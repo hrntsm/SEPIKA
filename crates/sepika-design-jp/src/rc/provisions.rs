@@ -54,7 +54,7 @@ pub(crate) fn beam_provisions(
     info: &RcRebarInfo,
     long_term: bool,
     mz_abs: f64,
-    ft: f64,
+    ft: Option<f64>,
 ) -> ProvisionCheck {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
@@ -88,7 +88,9 @@ pub(crate) fn beam_provisions(
     if props.pw + 1e-12 < 0.002 {
         warnings.push(format!("pw={:.4} < 0.2%", props.pw));
     }
-    if long_term && ft > 0.0 && props.j > 0.0 && props.d > 0.0 && props.b > 0.0 {
+    if let Some(ft) =
+        ft.filter(|&ft| long_term && ft > 0.0 && props.j > 0.0 && props.d > 0.0 && props.b > 0.0)
+    {
         let at_min_geom = 0.004 * props.b * props.d;
         let at_req = if mz_abs > 0.0 {
             mz_abs / (ft * props.j)
@@ -223,7 +225,7 @@ mod tests {
             j: 7.0 * 550.0 / 8.0,
             pw: 0.003,
         };
-        let p = beam_provisions(600.0, &props, &info, true, 0.0, 195.0);
+        let p = beam_provisions(600.0, &props, &info, true, 0.0, Some(195.0));
         assert!(p.errors.iter().any(|e| e.contains("かぶり")));
         assert!(p.errors.iter().any(|e| e.contains("あばら間隔")));
     }

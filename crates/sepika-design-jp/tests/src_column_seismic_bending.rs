@@ -286,6 +286,43 @@ fn column_qd_reports_missing_bending_or_alternative_without_a_ratio() {
 }
 
 #[test]
+fn qd1_preserves_steel_shear_failure_with_wrong_main_rebar() {
+    let mut ctx = context([0.0; 2], [0.0; 2]);
+    let bending = ctx.src_column_seismic_bending.as_mut().unwrap();
+    bending.qy.head.steel_allowable_n_mm = 2.0e9;
+    bending.qy.base.steel_allowable_n_mm = 2.0e9;
+    let forces = forces(0.0);
+    let steel_only = shear(&ctx, &forces);
+    assert!(steel_only.ratio > 1.0, "{steel_only:?}");
+    let bending = ctx.src_column_seismic_bending.as_mut().unwrap();
+    bending.qy.head.rc_ultimate_n_mm = f64::NAN;
+    ctx.rebar_material.as_mut().unwrap().category = MaterialCategory::Steel;
+
+    let outcomes: Vec<_> = SrcDesign
+        .check_outcomes(
+            &forces,
+            &section(),
+            &material("Fc24", MaterialCategory::Concrete, Some(24.0), None),
+            &ctx,
+            false,
+        )
+        .collect();
+    let [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }] = outcomes.as_slice()
+    else {
+        panic!("{outcomes:?}");
+    };
+    assert!(
+        reason.contains("SD345") && reason.contains("鋼材") && reason.contains("断面タブ"),
+        "{reason}"
+    );
+    assert_eq!(result.components.len(), 1);
+    let component = &result.components[0];
+    assert_eq!(component.kind, CheckKind::Shear);
+    close(component.ratio, steel_only.ratio, 1e-12);
+    assert!(component.detail.contains("RC rQD=未算定"), "{component:?}");
+}
+
+#[test]
 fn column_qd_never_reports_compliance_for_nonfinite_axial_force_or_moments() {
     let ctx = context([0.0; 2], [0.0; 2]);
     let sec = section();

@@ -14,7 +14,7 @@ use sepika_core::model::{
     Constraint, ElementData, ElementKind, EndCondition, Material, Model, Section,
 };
 use sepika_core::rc_capacity::{rc_mu_simple, RcCapacityInput};
-use sepika_core::section_shape::SectionShape;
+use sepika_core::section_shape::{RebarSize, SectionShape};
 
 use super::options::{
     MemberDemand, ShearMethod, StaticBeamBending, StaticBeamHingeMechanism, UltimateDemandMode,
@@ -287,6 +287,15 @@ fn check_member(
         SectionShape::RcColumnCircle { d, .. } => (*d, *d, MemberKind::Column),
         _ => return Ok(None),
     };
+    let main_rebar = model.element_rebar_material(elem);
+    let main_rebar_issue = crate::material_strength::main_rebar_category_issue(main_rebar)
+        .map(|reason| format!("部材 ID {}（断面「{}」）の{reason}", elem.id.0, sec.name));
+    let unchecked = |reason: &str| {
+        let reason = main_rebar_issue
+            .as_ref()
+            .map_or_else(|| reason.to_owned(), |issue| format!("{issue}。{reason}"));
+        Ok(Some(unchecked_member(elem.id, kind, &reason)))
+    };
     let Some(fc) = mat.fc else {
         return Err(format!(
             "部材 ID {} のコンクリート強度 Fc が未設定です",
@@ -300,9 +309,12 @@ fn check_member(
         ));
     }
     if let Err(reason) = shape.validate_rebar_size_materials(
-        model.element_rebar_material(elem),
+        main_rebar.filter(|_| main_rebar_issue.is_none()),
         model.element_shear_rebar_material(elem),
     ) {
+        if main_rebar_issue.is_some() {
+            return unchecked(&reason);
+        }
         return Err(format!("部材 ID {} の{reason}", elem.id.0));
     }
     if let Some(msg) = sepika_core::material_grade::shear_rebar_material_issue(
@@ -319,16 +331,20 @@ fn check_member(
         ..opts.clone()
     };
     let opts = &opts_owned;
-    let Some((main_rebar, sigma_y)) = model.element_rebar_material(elem).and_then(|main_rebar| {
-        sepika_core::material_grade::rebar_yield_strength(Some(main_rebar))
-            .filter(|fy| fy.is_finite())
-            .map(|fy| (main_rebar, fy))
-    }) else {
-        return Err(format!(
-            "部材 ID {} の主筋の降伏強度を解決できません",
-            elem.id.0
-        ));
+    let main_rebar_strength = if main_rebar_issue.is_some() {
+        None
+    } else {
+        Some(
+            main_rebar
+                .and_then(|material| {
+                    sepika_core::material_grade::rebar_yield_strength(Some(material))
+                        .filter(|fy| fy.is_finite())
+                        .map(|fy| (material, fy))
+                })
+                .ok_or_else(|| format!("部材 ID {} の主筋の降伏強度を解決できません", elem.id.0))?,
+        )
     };
+    let sigma_y = main_rebar_strength.map(|(_, fy)| fy);
     let invalid_rebar = || {
         format!(
             "部材 ID {} の配筋形状が不正または有効せいが 0 以下です",
@@ -358,8 +374,9 @@ fn check_member(
         })
     });
     let need_be = opts.shear_method == ShearMethod::Ductility;
-    let beam_applicability = (kind == MemberKind::Girder)
-        .then(|| beam_mu_applicability_reason(mat, fc, main_rebar, sigma_y, demand));
+    let beam_applicability = main_rebar_strength
+        .filter(|_| kind == MemberKind::Girder)
+        .map(|(material, fy)| beam_mu_applicability_reason(mat, fc, material, fy, demand));
     let mut static_beam_reasons = Vec::new();
     if static_beam_rebar.is_some() {
         static_beam_reasons.extend(beam_support_reason.iter().cloned());
@@ -392,7 +409,7 @@ fn check_member(
                 }
                 Err(reason) => reason.clone(),
             };
-            return Ok(Some(unchecked_member(elem.id, kind, &reason)));
+            return unchecked(&reason);
         }
     }
 
@@ -408,7 +425,7 @@ fn check_member(
         .ok_or_else(invalid_rebar)?;
     let l_clear = match l_clear {
         Ok(span) => span,
-        Err(reason) => return Ok(Some(unchecked_member(elem.id, kind, &reason))),
+        Err(reason) => return unchecked(&reason),
     };
     if static_beam_rebar.is_some() && p.at <= 0.0 {
         let reason = if tension_is_top {
@@ -417,11 +434,7 @@ fn check_member(
             "ultimate_beam_tension_rebar_missing: 下端引張の主筋がありません"
         };
         static_beam_reasons.push(reason.into());
-        return Ok(Some(unchecked_member(
-            elem.id,
-            kind,
-            &static_beam_reasons.join("。"),
-        )));
+        return unchecked(&static_beam_reasons.join("。"));
     }
     let jt = 7.0 * p.d_eff / 8.0;
     let at = p.at;
@@ -429,29 +442,28 @@ fn check_member(
     let pw = p.pw;
     let n_axial = demand.n_axial;
 
-    let cap = RcCapacityInput {
-        b: p.b_dir,
-        d: p.d_dir,
-        at,
-        d_eff: p.d_eff,
-        sigma_y,
-        fc,
-        pw,
-        sigma_wy: opts.sigma_wy,
-        clear_span: l_clear,
-        sigma_0: 0.0,
-    };
-    let mu = match kind {
+    let mu = sigma_y.map_or(f64::NAN, |sigma_y| match kind {
         MemberKind::Column => column_mu(p.b_dir, p.d_dir, p.dt, at, ag, sigma_y, fc, n_axial),
         _ => {
-            let reference = rc_mu_simple(&cap);
+            let reference = rc_mu_simple(&RcCapacityInput {
+                b: p.b_dir,
+                d: p.d_dir,
+                at,
+                d_eff: p.d_eff,
+                sigma_y,
+                fc,
+                pw,
+                sigma_wy: opts.sigma_wy,
+                clear_span: l_clear,
+                sigma_0: 0.0,
+            });
             if reference.is_finite() && reference > 0.0 {
                 reference
             } else {
                 f64::NAN
             }
         }
-    };
+    });
     let beam_reference = beam_applicability.as_ref().map(|_| {
         let direction = beam_mu_direction_detail(&p, "");
         let value = if mu.is_finite() {
@@ -517,13 +529,24 @@ fn check_member(
         };
         (qbu, tau_bu)
     };
-    let (qbu, tau_bu) = if opts.include_bond {
-        bond_strength(&p)
-    } else {
-        (0.0, 0.0)
+    let bond_unverified = opts.include_bond
+        && main_rebar_issue.is_some()
+        && !matches!(p.main_dia, RebarSize::Standard(_));
+    let main_rebar_issue = main_rebar_issue.map(|reason| {
+        if bond_unverified {
+            format!("{reason}。数値径から異形鉄筋であることを確認できないため付着は未算定です")
+        } else {
+            reason
+        }
+    });
+    let (qbu, tau_bu) = match (opts.include_bond, bond_unverified) {
+        (false, _) => (0.0, 0.0),
+        (true, false) => bond_strength(&p),
+        (true, true) => (f64::NAN, f64::NAN),
     };
-    if let (Some(_), Some(reference)) = (static_beam_rebar, &beam_reference) {
-        static_beam_reasons.push(reference.clone());
+    if static_beam_rebar.is_some() {
+        static_beam_reasons.extend(beam_reference);
+        static_beam_reasons.extend(main_rebar_issue);
         let ql = demand.q_long.unwrap_or_default().abs();
         let shear_ng = beam_mechanism.is_some() && qsu.is_finite() && ql > qsu;
         let bond_ng =
@@ -545,6 +568,14 @@ fn check_member(
             ));
         }
         let reason = static_beam_reasons.join("。");
+        if sigma_y.is_none() && !gravity_ng {
+            return Ok(Some(unchecked_member(elem.id, kind, &reason)));
+        }
+        let qbu_detail = if bond_unverified {
+            "未算定".into()
+        } else {
+            format!("{qbu:.0} N")
+        };
         return Ok(Some(UltimateCheck {
             mu,
             qsu,
@@ -552,7 +583,7 @@ fn check_member(
             shear_margin: if shear_ng { 0.0 } else { f64::NAN },
             bond_margin: if bond_ng { 0.0 } else { f64::NAN },
             unchecked_reason: (!gravity_ng).then(|| reason.clone()),
-            detail: format!("Qsu={qsu:.0} N, Qbu={qbu:.0} N。{reason}"),
+            detail: format!("Qsu={qsu:.0} N, Qbu={qbu_detail}。{reason}"),
             ..unchecked_member(elem.id, kind, &reason)
         }));
     }
@@ -569,6 +600,8 @@ fn check_member(
     let margin = |capacity_n: f64| {
         if demand.mode == UltimateDemandMode::StaticHinge && gravity_exceeds_capacity(capacity_n) {
             0.0
+        } else if sigma_y.is_none() && qmu.is_nan() {
+            f64::NAN
         } else if qmu > 0.0 {
             (capacity_n - ql).max(0.0) / qmu
         } else {
@@ -576,10 +609,10 @@ fn check_member(
         }
     };
     let shear_margin = margin(qsu);
-    let bond_margin = if opts.include_bond {
-        margin(qbu)
-    } else {
-        f64::INFINITY
+    let bond_margin = match (opts.include_bond, bond_unverified) {
+        (false, _) => f64::INFINITY,
+        (true, false) => margin(qbu),
+        (true, true) => f64::NAN,
     };
 
     let biaxial_shear = biaxial_shear_requested.then(|| {
@@ -593,10 +626,19 @@ fn check_member(
         }
         let p_y = rc_bar_props(shape, RcDirection::Weak, tension_is_top, need_be)
             .ok_or("二軸せん断に必要な弱軸の配筋形状または有効せいが不正です")?;
-        let (qsu_y, qmu_y_hinge) = column_axis_shear(&p_y, fc, sigma_y, n_axial, l_clear, opts);
-        let qmu_y = match demand.shear_weak {
-            Some(qmy) => opts.upper_strength_factor * qmy.abs(),
-            None => qmu_y_hinge,
+        let (qsu_y, qmu_y) = match demand.shear_weak {
+            Some(qmy) => (
+                member_shear_strength(&p_y, fc, n_axial, l_clear, opts),
+                opts.upper_strength_factor * qmy.abs(),
+            ),
+            None => column_axis_shear(
+                &p_y,
+                fc,
+                sigma_y.ok_or("二軸せん断に必要な主筋の降伏強度を解決できません")?,
+                n_axial,
+                l_clear,
+                opts,
+            ),
         };
         let rx = if qsu > 0.0 { qmu / qsu } else { f64::INFINITY };
         let ry = if qsu_y > 0.0 {
@@ -608,7 +650,9 @@ fn check_member(
     });
     let biaxial_shear_margin = biaxial_shear.and_then(Result::ok);
 
-    let biaxial_bending_margin = if kind == MemberKind::Column && opts.biaxial_bending {
+    let biaxial_bending_margin = if let Some(sigma_y) =
+        sigma_y.filter(|_| kind == MemberKind::Column && opts.biaxial_bending)
+    {
         rc_bar_props(shape, RcDirection::Weak, tension_is_top, need_be).map(|p_y| {
             let mux = mu;
             let muy = column_mu(
@@ -634,11 +678,41 @@ fn check_member(
         None
     };
 
-    let axial = if kind == MemberKind::Column {
-        Some(rc_column_axial_ultimate(p.b_dir, p.d_dir, fc, ag, sigma_y))
-    } else {
-        None
-    };
+    let axial = sigma_y
+        .filter(|_| kind == MemberKind::Column)
+        .map(|fy| rc_column_axial_ultimate(p.b_dir, p.d_dir, fc, ag, fy));
+
+    if let Some(reason) = &main_rebar_issue {
+        let shear_ng = shear_margin < 1.0;
+        let biaxial_shear_ng = biaxial_shear_margin.is_some_and(|margin| margin < 1.0);
+        let bond_ng = bond_margin < 1.0;
+        let mut check = unchecked_member(elem.id, kind, reason);
+        if shear_ng || biaxial_shear_ng || bond_ng {
+            check.unchecked_reason = None;
+            check.qmu = qmu;
+            if shear_ng || biaxial_shear_ng {
+                check.qsu = qsu;
+                check.shear_margin = shear_margin;
+                check.biaxial_shear_margin = biaxial_shear_margin.filter(|margin| *margin < 1.0);
+                if shear_ng {
+                    check.detail.push_str("。強軸せん断耐力を超えます");
+                }
+                if biaxial_shear_ng {
+                    check
+                        .detail
+                        .push_str("。二軸せん断の組合せで耐力を超えます");
+                }
+            }
+            if bond_ng {
+                check.qbu = qbu;
+                check.bond_margin = bond_margin;
+                check
+                    .detail
+                    .push_str(&format!("。付着耐力を超えます（Qbu={qbu:.0} N）"));
+            }
+        }
+        return Ok(Some(check));
+    }
 
     let shear_ok = shear_margin >= 1.0 && biaxial_shear_margin.is_none_or(|m| m >= 1.0);
     let bending_ok = biaxial_bending_margin.map(|m| m >= 1.0).unwrap_or(true);
@@ -717,7 +791,7 @@ fn check_member(
 
 /// RC梁・柱の終局検定。必須需要・材料・配筋・寸法の不足は部材ID付きのエラーを返す。
 /// 上限強度倍率は静的・両端ヒンジ略算で有限の正値、確定総応答で 1.0 を要し、違反時は部材ID付きのエラーを返す。
-/// 内法長さ・静的RC梁の支持／降伏機構・二軸せん断等の適用を確認できない部材は、未検定理由を保持する。
+/// 主筋の材料区分や内法長さ等の適用条件を満たさない部材は、未検定理由を保持する。
 pub fn collect_rc_ultimate_checks(
     model: &Model,
     demand_by_elem: &[(ElemId, MemberDemand)],

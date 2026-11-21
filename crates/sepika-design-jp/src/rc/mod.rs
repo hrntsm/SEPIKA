@@ -59,6 +59,71 @@ impl DesignCheck for RcDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> CheckOutcome {
+        let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx, None);
+        match incomplete {
+            Some(reason) => CheckOutcome::Skipped { reason },
+            None => outcome,
+        }
+    }
+}
+
+impl RcDesign {
+    /// 主筋の材料区分または材軸ねじりで未算定の場合、独立に確定した不適合を別に返す。
+    /// 必要な重力参照内力を用意できない場合は `missing_gravity` に true を渡す。
+    pub fn check_outcomes(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        missing_gravity: bool,
+    ) -> impl Iterator<Item = CheckOutcome> {
+        use crate::member_design_check::{
+            combine_incomplete_reasons, concrete_member_torsion_reason, strength_outcomes,
+        };
+        let missing_shear_reference =
+            missing_gravity.then_some("設計用せん断力に必要な重力参照内力が不足しています");
+        let (outcome, incomplete) =
+            self.check_with_incomplete(forces, sec, mat, ctx, missing_shear_reference);
+        let torsion =
+            concrete_member_torsion_reason(sepika_core::structure_kind::StructureKind::Rc, forces);
+        let reason = combine_incomplete_reasons(incomplete, torsion);
+        strength_outcomes(outcome, reason.as_deref())
+    }
+
+    pub(crate) fn check_with_incomplete(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        missing_shear_reference: Option<&str>,
+    ) -> (CheckOutcome, Option<String>) {
+        let material_issue =
+            crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
+                .map(|reason| format!("RC 検定: 断面「{}」の{reason}", sec.name));
+        let shear_issue = missing_shear_reference.or_else(|| beam_shear_issue(forces, sec, ctx));
+        let outcome = if let (None, Some(reason)) = (&material_issue, missing_shear_reference) {
+            CheckOutcome::Skipped {
+                reason: reason.into(),
+            }
+        } else {
+            Self::check_section(forces, sec, mat, ctx, material_issue.is_none(), shear_issue)
+        };
+        let incomplete = material_issue.and_then(|reason| {
+            crate::member_design_check::combine_incomplete_reasons(Some(reason), shear_issue)
+        });
+        (outcome, incomplete)
+    }
+
+    fn check_section(
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        main_rebar_valid: bool,
+        shear_issue: Option<&str>,
+    ) -> CheckOutcome {
         let fc_raw = mat.fc.unwrap_or(0.0);
         if fc_raw <= 0.0 {
             return CheckOutcome::Skipped {
@@ -108,7 +173,7 @@ impl DesignCheck for RcDesign {
             };
         }
         if let Err(reason) = shape.validate_rebar_size_materials(
-            ctx.rebar_material.as_ref(),
+            ctx.rebar_material.as_ref().filter(|_| main_rebar_valid),
             ctx.shear_rebar_material.as_ref(),
         ) {
             return CheckOutcome::Skipped {
@@ -150,37 +215,55 @@ impl DesignCheck for RcDesign {
             };
         }
 
-        if matches!(shape, SectionShape::RcBeamRect { .. })
-            && ctx.seismic_qd.as_ref().is_some_and(|qd| {
-                !qd.long_at
-                    .iter()
-                    .find(|(p, _)| (p - forces.pos).abs() < 1e-6)
-                    .is_some_and(|(p, f)| p.is_finite() && f.iter().all(|v| v.is_finite()))
-            })
-        {
+        if let (true, Some(reason)) = (main_rebar_valid, shear_issue) {
             return CheckOutcome::Skipped {
-                reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
-            };
-        }
-
-        if matches!(shape, SectionShape::RcBeamRect { .. })
-            && ctx.seismic_qd.as_ref().is_some_and(|qd| {
-                qd.method != crate::QdMethod::Qd2
-                    && !qd.q_simple.is_some_and(|q| q.is_finite() && q >= 0.0)
-            })
-        {
-            return CheckOutcome::Skipped {
-                reason: "QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません".into(),
+                reason: reason.into(),
             };
         }
 
         match shape {
-            SectionShape::RcBeamRect { rebar, .. } => {
-                beam::beam_check(forces, mat, ctx, shape, rebar, fc_raw)
-            }
-            _ => column::column_check(forces, mat, ctx, shape, fc_raw),
+            SectionShape::RcBeamRect { rebar, .. } => beam::beam_check(
+                forces,
+                mat,
+                ctx,
+                shape,
+                rebar,
+                fc_raw,
+                main_rebar_valid,
+                shear_issue.is_none(),
+            ),
+            _ => column::column_check(
+                forces,
+                mat,
+                ctx,
+                shape,
+                fc_raw,
+                main_rebar_valid,
+                shear_issue.is_none(),
+            ),
         }
     }
+}
+
+fn beam_shear_issue(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    ctx: &DesignCtx,
+) -> Option<&'static str> {
+    let qd = ctx.seismic_qd.as_ref()?;
+    if !matches!(sec.shape, Some(SectionShape::RcBeamRect { .. })) {
+        return None;
+    }
+    if !qd
+        .long_at
+        .iter()
+        .find(|(p, _)| (p - forces.pos).abs() < 1e-6)
+        .is_some_and(|(p, f)| p.is_finite() && f.iter().all(|v| v.is_finite()))
+    {
+        return Some("設計用せん断力に必要な重力参照内力が不足しています");
+    }
+    (qd.method != crate::QdMethod::Qd2 && !qd.q_simple.is_some_and(|q| q.is_finite() && q >= 0.0))
+        .then_some("QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません")
 }
 
 #[cfg(test)]

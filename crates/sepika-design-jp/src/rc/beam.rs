@@ -135,6 +135,7 @@ fn bending_component(
 }
 
 /// 梁の断面検定（RC 規準 13条）。強軸曲げ mz とそれに対のせん断 qy のみを扱う。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn beam_check(
     forces: &MemberForcesAt,
     mat: &Material,
@@ -142,15 +143,22 @@ pub(crate) fn beam_check(
     shape: &SectionShape,
     rebar: &RcBeamRebar,
     fc_raw: f64,
+    main_rebar_valid: bool,
+    shear_reference_valid: bool,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
-    let grade = main_rebar_grade(ctx.rebar_material.as_ref());
-    let deformed_rebar = matches!(
+    let deformed_rebar = if matches!(
         rebar.main_dia,
         sepika_core::section_shape::RebarSize::Standard(_)
-    ) || ctx.rebar_material.as_ref().is_some_and(|m| {
-        m.category == MaterialCategory::Rebar && !matches!(m.name.trim(), "SR235" | "SR295")
-    });
+    ) {
+        Some(true)
+    } else {
+        main_rebar_valid.then(|| {
+            ctx.rebar_material.as_ref().is_some_and(|m| {
+                m.category == MaterialCategory::Rebar && !matches!(m.name.trim(), "SR235" | "SR295")
+            })
+        })
+    };
     let allow = rc_allow(
         fc_raw,
         mat.concrete_class,
@@ -175,25 +183,34 @@ pub(crate) fn beam_check(
         .expect("梁の断面諸元を算定できる形状のみ来る");
     let info =
         rebar_info_from_shape(shape, tension_is_top).expect("梁の鉄筋情報を算定できる形状のみ来る");
-    let ft = rebar_allowable_tension(grade, info.main_dia.designation_or_diameter_mm(), long_term);
-
-    let bending = match bending_component(forces, ctx, rebar, &props, tension_is_top, ft, &allow) {
-        Ok(bending) => bending,
-        Err(reason) => {
-            return CheckOutcome::Skipped {
-                reason: format!(
-                    "RC 梁曲げ検定不能（{}曲げ）: {reason}",
-                    if tension_is_top { "負" } else { "正" }
-                ),
-            };
+    let ft = main_rebar_valid.then(|| {
+        let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+        rebar_allowable_tension(grade, info.main_dia.designation_or_diameter_mm(), long_term)
+    });
+    let mut components = Vec::new();
+    if let Some(ft) = ft {
+        match bending_component(forces, ctx, rebar, &props, tension_is_top, ft, &allow) {
+            Ok(bending) => components.push(bending),
+            Err(reason) => {
+                return CheckOutcome::Skipped {
+                    reason: format!(
+                        "RC 梁曲げ検定不能（{}曲げ）: {reason}",
+                        if tension_is_top { "負" } else { "正" }
+                    ),
+                };
+            }
         }
-    };
+    }
 
     let (m_for_alpha, q_for_alpha) = ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
     let alpha = shear_alpha(m_for_alpha, q_for_alpha, props.d, 2.0);
     let damage_control = ctx.rc_damage_control;
     let qa = shear_capacity(&props, &allow, alpha, ctx.term, damage_control, false);
-    let q_design = if ctx.seismic_qd.is_some() {
+    let q_design = if !shear_reference_valid {
+        None
+    } else if !main_rebar_valid {
+        super::shear_demand_without_main_rebar(ctx, forces.pos, forces.qy, 1)
+    } else if ctx.seismic_qd.is_some() {
         let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
             b: props.b,
             d: props.d_full,
@@ -207,15 +224,26 @@ pub(crate) fn beam_check(
             sigma_0: 0.0,
         };
         let sum_mu = 2.0 * sepika_core::rc_capacity::rc_mu_simple(&mu_inp);
-        seismic_design_shear(ctx, forces.pos, forces.qy, 1, sum_mu, false)
+        Some(seismic_design_shear(
+            ctx, forces.pos, forces.qy, 1, sum_mu, false,
+        ))
     } else {
-        forces.qy.abs()
+        Some(forces.qy.abs())
     };
-    let ratio_q = if qa > 0.0 { q_design / qa } else { 0.0 };
+    if let Some(q_design) = q_design {
+        components.push(CheckComponent {
+            kind: CheckKind::Shear,
+            ratio: if qa > 0.0 { q_design / qa } else { 0.0 },
+            detail: format!(
+                "QA={:.1} N, |qy|={:.1} N, α={:.3}, pw={:.5}",
+                qa, forces.qy, alpha, props.pw,
+            ),
+        });
+    }
 
     let (ratio_bond, bond_detail) =
-        match ctx.bond_method {
-            BondMethod::Rc1999 => {
+        match (ctx.bond_method, deformed_rebar, q_design) {
+            (BondMethod::Rc1999, Some(deformed_rebar), _) => {
                 let bond = rc_beam_bond_check_with_rebar(
                     forces.pos,
                     ctx.length,
@@ -249,7 +277,7 @@ pub(crate) fn beam_check(
                     });
                 (ratio, detail)
             }
-            BondMethod::Rc1991 => {
+            (BondMethod::Rc1991, Some(deformed_rebar), Some(q_design)) => {
                 let n_t = info.tension_count_1991;
                 let phi = n_t * info.main_dia.perimeter_mm();
                 let is_end = !(0.25 < forces.pos && forces.pos < 0.75);
@@ -282,33 +310,22 @@ pub(crate) fn beam_check(
                 });
                 (ratio, detail)
             }
+            _ => (0.0, None),
         };
 
     let basis = "RC 規準13条（梁の曲げ・せん断・付着）".to_string();
-    let shear_detail = format!(
-        "QA={:.1} N, |qy|={:.1} N, α={:.3}, pw={:.5}",
-        qa, forces.qy, alpha, props.pw,
-    );
     let detail = format!(
         "at={:.1} mm², d={:.1} mm, j={:.1} mm{}",
         props.at,
         props.d,
         props.j,
-        if bond_detail.is_some() {
+        if bond_detail.is_some() || !main_rebar_valid {
             ""
         } else {
             ", 付着検定: 部材長(柱面間距離)が未設定、または入力不足のため省略"
         },
     );
 
-    let mut components = vec![
-        bending,
-        CheckComponent {
-            kind: CheckKind::Shear,
-            ratio: ratio_q,
-            detail: shear_detail,
-        },
-    ];
     if let Some(bond_detail) = bond_detail {
         components.push(CheckComponent {
             kind: CheckKind::Bond,
@@ -374,7 +391,7 @@ mod tests {
         let SectionShape::RcBeamRect { rebar, .. } = shape else {
             unreachable!()
         };
-        beam_check(forces, mat, ctx, shape, rebar, 24.0).unwrap_checked()
+        beam_check(forces, mat, ctx, shape, rebar, 24.0, true, true).unwrap_checked()
     }
 
     #[test]

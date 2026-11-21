@@ -72,9 +72,10 @@ pub(crate) fn column_check(
     ctx: &DesignCtx,
     shape: &SectionShape,
     fc_raw: f64,
+    main_rebar_valid: bool,
+    shear_reference_valid: bool,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
-    let grade = main_rebar_grade(ctx.rebar_material.as_ref());
     let allow = rc_allow(
         fc_raw,
         mat.concrete_class,
@@ -91,46 +92,68 @@ pub(crate) fn column_check(
             .expect("円形柱の断面諸元を算定できる形状のみ来る");
         let info =
             rebar_info_from_shape(shape, true).expect("円形柱の鉄筋情報を算定できる形状のみ来る");
-        let ft =
-            rebar_allowable_tension(grade, info.main_dia.designation_or_diameter_mm(), long_term);
-
         let gross_area = std::f64::consts::PI * d_full * d_full / 4.0;
         let as_total = info.main_area;
-        let na = column_axial_capacity(gross_area, as_total, allow.fc, ft, allow.n_ratio);
+        let mut components = Vec::new();
+        if main_rebar_valid {
+            let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+            let ft = rebar_allowable_tension(
+                grade,
+                info.main_dia.designation_or_diameter_mm(),
+                long_term,
+            );
+            let na = column_axial_capacity(gross_area, as_total, allow.fc, ft, allow.n_ratio);
 
-        let axis = ColumnAxis {
-            props,
-            at_perp: 0.0,
-            ft,
-        };
-        let curve = column_nm_curve(&axis, &allow, na);
-        let ma = column_allowable_moment(&curve, n_design);
-        let ratio_moment = match column_moment_ratio(forces, na, ma, ma, true) {
-            Ok(ratio) => ratio,
-            Err(reason) => return CheckOutcome::Skipped { reason },
-        };
-        let nt = as_total * ft;
-        let ratio_axial = if forces.n > 0.0 {
-            forces.n / nt
-        } else if forces.n < 0.0 && na > 0.0 {
-            (-forces.n) / na
-        } else {
-            0.0
-        };
+            let axis = ColumnAxis {
+                props,
+                at_perp: 0.0,
+                ft,
+            };
+            let curve = column_nm_curve(&axis, &allow, na);
+            let ma = column_allowable_moment(&curve, n_design);
+            let ratio_moment = match column_moment_ratio(forces, na, ma, ma, true) {
+                Ok(ratio) => ratio,
+                Err(reason) => return CheckOutcome::Skipped { reason },
+            };
+            let nt = as_total * ft;
+            let ratio_axial = if forces.n > 0.0 {
+                forces.n / nt
+            } else if forces.n < 0.0 && na > 0.0 {
+                (-forces.n) / na
+            } else {
+                0.0
+            };
+            let axial_bending_detail = format!(
+            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA={:.1} N·mm（等価矩形近似）, mz={:.1} N·mm, my={:.1} N·mm",
+            na, nt, n_design, ma, forces.mz, forces.my,
+        );
+            components.push(CheckComponent {
+                kind: CheckKind::AxialBending,
+                ratio: ratio_axial.max(ratio_moment),
+                detail: axial_bending_detail,
+            });
+        }
 
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
-        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, axis.props.d, 1.5);
-        let qay = shear_capacity(&axis.props, &allow, alpha_y, ctx.term, damage_control, true);
-        let (q_design_y, q_design_z) = if ctx.seismic_qd.is_some() {
+        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props.d, 1.5);
+        let qay = shear_capacity(&props, &allow, alpha_y, ctx.term, damage_control, true);
+        let (q_design_y, q_design_z) = if !shear_reference_valid {
+            (None, None)
+        } else if !main_rebar_valid {
+            (
+                super::shear_demand_without_main_rebar(ctx, forces.pos, forces.qy, 1),
+                super::shear_demand_without_main_rebar(ctx, forces.pos, forces.qz, 2),
+            )
+        } else if ctx.seismic_qd.is_some() {
             let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
                 b: gross_area / d_full,
                 d: d_full,
-                at: axis.props.at,
-                d_eff: axis.props.d,
+                at: props.at,
+                d_eff: props.d,
                 sigma_y: rebar_sigma_y_of(ctx.rebar_material.as_ref()),
                 fc: fc_raw,
-                pw: axis.props.pw,
+                pw: props.pw,
                 sigma_wy: 0.0,
                 clear_span: 0.0,
                 sigma_0: 0.0,
@@ -142,44 +165,41 @@ pub(crate) fn column_check(
                 None => (sum_mu_fallback, sum_mu_fallback),
             };
             (
-                seismic_design_shear(ctx, forces.pos, forces.qy, 1, sum_mu_z, true),
-                seismic_design_shear(ctx, forces.pos, forces.qz, 2, sum_mu_y, true),
+                Some(seismic_design_shear(
+                    ctx, forces.pos, forces.qy, 1, sum_mu_z, true,
+                )),
+                Some(seismic_design_shear(
+                    ctx, forces.pos, forces.qz, 2, sum_mu_y, true,
+                )),
             )
         } else {
-            (forces.qy.abs(), forces.qz.abs())
+            (Some(forces.qy.abs()), Some(forces.qz.abs()))
         };
-        let ratio_qy = if qay > 0.0 { q_design_y / qay } else { 0.0 };
 
         let (m_for_alpha_z, q_for_alpha_z) = ctx
             .shear_span_y
             .unwrap_or((forces.my.abs(), forces.qz.abs()));
-        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, axis.props.d, 1.5);
-        let qaz = shear_capacity(&axis.props, &allow, alpha_z, ctx.term, damage_control, true);
-        let ratio_qz = if qaz > 0.0 { q_design_z / qaz } else { 0.0 };
+        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props.d, 1.5);
+        let qaz = shear_capacity(&props, &allow, alpha_z, ctx.term, damage_control, true);
 
         let basis = "RC 規準14条（円形柱、等価矩形近似）".to_string();
-        let axial_bending_detail = format!(
-            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA={:.1} N·mm（等価矩形近似）, mz={:.1} N·mm, my={:.1} N·mm",
-            na, nt, n_design, ma, forces.mz, forces.my,
-        );
         let shear_detail = format!(
             "QAy={:.1} N, QAz={:.1} N, αy={:.3}, αz={:.3}, pw={:.5}",
-            qay, qaz, alpha_y, alpha_z, axis.props.pw,
+            qay, qaz, alpha_y, alpha_z, props.pw,
         );
-        let mut detail = format!("at={:.1} mm², d={:.1} mm", axis.props.at, axis.props.d);
+        let mut detail = format!("at={:.1} mm², d={:.1} mm", props.at, props.d);
 
-        let mut components = vec![
-            CheckComponent {
-                kind: CheckKind::AxialBending,
-                ratio: ratio_axial.max(ratio_moment),
-                detail: axial_bending_detail,
-            },
-            CheckComponent {
+        if let Some(ratio) = [(q_design_y, qay), (q_design_z, qaz)]
+            .into_iter()
+            .filter_map(|(q, qa)| q.map(|q| if qa > 0.0 { q / qa } else { 0.0 }))
+            .reduce(f64::max)
+        {
+            components.push(CheckComponent {
                 kind: CheckKind::Shear,
-                ratio: ratio_qy.max(ratio_qz),
+                ratio,
                 detail: shear_detail,
-            },
-        ];
+            });
+        }
 
         if crate::rc::provisions::is_member_level_station(forces.pos) {
             let prov = crate::rc::provisions::column_provisions_info(
@@ -216,57 +236,72 @@ pub(crate) fn column_check(
             .expect("矩形柱の弱軸断面諸元を算定できる形状のみ来る");
         let info =
             rebar_info_from_shape(shape, true).expect("矩形柱の鉄筋情報を算定できる形状のみ来る");
-        let ft_z =
-            rebar_allowable_tension(grade, info.main_dia.designation_or_diameter_mm(), long_term);
-        let ft_y = ft_z;
-
         let gross_area = b * d;
         let as_total = info.main_area;
-        let na = column_axial_capacity(gross_area, as_total, allow.fc, ft_z, allow.n_ratio);
+        let mut components = Vec::new();
+        if main_rebar_valid {
+            let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+            let ft_z = rebar_allowable_tension(
+                grade,
+                info.main_dia.designation_or_diameter_mm(),
+                long_term,
+            );
+            let ft_y = ft_z;
+            let na = column_axial_capacity(gross_area, as_total, allow.fc, ft_z, allow.n_ratio);
 
-        let at_perp_for_z = rect_column_at_perp(as_total, props_z.at, props_z.ac);
-        let at_perp_for_y = rect_column_at_perp(as_total, props_y.at, props_y.ac);
+            let at_perp_for_z = rect_column_at_perp(as_total, props_z.at, props_z.ac);
+            let at_perp_for_y = rect_column_at_perp(as_total, props_y.at, props_y.ac);
 
-        let axis_z = ColumnAxis {
-            props: props_z,
-            at_perp: at_perp_for_z,
-            ft: ft_z,
-        };
-        let axis_y = ColumnAxis {
-            props: props_y,
-            at_perp: at_perp_for_y,
-            ft: ft_y,
-        };
+            let axis_z = ColumnAxis {
+                props: props_z,
+                at_perp: at_perp_for_z,
+                ft: ft_z,
+            };
+            let axis_y = ColumnAxis {
+                props: props_y,
+                at_perp: at_perp_for_y,
+                ft: ft_y,
+            };
 
-        let curve_z = column_nm_curve(&axis_z, &allow, na);
-        let curve_y = column_nm_curve(&axis_y, &allow, na);
-        let ma_z = column_allowable_moment(&curve_z, n_design);
-        let ma_y = column_allowable_moment(&curve_y, n_design);
-        let ratio_moment = match column_moment_ratio(forces, na, ma_z, ma_y, false) {
-            Ok(ratio) => ratio,
-            Err(reason) => return CheckOutcome::Skipped { reason },
-        };
-        let nt = as_total * ft_z;
-        let ratio_axial = if forces.n > 0.0 {
-            forces.n / nt
-        } else if forces.n < 0.0 && na > 0.0 {
-            (-forces.n) / na
-        } else {
-            0.0
-        };
+            let curve_z = column_nm_curve(&axis_z, &allow, na);
+            let curve_y = column_nm_curve(&axis_y, &allow, na);
+            let ma_z = column_allowable_moment(&curve_z, n_design);
+            let ma_y = column_allowable_moment(&curve_y, n_design);
+            let ratio_moment = match column_moment_ratio(forces, na, ma_z, ma_y, false) {
+                Ok(ratio) => ratio,
+                Err(reason) => return CheckOutcome::Skipped { reason },
+            };
+            let nt = as_total * ft_z;
+            let ratio_axial = if forces.n > 0.0 {
+                forces.n / nt
+            } else if forces.n < 0.0 && na > 0.0 {
+                (-forces.n) / na
+            } else {
+                0.0
+            };
+            let axial_bending_detail = format!(
+            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA_z={:.1} N·mm, MA_y={:.1} N·mm, mz={:.1} N·mm, my={:.1} N·mm",
+            na, nt, n_design, ma_z, ma_y, forces.mz, forces.my,
+        );
+            components.push(CheckComponent {
+                kind: CheckKind::AxialBending,
+                ratio: ratio_axial.max(ratio_moment),
+                detail: axial_bending_detail,
+            });
+        }
 
         let (m_for_alpha_y, q_for_alpha_y) =
             ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
-        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, axis_z.props.d, 1.5);
-        let qay = shear_capacity(
-            &axis_z.props,
-            &allow,
-            alpha_y,
-            ctx.term,
-            damage_control,
-            true,
-        );
-        let (q_design_y, q_design_z) = if ctx.seismic_qd.is_some() {
+        let alpha_y = shear_alpha(m_for_alpha_y, q_for_alpha_y, props_z.d, 1.5);
+        let qay = shear_capacity(&props_z, &allow, alpha_y, ctx.term, damage_control, true);
+        let (q_design_y, q_design_z) = if !shear_reference_valid {
+            (None, None)
+        } else if !main_rebar_valid {
+            (
+                super::shear_demand_without_main_rebar(ctx, forces.pos, forces.qy, 1),
+                super::shear_demand_without_main_rebar(ctx, forces.pos, forces.qz, 2),
+            )
+        } else if ctx.seismic_qd.is_some() {
             let sigma_y = rebar_sigma_y_of(ctx.rebar_material.as_ref());
             let mu_of = |b_dir: f64, d_dir: f64, props: &AxisProps| {
                 let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
@@ -283,58 +318,48 @@ pub(crate) fn column_check(
                 };
                 sepika_core::rc_capacity::rc_column_mu_simple(&mu_inp, as_total, n_design)
             };
-            let fallback_z = 2.0 * mu_of(*b, *d, &axis_z.props);
-            let fallback_y = 2.0 * mu_of(*d, *b, &axis_y.props);
+            let fallback_z = 2.0 * mu_of(*b, *d, &props_z);
+            let fallback_y = 2.0 * mu_of(*d, *b, &props_y);
             let (sum_mu_z, sum_mu_y) = match ctx.column_sum_my {
                 Some((sz, sy)) => (sz.unwrap_or(fallback_z), sy.unwrap_or(fallback_y)),
                 None => (fallback_z, fallback_y),
             };
             (
-                seismic_design_shear(ctx, forces.pos, forces.qy, 1, sum_mu_z, true),
-                seismic_design_shear(ctx, forces.pos, forces.qz, 2, sum_mu_y, true),
+                Some(seismic_design_shear(
+                    ctx, forces.pos, forces.qy, 1, sum_mu_z, true,
+                )),
+                Some(seismic_design_shear(
+                    ctx, forces.pos, forces.qz, 2, sum_mu_y, true,
+                )),
             )
         } else {
-            (forces.qy.abs(), forces.qz.abs())
+            (Some(forces.qy.abs()), Some(forces.qz.abs()))
         };
-        let ratio_qy = if qay > 0.0 { q_design_y / qay } else { 0.0 };
 
         let (m_for_alpha_z, q_for_alpha_z) = ctx
             .shear_span_y
             .unwrap_or((forces.my.abs(), forces.qz.abs()));
-        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, axis_y.props.d, 1.5);
-        let qaz = shear_capacity(
-            &axis_y.props,
-            &allow,
-            alpha_z,
-            ctx.term,
-            damage_control,
-            true,
-        );
-        let ratio_qz = if qaz > 0.0 { q_design_z / qaz } else { 0.0 };
+        let alpha_z = shear_alpha(m_for_alpha_z, q_for_alpha_z, props_y.d, 1.5);
+        let qaz = shear_capacity(&props_y, &allow, alpha_z, ctx.term, damage_control, true);
 
         let basis = "RC 規準14条（柱、軸力+二軸曲げ+せん断）".to_string();
-        let axial_bending_detail = format!(
-            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA_z={:.1} N·mm, MA_y={:.1} N·mm, mz={:.1} N·mm, my={:.1} N·mm",
-            na, nt, n_design, ma_z, ma_y, forces.mz, forces.my,
-        );
         let shear_detail = format!(
             "QAy={:.1} N, QAz={:.1} N, αy={:.3}, αz={:.3}, pw_z={:.5}, pw_y={:.5}",
-            qay, qaz, alpha_y, alpha_z, axis_z.props.pw, axis_y.props.pw
+            qay, qaz, alpha_y, alpha_z, props_z.pw, props_y.pw
         );
         let mut detail = String::new();
 
-        let mut components = vec![
-            CheckComponent {
-                kind: CheckKind::AxialBending,
-                ratio: ratio_axial.max(ratio_moment),
-                detail: axial_bending_detail,
-            },
-            CheckComponent {
+        if let Some(ratio) = [(q_design_y, qay), (q_design_z, qaz)]
+            .into_iter()
+            .filter_map(|(q, qa)| q.map(|q| if qa > 0.0 { q / qa } else { 0.0 }))
+            .reduce(f64::max)
+        {
+            components.push(CheckComponent {
                 kind: CheckKind::Shear,
-                ratio: ratio_qy.max(ratio_qz),
+                ratio,
                 detail: shear_detail,
-            },
-        ];
+            });
+        }
 
         if crate::rc::provisions::is_member_level_station(forces.pos) {
             let d_min = b.min(*d);

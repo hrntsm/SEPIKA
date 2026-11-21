@@ -1,6 +1,15 @@
 //! 鉄筋の許容応力度・降伏点。
 
-use sepika_core::model::Material;
+use sepika_core::model::{Material, MaterialCategory};
+
+pub(crate) fn main_rebar_category_issue(material: Option<&Material>) -> Option<String> {
+    let material = material.filter(|material| material.category != MaterialCategory::Rebar)?;
+    Some(format!(
+        "主筋材料「{}」の材料区分は「{}」です。断面タブで主筋に「鉄筋」区分の材料を割り当ててください",
+        material.name,
+        material.category.label()
+    ))
+}
 
 /// 鉄筋の許容引張・圧縮応力度 ft [N/mm²]。
 ///

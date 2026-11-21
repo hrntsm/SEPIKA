@@ -278,7 +278,7 @@ fn test_src_beam_shear_split_handcalc() {
         ctx: &ctx,
         pos: 0.0,
         s_ft_short: 0.0,
-        r_mu: 0.0,
+        r_mu: Some(0.0),
     };
     let shear = src_shear_check(
         q,
@@ -296,12 +296,12 @@ fn test_src_beam_shear_split_handcalc() {
         s_fs,
         9.0 * (500.0 - 2.0 * 14.0),
         2.0,
-        SrcShearMode::Beam(&seismic),
+        SrcShearMode::Beam(Some(&seismic)),
         ctx.term,
     );
     assert!(!shear.used_qd);
     assert!((shear.s_q - expected_s_q).abs() / expected_s_q < 1e-9);
-    assert!((shear.s_q + shear.r_q - q).abs() < 1e-6);
+    assert!((shear.s_q + shear.r_q.unwrap() - q).abs() < 1e-6);
 }
 
 /// SRC の pw 上限は SRC 規準1987 準拠で長短期とも 0.6%
@@ -345,7 +345,7 @@ fn test_src_shear_pw_capped_at_0_6_percent_both_terms() {
             ctx: &ctx,
             pos: 0.0,
             s_ft_short: 0.0,
-            r_mu: 0.0,
+            r_mu: Some(0.0),
         };
         let shear = src_shear_check(
             100_000.0,
@@ -363,7 +363,7 @@ fn test_src_shear_pw_capped_at_0_6_percent_both_terms() {
             s_fs,
             0.0,
             2.0,
-            SrcShearMode::Beam(&seismic),
+            SrcShearMode::Beam(Some(&seismic)),
             ctx.term,
         );
         assert!(
@@ -632,7 +632,7 @@ fn test_src_beam_seismic_qd2_handcalc() {
         ctx: &ctx,
         pos: 0.0,
         s_ft_short,
-        r_mu: 0.0,
+        r_mu: Some(0.0),
     };
 
     let shear = src_shear_check(
@@ -651,7 +651,7 @@ fn test_src_beam_seismic_qd2_handcalc() {
         s_fs,
         9.0 * (500.0 - 2.0 * 14.0),
         2.0,
-        SrcShearMode::Beam(&seismic),
+        SrcShearMode::Beam(Some(&seismic)),
         ctx.term,
     );
 
@@ -670,9 +670,9 @@ fn test_src_beam_seismic_qd2_handcalc() {
         s_qd_expected
     );
     assert!(
-        (shear.r_q - r_qd2_expected).abs() / r_qd2_expected.max(1.0) < 1e-9,
+        (shear.r_q.unwrap() - r_qd2_expected).abs() / r_qd2_expected.max(1.0) < 1e-9,
         "rQD={}, expected(rQD2)={}",
-        shear.r_q,
+        shear.r_q.unwrap(),
         r_qd2_expected
     );
 }
@@ -742,7 +742,7 @@ fn test_src_beam_seismic_qd1_handcalc() {
         ctx: &ctx,
         pos: 0.0,
         s_ft_short,
-        r_mu,
+        r_mu: Some(r_mu),
     };
 
     let shear = src_shear_check(
@@ -761,7 +761,7 @@ fn test_src_beam_seismic_qd1_handcalc() {
         s_fs,
         9.0 * (500.0 - 2.0 * 14.0),
         2.0,
-        SrcShearMode::Beam(&seismic),
+        SrcShearMode::Beam(Some(&seismic)),
         ctx.term,
     );
 
@@ -773,9 +773,9 @@ fn test_src_beam_seismic_qd1_handcalc() {
 
     assert!(shear.used_qd);
     assert!(
-        (shear.r_q - r_qd1_expected).abs() / r_qd1_expected < 1e-9,
+        (shear.r_q.unwrap() - r_qd1_expected).abs() / r_qd1_expected < 1e-9,
         "rQD={}, expected(rQD1)={}",
-        shear.r_q,
+        shear.r_q.unwrap(),
         r_qd1_expected
     );
 }
@@ -992,10 +992,8 @@ fn sm520_out_of_range_src_beam_and_column_do_not_restore_partial_rc_capacity() {
         for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
             let mut steel = make_material_no_fc(name);
             steel.fy = fy;
-            let mut rebar = make_material_no_fc("SD345");
-            rebar.fy = Some(345.0);
-            let mut shear = make_material_no_fc("SD295");
-            shear.fy = Some(295.0);
+            let rebar = make_rebar_material("SD345", 345.0);
+            let shear = make_rebar_material("SD295", 295.0);
             for kind in [MemberKind::Column, MemberKind::Girder] {
                 let shape = if kind == MemberKind::Column {
                     src_rect_shape(
