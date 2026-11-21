@@ -4834,6 +4834,63 @@ fn test_copy_story_without_overwrite_keeps_existing() {
     ));
 }
 
+#[test]
+fn copying_a_story_slab_rejects_a_hysteresis_ref_to_a_new_boundary_beam() {
+    use sepika_core::model::{HysteresisModel, RcBeamReference, Story};
+
+    let mut model = seeded_model(6, 0);
+    for (i, z_mm) in [3000.0, 6000.0].into_iter().enumerate() {
+        let story = StoryId(i as u32);
+        model.stories.push(Story::new(
+            story,
+            format!("{}F", i + 1),
+            Some(z_mm),
+            Some(0.0),
+        ));
+        for (node, (x_mm, y_mm)) in
+            model.nodes[i * 3..i * 3 + 3]
+                .iter_mut()
+                .zip([(0.0, 0.0), (4000.0, 0.0), (0.0, 4000.0)])
+        {
+            node.coord = [x_mm, y_mm, z_mm];
+            node.story = Some(story);
+        }
+    }
+    model.add_enclosed_slab_from_nodes(&[NodeId(0), NodeId(1), NodeId(2)], SlabPlate::default());
+    let command = CopyStory {
+        from: StoryId(0),
+        to: vec![StoryId(1)],
+        targets: CopyTargets {
+            slabs: true,
+            ..Default::default()
+        },
+        overwrite: false,
+    };
+    let new_beam = ElemId(3);
+    assert!(model.element(new_beam).is_none());
+    let mut valid = model.clone();
+    assert!(!command.apply(&mut valid).is_noop());
+    assert_eq!(valid.slabs.len(), 2);
+    assert_eq!(
+        valid.element(new_beam).unwrap().nodes.as_slice(),
+        &[NodeId(3), NodeId(4)]
+    );
+
+    model.set_member_hysteresis_th(new_beam, Some(HysteresisModel::Retrograde));
+    model.set_member_rc_beam_reference(new_beam, Some(RcBeamReference::AntisymmetricHalfMember));
+    let before = model.clone();
+    let inverse = command.apply(&mut model);
+    let reason = inverse.rejection().unwrap();
+    assert!(reason.contains("部材の履歴則指定 -> 部材 3"), "{reason}");
+    assert!(model.eq_ignoring_dofmap(&before));
+
+    let mut stack = UndoStack::new();
+    assert!(!stack.run(&mut model, Box::new(command)));
+    assert_eq!(stack.last_error(), Some(reason));
+    assert_eq!(stack.revision(), 0);
+    assert!(model.eq_ignoring_dofmap(&before));
+}
+
 /// 上書きが真でも、複製元の平面の外にある複製先の床には手を触れない。
 ///
 /// セットバックや張り出しのある建物で、複製元と関係のない場所が消えるのを防ぐ。
