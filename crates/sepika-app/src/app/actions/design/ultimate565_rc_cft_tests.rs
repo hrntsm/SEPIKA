@@ -884,6 +884,87 @@ fn ultimate_table_labels(app: &mut App) -> Vec<String> {
 }
 
 #[cfg(feature = "gui")]
+fn ultimate_table_hover(app: &mut App, label: &str, detail_fragment: &str) -> String {
+    let ctx = egui::Context::default();
+    ctx.global_style_mut(|style| {
+        style.interaction.tooltip_delay = 0.0;
+        style.interaction.show_tooltips_only_when_still = false;
+    });
+    ultimate_table_frame(&ctx, app, vec![]);
+    let position = ultimate_table_frame(&ctx, app, vec![])
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == label => {
+                Some(text.galley.rect.translate(text.pos.to_vec2()).center())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("一覧に「{label}」がありません"));
+    ultimate_table_frame(&ctx, app, vec![egui::Event::PointerMoved(position)]);
+    for _ in 0..3 {
+        let output = ultimate_table_frame(&ctx, app, vec![]);
+        if let Some(detail) = output.shapes.iter().find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text().contains(detail_fragment) => {
+                Some(text.galley.text().to_owned())
+            }
+            _ => None,
+        }) {
+            return detail;
+        }
+    }
+    panic!("「{label}」のホバー詳細に「{detail_fragment}」がありません");
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn rc_ultimate_table_and_member_hover_distinguish_disabled_and_unavailable_bond() {
+    let mut app = column(false);
+    let mut round_bars = app.core.model.materials[1].clone();
+    round_bars.id = MaterialId(2);
+    round_bars.name = "SR235".into();
+    round_bars.fy = Some(235.0);
+    app.core.model.materials.push(round_bars);
+    app.core.model.sections[0].rebar_material = Some(MaterialId(2));
+    solve_statics(&mut app);
+
+    for (ductility, symbol) in [(false, "Qbu"), (true, "Vbu")] {
+        app.core.ultimate_shear_ductility = ductility;
+        for (include_bond, status, verdict) in [(false, "無効", "OK"), (true, "未算定", "未検定")]
+        {
+            app.core.ultimate_include_bond = include_bond;
+            let labels = ultimate_table_labels(&mut app);
+            assert_eq!(
+                labels.iter().filter(|&label| label == status).count(),
+                2,
+                "{labels:?}"
+            );
+            assert!(labels.iter().any(|label| label == verdict), "{labels:?}");
+            let check = &app.compute_ultimate_checks().unwrap()[0];
+            if include_bond {
+                assert!(check.qbu.is_nan() && check.bond_margin.is_nan());
+            } else {
+                assert_eq!(check.qbu, 0.0);
+                assert_eq!(check.bond_margin, f64::INFINITY);
+            }
+
+            let detail = ultimate_table_hover(&mut app, "0", "τbu=");
+            for expected in [
+                format!("{symbol}={status}, τbu={status}"),
+                format!("付着余裕度 max({symbol}−QL, 0)/Qmu={status}"),
+            ] {
+                assert!(detail.contains(&expected), "{expected}: {detail}");
+            }
+            assert_eq!(
+                detail.contains("ultimate_bond_round_bar_unsupported:") && detail.contains("SR235"),
+                include_bond,
+                "{detail}"
+            );
+        }
+    }
+}
+
+#[cfg(feature = "gui")]
 #[test]
 fn rc_ultimate_table_and_member_hover_show_mode_and_method_specific_margins() {
     let mut app = column(false);
@@ -1040,40 +1121,7 @@ fn rc_ultimate_table_and_member_hover_show_mode_and_method_specific_margins() {
                 "{expected}: {labels:?}"
             );
         }
-        let ctx = egui::Context::default();
-        ctx.global_style_mut(|style| {
-            style.interaction.tooltip_delay = 0.0;
-            style.interaction.show_tooltips_only_when_still = false;
-        });
-        ultimate_table_frame(&ctx, &mut app, vec![]);
-        let member_id = ultimate_table_frame(&ctx, &mut app, vec![])
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.text() == "0" => {
-                    Some(text.galley.rect.translate(text.pos.to_vec2()).center())
-                }
-                _ => None,
-            })
-            .expect("部材IDのセル");
-        ultimate_table_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(member_id)]);
-        let mut hovered = ultimate_table_frame(&ctx, &mut app, vec![]);
-        for _ in 0..2 {
-            hovered = ultimate_table_frame(&ctx, &mut app, vec![]);
-        }
-        let detail = hovered
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text)
-                    if text.galley.text().contains("強軸せん断余裕度")
-                        && text.galley.text().contains("Mu=") =>
-                {
-                    Some(text.galley.text())
-                }
-                _ => None,
-            })
-            .expect("部材IDのホバー詳細");
+        let detail = ultimate_table_hover(&mut app, "0", "τbu=");
         for expected in [
             format!("{demand}={:.0} N", check.qmu),
             format!("{shear}={:.0} N", check.qsu),
@@ -1125,49 +1173,34 @@ fn rc_column_with_no_clear_span_keeps_its_unchecked_reason_in_the_ultimate_table
     assert!(!column.ok);
     assert!(column.qsu.is_nan() && column.bond_margin.is_nan());
     let reason = column.unchecked_reason.as_deref().unwrap();
-    for expected in [
+    let cause = [
         "ultimate_clear_span_invalid:",
         "材軸長 200 mm",
         "j端フェース距離 300 mm",
-        "member=0",
-    ] {
+    ];
+    for expected in cause.into_iter().chain(["member=0"]) {
         assert!(reason.contains(expected), "{reason}");
     }
     #[cfg(feature = "gui")]
     {
-        let ctx = egui::Context::default();
-        ctx.global_style_mut(|style| {
-            style.interaction.tooltip_delay = 0.0;
-            style.interaction.show_tooltips_only_when_still = false;
-        });
-        ultimate_table_frame(&ctx, &mut app, vec![]);
-        let settled = ultimate_table_frame(&ctx, &mut app, vec![]);
-        let unchecked_column = settled
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) if text.galley.text() == "未検定" => {
-                    Some(text.galley.rect.translate(text.pos.to_vec2()).center())
-                }
-                _ => None,
-            })
-            .expect("未検定の部材行");
-        ultimate_table_frame(
-            &ctx,
-            &mut app,
-            vec![egui::Event::PointerMoved(unchecked_column)],
-        );
-        let mut output = ultimate_table_frame(&ctx, &mut app, vec![]);
-        for _ in 0..2 {
-            output = ultimate_table_frame(&ctx, &mut app, vec![]);
+        ultimate_table_hover(&mut app, "未検定", reason);
+        for (include_bond, status, count) in [(false, "無効", 4), (true, "未算定", 3)] {
+            app.core.ultimate_include_bond = include_bond;
+            let labels = ultimate_table_labels(&mut app);
+            assert_eq!(
+                labels.iter().filter(|&label| label == status).count(),
+                count,
+                "{labels:?}"
+            );
+            let detail = ultimate_table_hover(&mut app, "0", "τbu=");
+            for expected in cause {
+                assert!(detail.contains(expected), "{expected}: {detail}");
+            }
+            assert!(
+                detail.contains(&format!("Qbu={status}, τbu={status}, 付着余裕度={status}")),
+                "{detail}"
+            );
         }
-        assert!(
-            output.shapes.iter().any(|shape| matches!(
-                &shape.shape,
-                egui::Shape::Text(text) if text.galley.text().contains(reason)
-            )),
-            "{reason}"
-        );
     }
 }
 
@@ -1220,7 +1253,12 @@ fn actual_rc_beam_mixed_static_bending_leaves_only_the_beam_unchecked() {
         assert!(labels.iter().any(|label| label.contains("両端ヒンジ略算")));
         assert_eq!(
             labels.iter().filter(|&label| label == "-").count(),
-            6,
+            4,
+            "{labels:?}"
+        );
+        assert_eq!(
+            labels.iter().filter(|&label| label == "未算定").count(),
+            2,
             "{labels:?}"
         );
         assert!(
@@ -1330,10 +1368,8 @@ fn actual_rc_free_end_never_shows_an_ok_or_ng_from_an_inapplicable_hinge_demand(
         assert_eq!(column.unchecked_reason, None);
         assert!(!column.ok && column.shear_margin < 1.0);
         let reason = beam.unchecked_reason.as_deref().unwrap();
-        assert!(
-            reason.contains("ultimate_beam_hinge_free_end: j端"),
-            "{reason}"
-        );
+        let cause = "ultimate_beam_hinge_free_end: j端";
+        assert!(reason.contains(cause), "{reason}");
         assert!(beam.qmu.is_nan() && beam.shear_margin.is_nan() && beam.bond_margin.is_nan());
         #[cfg(feature = "gui")]
         {
@@ -1342,6 +1378,7 @@ fn actual_rc_free_end_never_shows_an_ok_or_ng_from_an_inapplicable_hinge_demand(
                 "108.8（参考）",
                 "117.8",
                 "278.9",
+                "未算定",
                 "未検定",
                 "未検定 1 本",
                 "NG 1 本",
@@ -1350,9 +1387,14 @@ fn actual_rc_free_end_never_shows_an_ok_or_ng_from_an_inapplicable_hinge_demand(
             }
             assert_eq!(
                 labels.iter().filter(|&label| label == "-").count(),
-                3,
+                2,
                 "{labels:?}"
             );
+            ultimate_table_hover(&mut app, "未検定", reason);
+            let detail = ultimate_table_hover(&mut app, "1", "τbu=");
+            for expected in ["Qbu=278854 N", "付着余裕度=未算定", cause] {
+                assert!(detail.contains(expected), "{expected}: {detail}");
+            }
         }
     }
 }

@@ -345,6 +345,30 @@ fn check_member(
         SectionShape::RcColumnCircle { d, .. } => (*d, *d, MemberKind::Column),
         _ => return Ok(None),
     };
+    let (shear_symbol, bond_symbol) = opts.shear_method.capacity_symbols();
+    let bond_detail = |margin_label: &str, qbu: f64, tau_bu: f64, margin: f64| {
+        let display = |value: f64, decimals, unit| {
+            if !opts.include_bond {
+                "無効".into()
+            } else if value.is_nan() {
+                "未算定".into()
+            } else {
+                format!("{value:.decimals$}{unit}")
+            }
+        };
+        let capacity = display(qbu, 0, " N");
+        let strength = display(tau_bu, 3, " N/mm²");
+        let margin = display(margin, 3, "");
+        format!("{bond_symbol}={capacity}, τbu={strength}, {margin_label}={margin}")
+    };
+    let unavailable_bond_detail = || bond_detail("付着余裕度", f64::NAN, f64::NAN, f64::NAN);
+    let unchecked_without_bond_values = |reason: &str| {
+        let mut check = unchecked_member(elem.id, kind, reason);
+        check
+            .detail
+            .push_str(&format!("。{}", unavailable_bond_detail()));
+        check
+    };
     let main_rebar = model.element_rebar_material(elem);
     let main_rebar_issue = crate::material_strength::main_rebar_category_issue(main_rebar)
         .map(|reason| format!("部材 ID {}（断面「{}」）の{reason}", elem.id.0, sec.name));
@@ -375,7 +399,7 @@ fn check_member(
             .into_iter()
             .flatten()
             .fold(reason, |reason, issue| format!("{reason}。{issue}"));
-        Ok(Some(unchecked_member(elem.id, kind, &reason)))
+        Ok(Some(unchecked_without_bond_values(&reason)))
     };
     let Some(fc) = mat.fc else {
         return Err(format!(
@@ -644,7 +668,6 @@ fn check_member(
         (true, false) => bond_strength(&p),
         (true, true) => (f64::NAN, f64::NAN),
     };
-    let (shear_symbol, bond_symbol) = opts.shear_method.capacity_symbols();
     if static_beam_rebar.is_some() {
         static_beam_reasons.extend(beam_reference);
         static_beam_reasons.extend(main_rebar_issue);
@@ -675,30 +698,23 @@ fn check_member(
         }
         let reason = static_beam_reasons.join("。");
         if sigma_y.is_none() && !gravity_ng {
-            return Ok(Some(unchecked_member(elem.id, kind, &reason)));
+            return Ok(Some(unchecked_without_bond_values(&reason)));
         }
-        let qbu_detail = if bond_unverified {
-            "未算定".into()
-        } else if bond_zero_upper {
-            format!("{qbu:.0} N, τbu=未算定")
-        } else {
-            format!("{qbu:.0} N")
-        };
         let qsu_detail = if shear_strength.is_none() {
             "未算定".into()
         } else {
             format!("{qsu:.0} N")
         };
+        let bond_margin = if bond_ng { 0.0 } else { f64::NAN };
+        let bond_detail = bond_detail("付着余裕度", qbu, tau_bu, bond_margin);
         return Ok(Some(UltimateCheck {
             mu,
             qsu,
             qbu,
             shear_margin: if shear_ng { 0.0 } else { f64::NAN },
-            bond_margin: if bond_ng { 0.0 } else { f64::NAN },
+            bond_margin,
             unchecked_reason: (!gravity_ng).then(|| reason.clone()),
-            detail: format!(
-                "Qmu=未算定, {shear_symbol}={qsu_detail}, {bond_symbol}={qbu_detail}。{reason}"
-            ),
+            detail: format!("Qmu=未算定, {shear_symbol}={qsu_detail}, {bond_detail}。{reason}"),
             ..unchecked_member(elem.id, kind, &reason)
         }));
     }
@@ -918,14 +934,15 @@ fn check_member(
             if bond_ng {
                 check.qbu = qbu;
                 check.bond_margin = bond_margin;
-                check
-                    .detail
-                    .push_str(&format!("。付着耐力を超えます（{bond_symbol}={qbu:.0} N, {bond_margin_label}={bond_margin:.3}）"));
-                if bond_zero_upper {
-                    check.detail.push_str("。τbu=未算定");
-                }
+                check.detail.push_str("。付着耐力を超えます");
             }
         }
+        let bond_detail = if bond_ng {
+            bond_detail(&bond_margin_label, qbu, tau_bu, bond_margin)
+        } else {
+            unavailable_bond_detail()
+        };
+        check.detail.push_str(&format!("。{bond_detail}"));
         return Ok(Some(check));
     }
 
@@ -983,19 +1000,7 @@ fn check_member(
         (Some(reference), Some(reason)) => format!("{reference}。{reason}"),
         _ => format!("Mu={mu:.0} N·mm"),
     };
-    let bond_detail = if bond_unverified {
-        format!("{bond_symbol}=未算定, τbu=未算定, {bond_margin_label}=未算定")
-    } else if bond_zero_upper {
-        format!(
-            "{bond_symbol}={qbu:.0} N, τbu=未算定, {bond_margin_label}={}",
-            format_margin(bond_margin)
-        )
-    } else {
-        format!(
-            "{bond_symbol}={qbu:.0} N, τbu={tau_bu:.3} N/mm², {bond_margin_label}={}",
-            format_margin(bond_margin)
-        )
-    };
+    let bond_detail = bond_detail(&bond_margin_label, qbu, tau_bu, bond_margin);
     let mut detail = format!(
         "{bending_detail}, {demand_detail}, {shear_detail}, {bond_detail}\
          {biaxial_str}{bend_str}{ql_str}, pw={pw:.5}, jt={jt:.1} mm, L={l_clear} mm, Rp={rp:.4}",
