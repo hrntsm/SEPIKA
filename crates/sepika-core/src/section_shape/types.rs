@@ -393,7 +393,7 @@ impl SectionShape {
     }
 }
 
-/// 円断面の径 [mm] から断面積 `[mm²]`。
+/// 円断面の径 \[mm\] から断面積 `[mm²]`。
 pub fn one_bar_area(dia: f64) -> f64 {
     let r = dia / 2.0;
     std::f64::consts::PI * r * r

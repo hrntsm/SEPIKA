@@ -50,17 +50,17 @@ impl StandardRebar {
         }
     }
 
-    /// 公称直径 [mm]。
+    /// 公称直径 \[mm\]。
     pub const fn nominal_diameter_mm(self) -> f64 {
         self.nominal_dimensions().0
     }
 
-    /// 公称断面積 [mm²]。
+    /// 公称断面積 \[mm²\]。
     pub const fn area_mm2(self) -> f64 {
         self.nominal_dimensions().1
     }
 
-    /// 公称周長 [mm]。
+    /// 公称周長 \[mm\]。
     pub const fn perimeter_mm(self) -> f64 {
         self.nominal_dimensions().2
     }
@@ -88,7 +88,7 @@ impl fmt::Display for StandardRebar {
     }
 }
 
-/// RC・SRC梁柱の鉄筋寸法。標準呼び名は文字列、数値径 [mm] は数値として入出力する。
+/// RC・SRC梁柱の鉄筋寸法。標準呼び名は文字列、数値径 \[mm\] は数値として入出力する。
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RebarSize {
@@ -97,7 +97,7 @@ pub enum RebarSize {
 }
 
 impl RebarSize {
-    /// 規準で呼び名の数値を指定する項および配筋配置に用いる値 [mm]。
+    /// 規準で呼び名の数値を指定する項および配筋配置に用いる値 \[mm\]。
     pub const fn designation_or_diameter_mm(self) -> f64 {
         match self {
             Self::Standard(size) => size.designation_number(),
@@ -105,7 +105,7 @@ impl RebarSize {
         }
     }
 
-    /// 鉄筋1本の断面積 [mm²]。数値径は円断面とする。
+    /// 鉄筋1本の断面積 \[mm²\]。数値径は円断面とする。
     pub fn area_mm2(self) -> f64 {
         match self {
             Self::Standard(size) => size.area_mm2(),
@@ -113,7 +113,7 @@ impl RebarSize {
         }
     }
 
-    /// 付着計算に使う鉄筋1本の周長 [mm]。数値径は円断面とする。
+    /// 付着計算に使う鉄筋1本の周長 \[mm\]。数値径は円断面とする。
     pub fn perimeter_mm(self) -> f64 {
         match self {
             Self::Standard(size) => size.perimeter_mm(),

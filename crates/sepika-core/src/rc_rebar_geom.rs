@@ -282,7 +282,7 @@ impl RcBeamRebar {
 }
 
 impl RcBeamRebar {
-    /// 最内段の中心までの縁距離 [mm] を (上端, 下端) 順に返す。配筋が空の側は None。
+    /// 最内段の中心までの縁距離 \[mm\] を (上端, 下端) 順に返す。配筋が空の側は None。
     pub fn innermost_bar_distances_from_edges_mm(&self) -> (Option<f64>, Option<f64>) {
         let first_mm = self.cover
             + self.stirrup.dia.designation_or_diameter_mm()
