@@ -55,19 +55,11 @@ fn rigidity_from_analysis(
     rigidity_from_flexibility(model.nodes[master.index()].coord, flexibility)
 }
 
-fn with_wall_elements(
-    model: &Model,
-    story: StoryId,
-) -> Result<std::borrow::Cow<'_, Model>, String> {
-    model
-        .validate_wall_attr_refs()
-        .map_err(|error| evaluation_error(story, error.to_string()))?;
+fn with_wall_elements(model: &Model) -> std::borrow::Cow<'_, Model> {
     if model.wall_plates.is_empty() || !model.generated_wall_origins.is_empty() {
-        Ok(std::borrow::Cow::Borrowed(model))
+        std::borrow::Cow::Borrowed(model)
     } else {
-        Ok(std::borrow::Cow::Owned(
-            sepika_core::wall_expand::expand_wall_elements(model).0,
-        ))
+        std::borrow::Cow::Owned(sepika_core::wall_expand::expand_wall_elements(model).0)
     }
 }
 
@@ -114,14 +106,21 @@ pub fn validate_rigidity_node_ids(model: &Model) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_rigidity_inputs(model: &Model, story: StoryId) -> Result<(), String> {
+    validate_rigidity_node_ids(model).map_err(|reason| evaluation_error(story, reason))?;
+    model
+        .validate_wall_attr_refs()
+        .map_err(|error| evaluation_error(story, error.to_string()))
+}
+
 /// 独立な X・Y・Mz 荷重から剛心と層剛性を返す。
 /// 単層・上端単一剛床・基部の面内固定を確認できる線形弾性モデルに適用する。
 pub fn rigid_floor_story_rigidity(
     model: &Model,
     story: StoryId,
 ) -> Result<RigidFloorStoryRigidity, String> {
-    validate_rigidity_node_ids(model).map_err(|reason| evaluation_error(story, reason))?;
-    let model = with_wall_elements(model, story)?;
+    validate_rigidity_inputs(model, story)?;
+    let model = with_wall_elements(model);
     evaluation_master(&model, story)
         .and_then(|master| rigidity_from_analysis(&model, master, None))
         .map_err(|reason| evaluation_error(story, reason))
@@ -298,13 +297,13 @@ pub fn story_rigidity_requiring_coupled_analysis(
             "指定した上端階に対応する層がありません".into(),
         ));
     }
-    validate_rigidity_node_ids(model).map_err(|reason| evaluation_error(story, reason))?;
+    validate_rigidity_inputs(model, story)?;
     if let Some((_, evaluation)) = recorded_story_rigidity(story, responses)
         .map_err(|reason| evaluation_error(story, reason))?
     {
         return evaluation.clone();
     }
-    let expanded = with_wall_elements(model, story)?;
+    let expanded = with_wall_elements(model);
     evaluate_story_rigidity(&expanded, story, None).or_else(|reason| {
         validate_rigidity_column_axes(model, story)?;
         Err(reason)
@@ -402,8 +401,8 @@ enum CouplingIndicator {
 }
 
 pub(super) fn coupling_indicator(model: &Model, story: StoryId) -> Result<Option<String>, String> {
-    validate_rigidity_node_ids(model).map_err(|reason| evaluation_error(story, reason))?;
-    let model = with_wall_elements(model, story)?;
+    validate_rigidity_inputs(model, story)?;
+    let model = with_wall_elements(model);
     match coupling_indicator_from_expanded(&model, story)? {
         CouplingIndicator::Candidate(reason) => Ok(Some(reason)),
         _ => Ok(None),
