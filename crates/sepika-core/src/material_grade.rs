@@ -259,44 +259,72 @@ pub fn material_strength_factor_steel(mat: &crate::model::Material) -> f64 {
         .unwrap_or_else(|| steel_material_strength_factor(&mat.name))
 }
 
-/// 保有水平耐力計算（プッシュオーバー）で、材料の降伏強度 fy を
-/// **RC 主筋**として用いる文脈（RC 断面の集中ばね・主筋ファイバー・
-/// 曲げヒンジ・せん断降伏の主筋 σy）の材料強度割増係数。
-///
+const ORDINARY_JIS_REBAR_MAX_STRENGTH_FACTOR: f64 = 1.1;
+
+/// 保有水平耐力計算の主筋・壁縦筋に用いる無次元の材料強度割増係数。
 /// SD490 は 1.0。他の材種は直接指定値を優先し、空欄は 1.1。
-/// SD490 の入力は [`rebar_material_strength_issue`] で検証する。せん断補強筋には適用しない。
+/// JIS 主筋の入力は [`rebar_material_strength_issue`] で検証する。せん断補強筋には適用しない。
 pub fn material_strength_factor_rebar(
     mat: &crate::model::Material,
     stb_grade: Option<&str>,
 ) -> f64 {
-    if is_jis_sd490(mat, stb_grade) {
+    if main_rebar_grade(mat, stb_grade) == Some("SD490") {
         1.0
     } else {
         mat.strength_factor.unwrap_or(1.1)
     }
 }
 
-/// ST-Bridge標準材種、またはネイティブ鉄筋材料の名称からJIS SD490を判定する。
-/// 前後の空白を除き、種類記号は完全一致するものを採用する。
-pub fn is_jis_sd490(mat: &crate::model::Material, stb_grade: Option<&str>) -> bool {
-    match stb_grade {
-        Some(grade) => grade.trim() == "SD490",
-        None => mat.category == crate::model::MaterialCategory::Rebar && mat.name.trim() == "SD490",
+fn main_rebar_grade<'a>(
+    mat: &'a crate::model::Material,
+    stb_grade: Option<&'a str>,
+) -> Option<&'a str> {
+    stb_grade.map(str::trim).or_else(|| {
+        (mat.category == crate::model::MaterialCategory::Rebar).then(|| mat.name.trim())
+    })
+}
+
+fn ordinary_jis_rebar_fy(grade: &str) -> Option<f64> {
+    match grade {
+        "SR235" | "SRR235" | "SDR235" => Some(235.0),
+        "SR295" | "SD295" | "SD295A" | "SD295B" => Some(295.0),
+        "SD345" => Some(345.0),
+        "SD390" => Some(390.0),
+        _ => None,
     }
 }
 
-/// 保有水平耐力計算で主筋・壁縦筋に使う SD490 の入力不備を返す。
-/// Fy は 490 N/mm²、割増は空欄または 1.0 が必要。
+/// 保有水平耐力計算で基準強度と割増を検証する JIS 主筋・壁縦筋の材種かを返す。
+/// ST-Bridge 標準材種を優先し、鉄筋材料名・種類記号の前後の空白は除く。
+pub fn has_jis_rebar_strength_limit(mat: &crate::model::Material, stb_grade: Option<&str>) -> bool {
+    main_rebar_grade(mat, stb_grade)
+        .is_some_and(|grade| grade == "SD490" || ordinary_jis_rebar_fy(grade).is_some())
+}
+
+/// 保有水平耐力計算で JIS 主筋・壁縦筋に使う材料の入力不備を返す。
+/// Fy [N/mm²] は材種の基準強度、割増は空欄または材種ごとの許容範囲が必要。
 pub fn rebar_material_strength_issue(
     mat: &crate::model::Material,
     stb_grade: Option<&str>,
 ) -> Option<String> {
-    if !is_jis_sd490(mat, stb_grade) {
-        return None;
+    let grade = main_rebar_grade(mat, stb_grade)?;
+    if grade == "SD490" {
+        return (mat.fy != Some(490.0) || mat.strength_factor.is_some_and(|factor| factor != 1.0))
+            .then(|| {
+                format!(
+                    "材料 ID {}「{}」（材種 SD490）は保有水平耐力計算で Fy = 490 N/mm²、割増は空欄または 1.0 が必要です",
+                    mat.id.0, mat.name
+                )
+            });
     }
-    (mat.fy != Some(490.0) || mat.strength_factor.is_some_and(|factor| factor != 1.0)).then(|| {
+    let fy = ordinary_jis_rebar_fy(grade)?;
+    let allowed_factors = 1.0..=ORDINARY_JIS_REBAR_MAX_STRENGTH_FACTOR;
+    let invalid_factor = mat
+        .strength_factor
+        .is_some_and(|factor| !allowed_factors.contains(&factor));
+    (mat.fy != Some(fy) || invalid_factor).then(|| {
         format!(
-            "材料 ID {}「{}」（材種 SD490）は保有水平耐力計算で Fy = 490 N/mm²、割増は空欄または 1.0 が必要です",
+            "材料 ID {}「{}」（材種 {grade}）は保有水平耐力計算で Fy = {fy} N/mm²、割増は空欄または 1.0～{ORDINARY_JIS_REBAR_MAX_STRENGTH_FACTOR} が必要です",
             mat.id.0, mat.name
         )
     })
@@ -840,6 +868,48 @@ mod tests {
         assert_eq!(rebar_f_value("SD390"), Some(390.0));
         assert_eq!(rebar_f_value("SR235"), Some(235.0));
         assert_eq!(rebar_f_value("SS400"), None);
+    }
+
+    #[test]
+    fn jis_main_rebar_strength_limits_use_the_grade_reference_strength() {
+        for (grade, fy) in [
+            ("SR235", 235.0),
+            ("SRR235", 235.0),
+            ("SDR235", 235.0),
+            ("SR295", 295.0),
+            ("SD295", 295.0),
+            ("SD295A", 295.0),
+            ("SD295B", 295.0),
+            ("SD345", 345.0),
+            ("SD390", 390.0),
+        ] {
+            let mut mat = rebar_mat(grade, Some(fy));
+            mat.strength_factor = Some(1.1);
+            assert!(
+                rebar_material_strength_issue(&mat, None).is_none(),
+                "{grade}"
+            );
+            mat.strength_factor = Some(1.2);
+            assert!(
+                rebar_material_strength_issue(&mat, None).is_some(),
+                "{grade}"
+            );
+            mat.strength_factor = Some(1.0);
+            mat.fy = Some(fy + 1.0);
+            assert!(
+                rebar_material_strength_issue(&mat, None).is_some(),
+                "{grade}"
+            );
+        }
+
+        for name in ["sd345", "SD345-別材料", "USD685"] {
+            let mut mat = rebar_mat(name, Some(400.0));
+            mat.strength_factor = Some(1.2);
+            assert!(
+                rebar_material_strength_issue(&mat, None).is_none(),
+                "{name}"
+            );
+        }
     }
 
     /// 高強度鉄筋の製品名は末尾の数値を降伏点とみなす。

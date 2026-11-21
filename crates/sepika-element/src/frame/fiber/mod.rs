@@ -217,10 +217,12 @@ fn fiber_rebar_factor(
     model: &sepika_core::model::Model,
     basis: crate::factory::StrengthBasis,
 ) -> f64 {
-    // 他材種で主材料に割増を設定したモデルも使われるため、主筋材を参照するのは SD490 に限る。
+    // その他の材種で主材料に割増を設定したモデルも使われるため、主筋材の参照は割増範囲を検証する材種に限る。
     let material = model
         .element_rebar_material_with_grade(data)
-        .filter(|(mat, grade)| sepika_core::material_grade::is_jis_sd490(mat, *grade))
+        .filter(|(mat, grade)| {
+            sepika_core::material_grade::has_jis_rebar_strength_limit(mat, *grade)
+        })
         .or_else(|| model.element_material(data).map(|mat| (mat, None)));
     basis.rebar_factor(material)
 }

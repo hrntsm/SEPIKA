@@ -2789,6 +2789,58 @@ fn rc_rebar_strength_in_pushover_capacity_and_yield_thresholds() {
 }
 
 #[test]
+fn pushover_uses_sd345_main_rebar_strength_only_within_jis_limits() {
+    use sepika_core::model::AnalysisKind;
+    use sepika_element::factory::{build_hinge_view, StrengthBasis};
+
+    let (mut model, rebar, _, _) = rc_hinge_model();
+    let dofmap = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &dofmap);
+    let run = |model: &Model| pushover_analysis(model, &dofmap, &reducer, SeismicDir::X, 40, 60.0);
+    model.materials[0].strength_factor = Some(1.2);
+
+    let mut capacities = Vec::new();
+    for (factor, expected_fy) in [(Some(1.0), 345.0), (Some(1.1), 379.5), (None, 379.5)] {
+        model.materials[1].strength_factor = factor;
+        capacities.push(run(&model).unwrap().qu);
+        let hinge = build_hinge_view(
+            &model.elements[0],
+            &model,
+            StrengthBasis::MaterialStrength,
+            AnalysisKind::Incremental,
+            0.0,
+            8,
+            8,
+        )
+        .unwrap();
+        let n_tens = hinge.mn_surface.unwrap().n_tens;
+        assert!((n_tens - rebar.total_main_area() * expected_fy).abs() < 1e-6);
+    }
+    assert!(capacities[1] > capacities[0] && capacities[0] > 0.0);
+    assert_eq!(capacities[1], capacities[2]);
+
+    for (fy, factor) in [
+        (Some(345.0), Some(1.2)),
+        (Some(345.0), Some(0.95)),
+        (Some(345.0), Some(0.0)),
+        (Some(345.0), Some(f64::NAN)),
+        (Some(345.0), Some(f64::INFINITY)),
+        (Some(379.5), Some(1.0)),
+        (Some(330.0), None),
+        (None, None),
+    ] {
+        model.materials[1].fy = fy;
+        model.materials[1].strength_factor = factor;
+        let diagnostic = run(&model).expect_err("SD345の材料入力不備を診断する");
+        assert!(diagnostic.contains("部材 ID 0 の主筋"), "{diagnostic}");
+        assert!(diagnostic.contains("材料 ID 1"), "{diagnostic}");
+        assert!(diagnostic.contains("材種 SD345"), "{diagnostic}");
+        assert!(diagnostic.contains("345 N/mm²"), "{diagnostic}");
+        assert!(diagnostic.contains("1.0～1.1"), "{diagnostic}");
+    }
+}
+
+#[test]
 fn pushover_uses_stb_main_rebar_grade_independent_of_display_name() {
     use sepika_core::model::{
         DiameterStrength, StbCommonStrength, StbGradeMaterial, StbRebarStrength, StbSectionStrength,
@@ -2896,6 +2948,16 @@ fn pushover_uses_stb_main_rebar_grade_independent_of_display_name() {
             panic!("RC矩形柱のせん断耐力を算定できません");
         };
         assert!((input.sigma_y - 379.5).abs() < 1e-10);
+
+        model.materials[3].strength_factor = Some(1.2);
+        if native.is_none() {
+            let diagnostic = run(&model).expect_err("元材種SD345の上限超過を診断する");
+            assert!(diagnostic.contains("材料 ID 3"), "{diagnostic}");
+            assert!(diagnostic.contains("材種 SD345"), "{diagnostic}");
+        } else {
+            assert!(run(&model).is_ok());
+        }
+        model.materials[3].strength_factor = None;
     }
 
     model.materials[3].name = "SD490".into();
