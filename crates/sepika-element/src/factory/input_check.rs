@@ -314,6 +314,13 @@ fn nonlinear_input_issues_with_basis(
             }),
             ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
                 member_rebar_material_strength_issue(elem, model, basis)
+                    .or_else(|| {
+                        if kind == sepika_core::model::AnalysisKind::Incremental {
+                            shear_yield_rebar_category_issue(elem, model)
+                        } else {
+                            None
+                        }
+                    })
                     .or_else(|| member_strength_issue(elem, model))
                     .or_else(|| {
                         super::springs::rc_reference_issue(
@@ -354,6 +361,31 @@ fn nonlinear_input_issues_with_basis(
         }
     }
     issues
+}
+
+fn shear_yield_rebar_category_issue(data: &ElementData, model: &Model) -> Option<String> {
+    let shape = model.element_section(data)?.shape.as_ref()?;
+    if !matches!(
+        shape,
+        SectionShape::RcBeamRect { .. }
+            | SectionShape::RcColumnRect { .. }
+            | SectionShape::RcColumnCircle { .. }
+            | SectionShape::SrcBeamRect { .. }
+            | SectionShape::SrcColumnRect { .. }
+    ) {
+        return None;
+    }
+    let material = model.element_shear_rebar_material(data)?;
+    (material.category != MaterialCategory::Rebar).then(|| {
+        format!(
+            "部材 ID {} のせん断補強筋に割り当てた材料「{}」は区分が「{}」のため、\
+             せん断降伏耐力を算定できません。断面タブでせん断補強筋に区分「鉄筋」の材料を\
+             割り当てて、再解析してください。",
+            data.id.0,
+            material.name,
+            material.category.label()
+        )
+    })
 }
 
 /// 明示RC梁基準の入力診断。未指定なら `None`、不適合なら当該解析種別の理由を返す。
