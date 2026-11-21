@@ -992,10 +992,8 @@ fn sm520_out_of_range_src_beam_and_column_do_not_restore_partial_rc_capacity() {
         for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
             let mut steel = make_material_no_fc(name);
             steel.fy = fy;
-            let mut rebar = make_material_no_fc("SD345");
-            rebar.fy = Some(345.0);
-            let mut shear = make_material_no_fc("SD295");
-            shear.fy = Some(295.0);
+            let rebar = make_rebar_material("SD345", 345.0);
+            let shear = make_rebar_material("SD295", 295.0);
             for kind in [MemberKind::Column, MemberKind::Girder] {
                 let shape = if kind == MemberKind::Column {
                     src_rect_shape(

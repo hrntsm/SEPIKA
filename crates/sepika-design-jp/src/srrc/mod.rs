@@ -388,6 +388,11 @@ impl SrcDesign {
                     .to_string(),
             );
         }
+        if let Some(reason) =
+            crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
+        {
+            return Err(format!("{member}検定: 断面「{}」の{reason}", sec.name));
+        }
         if ctx.shear_rebar_material.is_none() {
             return Err("SRC検定: せん断補強筋の材料が未割当\
                          （断面タブでせん断補強筋の材料を割り当ててください）"

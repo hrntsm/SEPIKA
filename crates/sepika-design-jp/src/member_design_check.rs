@@ -749,10 +749,16 @@ pub fn run_member_design_checks(
                 check_incomplete = incomplete;
                 outcome
             } else if missing_gravity {
+                check_incomplete = crate::material_strength::main_rebar_category_issue(
+                    ctx.rebar_material.as_ref(),
+                );
                 CheckOutcome::Skipped {
                     reason: "設計用せん断力に必要な重力参照内力が不足しています".into(),
                 }
             } else if missing_q0 {
+                check_incomplete = crate::material_strength::main_rebar_category_issue(
+                    ctx.rebar_material.as_ref(),
+                );
                 CheckOutcome::Skipped {
                     reason: "QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません".into(),
                 }

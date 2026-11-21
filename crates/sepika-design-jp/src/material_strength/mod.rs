@@ -10,6 +10,7 @@ pub use concrete::{
     concrete_allowable_bond, concrete_allowable_compression, concrete_allowable_shear,
     concrete_allowable_shear_class, concrete_young_modulus, young_ratio_n,
 };
+pub(crate) use rebar::main_rebar_category_issue;
 pub use rebar::{
     main_rebar_grade, rebar_allowable_shear, rebar_allowable_tension, rebar_sigma_y_of,
     shear_rebar_grade,

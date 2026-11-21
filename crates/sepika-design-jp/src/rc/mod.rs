@@ -100,6 +100,13 @@ impl DesignCheck for RcDesign {
                     .to_string(),
             };
         }
+        if let Some(reason) =
+            crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
+        {
+            return CheckOutcome::Skipped {
+                reason: format!("RC 検定: 断面「{}」の{reason}", sec.name),
+            };
+        }
         if ctx.shear_rebar_material.is_none() {
             return CheckOutcome::Skipped {
                 reason: "RC 検定: せん断補強筋の材料が未割当\
