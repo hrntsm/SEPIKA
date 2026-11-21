@@ -468,6 +468,54 @@ impl Default for LoadCfg {
 }
 
 impl LoadCfg {
+    pub(super) fn find_member_weight_ref(
+        &self,
+        mut matches: impl FnMut(ElemId) -> bool,
+    ) -> Option<(ElemId, &'static str)> {
+        self.extra_line_weight
+            .iter()
+            .map(|&(id, _)| (id, "部材付加線重量"))
+            .chain(
+                self.finish_area_weight
+                    .iter()
+                    .map(|&(id, _)| (id, "仕上げ面重量")),
+            )
+            .chain(
+                self.dampers
+                    .iter()
+                    .map(|damper| (damper.elem, "ダンパー総重量")),
+            )
+            .find(|&(id, _)| matches(id))
+    }
+
+    pub(super) fn visit_member_weight_refs(&mut self, mut f: impl FnMut(&mut ElemId)) {
+        for (id, _) in self
+            .extra_line_weight
+            .iter_mut()
+            .chain(&mut self.finish_area_weight)
+        {
+            f(id);
+        }
+        for damper in &mut self.dampers {
+            f(&mut damper.elem);
+        }
+    }
+
+    /// 参照先が存在しない部材別重量を入力種別と部材番号付きで返す。
+    /// 重量値・部材種別・ダンパー総重量の未設定は検査しない。
+    pub fn validate_member_weight_refs(
+        &self,
+        model: &Model,
+    ) -> Result<(), crate::error::CoreError> {
+        if let Some((id, kind)) = self.find_member_weight_ref(|id| model.element(id).is_none()) {
+            return Err(crate::error::CoreError::DanglingRef(format!(
+                "{kind} -> 部材 {}",
+                id.0
+            )));
+        }
+        Ok(())
+    }
+
     /// ダンパー総重量の値・参照・明示 Damper の指定漏れを検証する。重量は生成しない。
     pub fn validate_damper_weights(&self, model: &Model) -> Result<(), String> {
         let mut ids = std::collections::HashSet::new();
@@ -518,6 +566,14 @@ impl LoadCfg {
 }
 
 impl Model {
+    /// 部材別重量の参照先の実在を検査する。入力の完成度は検査しない。
+    pub fn validate_member_weight_refs(&self) -> Result<(), crate::error::CoreError> {
+        if let Some(cfg) = &self.load_cfg {
+            cfg.validate_member_weight_refs(self)?;
+        }
+        Ok(())
+    }
+
     /// 全荷重ケースの部材荷重方向を計算用に検証する。失敗はケース・荷重・部材を付けて返す。
     /// 荷重の強度・生成元・解析対象ケースの選択によらず検査し、入力は変更しない。
     pub fn validate_member_load_directions(&self) -> Result<(), String> {

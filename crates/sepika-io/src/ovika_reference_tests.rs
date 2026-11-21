@@ -90,6 +90,44 @@ fn correct_hash_file(path: &Path, model: &Model) {
 }
 
 #[test]
+fn ovika_rejects_missing_member_weight_targets_on_save_and_load() {
+    let target = ElemId(8);
+    for (label, reason, cfg) in [
+        (
+            "line-weight",
+            "部材付加線重量 -> 部材 8",
+            LoadCfg {
+                extra_line_weight: vec![(target, 0.4)],
+                ..Default::default()
+            },
+        ),
+        (
+            "finish-weight",
+            "仕上げ面重量 -> 部材 8",
+            LoadCfg {
+                finish_area_weight: vec![(target, 0.002)],
+                ..Default::default()
+            },
+        ),
+        (
+            "damper-weight",
+            "ダンパー総重量 -> 部材 8",
+            LoadCfg {
+                dampers: vec![DamperSpec {
+                    elem: target,
+                    total_weight: 4000.0,
+                }],
+                ..Default::default()
+            },
+        ),
+    ] {
+        let mut model = member_model(0, vec![], None);
+        model.load_cfg = Some(cfg);
+        assert_rejected_preserving_input(&model, label, reason);
+    }
+}
+
+#[test]
 fn ovika_rejects_inconsistent_shape_area_and_preserves_supplied_area() {
     let shape = sepika_core::section_shape::SectionShape::SteelBox {
         height: 400.0,

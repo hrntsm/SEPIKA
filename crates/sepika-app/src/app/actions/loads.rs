@@ -152,7 +152,9 @@ impl App {
 
     pub(super) fn sync_prepared_model(&mut self, initialize_stories: bool) {
         if let Err(reason) =
-            sepika_element::springs::panel_gen::validate_panel_removal_references(&self.core.model)
+            sepika_element::springs::panel_gen::validate_panel_generation_references(
+                &self.core.model,
+            )
         {
             self.report_error(reason);
             return;

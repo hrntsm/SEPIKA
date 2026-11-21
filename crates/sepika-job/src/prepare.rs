@@ -7,7 +7,7 @@ use sepika_core::model::Model;
 use sepika_core::region_rebuild::rebuild_floor_regions;
 use sepika_core::wall_region_rebuild::rebuild_wall_regions;
 use sepika_element::springs::panel_gen::{
-    apply_auto_panel_zones, validate_panel_removal_references,
+    apply_auto_panel_zones, validate_panel_generation_references,
 };
 
 use crate::auto_loads::{
@@ -34,7 +34,7 @@ pub struct PrepareReport {
 pub fn apply_rigid_zones_and_panels(
     model: &mut Model,
 ) -> Result<Vec<sepika_element::springs::panel_gen::GeneratedPanel>, String> {
-    validate_panel_removal_references(model)?;
+    validate_panel_generation_references(model)?;
     let rule = sepika_element::frame::beam::RigidZoneRule {
         consider_walls: model.stress_cfg.rigid_zone_consider_walls,
     };
@@ -64,7 +64,7 @@ pub fn apply_rigid_zones_and_panels(
 }
 
 /// 解析前処理を一括で行う（剛域・仕口パネル・荷重ケースの自動同期）。
-/// 部材荷重方向が不正、または削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
+/// 部材荷重方向・部材別重量の参照先が不正、または削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
 pub fn prepare_model_for_analysis(
     model: &mut Model,
     settings: &AnalysisSettings,
@@ -75,14 +75,14 @@ pub fn prepare_model_for_analysis(
 
 /// 階に依存する準備では FL・ΔSL の明示入力を要求し、不足・所属不成立時は停止する。
 /// 階を持たない低水準の重力解析は `initialize_stories = false` で利用できる。
-/// 部材荷重方向が不正、または削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
+/// 部材荷重方向・部材別重量の参照先が不正、または削除対象の仕口パネルへの参照があればモデルを変更せず失敗する。
 pub fn prepare_model(
     model: &mut Model,
     settings: &AnalysisSettings,
     design_period: Option<f64>,
     initialize_stories: bool,
 ) -> Result<PrepareReport, JobError> {
-    validate_panel_removal_references(model).map_err(JobError::InvalidInput)?;
+    validate_panel_generation_references(model).map_err(JobError::InvalidInput)?;
     model
         .validate_member_load_directions()
         .map_err(JobError::InvalidInput)?;

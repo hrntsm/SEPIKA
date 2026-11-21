@@ -133,6 +133,9 @@ fn generate_stories_impl(
     mode: SelfWeightMode,
     mass_method: MassMethod,
 ) -> Result<StoryGenResult, String> {
+    model
+        .validate_member_weight_refs()
+        .map_err(|error| error.to_string())?;
     for (index, &id) in model.generated_masters.iter().enumerate() {
         if model.nodes.get(id.index()).is_none_or(|node| node.id != id) {
             return Err(format!(

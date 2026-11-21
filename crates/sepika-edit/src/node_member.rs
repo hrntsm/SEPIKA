@@ -500,6 +500,9 @@ impl EditCommand for AddMember {
         if let Err(error) = model.validate_steel_design_attr_refs() {
             return Box::new(RejectedEdit(error.to_string()));
         }
+        if let Err(error) = model.validate_member_weight_refs() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
         let snapshot = AssignmentTopology::capture(model);
         model.elements.push(self.elem.clone());
         Box::new(RestoreAssignmentTopology {
@@ -536,6 +539,9 @@ impl EditCommand for AddDamper {
             return Box::new(Noop);
         }
         if let Err(error) = model.validate_steel_design_attr_refs() {
+            return Box::new(RejectedEdit(error.to_string()));
+        }
+        if let Err(error) = model.validate_member_weight_refs() {
             return Box::new(RejectedEdit(error.to_string()));
         }
         let id = self.elem.id;
