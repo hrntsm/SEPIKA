@@ -830,6 +830,11 @@ fn actual_rc_beam_reports_reference_strengths_from_signed_gravity_without_passin
             reason.contains("ultimate_beam_hinge_free_end: j端"),
             "{reason}"
         );
+        assert!(
+            reason.contains("ultimate_beam_hinge_shear_upper_bound_unverified:"),
+            "{reason}"
+        );
+        assert!(beam.detail.contains("参考曲げ略算 Mu"));
         assert!(beam.qmu.is_nan() && beam.shear_margin.is_nan() && beam.bond_margin.is_nan());
     }
 }
@@ -1111,7 +1116,7 @@ fn actual_rc_free_end_never_shows_an_ok_or_ng_from_an_inapplicable_hinge_demand(
         {
             let labels = ultimate_table_labels(&mut app);
             for text in [
-                "108.8",
+                "108.8（参考）",
                 "117.8",
                 "278.9",
                 "未検定",
@@ -1126,6 +1131,74 @@ fn actual_rc_free_end_never_shows_an_ok_or_ng_from_an_inapplicable_hinge_demand(
                 "{labels:?}"
             );
         }
+    }
+}
+
+#[test]
+fn actual_rc_beam_compares_confirmed_shear_with_mu_displayed_as_reference() {
+    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+
+    let mut model = beam_model(&[4], &[2]);
+    model.load_cases[0].nodal.push(NodalLoad::manual(
+        NodeId(3),
+        [0.0, 0.0, -10_000.0, 0.0, 0.0, 0.0],
+    ));
+    let mut app = solve_beam_model(model);
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::X);
+    app.core.analysis_cfg.push_steps = 3;
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.core.ultimate_use_pushover = true;
+    let po = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .pushover_x
+        .as_mut()
+        .unwrap();
+    let response = &po.confirmed_history.as_ref().unwrap()[1];
+    let member = response
+        .members
+        .iter()
+        .find(|member| member.elem == ElemId(1))
+        .unwrap();
+    let shear = member.shear_strong.abs();
+    assert!(shear > 0.0);
+    po.capacity_evaluation = Some(
+        po.evaluation_point(
+            EvaluationPurpose::HoldingCapacity,
+            SeismicDir::X,
+            response.step,
+            "RC梁の総せん断力を照合するstep".into(),
+        )
+        .unwrap(),
+    );
+    let checks = app.compute_ultimate_checks().unwrap();
+    let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
+    close(beam.qmu, shear);
+    close(beam.shear_margin, beam.qsu / shear);
+    assert!(beam.ok && beam.unchecked_reason.is_none(), "{beam:?}");
+    assert!(
+        beam.detail.contains("参考曲げ略算 Mu")
+            && beam
+                .detail
+                .contains("ultimate_beam_mu_applicability_unverified:")
+    );
+    #[cfg(feature = "gui")]
+    {
+        let labels = ultimate_table_labels(&mut app);
+        assert!(
+            labels.iter().any(|label| label.ends_with("（参考）")),
+            "{labels:?}"
+        );
+        assert!(labels.iter().any(|label| label == "OK"), "{labels:?}");
     }
 }
 

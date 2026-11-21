@@ -214,7 +214,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                 &[
                     Col::id_named("部材"),
                     Col::label("種別"),
-                    Col::num("Mu[kN·m]"),
+                    Col::wide_num("Mu[kN·m]（梁は参考）"),
                     Col::num("Qmu[kN]"),
                     Col::num(qsu_hdr),
                     Col::num(if biaxial_shear {
@@ -244,7 +244,17 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                         }
                     };
                     row.col(|ui| {
-                        ui.label(format_capacity(moment_kn_m(c.mu)));
+                        let value = format_capacity(moment_kn_m(c.mu));
+                        if c.kind == sepika_design_jp::MemberKind::Girder {
+                            let value = if c.mu.is_finite() {
+                                format!("{value}（参考）")
+                            } else {
+                                value
+                            };
+                            ui.label(value).on_hover_text(&c.detail);
+                        } else {
+                            ui.label(value);
+                        }
                     });
                     row.col(|ui| {
                         ui.label(format_capacity(force_kn(c.qmu)));
@@ -314,7 +324,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             let shear_demand = if app.core.ultimate_use_pushover {
                 "Qmu は採用stepの確定総せん断力の絶対値"
             } else {
-                "Qmu=上限強度倍率·2·Mu/内法（両端ヒンジ）"
+                "RC梁の静的Qmuは要求せん断力の上側評価を確認できないため未算定。RC柱のQmuは上限強度倍率·2·Mu/内法"
             };
             ui.colored_label(
                 crate::theme::UI_MUTED,

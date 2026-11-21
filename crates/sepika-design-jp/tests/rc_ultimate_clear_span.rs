@@ -72,6 +72,22 @@ fn confirmed_faces_supply_the_same_demands_and_capacities_as_the_equivalent_clea
                     let faced = &collect_rc_ultimate_checks(&model, &input, &opts).unwrap()[0];
                     let clear = &collect_rc_ultimate_checks(&equivalent, &input, &opts).unwrap()[0];
                     assert_eq!(faced.kind, kind);
+                    assert!(faced.qsu.is_finite() && faced.qsu > 0.0);
+                    assert!(faced.qbu.is_finite() && faced.qbu > 0.0);
+                    for (actual, expected) in [(faced.qsu, clear.qsu), (faced.qbu, clear.qbu)] {
+                        assert!((actual - expected).abs() < 1e-6);
+                    }
+                    if kind == MemberKind::Girder && demand.shear.is_none() {
+                        for check in [faced, clear] {
+                            assert!(!check.ok && check.qmu.is_nan());
+                            assert!(check
+                                .unchecked_reason
+                                .as_deref()
+                                .unwrap()
+                                .contains("ultimate_beam_hinge_shear_upper_bound_unverified:"));
+                        }
+                        continue;
+                    }
                     assert_eq!(faced.unchecked_reason, None);
                     assert_eq!(clear.unchecked_reason, None);
                     assert!(
@@ -79,11 +95,6 @@ fn confirmed_faces_supply_the_same_demands_and_capacities_as_the_equivalent_clea
                         "{}",
                         faced.detail
                     );
-                    assert!(faced.qsu.is_finite() && faced.qsu > 0.0);
-                    assert!(faced.qbu.is_finite() && faced.qbu > 0.0);
-                    for (actual, expected) in [(faced.qsu, clear.qsu), (faced.qbu, clear.qbu)] {
-                        assert!((actual - expected).abs() < 1e-6);
-                    }
                     let expected_qmu = demand.shear.unwrap_or_else(|| 2.0 * faced.mu / span_mm);
                     assert!((faced.qmu - expected_qmu).abs() < 1e-6);
                     if kind == MemberKind::Column {

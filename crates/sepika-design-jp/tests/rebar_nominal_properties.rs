@@ -55,7 +55,7 @@ fn ratio(result: &CheckResult, kind: CheckKind) -> f64 {
 }
 
 #[test]
-fn beam_ultimate_checks_use_nominal_areas_in_resistance_and_hinge_demand() {
+fn beam_ultimate_checks_use_nominal_areas_in_resistance_and_reference_mu() {
     let mut model = beam_model();
     let static_demand = MemberDemand {
         mz: -10e6,
@@ -69,13 +69,12 @@ fn beam_ultimate_checks_use_nominal_areas_in_resistance_and_hinge_demand() {
         ..Default::default()
     };
     // 技術基準解説書 式(付1.3-5)と塑性理論式のトラス＋アーチに表値を代入。
-    for (main, shear, mu, qsu, static_ok, total_ok) in [
+    for (main, shear, mu, qsu, total_ok) in [
         (
             DiameterMm(19.0),
             DiameterMm(10.0),
             96_839_240.117_732,
             609_051.678_251,
-            true,
             true,
         ),
         (
@@ -83,7 +82,6 @@ fn beam_ultimate_checks_use_nominal_areas_in_resistance_and_hinge_demand() {
             DiameterMm(10.0),
             97_854_075.0,
             609_051.678_251,
-            false,
             true,
         ),
         (
@@ -92,7 +90,6 @@ fn beam_ultimate_checks_use_nominal_areas_in_resistance_and_hinge_demand() {
             97_854_075.0,
             563_466.329_583,
             false,
-            false,
         ),
     ] {
         let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() else {
@@ -100,17 +97,23 @@ fn beam_ultimate_checks_use_nominal_areas_in_resistance_and_hinge_demand() {
         };
         rebar.main_dia = main;
         rebar.stirrup.dia = shear;
-        for (demand, qmu, expected_ok) in [
-            (static_demand, mu / 2000.0, static_ok),
-            (total_demand, 580_000.0, total_ok),
-        ] {
+        for demand in [static_demand, total_demand] {
             let result =
                 &collect_rc_ultimate_checks(&model, &[(ElemId(0), demand)], &opts).unwrap()[0];
-            assert!(result.unchecked_reason.is_none(), "{result:?}");
             assert_near(result.mu, mu);
-            assert_near(result.qmu, qmu);
             assert_near(result.qsu, qsu);
-            assert_eq!(result.ok, expected_ok, "{result:?}");
+            if let Some(shear) = demand.shear {
+                assert!(result.unchecked_reason.is_none(), "{result:?}");
+                assert_near(result.qmu, shear);
+                assert_eq!(result.ok, total_ok, "{result:?}");
+            } else {
+                assert!(!result.ok && result.qmu.is_nan(), "{result:?}");
+                assert!(result
+                    .unchecked_reason
+                    .as_deref()
+                    .unwrap()
+                    .contains("ultimate_beam_hinge_shear_upper_bound_unverified:"));
+            }
         }
     }
 }
