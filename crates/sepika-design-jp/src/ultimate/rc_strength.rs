@@ -1,15 +1,13 @@
 //! RC 部材の終局強度（曲げ・せん断）ヘルパ群。
 //!
 //! - [`biaxial_margin`] — 2 軸相互作用の余裕度。
-//! - [`column_axis_shear`] — 指定方向の柱の Qsu・Qmu（2 軸せん断用）。
 //! - [`column_mu`] — 柱の曲げ終局強度 Mu（構造規定 at 式）。
 //! - [`member_shear_strength`] — 選択式に応じた終局せん断強度 Qsu/Vu。
-//! - [`ductility_be_ns`] — 靭性指針式のトラス機構有効幅 be・中子筋本数 Ns。
 
 use super::options::{ShearMethod, UltimateShearOptions};
 use super::rc_props::RcBarProps;
-use super::rc_shear::{rc_shear_qsu_plastic, RcPlasticShearInput};
-use super::rc_shear_ductility::{rc_shear_vu_ductility, RcDuctilityShearInput};
+use super::rc_shear::{rc_shear_qsu_plastic_with_strength, RcPlasticShearInput};
+use super::rc_shear_ductility::{rc_shear_vu_ductility_with_strength, RcDuctilityShearInput};
 use sepika_core::rc_capacity::{rc_column_mu_simple, RcCapacityInput};
 
 /// 2 軸相互作用の余裕度 `1/((rx)^α + (ry)^α)^(1/α)`（採用応力）。
@@ -29,37 +27,6 @@ pub fn biaxial_margin(rx: f64, ry: f64, alpha: f64) -> f64 {
     } else {
         1.0 / s.powf(1.0 / alpha)
     }
-}
-
-/// 指定方向の諸元 `props` から柱の終局せん断強度 `Qsu`/`Vu` と両端ヒンジ時せん断力 `Qmu` を算定する（2 軸せん断用）。
-/// 終局せん断強度は選択された [`ShearMethod`] に従う。有効せいが 0 以下なら `(0.0, 0.0)`。
-pub(super) fn column_axis_shear(
-    props: &RcBarProps,
-    fc: f64,
-    sigma_y: f64,
-    n_axial: f64,
-    l_clear: f64,
-    opts: &UltimateShearOptions,
-) -> (f64, f64) {
-    if props.d_eff <= 0.0 {
-        return (0.0, 0.0);
-    }
-    let cap = RcCapacityInput {
-        b: props.b_dir,
-        d: props.d_dir,
-        at: props.at,
-        d_eff: props.d_eff,
-        sigma_y,
-        fc,
-        pw: props.pw,
-        sigma_wy: opts.sigma_wy,
-        clear_span: l_clear,
-        sigma_0: 0.0,
-    };
-    let qsu = member_shear_strength(props, fc, n_axial, l_clear, opts);
-    let mu = rc_column_mu_simple(&cap, props.ag, n_axial);
-    let qmu = opts.upper_strength_factor * 2.0 * mu / l_clear;
-    (qsu, qmu)
 }
 
 /// 柱の曲げ終局強度 Mu [N·mm]（構造規定 at 式、軸力考慮）。
@@ -90,60 +57,53 @@ pub(super) fn column_mu(
     rc_column_mu_simple(&cap, ag, n_axial)
 }
 
-/// 靭性指針式による終局せん断信頼強度 `Vu` [N]（[`rc_shear_ductility`]）を
-/// 指定方向の諸元 `props` から算定する。`je` はトラス機構有効せい（`jt` を用いる）。
-fn member_vu_ductility(
-    props: &RcBarProps,
-    je: f64,
-    fc: f64,
-    n_axial: f64,
-    l_clear: f64,
-    sigma_wy: f64,
-    opts: &UltimateShearOptions,
-) -> f64 {
-    let s = props.shear_pitch;
-    let aw = props.shear_legs as f64 * props.shear_dia.area_mm2();
-    let pwe = if s > 0.0 { aw / (props.be * s) } else { 0.0 };
-    rc_shear_vu_ductility(&RcDuctilityShearInput {
-        b: props.b_dir,
-        d_full: props.d_dir,
-        be: props.be,
-        je,
-        pwe,
-        sigma_wy,
-        s,
-        n_s: props.n_s,
-        l_clear,
-        fc,
-        rp: opts.rp,
-        tensile_axial: n_axial < 0.0,
-        lightweight: opts.lightweight,
-    })
-}
-
 /// 選択された [`ShearMethod`] に応じた終局せん断強度 `Qsu`/`Vu` [N]。
 pub(super) fn member_shear_strength(
     props: &RcBarProps,
     fc: f64,
     n_axial: f64,
     l_clear: f64,
+    sigma_wy: Option<f64>,
     opts: &UltimateShearOptions,
-) -> f64 {
+) -> Option<f64> {
     let jt = 7.0 * props.d_eff / 8.0;
     match opts.shear_method {
-        ShearMethod::Plastic => rc_shear_qsu_plastic(&RcPlasticShearInput {
-            b: props.b_dir,
-            d_full: props.d_dir,
-            jt,
-            pw: props.pw,
-            sigma_wy: opts.sigma_wy,
-            l_clear,
-            fc,
-            rp: opts.rp,
-            lightweight: opts.lightweight,
-        }),
+        ShearMethod::Plastic => rc_shear_qsu_plastic_with_strength(
+            &RcPlasticShearInput {
+                b: props.b_dir,
+                d_full: props.d_dir,
+                jt,
+                pw: props.pw,
+                sigma_wy: sigma_wy.unwrap_or(f64::NAN),
+                l_clear,
+                fc,
+                rp: opts.rp,
+                lightweight: opts.lightweight,
+            },
+            sigma_wy,
+        ),
         ShearMethod::Ductility => {
-            member_vu_ductility(props, jt, fc, n_axial, l_clear, opts.sigma_wy, opts)
+            let s = props.shear_pitch;
+            let aw = props.shear_legs as f64 * props.shear_dia.area_mm2();
+            let pwe = if s > 0.0 { aw / (props.be * s) } else { 0.0 };
+            rc_shear_vu_ductility_with_strength(
+                &RcDuctilityShearInput {
+                    b: props.b_dir,
+                    d_full: props.d_dir,
+                    be: props.be,
+                    je: jt,
+                    pwe,
+                    sigma_wy: sigma_wy.unwrap_or(f64::NAN),
+                    s,
+                    n_s: props.n_s,
+                    l_clear,
+                    fc,
+                    rp: opts.rp,
+                    tensile_axial: n_axial < 0.0,
+                    lightweight: opts.lightweight,
+                },
+                sigma_wy,
+            )
         }
     }
 }

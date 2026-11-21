@@ -551,3 +551,79 @@ fn qd1_rejects_invalid_demand_inputs_and_geometry() {
     *steel_height = 2.0 * *steel_flange_thick;
     assert_skipped(check(&invalid, &f, &ctx), "ウェブ内法せい 0 mm");
 }
+
+#[test]
+fn qd1_keeps_independent_steel_shear_failure_with_wrong_shear_rebar_category() {
+    let mut ctx = context([0.0; 2], [0.0; 2]);
+    ctx.seismic_qd.as_mut().unwrap().clear_length = 1000.0;
+    let f = forces(0.0);
+    let expected_ratio = value(&shear(&ctx, &f), "Qy方向", "sQD/sQA=");
+    assert!(expected_ratio > 1.0);
+    ctx.shear_rebar_material.as_mut().unwrap().category = MaterialCategory::Steel;
+    ctx.src_column_seismic_bending
+        .as_mut()
+        .unwrap()
+        .qz
+        .base
+        .rc_ultimate_n_mm = f64::NAN;
+    let concrete = material("Fc24", MaterialCategory::Concrete, Some(24.0), None);
+    let rows: Vec<_> = SrcDesign
+        .check_outcomes(&f, &section(), &concrete, &ctx, false)
+        .collect();
+    let [CheckOutcome::Checked(known), CheckOutcome::Skipped { reason }] = rows.as_slice() else {
+        panic!("{rows:?}");
+    };
+    let [steel] = known.components.as_slice() else {
+        panic!("{known:?}");
+    };
+    assert_eq!(steel.kind, CheckKind::Shear);
+    assert_eq!(steel.ratio, expected_ratio);
+    assert!(steel.detail.contains("RC rQD=未算定"), "{steel:?}");
+    assert!(
+        reason.contains("せん断補強筋材料「SD295」の材料区分は「鋼材」"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn qd1_preserves_steel_shear_when_the_rc_demand_of_an_independent_axis_is_invalid() {
+    let mut sec = section();
+    let Some(SectionShape::SrcColumnRect { rebar, .. }) = sec.shape.as_mut() else {
+        unreachable!()
+    };
+    rebar.hoop.legs_y = 0;
+    let mut ctx = context([0.0; 2], [0.0; 2]);
+    ctx.seismic_qd.as_mut().unwrap().clear_length = 1000.0;
+    let f = forces(0.0);
+    let steel_ratio = value(&shear(&ctx, &f), "Qy方向", "sQD/sQA=");
+    assert!(steel_ratio > 1.0);
+    ctx.src_column_seismic_bending
+        .as_mut()
+        .unwrap()
+        .qz
+        .base
+        .rc_ultimate_n_mm = f64::NAN;
+    assert_skipped(check(&sec, &f, &ctx), "Qz方向の柱頭・柱脚");
+
+    ctx.shear_rebar_material.as_mut().unwrap().category = MaterialCategory::Steel;
+    let concrete = material("Fc24", MaterialCategory::Concrete, Some(24.0), None);
+    let rows: Vec<_> = SrcDesign
+        .check_outcomes(&f, &sec, &concrete, &ctx, false)
+        .collect();
+    let [CheckOutcome::Checked(known), CheckOutcome::Skipped { reason }] = rows.as_slice() else {
+        panic!("{rows:?}");
+    };
+    let [steel] = known.components.as_slice() else {
+        panic!("{known:?}");
+    };
+    assert_eq!(steel.kind, CheckKind::Shear);
+    assert_eq!(steel.ratio, steel_ratio);
+    assert!(
+        steel.detail.contains("Qy方向 鉄骨") && steel.detail.contains("Qz方向 鉄骨"),
+        "{steel:?}"
+    );
+    assert!(
+        reason.contains("Qz方向の柱頭・柱脚") && reason.contains("せん断補強筋材料"),
+        "{reason}"
+    );
+}

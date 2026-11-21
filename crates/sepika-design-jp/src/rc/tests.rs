@@ -229,12 +229,12 @@ fn test_pw_ratio_capped_long_term() {
         .unwrap();
     assert!(props.pw > 0.006, "テストの前提として pw > 0.6% が必要");
 
-    let allow = rc_allow(24.0, ConcreteClass::Normal, "SD345", true);
+    let allow = rc_allow(24.0, ConcreteClass::Normal, Some("SD345"), true);
     let alpha = 1.5;
-    let qa_capped = shear_capacity(&props, &allow, alpha, LoadTerm::Long, true, false);
+    let qa_capped = shear_capacity(&props, &allow, alpha, LoadTerm::Long, true, false).unwrap();
 
     // 手計算: pw を 0.6% に制限した式と一致すること。
-    let pw_term = 0.5 * allow.w_ft * (0.006 - 0.002);
+    let pw_term = 0.5 * allow.w_ft.unwrap() * (0.006 - 0.002);
     let expected = props.b * props.j * (alpha * allow.fs + pw_term);
     assert!((qa_capped - expected).abs() / expected < 1e-6);
 }
@@ -244,16 +244,16 @@ fn test_beam_shear_damage_control_vs_safety() {
     let shape = rc_rect_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
     let props = axis_props_from_shape(&shape, crate::ultimate::rc_props::RcDirection::Strong, true)
         .unwrap();
-    let allow = rc_allow(24.0, ConcreteClass::Normal, "SD345", false);
+    let allow = rc_allow(24.0, ConcreteClass::Normal, Some("SD345"), false);
     let alpha = 1.4;
 
-    let qa_damage = shear_capacity(&props, &allow, alpha, LoadTerm::Short, true, false);
-    let qa_safety = shear_capacity(&props, &allow, alpha, LoadTerm::Short, false, false);
+    let qa_damage = shear_capacity(&props, &allow, alpha, LoadTerm::Short, true, false).unwrap();
+    let qa_safety = shear_capacity(&props, &allow, alpha, LoadTerm::Short, false, false).unwrap();
 
     let pw_term = if props.pw < 0.002 {
         0.0
     } else {
-        0.5 * allow.w_ft * (props.pw.min(0.012) - 0.002)
+        0.5 * allow.w_ft.unwrap() * (props.pw.min(0.012) - 0.002)
     };
     let expected_damage = props.b * props.j * ((2.0 / 3.0) * alpha * allow.fs + pw_term);
     let expected_safety = props.b * props.j * (alpha * allow.fs + pw_term);
@@ -273,12 +273,12 @@ fn test_beam_shear_damage_control_wft_cap_sd490() {
         .unwrap();
     assert!(props.pw > 0.002, "テストの前提として pw > 0.002 が必要");
 
-    let allow = rc_allow(24.0, ConcreteClass::Normal, "SD490", false);
-    assert!((allow.w_ft - 490.0).abs() < 1e-9);
+    let allow = rc_allow(24.0, ConcreteClass::Normal, Some("SD490"), false);
+    assert!((allow.w_ft.unwrap() - 490.0).abs() < 1e-9);
 
     let alpha = 1.4;
-    let qa_damage = shear_capacity(&props, &allow, alpha, LoadTerm::Short, true, false);
-    let qa_safety = shear_capacity(&props, &allow, alpha, LoadTerm::Short, false, false);
+    let qa_damage = shear_capacity(&props, &allow, alpha, LoadTerm::Short, true, false).unwrap();
+    let qa_safety = shear_capacity(&props, &allow, alpha, LoadTerm::Short, false, false).unwrap();
 
     // 損傷制御の短期のみ w_ft を 390 にクランプして手計算と照合する。
     let pw_term_damage = 0.5 * 390.0 * (props.pw.min(0.012) - 0.002);
@@ -308,12 +308,12 @@ fn test_column_safety_check_excludes_alpha() {
     let pw = props.pw;
     assert!(pw > 0.002, "テストの前提として pw > 0.002 が必要: pw={pw}");
     let b_j = props.b * props.j;
-    let mut allow = rc_allow(24.0, ConcreteClass::Normal, "SD345", false);
-    let w_ft = allow.w_ft;
+    let mut allow = rc_allow(24.0, ConcreteClass::Normal, Some("SD345"), false);
+    let w_ft = allow.w_ft.unwrap();
     let pw_term = 0.5 * w_ft * (pw.min(0.012) - 0.002);
     let expected = b_j * (fs + pw_term);
-    let qa_alpha_1 = shear_capacity(&props, &allow, 1.0, LoadTerm::Short, false, true);
-    let qa_alpha_1_5 = shear_capacity(&props, &allow, 1.5, LoadTerm::Short, false, true);
+    let qa_alpha_1 = shear_capacity(&props, &allow, 1.0, LoadTerm::Short, false, true).unwrap();
+    let qa_alpha_1_5 = shear_capacity(&props, &allow, 1.5, LoadTerm::Short, false, true).unwrap();
     assert!(
         (qa_alpha_1 - expected).abs() / expected < 1e-9,
         "QA={qa_alpha_1}, expected={expected}"
@@ -323,9 +323,9 @@ fn test_column_safety_check_excludes_alpha() {
         "α を変えても安全確保式は変化しない"
     );
 
-    allow.w_ft = w_ft;
-    let qa_damage_1 = shear_capacity(&props, &allow, 1.0, LoadTerm::Short, true, true);
-    let qa_damage_1_5 = shear_capacity(&props, &allow, 1.5, LoadTerm::Short, true, true);
+    allow.w_ft = Some(w_ft);
+    let qa_damage_1 = shear_capacity(&props, &allow, 1.0, LoadTerm::Short, true, true).unwrap();
+    let qa_damage_1_5 = shear_capacity(&props, &allow, 1.5, LoadTerm::Short, true, true).unwrap();
     assert!((qa_damage_1 - qa_damage_1_5).abs() > 1e-6);
 }
 
@@ -334,9 +334,9 @@ fn test_column_long_term_shear_has_no_rebar_term() {
     let shape = rc_rect_shape(400.0, 400.0, 8, 22.0, 2, 40.0, 10.0, 60.0, 4);
     let props = axis_props_from_shape(&shape, crate::ultimate::rc_props::RcDirection::Strong, true)
         .unwrap();
-    let allow = rc_allow(24.0, ConcreteClass::Normal, "SD345", true);
+    let allow = rc_allow(24.0, ConcreteClass::Normal, Some("SD345"), true);
     let alpha = 1.3;
-    let qal = shear_capacity(&props, &allow, alpha, LoadTerm::Long, true, true);
+    let qal = shear_capacity(&props, &allow, alpha, LoadTerm::Long, true, true).unwrap();
     let expected = props.b * props.j * alpha * allow.fs;
     assert!((qal - expected).abs() / expected < 1e-9);
 }

@@ -292,7 +292,7 @@ fn test_src_beam_shear_split_handcalc() {
         200.0,
         props.pw,
         fs,
-        w_ft,
+        Some(w_ft),
         s_fs,
         9.0 * (500.0 - 2.0 * 14.0),
         2.0,
@@ -359,7 +359,7 @@ fn test_src_shear_pw_capped_at_0_6_percent_both_terms() {
             200.0,
             props.pw,
             fs,
-            w_ft,
+            Some(w_ft),
             s_fs,
             0.0,
             2.0,
@@ -402,7 +402,7 @@ fn test_src_column_short_rc_allowable_has_no_alpha() {
         390.0, // b′ を大きく取り rQA2 を支配させない
         props.pw,
         fs,
-        w_ft,
+        Some(w_ft),
         0.0,
         0.0,
         2.0,
@@ -417,9 +417,9 @@ fn test_src_column_short_rc_allowable_has_no_alpha() {
     let expected_rqa2 = props.b * props.j * (2.0 * (390.0 / props.b) * fs + pw * w_ft);
     let expected = expected_rqa1.min(expected_rqa2);
     assert!(
-        (shear.r_qa - expected).abs() / expected < 1e-9,
+        (shear.r_qa.unwrap() - expected).abs() / expected < 1e-9,
         "rQA={} expected={}（α を含まない短期式）",
-        shear.r_qa,
+        shear.r_qa.unwrap(),
         expected
     );
 }
@@ -453,7 +453,7 @@ fn test_src_column_long_combined_formula() {
         b_prime,
         props.pw,
         fs,
-        0.0,
+        None,
         100.0,
         1000.0,
         2.0,
@@ -466,9 +466,9 @@ fn test_src_column_long_combined_formula() {
     let a_prime = 1.5;
     let qa = (1.0 + beta) * props.b * props.j * a_prime * fs;
     assert!(
-        (shear.r_qa - qa).abs() / qa < 1e-9,
+        (shear.r_qa.unwrap() - qa).abs() / qa < 1e-9,
         "QA={} expected={}",
-        shear.r_qa,
+        shear.r_qa.unwrap(),
         qa
     );
     assert!((shear.ratio - q / qa).abs() < 1e-9, "ratio={}", shear.ratio);
@@ -647,7 +647,7 @@ fn test_src_beam_seismic_qd2_handcalc() {
         200.0,
         props.pw,
         fs,
-        w_ft,
+        Some(w_ft),
         s_fs,
         9.0 * (500.0 - 2.0 * 14.0),
         2.0,
@@ -757,7 +757,7 @@ fn test_src_beam_seismic_qd1_handcalc() {
         200.0,
         props.pw,
         fs,
-        w_ft,
+        Some(w_ft),
         s_fs,
         9.0 * (500.0 - 2.0 * 14.0),
         2.0,

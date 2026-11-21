@@ -53,6 +53,10 @@ pub fn truss_lambda(s: f64, je: f64, be: f64, n_s: u32) -> f64 {
     (1.0 - s.max(0.0) / (2.0 * je) - bs / (4.0 * je)).clamp(0.0, 1.0)
 }
 
+pub(super) fn ductility_truss_upper_bound(lambda: f64, nu_fc: f64, be: f64, je: f64) -> f64 {
+    (lambda * nu_fc / 2.0) * be * je
+}
+
 /// 靭性指針式による終局せん断信頼強度 `Vu` の算定入力（AIJ 靭性指針 6.4）。
 #[derive(Clone, Copy, Debug)]
 pub struct RcDuctilityShearInput {
@@ -87,16 +91,30 @@ pub struct RcDuctilityShearInput {
 /// 靭性指針式の終局せん断信頼強度Vu `[N]` を返す。
 /// 軽量コンクリートは0.9倍。b・D・be・je・Fcのいずれかが0以下なら0。
 pub fn rc_shear_vu_ductility(inp: &RcDuctilityShearInput) -> f64 {
+    rc_shear_vu_ductility_with_strength(inp, Some(inp.sigma_wy)).unwrap()
+}
+
+pub(super) fn rc_shear_vu_ductility_with_strength(
+    inp: &RcDuctilityShearInput,
+    sigma_wy: Option<f64>,
+) -> Option<f64> {
     if inp.b <= 0.0 || inp.d_full <= 0.0 || inp.be <= 0.0 || inp.je <= 0.0 || inp.fc <= 0.0 {
-        return 0.0;
+        return Some(0.0);
     }
     let mu = ductility_mu(inp.rp);
     let nu = ductility_nu(inp.fc, inp.rp);
     let lambda = truss_lambda(inp.s, inp.je, inp.be, inp.n_s);
     let tan_theta = arch_tan_theta(inp.l_clear, inp.d_full, inp.tensile_axial);
 
-    let pw_sigma = inp.pwe.max(0.0) * inp.sigma_wy.max(0.0);
     let nu_sb = nu * inp.fc;
+    let vu3 = ductility_truss_upper_bound(lambda, nu_sb, inp.be, inp.je);
+    let pw_sigma = match sigma_wy {
+        Some(sigma_wy) => inp.pwe.max(0.0) * sigma_wy.max(0.0),
+        // Vu3 が0なら、3式の最小値を0以上とした Vu は材料強度に依存しない。
+        None if vu3 == 0.0 => return Some(0.0),
+        None if inp.pwe == 0.0 => 0.0,
+        None => return None,
+    };
 
     let arch_stress = if lambda > 0.0 {
         (nu_sb - 5.0 * pw_sigma / lambda).max(0.0)
@@ -106,14 +124,9 @@ pub fn rc_shear_vu_ductility(inp: &RcDuctilityShearInput) -> f64 {
     let vu1 =
         mu * pw_sigma * inp.be * inp.je + arch_stress * (inp.b * inp.d_full / 2.0) * tan_theta;
     let vu2 = (lambda * nu_sb + pw_sigma) / 3.0 * inp.be * inp.je;
-    let vu3 = (lambda * nu_sb / 2.0) * inp.be * inp.je;
 
     let vu = vu1.min(vu2).min(vu3).max(0.0);
-    if inp.lightweight {
-        0.9 * vu
-    } else {
-        vu
-    }
+    Some(if inp.lightweight { 0.9 * vu } else { vu })
 }
 
 /// 1・2段目の付着強度 `[N/mm²]` と周長和 `[mm]` から単位長さ当たり付着力Tx `[N/mm]` を返す。
@@ -196,7 +209,7 @@ pub fn rc_shear_vbu_ductility(inp: &RcVbuInput) -> f64 {
         nu_sb
     };
     let vbu1 = tx * inp.je + arch_stress * (inp.b * inp.d_full / 2.0) * tan_theta;
-    let vbu2 = (lambda * nu_sb / 2.0) * inp.be * inp.je;
+    let vbu2 = ductility_truss_upper_bound(lambda, nu_sb, inp.be, inp.je);
 
     let vbu = vbu1.min(vbu2).max(0.0);
     if inp.lightweight {

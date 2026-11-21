@@ -1,5 +1,6 @@
 //! RC 造の許容応力度と断面検定（RC 規準13〜18条・令82条による許容応力度計算）。
 
+use crate::member_design_check::combine_incomplete_reasons;
 use crate::{CheckOutcome, DesignCheck, DesignCtx, MemberForcesAt, MemberKind};
 use sepika_core::model::{Material, Section};
 use sepika_core::section_shape::SectionShape;
@@ -66,7 +67,7 @@ impl DesignCheck for RcDesign {
 }
 
 impl RcDesign {
-    /// 主筋の材料区分または材軸ねじりで未算定の場合、独立に確定した不適合を別に返す。
+    /// 鉄筋の材料区分または材軸ねじりで未算定の場合、独立に確定した不適合を別に返す。
     /// 必要な重力参照内力を用意できない場合は `missing_gravity` に true を渡す。
     pub fn check_outcomes(
         &self,
@@ -100,17 +101,44 @@ impl RcDesign {
         let material_issue =
             crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
                 .map(|reason| format!("RC 検定: 断面「{}」の{reason}", sec.name));
+        let shear_material_issue = crate::material_strength::shear_rebar_category_issue(
+            sec,
+            ctx.shear_rebar_material.as_ref(),
+        );
+        let main_rebar_valid = material_issue.is_none();
+        let shear_rebar_valid = shear_material_issue.is_none();
         let shear_issue = missing_shear_reference.or_else(|| beam_shear_issue(forces, sec, ctx));
-        let outcome = if let (None, Some(reason)) = (&material_issue, missing_shear_reference) {
+        let outcome = if let (true, true, Some(reason)) =
+            (main_rebar_valid, shear_rebar_valid, missing_shear_reference)
+        {
             CheckOutcome::Skipped {
                 reason: reason.into(),
             }
         } else {
-            Self::check_section(forces, sec, mat, ctx, material_issue.is_none(), shear_issue)
+            Self::check_section(
+                forces,
+                sec,
+                mat,
+                ctx,
+                main_rebar_valid,
+                shear_rebar_valid,
+                shear_issue,
+            )
         };
-        use crate::member_design_check::combine_incomplete_reasons;
         let incomplete =
-            material_issue.and_then(|reason| combine_incomplete_reasons(Some(reason), shear_issue));
+            combine_incomplete_reasons(material_issue, shear_material_issue.as_deref())
+                .and_then(|reason| combine_incomplete_reasons(Some(reason), shear_issue));
+        let incomplete = match sec.shape.as_ref() {
+            Some(shape) if !shear_rebar_valid && missing_shear_reference.is_none() => {
+                column::gravity_shear_reference_issues(ctx, forces.pos, shape).fold(
+                    incomplete,
+                    |reason, reference_issue| {
+                        combine_incomplete_reasons(reason, Some(reference_issue))
+                    },
+                )
+            }
+            _ => incomplete,
+        };
         let incomplete = if let Some(mechanism) = column::qd1_mechanism(ctx) {
             [&mechanism.qy, &mechanism.qz]
                 .into_iter()
@@ -130,6 +158,7 @@ impl RcDesign {
         mat: &Material,
         ctx: &DesignCtx,
         main_rebar_valid: bool,
+        shear_rebar_valid: bool,
         shear_issue: Option<&str>,
     ) -> CheckOutcome {
         let fc_raw = mat.fc.unwrap_or(0.0);
@@ -182,14 +211,18 @@ impl RcDesign {
         }
         if let Err(reason) = shape.validate_rebar_size_materials(
             ctx.rebar_material.as_ref().filter(|_| main_rebar_valid),
-            ctx.shear_rebar_material.as_ref(),
+            ctx.shear_rebar_material
+                .as_ref()
+                .filter(|_| shear_rebar_valid),
         ) {
             return CheckOutcome::Skipped {
                 reason: format!("RC 検定: {reason}"),
             };
         }
         if let Some(msg) = sepika_core::material_grade::shear_rebar_material_issue(
-            ctx.shear_rebar_material.as_ref(),
+            ctx.shear_rebar_material
+                .as_ref()
+                .filter(|_| shear_rebar_valid),
         ) {
             return CheckOutcome::Skipped {
                 reason: format!("RC 検定: {msg}"),
@@ -223,7 +256,7 @@ impl RcDesign {
             };
         }
 
-        if let (true, Some(reason)) = (main_rebar_valid, shear_issue) {
+        if let (true, true, Some(reason)) = (main_rebar_valid, shear_rebar_valid, shear_issue) {
             return CheckOutcome::Skipped {
                 reason: reason.into(),
             };
@@ -238,6 +271,7 @@ impl RcDesign {
                 rebar,
                 fc_raw,
                 main_rebar_valid,
+                shear_rebar_valid,
                 shear_issue.is_none(),
             ),
             _ => column::column_check(
@@ -247,6 +281,7 @@ impl RcDesign {
                 shape,
                 fc_raw,
                 main_rebar_valid,
+                shear_rebar_valid,
                 shear_issue.is_none(),
             ),
         }

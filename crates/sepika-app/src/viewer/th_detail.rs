@@ -717,6 +717,9 @@ fn draw_peak_check(
     let rebar_material = model.element_rebar_material(elem);
     let wrong_main_rebar = rebar_material
         .is_some_and(|material| material.category != sepika_core::model::MaterialCategory::Rebar);
+    let shear_rebar_material = model.element_shear_rebar_material(elem);
+    let wrong_shear_rebar = shear_rebar_material
+        .is_some_and(|material| material.category != sepika_core::model::MaterialCategory::Rebar);
     let long_mf = wire_qd
         .then(|| {
             app.core.scoped.results.as_ref().and_then(|r| {
@@ -738,8 +741,11 @@ fn draw_peak_check(
                     theme::PARETO_RED,
                     format!("検定不能: QD1用の部材荷重由来Q0を算定できません（{reason}）"),
                 );
-                draw_peak_precheck(ui, peak, axial_peaks, None, torsion_reason);
-                return;
+                if !wrong_shear_rebar {
+                    draw_peak_precheck(ui, peak, axial_peaks, None, torsion_reason);
+                    return;
+                }
+                None
             }
         }
     } else {
@@ -771,7 +777,7 @@ fn draw_peak_check(
                     .iter()
                     .any(|(p, _)| !qd.long_at.iter().any(|(q, _)| (p - q).abs() < 1e-6))
         });
-    if missing_rc_beam_gravity && !wrong_main_rebar {
+    if missing_rc_beam_gravity && !wrong_main_rebar && !wrong_shear_rebar {
         draw_peak_precheck(
             ui,
             peak,
@@ -801,7 +807,7 @@ fn draw_peak_check(
         rc_damage_control: app.core.analysis_cfg.rc_damage_control,
         bond_method: app.core.analysis_cfg.bond_method,
         rebar_material: rebar_material.cloned(),
-        shear_rebar_material: app.core.model.element_shear_rebar_material(elem).cloned(),
+        shear_rebar_material: shear_rebar_material.cloned(),
         steel_material: app.core.model.element_steel_material(elem).cloned(),
         steel_attr: attr
             .filter(|_| {
@@ -913,7 +919,7 @@ fn draw_peak_check(
                         sec,
                         mat,
                         &ctx,
-                        missing_gravity && (src_column || wrong_main_rebar),
+                        missing_gravity && (src_column || wrong_main_rebar || wrong_shear_rebar),
                     ) {
                         draw_outcome(&outcome);
                     }
@@ -923,7 +929,11 @@ fn draw_peak_check(
                         sec,
                         mat,
                         &ctx,
-                        missing_rc_beam_gravity || (missing_gravity && wrong_main_rebar),
+                        if wrong_shear_rebar {
+                            missing_gravity
+                        } else {
+                            missing_rc_beam_gravity || (missing_gravity && wrong_main_rebar)
+                        },
                     ) {
                         draw_outcome(&outcome);
                     }
