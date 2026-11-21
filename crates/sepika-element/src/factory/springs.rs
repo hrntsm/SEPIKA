@@ -7,7 +7,7 @@ use sepika_core::model::{
     HysteresisModel, Model,
 };
 use sepika_material::uniaxial::{Bilinear, UniaxialMaterial};
-use sepika_material::{HysteresisMaterial, HysteresisRule, SteelBuckling, TsujiYamada};
+use sepika_material::{HysteresisMaterial, HysteresisRule, SteelBuckling};
 
 use super::regime::is_column_member;
 use super::StrengthBasis;
@@ -400,9 +400,7 @@ pub(super) fn rc_reference_issue(
         }
         if !matches!(
             rule,
-            HysteresisModel::Standard
-                | HysteresisModel::TsujiYamada
-                | HysteresisModel::SteelBuckling
+            HysteresisModel::Standard | HysteresisModel::SteelBuckling
         ) {
             return Some(format!(
                 "{}は集中RC梁の採用αy基準接続に未対応です。武田型へ代用しません",
@@ -447,8 +445,6 @@ pub(super) fn rc_reference_issue(
 enum FlexuralBackboneKind {
     /// 標準型（バイリニア）。
     Bilinear,
-    /// 辻・山田型。
-    TsujiYamada,
     /// 座屈考慮型。構築済みの材料を保持する。
     SteelBuckling(SteelBuckling),
     /// 履歴材料（武田型・逆行型・原点指向型・最大点指向型）。
@@ -483,7 +479,7 @@ impl FlexuralSpringBackbone {
         };
         let m = mn.moment_limit(axial_force);
         match &self.kind {
-            FlexuralBackboneKind::Bilinear | FlexuralBackboneKind::TsujiYamada => {
+            FlexuralBackboneKind::Bilinear => {
                 if self.k_rot > 0.0 {
                     bilinear_backbone_points(self.k_rot, m, self.post_yield_stiffness)
                 } else {
@@ -556,18 +552,6 @@ pub(super) fn build_flexural_springs(
             Box::new(Bilinear::new(k_rot, my, 0.01)),
             backbone,
         );
-    }
-    if rule == HysteresisModel::TsujiYamada {
-        let k2 = 0.01 * k_rot;
-        let mk = || Box::new(TsujiYamada::new(k_rot, my, k2, 0.5)) as Box<dyn UniaxialMaterial>;
-        let backbone = FlexuralSpringBackbone {
-            k_rot,
-            post_yield_stiffness: k2,
-            points: bilinear_backbone_points(k_rot, my, k2),
-            use_mn: true,
-            kind: FlexuralBackboneKind::TsujiYamada,
-        };
-        return (mk(), mk(), backbone);
     }
     if rule == HysteresisModel::SteelBuckling {
         let template = SteelBuckling::with_defaults(k_rot, my, 1.1);

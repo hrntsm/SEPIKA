@@ -651,44 +651,40 @@ mod tests {
         }
     }
 
-    /// バイリニア系（Bilinear／TsujiYamada）の降伏後枝は、`set_yield` を適用した
-    /// 実際の材料の `probe` 応答と一致する。
     #[test]
-    fn bilinear_and_tsuji_post_yield_matches_set_yield_material() {
+    fn standard_mn_points_match_set_yield_material() {
         let basis = StrengthBasis::Nominal;
         let kind = AnalysisKind::Incremental;
         let axial = 1.5e5;
 
-        for rule in [HysteresisModel::Standard, HysteresisModel::TsujiYamada] {
-            let mut model = make_model(None, None);
-            let beam = elem(ElementKind::Beam, [NodeId(0), NodeId(1)]);
-            model.elements.push(beam.clone());
-            model.set_member_hysteresis(ElemId(0), rule);
+        let rule = HysteresisModel::Standard;
+        let mut model = make_model(None, None);
+        let beam = elem(ElementKind::Beam, [NodeId(0), NodeId(1)]);
+        model.elements.push(beam.clone());
+        model.set_member_hysteresis(ElemId(0), rule);
 
-            let view =
-                build_hinge_view(&beam, &model, basis, kind, axial, 8, 24).expect("配筋は妥当");
-            let mn = view.mn_linear.expect("N-M 線形相関");
-            let points = view.backbone.expect("骨格");
-            assert_eq!(points.len(), 3, "{rule:?} は 3 折れ点");
-            let expected = mn.moment_limit(axial);
+        let view = build_hinge_view(&beam, &model, basis, kind, axial, 8, 24).expect("配筋は妥当");
+        let mn = view.mn_linear.expect("N-M 線形相関");
+        let points = view.backbone.expect("骨格");
+        assert_eq!(points.len(), 3);
+        let expected = mn.moment_limit(axial);
 
-            let (_i, mut sj, backbone) = build_flexural_springs(&beam, &model, rule, basis);
-            sj.set_yield(expected);
-            for p in &points {
-                let (m, _) = sj.probe(p[0]);
-                assert!(
-                    (m - p[1]).abs() < 1e-6 * expected.abs(),
-                    "{rule:?} θ={} で材料応答 {} と骨格 {} が不一致",
-                    p[0],
-                    m,
-                    p[1]
-                );
-            }
-            let theta_y = expected / backbone.k_rot;
-            assert!((points[2][0] - 4.0 * theta_y).abs() < 1e-12);
-            let expected_end = expected + backbone.post_yield_stiffness * 3.0 * theta_y;
-            assert!((points[2][1] - expected_end).abs() < 1e-9 * expected.abs());
+        let (_i, mut sj, backbone) = build_flexural_springs(&beam, &model, rule, basis);
+        sj.set_yield(expected);
+        for p in &points {
+            let (m, _) = sj.probe(p[0]);
+            assert!(
+                (m - p[1]).abs() < 1e-6 * expected.abs(),
+                "θ={} で材料応答 {} と骨格 {} が不一致",
+                p[0],
+                m,
+                p[1]
+            );
         }
+        let theta_y = expected / backbone.k_rot;
+        assert!((points[2][0] - 4.0 * theta_y).abs() < 1e-12);
+        let expected_end = expected + backbone.post_yield_stiffness * 3.0 * theta_y;
+        assert!((points[2][1] - expected_end).abs() < 1e-9 * expected.abs());
     }
 
     /// 座屈考慮型は `set_yield` 後の材料応答（θ 節点は元の θy 基準）と一致する。

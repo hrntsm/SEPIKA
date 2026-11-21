@@ -3,7 +3,7 @@ pub mod newrc;
 mod state_serde;
 pub mod uniaxial;
 pub use hysteresis::{
-    lateral_buckling_mu_ratio, HysteresisMaterial, HysteresisRule, SteelBuckling, TsujiYamada,
+    lateral_buckling_mu_ratio, HysteresisMaterial, HysteresisRule, SteelBuckling,
 };
 pub use newrc::ConcreteNewRc;
 pub use uniaxial::*;
