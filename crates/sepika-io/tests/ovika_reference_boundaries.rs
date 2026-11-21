@@ -179,6 +179,144 @@ fn ovika_rejects_steel_design_attr_without_a_member() {
 }
 
 #[test]
+fn ovika_rejects_each_hysteresis_attribute_without_a_member() {
+    use HysteresisModel::{Auto, Retrograde, Takeda};
+
+    let path =
+        std::env::temp_dir().join(format!("sepika1755-invalid-{}.ovika", std::process::id()));
+    for (rule, rule_th, rc_beam_reference) in [
+        (Takeda, None, None),
+        (Auto, Some(Retrograde), None),
+        (Auto, None, Some(RcBeamReference::AntisymmetricHalfMember)),
+    ] {
+        let mut model = baseline();
+        model.member_hysteresis_attrs.push(MemberHysteresisAttr {
+            elem: ElemId(0),
+            rule,
+            rule_th,
+            rc_beam_reference,
+        });
+        independent_file(&path, &model);
+        let original = std::fs::read(&path).unwrap();
+        let load = load_ovika(&path).err().unwrap();
+        let save = save_ovika(&path, &model, OvikaExtras::default()).unwrap_err();
+        for error in [load, save] {
+            assert!(
+                error.to_string().contains("部材の履歴則指定 -> 部材 0"),
+                "{error}"
+            );
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn ovika_preserves_hysteresis_selection_and_rc_beam_reference_for_both_analyses() {
+    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, RebarSize, SectionShape};
+    use sepika_element::factory::{ensure_nonlinear_input_for_kind, resolve_member_hysteresis};
+
+    let mut model = baseline();
+    model.nodes[1].coord[0] = 6000.0;
+    model.materials.push(Material {
+        id: MaterialId(0),
+        name: "Fc24".into(),
+        category: MaterialCategory::Concrete,
+        young: 20_000.0,
+        poisson: 0.2,
+        density: 2.4e-9,
+        shear: None,
+        fc: Some(24.0),
+        fy: None,
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+    model.materials.push(Material {
+        id: MaterialId(1),
+        name: "SD345".into(),
+        category: MaterialCategory::Rebar,
+        young: 200_000.0,
+        poisson: 0.3,
+        fc: None,
+        fy: Some(345.0),
+        ..model.materials[0].clone()
+    });
+    let mut section = SectionShape::RcBeamRect {
+        b: 300.0,
+        d: 600.0,
+        rebar: RcBeamRebar {
+            main_dia: RebarSize::DiameterMm(28.0),
+            top: vec![3],
+            bottom: vec![3],
+            cover: 35.0,
+            stirrup: BeamStirrup {
+                dia: RebarSize::DiameterMm(10.0),
+                pitch: 100.0,
+                legs: 2,
+            },
+        },
+    }
+    .to_section(SectionId(0), "G1".into());
+    section.frame_use = Some(FrameSectionUse::Girder);
+    section.material = Some(MaterialId(0));
+    section.rebar_material = Some(MaterialId(1));
+    section.shear_rebar_material = Some(MaterialId(1));
+    model.sections.push(section);
+    let id = ElemId(0);
+    model.elements.push(ElementData {
+        id,
+        kind: ElementKind::Beam,
+        nodes: smallvec::smallvec![NodeId(0), NodeId(1)],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed; 2],
+        force_regime: ForceRegime::UniaxialBendingShear,
+        rigid_zone: Default::default(),
+        end_offsets_mm: [[0.0; 3]; 2],
+        plastic_zone: None,
+        spring: None,
+    });
+    let reference = Some(RcBeamReference::AntisymmetricHalfMember);
+    model.member_hysteresis_attrs = vec![
+        MemberHysteresisAttr {
+            elem: id,
+            rule: HysteresisModel::Retrograde,
+            rule_th: Some(HysteresisModel::MaxPointOriented),
+            rc_beam_reference: reference,
+        },
+        MemberHysteresisAttr {
+            elem: id,
+            rule: HysteresisModel::Takeda,
+            rule_th: Some(HysteresisModel::OriginOriented),
+            rc_beam_reference: None,
+        },
+    ];
+    let path = std::env::temp_dir().join(format!("sepika1755-valid-{}.ovika", std::process::id()));
+    save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+    let saved = load_ovika(&path).unwrap().model;
+    std::fs::remove_file(path).unwrap();
+
+    assert_eq!(saved.member_hysteresis_attrs, model.member_hysteresis_attrs);
+    assert_eq!(saved.member_rc_beam_reference(id), reference);
+    model = saved.clone();
+    model.set_member_rc_beam_reference(id, None);
+    for (kind, expected) in [
+        (AnalysisKind::Incremental, HysteresisModel::Retrograde),
+        (AnalysisKind::TimeHistory, HysteresisModel::MaxPointOriented),
+    ] {
+        assert_eq!(
+            resolve_member_hysteresis(&saved.elements[0], &saved, kind),
+            expected
+        );
+        ensure_nonlinear_input_for_kind(&saved, kind).unwrap();
+        let error = ensure_nonlinear_input_for_kind(&model, kind).unwrap_err();
+        assert!(error.contains("基準分布が未指定"), "{error}");
+    }
+}
+
+#[test]
 fn save_and_independent_load_reject_missing_targets_and_preserve_input() {
     let dir = std::env::temp_dir().join(format!("sepika681-reference-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

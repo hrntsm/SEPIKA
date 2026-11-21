@@ -12,6 +12,41 @@ use sepika_load::story_gen::{
 mod rc_wall_side_column_model;
 
 #[test]
+fn nonlinear_jobs_reject_a_hysteresis_ref_to_an_expanded_wall_number() {
+    use sepika_job::compute::{compute_pushover, compute_time_history};
+    use sepika_job::{AnalysisSettings, JobError};
+    use sepika_solver::dynamic::timehistory::GroundMotion;
+
+    let mut model = rc_wall_side_column_model::input_model();
+    let id = ElemId(model.elements.len() as u32);
+    let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
+    assert!(expanded.element(id).is_some());
+    assert!(index.plate_of(id).is_some());
+    model.set_member_hysteresis_th(id, Some(HysteresisModel::Retrograde));
+    let settings = AnalysisSettings {
+        th_nonlinear: true,
+        ..AnalysisSettings::default()
+    };
+    let wave = GroundMotion {
+        dt: 0.01,
+        accel_x: vec![0.0, 1.0, 0.0],
+        accel_y: None,
+        accel_theta: None,
+    };
+
+    let expected = format!("部材の履歴則指定 -> 部材 {}", id.0);
+    for error in [
+        compute_pushover(model.clone(), settings).err().unwrap(),
+        compute_time_history(model, settings, wave).err().unwrap(),
+    ] {
+        assert!(
+            matches!(&error, JobError::InvalidInput(reason) if reason.contains(&expected)),
+            "{error}"
+        );
+    }
+}
+
+#[test]
 fn preparation_distinguishes_incremental_sd490_wall_diagnostics_from_common_input_errors() {
     use sepika_job::{prepare_model_for_analysis, AnalysisSettings};
 
