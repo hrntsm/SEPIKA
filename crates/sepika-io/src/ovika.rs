@@ -304,11 +304,12 @@ mod tests {
     use sepika_core::section_shape::*;
 
     #[test]
-    fn removed_brb_product_attributes_are_rejected_on_project_load() {
+    fn removed_member_attributes_are_rejected_on_project_load() {
         let model = make_rich_model();
-        for (label, attrs) in [
-            ("empty", serde_json::json!([])),
+        for (field, label, attrs) in [
+            ("brb_attrs", "empty", serde_json::json!([])),
             (
+                "brb_attrs",
                 "assigned",
                 serde_json::json!([{
                     "elem": 0,
@@ -317,15 +318,27 @@ mod tests {
                     "length_reduction": 300.0
                 }]),
             ),
+            ("pca_attrs", "empty", serde_json::json!([])),
+            (
+                "pca_attrs",
+                "assigned",
+                serde_json::json!([{
+                    "elem": 0,
+                    "mu": 0.6,
+                    "pw_joint": 0.002,
+                    "sigma_y_joint": 345.0,
+                    "joint_depth_from_top": 150.0
+                }]),
+            ),
         ] {
-            let path = crate::test_util::test_tmp().join(format!("removed-brb-{label}.ovika"));
+            let path = crate::test_util::test_tmp().join(format!("removed-{field}-{label}.ovika"));
             let mut value = serde_json::to_value(&model).unwrap();
-            value["brb_attrs"] = attrs;
+            value[field] = attrs;
             let bytes = rmp_serde::to_vec_named(&value).unwrap();
             let manifest = Manifest {
                 schema_version: CURRENT_SCHEMA_VERSION,
                 units: "internal: N-mm-s".into(),
-                created_by: "legacy-brb-fixture".into(),
+                created_by: "legacy-member-attributes-fixture".into(),
                 entries: vec![crate::manifest::EntryHash {
                     name: "model.msgpack".into(),
                     sha256: sha256_of(&bytes),
@@ -334,8 +347,8 @@ mod tests {
             write_zip_with_manifest(&path, &manifest, &bytes);
             let error = load_ovika(&path).err().unwrap();
             assert!(
-                matches!(&error, IoError::Decode(reason) if reason.contains("unknown field") && reason.contains("brb_attrs")),
-                "{label}: {error}"
+                matches!(&error, IoError::Decode(reason) if reason.contains("unknown field") && reason.contains(field)),
+                "{field} {label}: {error}"
             );
         }
     }

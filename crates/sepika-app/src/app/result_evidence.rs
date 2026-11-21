@@ -1873,7 +1873,7 @@ mod tests {
         let elem = member.elem;
         let xi = 0.5;
         member.positions.retain(|p| p.xi != xi);
-        for (basis, ratio) in [("RC梁曲げ", 0.6), ("PCa水平接合面", 0.4)] {
+        for (basis, ratio) in [("RC梁の長期曲げ", 0.6), ("RC梁の短期曲げ", 0.4)] {
             member.positions.push(PositionCheck {
                 xi,
                 outcome: CheckOutcome::Checked(CheckResult {
@@ -1922,11 +1922,11 @@ mod tests {
             .lines
             .join("\n");
         assert!(
-            lines.contains("0.6000 / OK / 式名・根拠: RC梁曲げ"),
+            lines.contains("0.6000 / OK / 式名・根拠: RC梁の長期曲げ"),
             "{lines}"
         );
         assert!(
-            lines.contains("0.4000 / OK / 式名・根拠: PCa水平接合面"),
+            lines.contains("0.4000 / OK / 式名・根拠: RC梁の短期曲げ"),
             "{lines}"
         );
         assert!(

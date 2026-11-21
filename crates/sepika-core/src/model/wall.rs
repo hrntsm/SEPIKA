@@ -1,4 +1,4 @@
-//! 壁関連の型（開口・壁属性・雑壁・鉄骨/PCa 属性など）。
+//! 壁関連の型（開口・壁属性・雑壁・鉄骨 属性など）。
 
 use super::*;
 use crate::geom::vec3::{dot, norm, sub, unit};
@@ -353,20 +353,6 @@ pub struct DamperDef {
     pub name: String,
     /// ダンパー特性。
     pub props: DamperProps,
-}
-
-/// PCa（プレキャスト）梁の水平接合面検定用属性（水平接合面のせん断摩擦検定）。
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PcaGirderAttr {
-    pub elem: ElemId,
-    /// 水平接合面の摩擦係数 μ
-    pub mu: f64,
-    /// 接合面を横切る補強筋の体積比合計 p′w（あばら筋+接合面補強筋）
-    pub pw_joint: f64,
-    /// 補強筋の降伏強度 σy [N/mm²]
-    pub sigma_y_joint: f64,
-    /// 接合面の位置: 断面上端からの距離 `[mm]`（例: 後打ちスラブ厚）
-    pub joint_depth_from_top: f64,
 }
 
 /// 壁の芯々面積へ乗じる内法係数。寸法は境界辺順の柱梁の幅・せい `[mm]`。
