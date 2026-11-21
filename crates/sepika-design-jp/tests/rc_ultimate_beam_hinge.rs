@@ -2,8 +2,10 @@
 mod beam_input;
 
 use sepika_core::dof::{Dof, Dof6Mask};
-use sepika_core::ids::{ElemId, LoadCaseId, NodeId};
-use sepika_core::model::{EndCondition, LoadCase, LoadCaseKind, Model, NodalLoad};
+use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId};
+use sepika_core::model::{
+    EndCondition, LoadCase, LoadCaseKind, Material, MaterialCategory, Model, NodalLoad, Section,
+};
 use sepika_core::section_shape::{RebarSize, SectionShape, StandardRebar};
 use sepika_design_jp::ultimate::{
     collect_rc_ultimate_checks, MemberDemand, StaticBeamHingeMechanism, UltimateCheck,
@@ -214,4 +216,157 @@ fn independently_confirmed_hinges_do_not_enable_the_symmetric_shortcut_for_asymm
             "ultimate_beam_hinge_bending_unverified:",
         );
     }
+}
+
+fn d29_section(width_mm: f64, depth_mm: f64, top: &[u32], bottom: &[u32]) -> Section {
+    let mut section = beam_input::section(width_mm, depth_mm, 29.0, top, bottom);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut section.shape else {
+        unreachable!();
+    };
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D29);
+    section.rebar_material = Some(MaterialId(2));
+    section
+}
+
+fn main_material(grade: &str) -> Material {
+    let mut material = beam_input::material(grade, MaterialCategory::Rebar);
+    material.id = MaterialId(2);
+    material
+}
+
+#[test]
+fn static_hinge_checker_returns_the_same_mu_and_qmu_across_the_section_balance_boundary() {
+    let mut model = fully_fixed_beam();
+    model.sections[0] = d29_section(480.0, 202.0, &[2], &[2]);
+    model.materials.push(main_material("SD490"));
+    let demand = MemberDemand {
+        q_long: Some(0.0),
+        static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
+        ..Default::default()
+    };
+    for (fc, reference_q_n, overestimates) in [
+        (17.0, 30_538.202, true),
+        (18.0, 31_584.359, true),
+        (19.0, 32_057.189, true),
+        (60.0, 46_067.946, false),
+        (72.0, 49_231.634, false),
+    ] {
+        model.materials[0].fc = Some(fc);
+        model.validate().unwrap();
+        let result = verify(&model, demand);
+        assert!(
+            result.ok && result.unchecked_reason.is_none(),
+            "Fc={fc}: {result:?}"
+        );
+        assert!((result.mu - 77_907_060.0).abs() < 1e-6, "{result:?}");
+        assert!((result.qmu - 38_953.530).abs() < 1e-6, "{result:?}");
+        assert_eq!(result.qmu > reference_q_n, overestimates, "{result:?}");
+    }
+
+    model.materials[0].fc = Some(18.0);
+    model.materials[2] = main_material("USD685");
+    model.validate().unwrap();
+    let result = verify(&model, demand);
+    assert!(result.ok && result.unchecked_reason.is_none(), "{result:?}");
+    assert!((result.mu - 108_910_890.0).abs() < 1e-6, "{result:?}");
+    assert!((result.qmu - 54_455.445).abs() < 1e-6, "{result:?}");
+    assert!(result.qmu > 31_584.359);
+}
+
+#[test]
+fn static_hinge_checker_does_not_screen_the_two_percent_tension_ratio() {
+    let mut model = fully_fixed_beam();
+    model.materials[0].fc = Some(18.0);
+    model.materials.push(main_material("SD490"));
+    let demand = MemberDemand {
+        q_long: Some(0.0),
+        static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
+        ..Default::default()
+    };
+    for width_mm in [440.0, 441.512_027_491_408_9, 450.0] {
+        model.sections[0] = d29_section(width_mm, 210.0, &[2], &[2]);
+        model.validate().unwrap();
+        let result = verify(&model, demand);
+        assert!(result.ok && result.unchecked_reason.is_none(), "{result:?}");
+        assert!((result.mu - 82_439_834.4).abs() < 1e-6, "{result:?}");
+        assert!((result.qmu - 41_219.917_2).abs() < 1e-6, "{result:?}");
+    }
+}
+
+#[test]
+fn asymmetric_beam_returns_directional_reference_mu_and_withholds_static_hinge_demand() {
+    let mut model = fully_fixed_beam();
+    model.materials[0].fc = Some(18.0);
+    model.sections[0] = d29_section(650.0, 214.0, &[3], &[2]);
+    model.materials.push(main_material("SD490"));
+    model.validate().unwrap();
+    for (moment, mechanism, mu_n_mm, section_mu_n_mm) in [
+        (
+            -10e6,
+            StaticBeamHingeMechanism::ITopJBottom,
+            127_059_332.4,
+            102_416_524.812,
+        ),
+        (
+            10e6,
+            StaticBeamHingeMechanism::IBottomJTop,
+            84_706_221.6,
+            76_223_314.571,
+        ),
+    ] {
+        let result = verify(
+            &model,
+            MemberDemand {
+                mz: moment,
+                q_long: Some(0.0),
+                static_beam_hinge_mechanism: Some(mechanism),
+                ..Default::default()
+            },
+        );
+        assert!((result.mu - mu_n_mm).abs() < 1e-6, "{result:?}");
+        assert!(result.mu > section_mu_n_mm);
+        assert_unchecked(result, "ultimate_beam_hinge_bending_unverified:");
+
+        let result = verify(
+            &model,
+            MemberDemand::from_pushover(0.0, moment, 0.0, 30_000.0, 0.0, 0.0),
+        );
+        assert!((result.mu - mu_n_mm).abs() < 1e-6, "{result:?}");
+        assert_eq!(result.qmu, 30_000.0);
+        assert!(result.ok && result.unchecked_reason.is_none(), "{result:?}");
+    }
+}
+
+#[test]
+fn static_hinge_shear_can_pass_with_less_remaining_capacity_than_the_section_reference_demand() {
+    let mut model = fully_fixed_beam();
+    model.sections[0] = beam_input::section(350.0, 610.0, 19.0, &[2], &[2]);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape else {
+        unreachable!();
+    };
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D19);
+    model.validate().unwrap();
+    let q_long_n = 558_000.0;
+    let result = collect_rc_ultimate_checks(
+        &model,
+        &[(
+            ElemId(0),
+            MemberDemand {
+                q_long: Some(q_long_n),
+                static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
+                ..Default::default()
+            },
+        )],
+        &UltimateShearOptions {
+            include_bond: false,
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .remove(0);
+    assert!((result.mu - 97_943_033.25).abs() < 1e-6, "{result:?}");
+    assert!((result.qmu - 48_971.516_625).abs() < 1e-6, "{result:?}");
+    let reference_q_n = 54_677.241;
+    assert!(result.ok && result.unchecked_reason.is_none(), "{result:?}");
+    assert!(result.qsu - q_long_n < reference_q_n, "{result:?}");
 }
