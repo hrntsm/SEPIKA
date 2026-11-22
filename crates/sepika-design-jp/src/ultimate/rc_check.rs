@@ -58,9 +58,9 @@ pub struct UltimateCheck {
     /// 確定総応答の強軸せん断余裕度。耐力が算定済みで需要が 0 の場合は無限大。
     /// 未算定値は、他項目の不適合にかかわらず NaN。
     pub shear_margin: f64,
-    /// 確定総応答の二軸せん断余裕度。両軸の耐力が算定できる場合に返す。
+    /// 確定総応答の二軸せん断余裕度。`biaxial_shear` が有効で両軸の耐力を算定できる場合に返す。
     pub biaxial_shear_margin: Option<f64>,
-    /// 2 軸曲げ余裕度（柱かつ `biaxial_bending=true` のとき Some）。
+    /// 柱の二軸曲げ余裕度。`biaxial_bending` が有効で算定条件を確認できる場合に返す。
     /// `1/((Mmx/Mux)^2+(Mmy/Muy)^2)^(1/2)`。設計用曲げ需要が 0 なら `f64::INFINITY`。
     pub biaxial_bending_margin: Option<f64>,
     /// 付着余裕度 Kfb/τD。算定済み需要が 0 の場合、または通常の検定結果で付着が無効なら無限大。
