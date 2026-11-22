@@ -435,7 +435,7 @@ pub(super) fn column_check(
                 let qa = capacity?;
                 let (m, span_q) = spans[axis];
                 let ratio = if qa > 0.0 { q / qa } else { 0.0 };
-                if boundary_shear_only
+                if (boundary_shear_only || short_force_issue || span_issue)
                     && (!q.is_finite()
                         || !qa.is_finite()
                         || qa <= 0.0

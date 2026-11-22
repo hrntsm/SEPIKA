@@ -220,6 +220,53 @@ fn ordinary_qd2_does_not_require_axial_force_but_qd1_and_min_require_end_axial_f
 }
 
 #[test]
+fn time_history_keeps_only_finite_shear_failures_when_axial_force_is_nonfinite() {
+    for circle in [false, true] {
+        let model = input::column_model(circle, 0.0);
+        let ctx = DesignCtx {
+            kind: MemberKind::Column,
+            term: LoadTerm::Short,
+            length: 3000.0,
+            rebar_material: Some(model.materials[1].clone()),
+            shear_rebar_material: Some(model.materials[1].clone()),
+            rc_damage_control: false,
+            ..Default::default()
+        };
+        for (qz, expected_ng) in [(1.0e6, true), (0.0, false)] {
+            let forces =
+                MemberForcesAt::from_local(0.5, [f64::NAN, f64::INFINITY, qz, 0.0, 0.0, 0.0]);
+            let outcomes: Vec<_> = RcDesign
+                .check_outcomes(
+                    &forces,
+                    &model.sections[0],
+                    &model.materials[0],
+                    &ctx,
+                    false,
+                )
+                .collect();
+            assert_eq!(
+                outcomes.len(),
+                if expected_ng { 2 } else { 1 },
+                "{outcomes:?}"
+            );
+            assert!(
+                matches!(outcomes.last(), Some(CheckOutcome::Skipped { reason })
+                if reason.contains("軸力Nが非有限") && reason.contains("Qy方向")),
+                "{outcomes:?}"
+            );
+            if expected_ng {
+                assert!(
+                    matches!(&outcomes[0], CheckOutcome::Checked(result)
+                    if matches!(result.components.as_slice(), [c] if c.kind == CheckKind::Shear
+                        && c.ratio.is_finite() && c.ratio > 1.0)),
+                    "{outcomes:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn direct_rc_entry_preserves_qd2_failure_without_axial_force_and_rejects_unknown_min_branch() {
     for circle in [false, true] {
         let model = input::column_model(circle, 0.0);
