@@ -1,6 +1,6 @@
 # S造合成梁の曲げ剛性と協力幅の原典照合
 
-[#1306](https://github.com/hrntsm/SEPIKA/issues/1306)の調査記録。現行モデルの導出と断面例は[#1227](https://github.com/hrntsm/SEPIKA/issues/1227)・[PR #1307](https://github.com/hrntsm/SEPIKA/pull/1307)の[製品計算根拠](../../docs/calc_basis/04_要素剛性/01_ティモシェンコ梁要素.md#s造合成梁の強軸曲げ剛性)にある。今回、RC規準2024年版で協力幅式の係数と梁条件を確認した。現行経路では、床範囲と板厚から曲げ剛性の割増しを決めるため、接合の成立を確認できない入力でも倍率が1を超える場合がある。日本建築学会『各種合成構造設計指針・同解説』2010・2023年版の本文と実架構での適用域が未照合のため、設計上の採否は保留する。
+[#1306](https://github.com/hrntsm/SEPIKA/issues/1306)の調査記録。[ADR 0148](../adr/0148-steel-calculation-sources.md)による廃止前のモデルの導出と断面例は、[#1227](https://github.com/hrntsm/SEPIKA/issues/1227)・[PR #1307](https://github.com/hrntsm/SEPIKA/pull/1307)の[当時の製品計算根拠](https://github.com/hrntsm/SEPIKA/blob/7fe3b5d59b2861f9c0798875823df0b30735ec8c/docs/calc_basis/04_要素剛性/01_ティモシェンコ梁要素.md#s造合成梁の強軸曲げ剛性)にある。この調査では、RC規準2024年版で協力幅式の係数と梁条件を確認した。旧方式は床範囲と板厚から曲げ剛性の割増しを決めるため、接合の成立を確認できない入力でも倍率が1を超える場合があった。日本建築学会『各種合成構造設計指針・同解説』2010・2023年版の本文と実架構での適用域は、この調査では未照合だった。
 
 ## 資料ごとの確認範囲
 
