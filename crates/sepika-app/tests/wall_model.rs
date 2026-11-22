@@ -490,6 +490,7 @@ fn wall_bay_app() -> App {
 
 fn unperforated_wall_bay_app() -> App {
     let mut app = wall_bay_app();
+    app.core.model.panel_zone = sepika_core::model::PanelZoneMode::None;
     let plate = &mut app.core.model.wall_plates[0];
     plate.openings.clear();
     assert_eq!(plate.opening_area, 0.0);
@@ -527,6 +528,7 @@ fn balance_ex_floor_rotation(model: &mut Model) {
 fn nonlinear_opening_wall_refuses_job_without_publishing_partial_results() {
     for time_history in [false, true] {
         let mut app = wall_bay_app();
+        app.core.model.panel_zone = sepika_core::model::PanelZoneMode::None;
         app.run_preparation();
         select_frame_gravity(&mut app.core.model);
         app.run_static_all();
@@ -536,6 +538,14 @@ fn nonlinear_opening_wall_refuses_job_without_publishing_partial_results() {
             app.core.scoped.last_error
         );
         let before = serde_json::to_vec(&app.core.scoped.results).unwrap();
+        let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&app.core.model);
+        let wall = expanded
+            .elements
+            .iter()
+            .find(|element| index.plate_of(element.id) == Some(WallPlateId(0)))
+            .unwrap()
+            .id
+            .0;
         if time_history {
             app.core.analysis_cfg.th_nonlinear = true;
             app.core.analysis_cfg.th_duration = 0.04;
@@ -546,12 +556,12 @@ fn nonlinear_opening_wall_refuses_job_without_publishing_partial_results() {
         let error = app.core.scoped.last_error.as_ref().unwrap();
         if time_history {
             assert!(
-                error.contains("壁 ID [16]") && error.contains("従属回転の慣性"),
+                error.contains(&format!("壁 ID [{wall}]")) && error.contains("従属回転の慣性"),
                 "{error}"
             );
         } else {
             assert!(
-                error.contains("壁 ID 16") && error.contains("開口壁は未対応"),
+                error.contains(&format!("壁 ID {wall}")) && error.contains("開口壁は未対応"),
                 "{error}"
             );
         }
@@ -1481,7 +1491,23 @@ fn snapshot_wall_response_and_ds_hold() {
         .iter()
         .map(|(id, forces)| (*id, forces.at.as_slice()))
         .collect();
-    let expected_compression_n = 35_707.925_489_801_8;
+    let axial_at = |id: ElemId, position: f64| {
+        gravity_result
+            .member_forces
+            .iter()
+            .find(|(member, _)| *member == id)
+            .unwrap()
+            .1
+            .at
+            .iter()
+            .find(|(s, _)| (*s - position).abs() < 1e-12)
+            .unwrap()
+            .1[0]
+    };
+    let expected_compression_n = -axial_at(wall.id, 0.0)
+        - axial_at(ElemId(0), 200.0 / 3000.0)
+        - axial_at(ElemId(1), 200.0 / 3000.0);
+    assert!(expected_compression_n > 0.0);
     assert!((face.recover(&batch).unwrap().compression_n - expected_compression_n).abs() < 1e-6);
     // A=735000、D=4300、te=A/D、j=3631.25より軸力項は0.1·N·j/D。
     let expected_wall_capacity_n =

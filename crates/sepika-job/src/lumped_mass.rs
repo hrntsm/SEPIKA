@@ -664,6 +664,7 @@ mod tests {
             capacity_curve: Vec::new(),
             hinges: Vec::new(),
             shear_yields: Vec::new(),
+            shear_diagnostics: Vec::new(),
             mechanism: sepika_solver::nonlinear::pushover::MechanismType::Overall,
             qu: 0.0,
             member_response: Vec::new(),

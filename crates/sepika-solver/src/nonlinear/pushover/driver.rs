@@ -592,6 +592,7 @@ pub fn pushover_analysis_recording(
         capacity_curve: recorded.capacity_curve,
         hinges: recorded.hinges,
         shear_yields: recorded.shear_yields,
+        shear_diagnostics: recorded.shear_diagnostics,
         mechanism,
         qu,
         member_response,

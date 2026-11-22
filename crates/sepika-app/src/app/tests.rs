@@ -3495,8 +3495,8 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::MaterialId;
     use sepika_core::model::{
-        ElementData, ElementKind, EndCondition, ForceRegime, LoadCase, LocalAxis, Material,
-        MemberLoad, MemberLoadKind, Model, NodalLoad, Node,
+        Constraint, ElementData, ElementKind, EndCondition, ForceRegime, LoadCase, LocalAxis,
+        Material, MemberLoad, MemberLoadKind, Model, NodalLoad, Node,
     };
     use sepika_core::section_shape::{
         RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
@@ -3539,6 +3539,11 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
 
     let mut model = Model {
         stories: explicit_story_inputs(&[0.0, 3000.0]),
+        constraints: vec![Constraint::rigid_diaphragm(
+            StoryId(1),
+            NodeId(4),
+            vec![NodeId(2), NodeId(3)],
+        )],
         nodes: vec![
             Node {
                 id: NodeId(0),
@@ -3570,6 +3575,14 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
                 restraint: Dof6Mask::FREE,
                 mass: None,
                 story: None,
+                support_spring: None,
+            },
+            Node {
+                id: NodeId(4),
+                coord: [2000.0, 0.0, 3000.0],
+                restraint: Dof6Mask(0b011100),
+                mass: None,
+                story: Some(StoryId(1)),
                 support_spring: None,
             },
         ],
@@ -3632,7 +3645,11 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
             section: Some(SectionId(sec)),
             local_axis: LocalAxis { ref_vector },
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
+            force_regime: if id == 2 {
+                ForceRegime::UniaxialBendingShear
+            } else {
+                ForceRegime::Auto
+            },
             rigid_zone: Default::default(),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
@@ -3644,7 +3661,9 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
         kind: Default::default(),
         id: LoadCaseId(0),
         name: "長期".into(),
-        nodal: Vec::new(),
+        nodal: [NodeId(2), NodeId(3)]
+            .map(|node| NodalLoad::manual(node, [0.0, 0.0, -100_000.0, 0.0, 0.0, 0.0]))
+            .into(),
         member: vec![MemberLoad::manual(
             ElemId(2),
             [0.0, 0.0, -1.0],
@@ -3691,7 +3710,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     // 既定の押込み量では機構形成後に特異となり得るため、ランクの接続検証には微小変位を使う。
     app.core.analysis_cfg.push_steps = 3;
     app.core.analysis_cfg.push_use_max_disp = true;
-    app.core.analysis_cfg.push_max_disp = 3.0;
+    app.core.analysis_cfg.push_max_disp = 0.02;
     app.core.analysis_cfg.push_use_drift_angle = false;
     app.run_pushover();
     select_holding_points(&mut app);
@@ -10685,6 +10704,7 @@ pub(super) fn dummy_pushover(qu: f64) -> sepika_solver::nonlinear::pushover::Pus
         capacity_curve: vec![],
         hinges: vec![],
         shear_yields: vec![],
+        shear_diagnostics: vec![],
         mechanism: sepika_solver::nonlinear::pushover::MechanismType::Partial,
         qu,
         member_response: vec![],

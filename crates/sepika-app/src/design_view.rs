@@ -1241,6 +1241,13 @@ pub(crate) fn holding_evaluation_inputs(ui: &mut egui::Ui, app: &mut crate::app:
     let Some(po) = po else {
         return;
     };
+    if let Some(reason) = po
+        .capacity_curve
+        .last()
+        .and_then(|last| po.shear_design_unavailable_at(last.step))
+    {
+        ui.colored_label(crate::theme::SECONDARY_AMBER, reason);
+    }
     ui.label("目的別に確定stepと選定理由を指定してください。法的な停止点は自動選択しません。");
     for (purpose, label) in [
         (EvaluationPurpose::Ds, "Ds判定"),

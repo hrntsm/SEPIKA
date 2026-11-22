@@ -323,6 +323,40 @@ pub(crate) enum BoundarySecondaryKind {
 }
 
 impl Model {
+    /// 厚さを持つ床板が部材の両端に対応するかを返す。
+    pub fn beam_has_attached_slab(&self, elem: &super::ElementData) -> bool {
+        if elem.nodes.len() < 2 || (self.floor_regions.is_empty() && self.slabs.is_empty()) {
+            return false;
+        }
+        let n0 = elem.nodes[0];
+        let n1 = elem.nodes[elem.nodes.len() - 1];
+
+        let mut referenced = std::collections::HashSet::new();
+        for region in &self.floor_regions {
+            referenced.extend(region.slab_ids.iter().copied());
+            let has_thickness = region
+                .slab_ids
+                .iter()
+                .filter_map(|&id| self.slab(id))
+                .any(|s| self.slab_plate_thickness(s).is_some());
+            if has_thickness && region.boundary.contains(&n0) && region.boundary.contains(&n1) {
+                return true;
+            }
+        }
+        self.slabs.iter().any(|s| {
+            if referenced.contains(&s.id) || self.slab_plate_thickness(s).is_none() {
+                return false;
+            }
+            if let Some(b) = s.boundary_nodes(self) {
+                b.contains(&n0) && b.contains(&n1)
+            } else if let Some([a, b]) = s.edge_nodes(self, 0) {
+                (a == n0 && b == n1) || (a == n1 && b == n0)
+            } else {
+                false
+            }
+        })
+    }
+
     /// 床板 ID から床板を引く。存在しなければ `None`。
     pub fn slab(&self, id: SlabId) -> Option<&Slab> {
         match self.slabs.get(id.index()) {

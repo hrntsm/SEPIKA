@@ -1,7 +1,7 @@
 //! RC 矩形断面の簡易終局耐力算定（部材ランク判定・プッシュオーバーせん断降伏判定用）。
 
 /// RC 矩形断面の簡易終局耐力算定用の入力一式。
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct RcCapacityInput {
     /// 断面幅 b \[mm\]
     pub b: f64,
@@ -204,16 +204,59 @@ pub fn rc_qsu_simple(inp: &RcCapacityInput) -> f64 {
 /// 終局せん断耐力 [N]。正の幾何・配筋と強度および非負のせん断スパン比を要する。
 /// スパン比、せん断補強筋比、圧縮応力度の上限を適用する。
 pub fn rc_qsu_arakawa_mean(inp: &RcCapacityInput, shear_span_ratio: f64) -> f64 {
-    let pt_shear_percent = 100.0 * inp.at / (inp.b * inp.d_eff);
+    let [concrete, hoop, axial] = arakawa_mean_terms(inp);
     let j = 7.0 * inp.d_eff / 8.0;
-    let shear_span_ratio = shear_span_ratio.clamp(1.0, 3.0);
+    (concrete / (shear_span_ratio.clamp(1.0, 3.0) + 0.12) + hoop + axial) * inp.b * j
+}
+
+fn arakawa_mean_terms(inp: &RcCapacityInput) -> [f64; 3] {
+    let pt_shear_percent = 100.0 * inp.at / (inp.b * inp.d_eff);
     let pw_ratio = inp.pw.clamp(0.0, 0.012);
-    let concrete_term =
-        0.068 * pt_shear_percent.powf(0.23) * (inp.fc + 18.0) / (shear_span_ratio + 0.12);
+    let concrete_term = 0.068 * pt_shear_percent.powf(0.23) * (inp.fc + 18.0);
     let hoop_term = 0.85 * (pw_ratio * inp.sigma_wy).max(0.0).sqrt();
     let sigma_0 = inp.sigma_0.clamp(0.0, 0.4 * inp.fc);
     let axial_term = 0.1 * sigma_0;
-    (concrete_term + hoop_term + axial_term) * inp.b * j
+    [concrete_term, hoop_term, axial_term]
+}
+
+/// 荒川mean式の耐力を `a/(λ+0.12)+c` [N] と表すときの係数 `[a,c]` [N]。
+/// せん断補強筋比と圧縮応力度には規定上限を適用する。
+pub fn rc_qsu_arakawa_mean_coefficients(inp: &RcCapacityInput) -> [f64; 2] {
+    let [concrete, hoop, axial] = arakawa_mean_terms(inp);
+    let b_j_mm2 = inp.b * (7.0 * inp.d_eff / 8.0);
+    [concrete * b_j_mm2, (hoop + axial) * b_j_mm2]
+}
+
+/// 与えた曲げモーメント [N·mm] と圧縮応力度で、作用せん断力と荒川mean耐力が一致する正の値 [N]。
+/// 渡す矩形断面と材料の適用条件は呼出側で確認し、算定不能時は `None`。
+pub fn rc_qsu_arakawa_mean_limit(inp: &RcCapacityInput, moment_nmm: f64) -> Option<f64> {
+    let [concrete, reinforcement_and_axial] = rc_qsu_arakawa_mean_coefficients(inp);
+    let moment_over_depth_n = moment_nmm.abs() / inp.d_eff;
+    if !moment_over_depth_n.is_finite()
+        || !concrete.is_finite()
+        || concrete <= 0.0
+        || !reinforcement_and_axial.is_finite()
+        || reinforcement_and_axial < 0.0
+    {
+        return None;
+    }
+    let upper_limit_n = concrete / 1.12 + reinforcement_and_axial;
+    let lower_limit_n = concrete / 3.12 + reinforcement_and_axial;
+    let limit_n = if moment_over_depth_n <= upper_limit_n {
+        upper_limit_n
+    } else if moment_over_depth_n >= 3.0 * lower_limit_n {
+        lower_limit_n
+    } else {
+        let b = moment_over_depth_n - 0.12 * reinforcement_and_axial - concrete;
+        let c = moment_over_depth_n.sqrt() * reinforcement_and_axial.sqrt();
+        let discriminant = b.hypot(0.48_f64.sqrt() * c);
+        if b > 0.0 {
+            2.0 * c * (c / (discriminant + b))
+        } else {
+            (discriminant - b) / 0.24
+        }
+    };
+    (limit_n.is_finite() && limit_n > 0.0).then_some(limit_n)
 }
 
 /// 幾何・配筋の入力診断後にせん断終局耐力 `[N]` を算定する。
@@ -443,6 +486,25 @@ mod tests {
             clear_span: 3000.0,
             sigma_0: 0.0,
         }
+    }
+
+    #[test]
+    fn arakawa_limit_matches_the_shear_demand_at_each_span_ratio_branch() {
+        let input = sample_input();
+        for (moment_nmm, limit_n) in [
+            (0.0, 584_307.046_010_279_6),
+            (387_768_178.555_515_7, 365_819.036_373_128),
+            (800_000_000.0, 287_387.443_170_048),
+        ] {
+            let actual = rc_qsu_arakawa_mean_limit(&input, moment_nmm).unwrap();
+            assert!((actual - limit_n).abs() < 1e-7, "{actual} at {moment_nmm}");
+        }
+        let compressed = RcCapacityInput {
+            sigma_0: 5.0,
+            ..input
+        };
+        let actual = rc_qsu_arakawa_mean_limit(&compressed, 486_083_178.555_515_7).unwrap();
+        assert!((actual - 458_569.036_373_128).abs() < 1e-7);
     }
 
     #[test]

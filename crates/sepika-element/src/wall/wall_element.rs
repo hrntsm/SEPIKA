@@ -831,6 +831,9 @@ impl WallElement {
         if !crate::wall::misc_wall::wall_is_seismic(data, model) {
             return None;
         }
+        if model.element_section(data).is_none() {
+            return Some(wall_input_error(data, "断面", "断面が設定されていません"));
+        }
         if !crate::wall::misc_wall::is_rc_wall(data, model) {
             return Some(Self::unsupported_steel_wall_nonlinear(data));
         }

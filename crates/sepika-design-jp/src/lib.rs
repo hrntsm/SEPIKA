@@ -437,39 +437,7 @@ pub fn beam_has_attached_slab(
     model: &sepika_core::model::Model,
     elem: &sepika_core::model::ElementData,
 ) -> bool {
-    if elem.nodes.len() < 2 || (model.floor_regions.is_empty() && model.slabs.is_empty()) {
-        return false;
-    }
-    let n0 = elem.nodes[0];
-    let n1 = elem.nodes[elem.nodes.len() - 1];
-
-    let mut referenced = std::collections::HashSet::new();
-    for region in &model.floor_regions {
-        referenced.extend(region.slab_ids.iter().copied());
-        let has_thickness = region
-            .slab_ids
-            .iter()
-            .filter_map(|&id| model.slab(id))
-            .any(|s| model.slab_plate_thickness(s).is_some());
-        if has_thickness && region.boundary.contains(&n0) && region.boundary.contains(&n1) {
-            return true;
-        }
-    }
-    model.slabs.iter().any(|s| {
-        if referenced.contains(&s.id) {
-            return false;
-        }
-        if model.slab_plate_thickness(s).is_none() {
-            return false;
-        }
-        if let Some(b) = s.boundary_nodes(model) {
-            b.contains(&n0) && b.contains(&n1)
-        } else if let Some([a, b]) = s.edge_nodes(model, 0) {
-            (a == n0 && b == n1) || (a == n1 && b == n0)
-        } else {
-            false
-        }
-    })
+    model.beam_has_attached_slab(elem)
 }
 
 /// 強軸・弱軸の座屈長さを個別に扱った有効細長比 λ の算定

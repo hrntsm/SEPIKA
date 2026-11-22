@@ -20,7 +20,7 @@ fn source_limit(po: &PushoverResult, heights: &[f64]) -> JobResult<(usize, f64)>
             "元増分解析の終了目標が未記録です。増分解析を再実行してください".into(),
         )
     })?;
-    if po.steps.len() != po.capacity_curve.len() || po.steps.len() < 2 {
+    if po.steps.len() != po.capacity_curve.len() {
         return Err(JobError::InvalidInput(
             "元増分解析の確定ステップと性能曲線が不足・不整合です".into(),
         ));
@@ -35,9 +35,26 @@ fn source_limit(po: &PushoverResult, heights: &[f64]) -> JobResult<(usize, f64)>
             "元増分解析の終了目標が不正です".into(),
         ));
     }
+    let require_admissible = |step| {
+        if let Some(reason) = po.shear_design_unavailable_at(step) {
+            return Err(JobError::InvalidInput(format!(
+                "元増分解析のstep {step}を同定に採用できません。{reason}"
+            )));
+        }
+        Ok(())
+    };
+    if let Some(first) = po.capacity_curve.first() {
+        require_admissible(first.step)?;
+    }
+    if po.steps.len() < 2 {
+        return Err(JobError::InvalidInput(
+            "元増分解析の確定ステップと性能曲線が不足・不整合です".into(),
+        ));
+    }
     for i in 1..po.steps.len() {
         let p = &po.capacity_curve[i - 1];
         let n = &po.capacity_curve[i];
+        require_admissible(n.step)?;
         if p.story_drift.len() != heights.len() || n.story_drift.len() != heights.len() {
             return Err(JobError::InvalidInput(
                 "元増分解析の層間変位の数が不整合です".into(),
@@ -122,7 +139,7 @@ fn fit_inner(
         .zip(&dbel)
         .map(|((&q, &d), &b)| q / (d - b))
         .collect();
-    let baseline = po.steps.iter().position(|s| s.load_factor == 0.0);
+    let baseline = po.steps[..=last].iter().position(|s| s.load_factor == 0.0);
     let zeros = vec![0.0; layers.len()];
     let (d0, q0) = if let Some(i) = baseline {
         (
@@ -235,10 +252,13 @@ fn fit_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sepika_solver::nonlinear::pushover::{CapacityPoint, PushoverStep, PushoverTarget};
+    use sepika_core::ids::ElemId;
+    use sepika_solver::nonlinear::pushover::{
+        CapacityPoint, MemberShearDiagnostic, MemberShearYield, PushoverStep, PushoverTarget,
+        ShearYieldEvent,
+    };
 
-    #[test]
-    fn source_target_first_arrival_interpolates_each_criterion_and_ignores_later_data() {
+    fn three_step_source() -> PushoverResult {
         let mut po = super::super::tests::empty_pushover();
         for i in 0..3 {
             let d = 10.0 * i as f64;
@@ -257,6 +277,12 @@ mod tests {
                 floor_disp: Vec::new(),
             });
         }
+        po
+    }
+
+    #[test]
+    fn source_target_first_arrival_interpolates_each_criterion_and_ignores_later_data() {
+        let mut po = three_step_source();
         for (target, expected) in [
             (
                 PushoverTarget {
@@ -305,5 +331,49 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("未記録"));
+    }
+
+    #[test]
+    fn source_target_excludes_interpolation_from_an_rc_reference_step() {
+        let mut po = three_step_source();
+        po.shear_yields.push(ShearYieldEvent {
+            step: 2,
+            elem: ElemId(4),
+            detail: Some(MemberShearYield {
+                at_i: true,
+                is_rc: true,
+                shear_n: [120.0, 0.0],
+                limit_n: 100.0,
+                governing_axis: Some(0),
+                exactly_at_limit: false,
+            }),
+        });
+        let target = |max_disp| PushoverTarget {
+            max_disp: Some(max_disp),
+            max_drift_angle: None,
+        };
+        let heights = [3000.0, 4000.0];
+        po.target = Some(target(20.0));
+        assert_eq!(source_limit(&po, &heights).unwrap(), (1, 1.0));
+        po.target = Some(target(30.0));
+        let failure = source_limit(&po, &heights).unwrap_err().to_string();
+        assert!(failure.contains("部材ID 4 i端 step 2"));
+        assert!(failure.contains("参考結果"));
+
+        let detail = po.shear_yields[0].detail.as_mut().unwrap();
+        detail.shear_n = [100.0, 0.0];
+        detail.exactly_at_limit = true;
+        assert_eq!(source_limit(&po, &heights).unwrap(), (2, 0.5));
+
+        po.shear_diagnostics.push(MemberShearDiagnostic {
+            step: 0,
+            elem: ElemId(9),
+            at_i: None,
+            is_rc: true,
+            reason: "内点のせん断耐力が未確認".into(),
+        });
+        let failure = source_limit(&po, &heights).unwrap_err().to_string();
+        assert!(failure.contains("部材ID 9 可撓部区間 step 0"));
+        assert!(failure.contains("内点のせん断耐力が未確認"));
     }
 }

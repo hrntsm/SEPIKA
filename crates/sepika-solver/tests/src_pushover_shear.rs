@@ -369,94 +369,77 @@ fn pushover_requires_finite_positive_shear_rebar_fy() {
 }
 
 #[test]
-fn src_pushover_event_uses_web_or_flange_f_at_each_independent_shear_threshold() {
-    // Fc24、軸力0。SN400B の10・13 mmは235、45 mmは215 N/mm²。
-    for (frame_use, direction, web_mm, flange_mm, qy_n) in [
+fn src_pushover_recovers_shear_in_both_directions_without_a_shear_yield_event() {
+    for (frame_use, direction, web_mm, flange_mm, load_n) in [
         (
             FrameSectionUse::Column,
             SeismicDir::X,
             10.0,
             45.0,
-            980_076.778_015_748,
+            981_000.0,
         ),
         (
             FrameSectionUse::Column,
             SeismicDir::Y,
             10.0,
             45.0,
-            2_395_602.442_002_425,
+            2_396_000.0,
         ),
         (
             FrameSectionUse::Girder,
             SeismicDir::Y,
             10.0,
             45.0,
-            955_335.210_331_358,
+            956_000.0,
         ),
         (
             FrameSectionUse::Column,
             SeismicDir::X,
             45.0,
             13.0,
-            2_350_241.55,
+            2_351_000.0,
         ),
         (
             FrameSectionUse::Column,
             SeismicDir::Y,
             45.0,
             13.0,
-            1_134_323.04,
+            1_135_000.0,
         ),
     ] {
-        for (load_n, yields) in [(qy_n - 1_000.0, false), (qy_n + 1_000.0, true)] {
-            let mut model = restrained_member(frame_use, web_mm, flange_mm);
-            let result = run(&mut model, direction, load_n)
-                .unwrap_or_else(|error| panic!("{frame_use:?} {direction:?} {error}"));
-            let response = &result.member_response[0];
-            assert!(result.hinges.is_empty(), "{frame_use:?} {direction:?}");
-            let (shear_n, other_n) =
-                if frame_use == FrameSectionUse::Column && direction == SeismicDir::Y {
-                    (response.shear_weak, response.shear_strong)
-                } else {
-                    (response.shear_strong, response.shear_weak)
-                };
-            assert!(
-                (shear_n - load_n).abs() < 1.0,
-                "{frame_use:?} {direction:?} {response:?}"
-            );
-            assert!(
-                other_n.abs() < 1.0 && response.axial.abs() < 1.0,
-                "{response:?}"
-            );
-            if yields {
-                let last_step = result.capacity_curve.last().unwrap().step;
-                assert_eq!(result.shear_yields.len(), 1);
-                let event = &result.shear_yields[0];
-                assert_eq!((event.step, event.elem), (last_step, ELEMENT));
-                let history = result
-                    .member_history
-                    .iter()
-                    .find(|h| h.elem == ELEMENT)
-                    .unwrap();
-                assert_eq!(history.records.len(), result.steps.len());
-                assert_eq!(result.fiber_states[0].0, ELEMENT);
+        let mut model = restrained_member(frame_use, web_mm, flange_mm);
+        let result = run(&mut model, direction, load_n)
+            .unwrap_or_else(|error| panic!("{frame_use:?} {direction:?} {error}"));
+        let response = &result.member_response[0];
+        assert!(result.hinges.is_empty(), "{frame_use:?} {direction:?}");
+        let (shear_n, other_n) =
+            if frame_use == FrameSectionUse::Column && direction == SeismicDir::Y {
+                (response.shear_weak, response.shear_strong)
             } else {
-                assert!(
-                    result.shear_yields.is_empty(),
-                    "{frame_use:?} {direction:?} {response:?}"
-                );
-                assert!(result.member_history.is_empty());
-                assert!(result.fiber_states.is_empty());
-            }
-        }
+                (response.shear_strong, response.shear_weak)
+            };
+        assert!(
+            (shear_n - load_n).abs() < 1.0,
+            "{frame_use:?} {direction:?} {response:?}"
+        );
+        assert!(
+            other_n.abs() < 1.0 && response.axial.abs() < 1.0,
+            "{response:?}"
+        );
+        assert!(
+            result.shear_yields.is_empty(),
+            "{frame_use:?} {direction:?} {response:?}"
+        );
+        assert!(result.member_history.is_empty());
+        assert!(result.fiber_states.is_empty());
     }
 }
 
 #[test]
-fn src_pushover_reports_why_the_assigned_steel_cannot_supply_a_shear_f() {
+fn src_pushover_reports_why_internal_fiber_steel_cannot_be_used() {
     for frame_use in [FrameSectionUse::Column, FrameSectionUse::Girder] {
         for (name, fy, category, reason) in [
-            (None, None, MaterialCategory::Steel, "未割当"),
+            (None, None, MaterialCategory::Steel, "設定されていません"),
             (
                 Some("独自H"),
                 None,
@@ -464,41 +447,10 @@ fn src_pushover_reports_why_the_assigned_steel_cannot_supply_a_shear_f() {
                 "明示 fy も未入力",
             ),
             (
-                Some("独自H"),
-                Some(400.0),
-                MaterialCategory::Steel,
-                "明示 fy が入力",
-            ),
-            (
                 Some("SN400B"),
                 Some(235.0),
                 MaterialCategory::Rebar,
-                "鋼材ではありません",
-            ),
-            (Some("STK400"), None, MaterialCategory::Steel, "鋼管用"),
-            (
-                Some("SN400"),
-                None,
-                MaterialCategory::Steel,
-                "種類記号が不完全",
-            ),
-            (
-                Some("TMCP325"),
-                Some(325.0),
-                MaterialCategory::Steel,
-                "個別認定の番号・対象形状・板厚・基準強度",
-            ),
-            (
-                Some("SS490"),
-                None,
-                MaterialCategory::Steel,
-                "溶接を使用する部分",
-            ),
-            (
-                Some("SN400C"),
-                None,
-                MaterialCategory::Steel,
-                "両方に 16 mm 以上",
+                "材料区分は「鉄筋」",
             ),
         ] {
             let mut model = restrained_member(frame_use, 10.0, 45.0);
@@ -511,7 +463,7 @@ fn src_pushover_reports_why_the_assigned_steel_cannot_supply_a_shear_f() {
             model.materials[3].fy = fy;
             let error = run(&mut model, SeismicDir::Y, 1_000.0).unwrap_err();
             assert!(
-                error.contains("部材 ID 0") && error.contains("せん断降伏耐力"),
+                error.contains("部材 ID 0") && error.contains("内蔵鉄骨"),
                 "{error}"
             );
             assert!(name.is_none_or(|name| error.contains(name)), "{error}");
@@ -521,49 +473,25 @@ fn src_pushover_reports_why_the_assigned_steel_cannot_supply_a_shear_f() {
 }
 
 #[test]
-fn src_pushover_checks_both_plates_and_respects_external_steel_assignments() {
-    for (name, web_mm, flange_mm, reason) in [
-        ("SN490C", 16.0, 10.0, "両方に 16 mm 以上"),
-        ("SN490C", 16.0, 100.001, "適用範囲"),
-        ("SN490C", 100.001, 16.0, "適用範囲"),
-        ("SM520B", 16.0, 100.001, "適用範囲"),
-        ("SM520C", 100.001, 16.0, "適用範囲"),
-    ] {
-        let mut model = restrained_member(FrameSectionUse::Column, web_mm, flange_mm);
-        model.materials[3].name = name.into();
-        let error = run(&mut model, SeismicDir::X, 1_000.0).unwrap_err();
-        assert!(
-            error.contains("せん断降伏耐力") && error.contains(name) && error.contains(reason),
-            "{error}"
-        );
-    }
-
+fn src_pushover_requires_strength_of_the_explicitly_assigned_internal_steel() {
     let mut model = restrained_member(FrameSectionUse::Column, 10.0, 12.0);
     model.materials[0].fy = Some(235.0);
-    model.materials[3].name = "独自H".into();
-    model.materials[3].fy = None;
-    let error = run(&mut model, SeismicDir::X, 1_000.0).unwrap_err();
-    assert!(
-        error.contains("部材 ID 0")
-            && error.contains("せん断降伏耐力")
-            && error.contains("独自H")
-            && error.contains("明示 fy も未入力"),
-        "{error}"
-    );
-
-    let mut model = restrained_member(FrameSectionUse::Column, 10.0, 45.0);
     model.materials.push(Material {
         id: MaterialId(4),
-        name: "STK400".into(),
-        fy: Some(235.0),
+        name: "独自H".into(),
+        young: 103_000.0,
+        fy: Some(400.0),
         ..model.materials[3].clone()
     });
     model.sections[0].steel_material = Some(MaterialId(4));
+    let assigned = run(&mut model, SeismicDir::X, 1_000.0).unwrap();
+    assert!((assigned.member_response[0].shear_strong - 1_000.0).abs() < 1.0);
+    assert!(assigned.shear_yields.is_empty());
+    model.materials[4].fy = None;
     let error = run(&mut model, SeismicDir::X, 1_000.0).unwrap_err();
-    assert!(
-        error.contains("せん断降伏耐力") && error.contains("STK400") && error.contains("鋼管用"),
-        "{error}"
-    );
+    for expected in ["部材 ID 0", "内蔵鉄骨", "独自H", "明示 fy も未入力"] {
+        assert!(error.contains(expected), "{error}");
+    }
 }
 
 fn run_time_history(model: &mut Model) -> Result<ResponseResult, SolveError> {

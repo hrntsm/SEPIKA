@@ -348,6 +348,14 @@ impl App {
             });
 
         ui.separator();
+        let shear_rows = crate::summary::member_shear_rows(po);
+        if !shear_rows.is_empty() {
+            ui.collapsing("線材のせん断応答", |ui| {
+                for (label, value) in shear_rows {
+                    ui.label(format!("{label}: {value}"));
+                }
+            });
+        }
         ui.collapsing("壁単体の確定step応答", |ui| {
             for (label, value) in crate::summary::wall_response_rows(po) {
                 ui.label(format!("{label}: {value}"));

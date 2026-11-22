@@ -1077,6 +1077,44 @@ fn actual_rc_factory_connects_additional_angle_and_publishes_both_backbones() {
     let equal_rotations = elastic.axis.rotate_to_global(&unit);
     let initial = behavior.tangent_stiffness(&ctx);
     assert!((quadratic(&initial, &unit_global, &equal_rotations) / 108e9 - 1.0).abs() < 1e-12);
+    let rule = crate::factory::resolve_member_hysteresis(data, &model, AnalysisKind::Incremental);
+    let (spring_i, spring_j, backbone) = crate::factory::springs::build_flexural_springs(
+        data,
+        &model,
+        rule,
+        crate::factory::StrengthBasis::Nominal,
+    );
+    let mut original = crate::frame::concentrated::ConcentratedSpringBeam::new(
+        elastic.clone(),
+        spring_i,
+        spring_j,
+    )
+    .with_total_rotation_reference(backbone.k_rot);
+    let mut local = [0.0; 12];
+    local[7] = 0.015;
+    let increment = LocalVec {
+        data: elastic.axis.rotate_to_global(&local).into_iter().collect(),
+    };
+    behavior.update_state(&increment, false, &ctx).unwrap();
+    original.update_state(&increment, false, &ctx).unwrap();
+    assert_eq!(
+        behavior.internal_force(&ctx).data,
+        original.internal_force(&ctx).data
+    );
+    assert_eq!(
+        behavior.tangent_stiffness(&ctx).data,
+        original.tangent_stiffness(&ctx).data
+    );
+    assert!(behavior
+        .member_shear_status()
+        .unwrap()
+        .ends
+        .iter()
+        .all(|end| {
+            end.as_ref()
+                .is_some_and(|end| end.as_ref().is_ok_and(|end| !end.reached))
+        }));
+    behavior.revert_state();
     assert_eq!(
         behavior.mass_matrix(MassOption::Lumped).data,
         elastic.mass_matrix(MassOption::Lumped).data
@@ -1102,6 +1140,83 @@ fn actual_rc_factory_connects_additional_angle_and_publishes_both_backbones() {
     for extra in behavior.end_spring_rotations().unwrap() {
         assert!((extra - 0.005_458_906_678_110_617).abs() < 1e-12);
     }
+}
+
+#[test]
+fn rc_total_rotation_beam_adds_shear_deformation_at_the_same_force_after_qu() {
+    use crate::behavior::{Ctx, ElementBehavior, LocalVec};
+    use sepika_core::model::AnalysisKind;
+
+    let mut model = explicit_rc_reference_fixture();
+    model.nodes[1].coord[0] = 1200.0;
+    let data = &model.elements[0];
+    let ctx = Ctx { model: &model };
+    let basis = crate::factory::StrengthBasis::Nominal;
+    let mut behavior = crate::factory::build_nonlinear_behavior(
+        data,
+        &model,
+        basis,
+        AnalysisKind::Incremental,
+        None,
+    );
+    let elastic = crate::frame::beam::BeamElement::new(data, &model);
+    let axis = elastic.axis;
+    let rule = crate::factory::resolve_member_hysteresis(data, &model, AnalysisKind::Incremental);
+    let (si, sj, backbone) =
+        crate::factory::springs::build_flexural_springs(data, &model, rule, basis);
+    let mut original = crate::frame::concentrated::ConcentratedSpringBeam::new(elastic, si, sj)
+        .with_total_rotation_reference(backbone.k_rot);
+
+    let force_at = |element: &mut dyn ElementBehavior, displacement_mm: f64| {
+        element.revert_state();
+        let mut local = [0.0; 12];
+        local[7] = displacement_mm;
+        element
+            .update_state(
+                &LocalVec {
+                    data: axis.rotate_to_global(&local).into_iter().collect(),
+                },
+                false,
+                &ctx,
+            )
+            .unwrap();
+        element
+            .state_frame_load_response()
+            .unwrap()
+            .unwrap()
+            .flex_face_force_local[7]
+    };
+    let (applied_mm, qu_reached_n) = [0.5, 1.0, 2.0, 4.0, 8.0, 16.0]
+        .into_iter()
+        .find_map(|u| {
+            let force_n = force_at(behavior.as_mut(), u);
+            behavior
+                .member_shear_status()
+                .unwrap()
+                .ends
+                .iter()
+                .flatten()
+                .any(|end| {
+                    end.as_ref()
+                        .is_ok_and(|end| end.reached && end.utilization > 1.0001)
+                })
+                .then_some((u, force_n))
+        })
+        .expect("せん断Qu到達後の集中ばね梁の応答");
+    assert!(force_at(&mut original, applied_mm) > qu_reached_n);
+    let mut lo: f64 = 0.0;
+    let mut hi = applied_mm;
+    for _ in 0..45 {
+        let mid = lo.midpoint(hi);
+        if force_at(&mut original, mid) < qu_reached_n {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let original_mm = lo.midpoint(hi);
+    assert!((force_at(&mut original, original_mm) - qu_reached_n).abs() < 0.01);
+    assert!(applied_mm - original_mm > 0.01);
 }
 
 #[test]

@@ -312,6 +312,7 @@ fn sample_pushover() -> sepika_solver::nonlinear::pushover::PushoverResult {
         capacity_curve,
         hinges: vec![],
         shear_yields: vec![],
+        shear_diagnostics: vec![],
         mechanism: MechanismType::Overall,
         qu: 250.0,
         member_response: vec![],

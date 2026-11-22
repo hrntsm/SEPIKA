@@ -1565,6 +1565,103 @@ fn ordinary_steel_pushover_does_not_use_elastic_areas_as_shear_yield_strengths()
 }
 
 #[test]
+fn steel_h_web_shear_limit_and_out_of_scope_weak_shear_are_both_recorded() {
+    let mut model = single_column_model(235.0, 3_200_000.0);
+    model.nodes[1].coord[2] = 900.0;
+    model.nodes[1].restraint = Dof6Mask(0b111110);
+    model.stories[1].elevation = Some(900.0);
+    model.elements[0].local_axis.ref_vector = [1.0, 0.075, 0.0];
+    model.sections[0] = SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 8.0,
+        flange_thick: 12.0,
+        root_r: Some(0.0),
+    }
+    .to_section(SectionId(0), "H400×200×8×12".into());
+    model.sections[0].material = Some(MaterialId(0));
+    model.materials[0].name = "SS400".into();
+    let map = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &map);
+    let result = pushover_analysis_recording(
+        &model,
+        &map,
+        &reducer,
+        SeismicDir::X,
+        20,
+        PushoverTarget::from_max_disp(0.0),
+        PushoverControl::LoadOnly,
+        false,
+        DuctilityMethod::default(),
+    )
+    .unwrap();
+    let (event, detail) = result
+        .shear_yields
+        .iter()
+        .find_map(|event| {
+            event
+                .detail
+                .filter(|detail| detail.at_i)
+                .map(|d| (event, d))
+        })
+        .expect("H形鋼ウェブでせん断耐力に到達");
+    assert_eq!(event.elem, ElemId(0));
+    assert!(!detail.is_rc);
+    assert_eq!(detail.governing_axis, Some(0));
+    assert!((detail.limit_n - 408_117.358_284_762_7).abs() < 1e-6);
+    assert!(detail.shear_n[0].abs() >= detail.limit_n);
+    assert_eq!(detail.shear_n[1], 0.0);
+    assert!(result.shear_diagnostics.iter().any(|diagnostic| {
+        diagnostic.elem == event.elem
+            && diagnostic.at_i == Some(true)
+            && diagnostic.step <= event.step
+            && diagnostic.reason.contains("弱軸せん断")
+    }));
+    assert!(result.shear_design_unavailable_at(event.step).is_none());
+    assert!(result
+        .confirmed_history
+        .as_ref()
+        .unwrap()
+        .iter()
+        .any(|step| step.step == event.step));
+}
+
+#[test]
+fn rc_column_shear_limit_keeps_later_pushover_response_as_reference() {
+    let (mut model, _, _, _) = rc_hinge_model();
+    model.nodes[1].coord[2] = 1200.0;
+    model.nodes[1].restraint = Dof6Mask(0b111110);
+    model.stories[1].elevation = Some(1200.0);
+    model.stories[1].seismic_weight = Some(4_000_000.0);
+    let map = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &map);
+    let result = pushover_analysis_recording(
+        &model,
+        &map,
+        &reducer,
+        SeismicDir::X,
+        40,
+        PushoverTarget::from_max_disp(0.0),
+        PushoverControl::LoadOnly,
+        false,
+        DuctilityMethod::default(),
+    )
+    .unwrap();
+    let event = result
+        .shear_yields
+        .iter()
+        .find(|event| event.detail.is_some_and(|detail| detail.is_rc))
+        .expect("RC柱が終局せん断耐力に到達");
+    assert!(event.step > 0);
+    assert!(result.shear_design_unavailable_at(event.step - 1).is_none());
+    assert!(result.capacity_curve.last().unwrap().step > event.step);
+    assert!(result
+        .shear_design_unavailable_at(event.step + 1)
+        .unwrap()
+        .contains("終局せん断耐力Qu"));
+}
+
+#[test]
 fn test_effective_clear_span_falls_back_when_non_positive() {
     let rz_over = RigidZone {
         length_i: 2000.0,
@@ -2108,7 +2205,7 @@ fn test_compute_hinge_thresholds_steel_strength_factor_resolution() {
 }
 
 #[test]
-fn steel_grade_recognition_agrees_in_factory_hinge_and_shear_consumers() {
+fn steel_grade_recognition_agrees_in_factory_and_hinge_consumers() {
     use sepika_element::factory::{build_hinge_view, StrengthBasis};
     for (name, automatic_fy) in [
         ("未知鋼材", 200.0),
@@ -2128,17 +2225,12 @@ fn steel_grade_recognition_agrees_in_factory_hinge_and_shear_consumers() {
             model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
             model.sections[0].iy = 5_000_000.0;
             model.sections[0].iz = 5_000_000.0;
-            model.sections[0].as_y = 1000.0;
-            model.sections[0].as_z = 2000.0;
             let expected_moment = expected_fy * 100_000.0;
             let hinge = &compute_hinge_thresholds(&model)[0];
             assert!(
                 (hinge.my - expected_moment).abs() < 1e-7,
                 "{name:?} {factor:?}"
             );
-            let shear = &build_shear_yield_thresholds(&model)[0];
-            assert!((shear.y.qy(0.0) - expected_fy * 2000.0 / 3.0_f64.sqrt()).abs() < 1e-7);
-            assert!((shear.z.qy(0.0) - expected_fy * 1000.0 / 3.0_f64.sqrt()).abs() < 1e-7);
             for (basis, moment) in [
                 (StrengthBasis::Nominal, 20_000_000.0),
                 (StrengthBasis::MaterialStrength, expected_moment),
@@ -2193,7 +2285,7 @@ fn rc_rebar_strength_in_pushover_capacity_and_yield_thresholds() {
             reference.materials[1].strength_factor = Some(1.0);
             let reference_result = run(&reference).unwrap();
             assert!(
-                (result.qu - reference_result.qu).abs() < 1e-6,
+                (result.qu - reference_result.qu).abs() / reference_result.qu < 1e-8,
                 "SD490: {}, 490 N/mm² の比較材: {}",
                 result.qu,
                 reference_result.qu,

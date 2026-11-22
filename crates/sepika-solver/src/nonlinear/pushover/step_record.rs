@@ -5,9 +5,10 @@ use super::ductility::{compute_ductility_refs, update_ductility, DuctilityRef, D
 use super::hinge::{compute_hinge_thresholds, track_hinges, HingeThreshold};
 use super::member_response::record_member_step;
 use super::response::{compute_story_drift, get_roof_disp, max_story_drift_angle};
-use super::shear_yield::{track_shear_yield, ShearThreshold};
+use super::shear_yield::{record_member_shear, track_shear_yield, ShearThreshold};
 use super::types::{
-    CapacityPoint, DuctilityMethod, HingeEvent, MemberStepState, PushoverStep, ShearYieldEvent,
+    CapacityPoint, DuctilityMethod, HingeEvent, MemberShearDiagnostic, MemberStepState,
+    PushoverStep, ShearYieldEvent,
 };
 use crate::statics::analysis::SeismicDir;
 use sepika_core::dof::DofMap;
@@ -52,6 +53,7 @@ pub(super) struct StepRecorder<'a> {
     steps: Vec<PushoverStep>,
     hinges: Vec<HingeEvent>,
     shear_yields: Vec<ShearYieldEvent>,
+    shear_diagnostics: Vec<MemberShearDiagnostic>,
     member_history_steps: Vec<Vec<MemberStepState>>,
     wall_history: Vec<super::wall_response::WallStepResponse>,
     pub(super) run: super::wall_response::WallRunIdentity,
@@ -67,6 +69,7 @@ pub(super) struct RecordedSteps {
     pub(super) steps: Vec<PushoverStep>,
     pub(super) hinges: Vec<HingeEvent>,
     pub(super) shear_yields: Vec<ShearYieldEvent>,
+    pub(super) shear_diagnostics: Vec<MemberShearDiagnostic>,
     pub(super) member_history_steps: Vec<Vec<MemberStepState>>,
     pub(super) wall_history: Vec<super::wall_response::WallStepResponse>,
     pub(super) run: super::wall_response::WallRunIdentity,
@@ -96,6 +99,7 @@ impl<'a> StepRecorder<'a> {
             steps: Vec::new(),
             hinges: Vec::new(),
             shear_yields: Vec::new(),
+            shear_diagnostics: Vec::new(),
             member_history_steps: Vec::new(),
             wall_history: Vec::new(),
             run: super::wall_response::WallRunIdentity::new(),
@@ -217,6 +221,13 @@ impl<'a> StepRecorder<'a> {
             self.step_no,
             &mut self.shear_yields,
         );
+        record_member_shear(
+            model,
+            behaviors,
+            self.step_no,
+            &mut self.shear_yields,
+            &mut self.shear_diagnostics,
+        );
         self.member_history_steps.push(member_step);
         self.wall_history
             .extend(super::wall_response::record_wall_step(
@@ -272,6 +283,7 @@ impl<'a> StepRecorder<'a> {
             steps: self.steps,
             hinges: self.hinges,
             shear_yields: self.shear_yields,
+            shear_diagnostics: self.shear_diagnostics,
             member_history_steps: self.member_history_steps,
             wall_history: self.wall_history,
             run: self.run,

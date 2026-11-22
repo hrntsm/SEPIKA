@@ -772,6 +772,13 @@ pub fn build_report_csv(app: &App) -> String {
             force_kn(po.qu),
             po.hinges.len()
         ));
+        let shear_rows = member_shear_rows(po);
+        if !shear_rows.is_empty() {
+            out.push_str("\n[線材のせん断応答]\n項目,値\n");
+            for (label, value) in shear_rows {
+                out.push_str(&format!("{},{}\n", csv_cell(&label), csv_cell(&value)));
+            }
+        }
         out.push_str("\n[壁単体 確定step応答]\n項目,値または未記録理由\n");
         for (label, value) in wall_response_rows(po) {
             out.push_str(&format!(
@@ -1341,6 +1348,62 @@ pub fn has_report_content(results: &Option<ResultsBundle>) -> bool {
         })
         .unwrap_or(false)
 }
+
+pub(crate) fn member_shear_rows(
+    po: &sepika_solver::nonlinear::pushover::PushoverResult,
+) -> Vec<(String, String)> {
+    let name =
+        |at_i: bool, is_rc: bool| (if at_i { "i" } else { "j" }, if is_rc { "RC" } else { "S" });
+    let mut rows = Vec::new();
+    for event in &po.shear_yields {
+        let Some(detail) = event.detail else { continue };
+        let (end, material) = name(detail.at_i, detail.is_rc);
+        let direction = match detail.governing_axis {
+            Some(0) => "局所y",
+            Some(1) => "局所z",
+            _ => "局所y・z",
+        };
+        let limit = if detail.is_rc { "Qu" } else { "Qy" };
+        let state = if detail.exactly_at_limit {
+            "到達"
+        } else {
+            "初回超過"
+        };
+        rows.push((
+            format!(
+                "{material}部材 {} 可撓部{end}端 {direction} step {}",
+                event.elem.0, event.step
+            ),
+            format!(
+                "{limit}{state}  局所y成分={:.3} kN  局所z成分={:.3} kN  {limit}={:.3} kN",
+                force_kn(detail.shear_n[0]),
+                force_kn(detail.shear_n[1]),
+                force_kn(detail.limit_n),
+            ),
+        ));
+    }
+    for diagnostic in &po.shear_diagnostics {
+        let material = if diagnostic.is_rc { "RC" } else { "S" };
+        rows.push((
+            format!(
+                "{material}部材 {} {} step {}",
+                diagnostic.elem.0,
+                diagnostic.location(),
+                diagnostic.step
+            ),
+            format!("せん断適用範囲外 ({})", diagnostic.reason),
+        ));
+    }
+    if let Some(reason) = po
+        .capacity_curve
+        .last()
+        .and_then(|last| po.shear_design_unavailable_at(last.step))
+    {
+        rows.push(("保有水平耐力評価の制限".into(), reason));
+    }
+    rows
+}
+
 pub(crate) fn wall_response_rows(
     po: &sepika_solver::nonlinear::pushover::PushoverResult,
 ) -> Vec<(String, String)> {

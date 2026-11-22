@@ -2009,6 +2009,50 @@ mod purpose_tests {
         );
         app
     }
+
+    #[test]
+    fn rc_shear_reference_step_is_visible_but_cannot_be_adopted() {
+        use sepika_core::ids::ElemId;
+        use sepika_solver::nonlinear::pushover::{MemberShearYield, ShearYieldEvent};
+
+        let mut app = ready();
+        super::super::tests::select_holding_points(&mut app);
+        let po = app
+            .core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .pushover_x
+            .as_mut()
+            .unwrap();
+        let step = po.capacity_evaluation.as_ref().unwrap().step;
+        po.shear_yields.push(ShearYieldEvent {
+            step,
+            elem: ElemId(0),
+            detail: Some(MemberShearYield {
+                at_i: true,
+                is_rc: true,
+                shear_n: [120_000.0, 0.0],
+                limit_n: 100_000.0,
+                governing_axis: Some(0),
+                exactly_at_limit: false,
+            }),
+        });
+        let error = app
+            .adopt_holding_evaluation(EvaluationPurpose::HoldingCapacity)
+            .unwrap_err();
+        assert!(error.contains("参考結果"));
+        let error = app.compute_unconfirmed_holding_capacity().err().unwrap();
+        assert!(error.contains("終局せん断耐力Qu"));
+        let csv = crate::summary::build_report_csv(&app);
+        assert!(csv.contains("[線材のせん断応答]"));
+        assert!(csv.contains(&format!("RC部材 0 可撓部i端 局所y step {step}")));
+        assert!(csv.contains("120.000 kN"));
+        assert!(csv.contains("Qu=100.000 kN"));
+        assert!(app.core.scoped.holding_capacity_source.is_none());
+    }
+
     #[test]
     fn 目的別run条件の差を許容し同時点の独立期待値と保存帳票を維持する() {
         let mut app = two_purposes();

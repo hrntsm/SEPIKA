@@ -527,7 +527,9 @@ fn original_rc_factory_combined_point_two_mm_trial_reaches_material_equilibrium(
         .flat_map(|section| &section.fibers)
         .any(|fiber| fiber.material == 0 && fiber.strain > 8e-5));
     let snapshot = member.snapshot_state();
-    let state = snapshot.downcast_ref::<FiberBeamSnapshot>().unwrap();
+    let state = crate::frame::shear::axial_bending_snapshot(snapshot.as_ref())
+        .downcast_ref::<FiberBeamSnapshot>()
+        .unwrap();
     let axis = crate::transform::LocalFrame::from_nodes(
         model.nodes[0].coord,
         model.nodes[1].coord,

@@ -16,10 +16,10 @@ use sepika_element::behavior::{Ctx, ElementBehavior};
 use sepika_math::solver::SolverBackend;
 
 pub(crate) fn tangent_solver_backend(behaviors: &[Box<dyn ElementBehavior>]) -> SolverBackend {
-    if behaviors
-        .iter()
-        .any(|behavior| behavior.panel_column_sections().is_some())
-    {
+    if behaviors.iter().any(|behavior| {
+        behavior.panel_column_sections().is_some()
+            || behavior.member_shear_uses_nonsymmetric_tangent()
+    }) {
         SolverBackend::DirectSparseLu
     } else {
         SolverBackend::DirectSparseCholesky

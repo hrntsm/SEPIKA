@@ -1167,6 +1167,9 @@ fn actual_rc_beam_with_verified_zero_axial_force_displays_arakawa_mean_capacity(
     model.nodes[3]
         .restraint
         .set_fixed(sepika_core::dof::Dof::Ux);
+    model.nodes[3]
+        .restraint
+        .set_fixed(sepika_core::dof::Dof::Uy);
     model.elements[1].force_regime = ForceRegime::UniaxialBendingShear;
     model.set_member_rc_beam_reference(
         ElemId(1),
@@ -1237,6 +1240,9 @@ fn actual_rc_beam_with_member_load_displays_unavailable_capacity_and_reference_m
     use sepika_core::model::{MemberLoad, MemberLoadKind};
 
     let mut model = beam_model(&[4], &[2]);
+    model.nodes[3]
+        .restraint
+        .set_fixed(sepika_core::dof::Dof::Uy);
     model.load_cases[0].nodal.push(NodalLoad::manual(
         NodeId(3),
         [0.0, 0.0, -10_000.0, 0.0, 0.0, 0.0],
@@ -1253,7 +1259,8 @@ fn actual_rc_beam_with_member_load_displays_unavailable_capacity_and_reference_m
     ));
     let mut app = solve_beam_model(model);
     app.generate_stories_action();
-    app.run_seismic(SeismicDir::X);
+    app.run_seismic(SeismicDir::Y);
+    app.core.analysis_cfg.push_dir = SeismicDir::Y;
     app.core.analysis_cfg.push_steps = 3;
     app.run_pushover();
     assert!(
@@ -1268,7 +1275,7 @@ fn actual_rc_beam_with_member_load_displays_unavailable_capacity_and_reference_m
         .results
         .as_mut()
         .unwrap()
-        .pushover_x
+        .pushover_y
         .as_mut()
         .unwrap();
     let response = &po.confirmed_history.as_ref().unwrap()[1];
@@ -1283,7 +1290,7 @@ fn actual_rc_beam_with_member_load_displays_unavailable_capacity_and_reference_m
     po.capacity_evaluation = Some(
         po.evaluation_point(
             EvaluationPurpose::HoldingCapacity,
-            SeismicDir::X,
+            SeismicDir::Y,
             response.step,
             "RC梁の総せん断力を照合するstep".into(),
         )

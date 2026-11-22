@@ -172,14 +172,28 @@ fn build_connected_fiber(
     model: &Model,
     basis: StrengthBasis,
     kind: AnalysisKind,
-) -> crate::frame::fiber::FiberBeam {
+) -> Box<dyn ElementBehavior> {
     let mut member = build_fiber(data, model, basis, kind);
     if let Some(normal) = wall_release_normal(data, model, kind) {
         member
             .configure_wall_release(normal)
             .unwrap_or_else(|reason| panic!("部材 ID {} の壁側柱接続: {reason}", data.id.0));
+        return Box::new(member);
     }
-    member
+    with_member_shear(Box::new(member), data, model, kind)
+}
+
+fn with_member_shear(
+    member: Box<dyn ElementBehavior>,
+    data: &ElementData,
+    model: &Model,
+    kind: AnalysisKind,
+) -> Box<dyn ElementBehavior> {
+    if kind == AnalysisKind::Incremental {
+        crate::frame::shear::connect(member, data, model)
+    } else {
+        member
+    }
 }
 
 /// 部材耐力算定に用いる材料強度の基準。
@@ -289,17 +303,15 @@ pub fn build_nonlinear_behavior(
                     } else {
                         beam
                     };
-                    Box::new(beam)
+                    with_member_shear(Box::new(beam), data, model, kind)
                 }
-                ResolvedRegime::Fiber => Box::new(build_connected_fiber(data, model, basis, kind)),
+                ResolvedRegime::Fiber => build_connected_fiber(data, model, basis, kind),
             };
             with_panel_offset(inner, data, model)
         }
-        ElementKind::Fiber => with_panel_offset(
-            Box::new(build_connected_fiber(data, model, basis, kind)),
-            data,
-            model,
-        ),
+        ElementKind::Fiber => {
+            with_panel_offset(build_connected_fiber(data, model, basis, kind), data, model)
+        }
         ElementKind::MultiSpring => {
             let mut member =
                 crate::frame::multi_spring::MultiSpringElement::new(data, model, basis, kind);
@@ -309,8 +321,13 @@ pub fn build_nonlinear_behavior(
                     .unwrap_or_else(|reason| {
                         panic!("部材 ID {} の壁側柱接続: {reason}", data.id.0)
                     });
+                return with_panel_offset(Box::new(member), data, model);
             }
-            with_panel_offset(Box::new(member), data, model)
+            with_panel_offset(
+                with_member_shear(Box::new(member), data, model, kind),
+                data,
+                model,
+            )
         }
         ElementKind::Brace { .. } => crate::frame::eccentric::connect(
             Box::new(crate::frame::truss::TrussElement::new(data, model)),
@@ -324,7 +341,9 @@ pub fn build_nonlinear_behavior(
                 return build_behavior(data, model);
             }
             if !crate::wall::misc_wall::is_rc_wall(data, model) {
-                panic!("{}", WallElement::unsupported_steel_wall_nonlinear(data));
+                let reason = WallElement::wall_shear_capacity_issue(data, model, basis)
+                    .unwrap_or_else(|| WallElement::unsupported_steel_wall_nonlinear(data));
+                panic!("{reason}");
             }
             let qu = wall_capacity
                 .unwrap_or_else(|| panic!("壁 ID {}: runの静的一次参照Quが未解決です", data.id.0));

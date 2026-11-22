@@ -1603,7 +1603,9 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
         crate::frame::beam::state::ElasticLoadState,
     );
     let initial = behavior.snapshot_state();
-    let initial = initial.downcast_ref::<Snapshot>().unwrap();
+    let initial = crate::frame::shear::axial_bending_snapshot(initial.as_ref())
+        .downcast_ref::<Snapshot>()
+        .unwrap();
     let k0 = 6.0 * 20000.0 * 833.33 / 5000.0;
     for spring in &initial.0 {
         assert!((spring.probe(0.0).1 - k0).abs() < 1e-9);
@@ -1623,7 +1625,9 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
     };
     behavior.update_state(&du, true, &ctx).unwrap();
     let before = behavior.snapshot_state();
-    let state = before.downcast_ref::<Snapshot>().unwrap();
+    let state = crate::frame::shear::axial_bending_snapshot(before.as_ref())
+        .downcast_ref::<Snapshot>()
+        .unwrap();
     let k = behavior.tangent_stiffness(&ctx);
     let f = behavior.internal_force(&ctx);
     for i in 0..12 {
@@ -1640,7 +1644,9 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
     behavior.update_state(&zero, false, &ctx).unwrap();
     behavior.commit_state();
     let after = behavior.snapshot_state();
-    let after = after.downcast_ref::<Snapshot>().unwrap();
+    let after = crate::frame::shear::axial_bending_snapshot(after.as_ref())
+        .downcast_ref::<Snapshot>()
+        .unwrap();
     assert_eq!(state.1, after.1);
     assert_eq!(state.2, after.2);
     for end in 0..2 {

@@ -1431,6 +1431,7 @@ mod tests {
                 run.shear_yields.push(ShearYieldEvent {
                     step,
                     elem: ElemId(0),
+                    detail: None,
                 });
             }
 

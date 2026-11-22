@@ -119,6 +119,7 @@ fn pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult {
         capacity_curve: vec![],
         hinges: vec![],
         shear_yields: vec![],
+        shear_diagnostics: vec![],
         mechanism: MechanismType::Partial,
         qu,
         member_response: vec![],

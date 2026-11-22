@@ -154,6 +154,50 @@ impl StoryCut {
 }
 
 impl PushoverResult {
+    /// RC線材のせん断耐力または適用条件で、指定stepを設計に採用できない理由を返す。
+    pub fn shear_design_unavailable_at(&self, step: u32) -> Option<String> {
+        let reached = self
+            .shear_yields
+            .iter()
+            .filter_map(|event| {
+                let detail = event.detail.filter(|detail| detail.is_rc)?;
+                let reached_n = detail.shear_n[0].hypot(detail.shear_n[1]);
+                let exact = detail.exactly_at_limit
+                    && detail.limit_n.is_finite()
+                    && detail.limit_n > 0.0
+                    && reached_n.is_finite()
+                    && (reached_n - detail.limit_n).abs()
+                        <= crate::common::newton::STATIC_NEWTON.tol * detail.limit_n;
+                (event.step < step || event.step == step && !exact).then_some((event, detail))
+            })
+            .min_by_key(|(event, _)| event.step);
+        let unconfirmed = self
+            .shear_diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.is_rc && diagnostic.step <= step)
+            .min_by_key(|diagnostic| (diagnostic.step, diagnostic.at_i.is_none()));
+        if let Some(diagnostic) =
+            unconfirmed.filter(|d| reached.is_none_or(|(e, _)| d.step <= e.step))
+        {
+            return Some(format!(
+                "RC線材せん断適用範囲外: 部材ID {} {} step {}（{}）。このstep以降は設計に採用できません",
+                diagnostic.elem.0,
+                diagnostic.location(),
+                diagnostic.step,
+                diagnostic.reason,
+            ));
+        }
+        reached.map(|(event, detail)| {
+            format!(
+                "RC線材の終局せん断耐力Quに到達: 部材ID {} {}端 step {}。指定step {}は参考結果です",
+                event.elem.0,
+                if detail.at_i { "i" } else { "j" },
+                event.step,
+                step,
+            )
+        })
+    }
+
     /// 明示した採用点を作る。終了理由から法的な評価点を自動推定しない。
     pub fn evaluation_point(
         &self,
@@ -240,6 +284,9 @@ impl PushoverResult {
             return Err(format!(
                 "{cause}: member=unresolved 確定履歴のrun・入力世代・方向・stepが不整合です"
             ));
+        }
+        if let Some(reason) = self.shear_design_unavailable_at(point.step) {
+            return Err(reason);
         }
         let mut seen = std::collections::HashSet::new();
         if let Some(member) = record.members.iter().find(|r| {
@@ -564,6 +611,7 @@ mod tests {
             capacity_curve: vec![],
             hinges: vec![],
             shear_yields: vec![],
+            shear_diagnostics: vec![],
             mechanism: super::super::MechanismType::Overall,
             qu: 0.0,
             member_response: vec![],
@@ -611,6 +659,70 @@ mod tests {
         po.evaluation_point(purpose, dir, step, "独立指定".into())
             .unwrap()
     }
+
+    #[test]
+    fn rc_shear_reference_steps_cannot_be_adopted_for_design() {
+        use super::super::{MemberShearYield, ShearYieldEvent};
+
+        let mut po = result("A", SeismicDir::X, vec![vec![cut(0, 150.0, 90.0)]; 3]);
+        let purposes = [EvaluationPurpose::HoldingCapacity, EvaluationPurpose::Ds];
+        let points =
+            purposes.map(|purpose| [0, 1, 2].map(|step| point(&po, purpose, SeismicDir::X, step)));
+        for (is_rc, exactly_at_limit, shear_n, expected) in [
+            (true, true, 120.0, [true, true, false]),
+            (true, false, 120.1, [true, false, false]),
+            (true, true, 120.1, [true, false, false]),
+            (false, false, 120.1, [true, true, true]),
+        ] {
+            po.shear_yields = vec![ShearYieldEvent {
+                step: 1,
+                elem: ElemId(7),
+                detail: Some(MemberShearYield {
+                    at_i: false,
+                    is_rc,
+                    shear_n: [shear_n, 0.0],
+                    limit_n: 120.0,
+                    governing_axis: Some(0),
+                    exactly_at_limit,
+                }),
+            }];
+            for (purpose, points) in purposes.iter().zip(&points) {
+                for (point, accepted) in points.iter().zip(expected) {
+                    let evaluation = po.evaluate_stories(point, *purpose);
+                    assert_eq!(evaluation.is_ok(), accepted);
+                    if let Err(reason) = evaluation {
+                        assert!(reason.contains("部材ID 7 j端 step 1"));
+                    }
+                }
+            }
+            assert_eq!(po.capacity_curve.len(), 3);
+        }
+    }
+
+    #[test]
+    fn rc_shear_applicability_diagnostic_preserves_preceding_design_step() {
+        use super::super::MemberShearDiagnostic;
+
+        let mut po = result("A", SeismicDir::X, vec![vec![cut(0, 150.0, 90.0)]; 3]);
+        po.shear_diagnostics.push(MemberShearDiagnostic {
+            step: 1,
+            elem: ElemId(4),
+            at_i: Some(true),
+            is_rc: true,
+            reason: "柱の軸力が引張域です".into(),
+        });
+        let purpose = EvaluationPurpose::HoldingCapacity;
+        assert_eq!(point(&po, purpose, SeismicDir::X, 0).step, 0);
+        for step in [1, 2] {
+            let error = po
+                .evaluation_point(purpose, SeismicDir::X, step, "利用者指定".into())
+                .unwrap_err();
+            assert!(error.contains("せん断適用範囲外"));
+            assert!(error.contains("部材ID 4 i端 step 1"));
+            assert!(error.contains("引張域"));
+        }
+    }
+
     #[test]
     fn 二層外力100と50壁90と30は同時点で両層06() {
         let po = result(

@@ -6,7 +6,8 @@
 
 use super::geom::member_local_frame;
 use super::geom::{axial_compression, dot3, recording_force};
-use super::types::ShearYieldEvent;
+use super::types::{MemberShearDiagnostic, MemberShearYield, ShearYieldEvent};
+use sepika_core::ids::ElemId;
 use sepika_core::material_grade::{material_strength_factor_rebar, material_strength_factor_steel};
 use sepika_core::model::{ElementData, Material, MaterialCategory, Model, Section};
 use sepika_core::rc_capacity::{rc_qsu_simple, RcCapacityInput};
@@ -301,7 +302,9 @@ pub(crate) fn track_shear_yield(
         .zip(responses)
         .enumerate()
     {
-        if sepika_element::frame::beam::is_elastic_wall_girder(model, elem) || elem.nodes.len() != 2
+        if b.member_shear_status().is_some()
+            || sepika_element::frame::beam::is_elastic_wall_girder(model, elem)
+            || elem.nodes.len() != 2
         {
             continue;
         }
@@ -334,9 +337,97 @@ pub(crate) fn track_shear_yield(
             events.push(ShearYieldEvent {
                 step,
                 elem: elem.id,
+                detail: None,
             });
         }
     }
+}
+
+pub(super) fn record_member_shear(
+    model: &Model,
+    behaviors: &[Box<dyn ElementBehavior>],
+    step: u32,
+    events: &mut Vec<ShearYieldEvent>,
+    diagnostics: &mut Vec<MemberShearDiagnostic>,
+) {
+    for (elem, behavior) in model.elements.iter().zip(behaviors) {
+        let Some(status) = behavior.member_shear_status() else {
+            continue;
+        };
+        if let Some(reason) = &status.span_issue {
+            record_shear_diagnostic(diagnostics, elem.id, step, None, status.is_rc, reason);
+        }
+        for (index, end) in status.ends.iter().enumerate() {
+            let at_i = index == 0;
+            if let Some(reason) = &status.end_issues[index] {
+                record_shear_diagnostic(
+                    diagnostics,
+                    elem.id,
+                    step,
+                    Some(at_i),
+                    status.is_rc,
+                    reason,
+                );
+            }
+            match end {
+                Some(Ok(end))
+                    if end.reached
+                        && !events.iter().any(|event| {
+                            event.elem == elem.id
+                                && event.detail.is_some_and(|detail| {
+                                    detail.at_i == at_i
+                                        && detail.governing_axis == end.governing_axis
+                                })
+                        }) =>
+                {
+                    events.push(ShearYieldEvent {
+                        step,
+                        elem: elem.id,
+                        detail: Some(MemberShearYield {
+                            at_i,
+                            is_rc: status.is_rc,
+                            shear_n: end.shear_n,
+                            limit_n: end.limit_n,
+                            governing_axis: end.governing_axis,
+                            exactly_at_limit: end.exactly_at_limit,
+                        }),
+                    });
+                }
+                Some(Err(reason)) => record_shear_diagnostic(
+                    diagnostics,
+                    elem.id,
+                    step,
+                    Some(at_i),
+                    status.is_rc,
+                    reason,
+                ),
+                _ => {}
+            }
+        }
+    }
+}
+
+fn record_shear_diagnostic(
+    diagnostics: &mut Vec<MemberShearDiagnostic>,
+    elem: ElemId,
+    step: u32,
+    at_i: Option<bool>,
+    is_rc: bool,
+    reason: &str,
+) {
+    if diagnostics
+        .iter()
+        .any(|previous| previous.elem == elem && previous.at_i == at_i && previous.reason == reason)
+    {
+        return;
+    }
+    diagnostics.push(MemberShearDiagnostic {
+        step,
+        elem,
+        at_i,
+        is_rc,
+        reason: reason.into(),
+    });
 }
 
 #[cfg(test)]

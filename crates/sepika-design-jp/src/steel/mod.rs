@@ -659,13 +659,6 @@ impl SteelDesign {
             .filter(|_| ctx.kind == MemberKind::Column && forces.n <= 0.0 && forces.mz != 0.0);
         let asymmetric_girder =
             asymmetric_built_h.filter(|_| ctx.kind == MemberKind::Girder && forces.mz != 0.0);
-        if torsion_reason.is_none()
-            && matches!(sec.shape, Some(SectionShape::SteelLipChannel { .. }))
-        {
-            return CheckOutcome::Skipped {
-                reason: lip_channel::unsupported_reason(forces, sec, ctx),
-            };
-        }
         let lambda =
             match check_compression_slenderness(forces, sec, ctx, torsion_reason, secondary_post) {
                 Ok(Some(lambda)) if !secondary_post => lambda,
@@ -746,6 +739,11 @@ impl SteelDesign {
         if let Some(reason) = torsion_reason {
             return CheckOutcome::Skipped {
                 reason: reason.into(),
+            };
+        }
+        if matches!(sec.shape, Some(SectionShape::SteelLipChannel { .. })) {
+            return CheckOutcome::Skipped {
+                reason: lip_channel::unsupported_reason(forces, sec, ctx),
             };
         }
         if matches!(ctx.kind, MemberKind::Girder | MemberKind::Column)

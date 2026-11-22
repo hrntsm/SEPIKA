@@ -3592,14 +3592,20 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     app.run_pushover();
     assert_no_error(&app, "GL跨ぎ混合構造の増分解析");
     app.run_seismic(SeismicDir::Y);
-    select_holding_points(&mut app);
 
     assert!((required_story_shear(&app)[0] - 215_250.0).abs() < 1e-7);
-    assert!(app
-        .compute_holding_capacity()
-        .err()
+    let push = app
+        .core
+        .scoped
+        .results
+        .as_ref()
         .unwrap()
-        .contains("Ds判定保留"));
+        .pushover_x
+        .as_ref()
+        .unwrap();
+    let last_step = push.capacity_curve.last().unwrap().step;
+    let reason = push.shear_design_unavailable_at(last_step).unwrap();
+    assert!(reason.contains("RC線材せん断適用範囲外"), "{reason}");
 
     assert!(app.core.scoped.undo.run(
         &mut app.core.model,
