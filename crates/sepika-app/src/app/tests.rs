@@ -3645,11 +3645,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
             section: Some(SectionId(sec)),
             local_axis: LocalAxis { ref_vector },
             end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: if id == 2 {
-                ForceRegime::UniaxialBendingShear
-            } else {
-                ForceRegime::Auto
-            },
+            force_regime: ForceRegime::Auto,
             rigid_zone: Default::default(),
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
@@ -3661,9 +3657,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
         kind: Default::default(),
         id: LoadCaseId(0),
         name: "長期".into(),
-        nodal: [NodeId(2), NodeId(3)]
-            .map(|node| NodalLoad::manual(node, [0.0, 0.0, -100_000.0, 0.0, 0.0, 0.0]))
-            .into(),
+        nodal: Vec::new(),
         member: vec![MemberLoad::manual(
             ElemId(2),
             [0.0, 0.0, -1.0],
@@ -3710,7 +3704,7 @@ fn test_holding_capacity_rank_auto_rc_rect_from_shape() {
     // 既定の押込み量では機構形成後に特異となり得るため、ランクの接続検証には微小変位を使う。
     app.core.analysis_cfg.push_steps = 3;
     app.core.analysis_cfg.push_use_max_disp = true;
-    app.core.analysis_cfg.push_max_disp = 0.02;
+    app.core.analysis_cfg.push_max_disp = 0.1;
     app.core.analysis_cfg.push_use_drift_angle = false;
     app.run_pushover();
     select_holding_points(&mut app);

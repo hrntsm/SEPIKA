@@ -1,8 +1,7 @@
 use super::App;
-use sepika_core::model::{Model, NodalLoad, EY_CASE_NAME};
+use sepika_core::model::Model;
 use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
 use sepika_solver::statics::analysis::SeismicDir;
-use sepika_solver::statics::linear::linear_static_once;
 
 #[path = "frame_gravity.rs"]
 mod frame_gravity;
@@ -15,7 +14,7 @@ pub fn rc_rank_portal(
 ) -> App {
     use sepika_core::dof::{Dof, Dof6Mask};
     use sepika_core::ids::{NodeId, SectionId};
-    use sepika_core::model::{Constraint, ElementKind, EndCondition, Node, ZoneSource};
+    use sepika_core::model::{Constraint, ElementKind, EndCondition, GirderTorsionMode, Node};
     use sepika_core::section_shape::{CircleColumnHoop, RcCircleColumnRebar, SectionShape};
 
     model.elements.pop();
@@ -52,6 +51,8 @@ pub fn rc_rank_portal(
         (beam.rigid_zone.face_i, beam.rigid_zone.face_j) = faces;
     }
     if circular_column {
+        // 両端ピンの梁・円柱が剛床回転を拘束しないので、矩形柱のねじりを保持する。
+        model.girder_torsion = GirderTorsionMode::Keep;
         let section = &mut model.sections[0];
         let old = section.clone();
         *section = SectionShape::RcColumnCircle {
@@ -72,10 +73,6 @@ pub fn rc_rank_portal(
         section.rebar_material = old.rebar_material;
         section.shear_rebar_material = old.shear_rebar_material;
         model.elements[0].end_cond = [EndCondition::Pinned; 2];
-        for column in &mut model.elements[..2] {
-            column.rigid_zone.source_i = ZoneSource::Manual;
-            column.rigid_zone.source_j = ZoneSource::Manual;
-        }
         model.elements[1].section = Some(SectionId(2));
         model.sections.push(sepika_core::model::Section {
             id: SectionId(2),
@@ -95,9 +92,6 @@ pub fn rc_rank_portal(
     app.core.analysis_cfg.push_use_drift_angle = false;
     app.core.analysis_cfg.push_max_disp = 0.002;
     app.run_preparation();
-    if circular_column {
-        balance_y_floor_rotation(&mut app.core.model);
-    }
     app.run_seismic(SeismicDir::X);
     app.run_seismic(SeismicDir::Y);
     app.run_pushover();
@@ -141,31 +135,4 @@ pub fn rc_rank_portal(
         .unwrap(),
     );
     app
-}
-
-fn balance_y_floor_rotation(model: &mut Model) {
-    let story = model.layers()[0].top;
-    let master = model.diaphragms_of(story).next().unwrap().master;
-    let ey = model
-        .load_cases
-        .iter()
-        .find(|case| case.name == EY_CASE_NAME)
-        .unwrap()
-        .id;
-    let response = linear_static_once(model, ey).unwrap();
-    let mut torsion_model = model.clone();
-    let moment_nmm = 1_000_000.0;
-    let case = &mut torsion_model.load_cases[ey.index()];
-    case.member.clear();
-    case.nodal = vec![NodalLoad::manual(
-        master,
-        [0.0, 0.0, 0.0, 0.0, 0.0, moment_nmm],
-    )];
-    let torsion = linear_static_once(&torsion_model, ey).unwrap();
-    let balance_nmm =
-        -moment_nmm * response.disp[master.index()][5] / torsion.disp[master.index()][5];
-    model.load_cases[ey.index()].nodal.push(NodalLoad::manual(
-        master,
-        [0.0, 0.0, 0.0, 0.0, 0.0, balance_nmm],
-    ));
 }
