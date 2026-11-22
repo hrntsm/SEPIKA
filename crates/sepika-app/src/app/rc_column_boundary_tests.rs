@@ -252,7 +252,7 @@ fn rc_column_boundary_gui_saves_axial_and_shear_ng_with_unchecked_bending() {
             app.core.scoped.last_error
         );
         let design = app.current_design_results().unwrap();
-        assert_eq!(design.design_contract_version, Some(108));
+        assert_eq!(design.design_contract_version, Some(109));
         let expected_forces = design.member_forces.clone();
         let expected = design.member_checks.clone();
         assert_eq!(expected.len(), 1);
@@ -302,7 +302,7 @@ fn rc_column_boundary_gui_saves_axial_and_shear_ng_with_unchecked_bending() {
         let (mut stale, path) = super::result_contract_tests::restore(
             &app,
             Some(sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION),
-            Some(107),
+            Some(108),
             &format!("rc-column1813-old-{circle}"),
         );
         std::fs::remove_file(path).unwrap();
@@ -314,7 +314,7 @@ fn rc_column_boundary_gui_saves_axial_and_shear_ng_with_unchecked_bending() {
         assert!(stale.current_design_results().is_none());
         stale.run_design_check();
         let rechecked = stale.current_design_results().unwrap();
-        assert_eq!(rechecked.design_contract_version, Some(108));
+        assert_eq!(rechecked.design_contract_version, Some(109));
         assert_eq!(rechecked.member_forces, expected_forces);
         assert_eq!(
             serde_json::to_value(&rechecked.member_checks).unwrap(),

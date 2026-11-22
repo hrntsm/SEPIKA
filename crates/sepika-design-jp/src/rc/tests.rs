@@ -661,7 +661,7 @@ fn test_rc_column_circle_hoop_pw_provision_ok() {
         false,
         gross,
         info.main_area,
-        0.0,
+        Some(0.0),
         24.0,
         props.pw,
     );

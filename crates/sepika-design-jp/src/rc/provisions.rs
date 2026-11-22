@@ -127,7 +127,7 @@ pub(crate) fn column_provisions_info(
     long_term: bool,
     ag: f64,
     as_total: f64,
-    n_short_comp: f64,
+    n_short_comp: Option<f64>,
     fc_raw: f64,
     pw_min: f64,
 ) -> ProvisionCheck {
@@ -172,7 +172,8 @@ pub(crate) fn column_provisions_info(
         if pg + 1e-12 < 0.008 {
             warnings.push(format!("主筋比 pg={:.3}% < 0.8%", pg * 100.0));
         }
-        if !long_term && fc_raw > 0.0 && n_short_comp > 0.0 {
+        if let Some(n_short_comp) = n_short_comp.filter(|&n| !long_term && fc_raw > 0.0 && n > 0.0)
+        {
             let sigma = n_short_comp / ag;
             let lim = fc_raw / 3.0;
             if sigma + 1e-9 < lim {
@@ -242,7 +243,7 @@ mod tests {
             true,
             800.0 * 400.0,
             info.main_area,
-            0.0,
+            None,
             24.0,
             2.0 * one_bar_area(10.0) / (800.0 * 250.0),
         );
@@ -270,7 +271,7 @@ mod tests {
             false,
             ag,
             info.main_area,
-            1.0 * ag,
+            Some(1.0 * ag),
             fc,
             2.0 * one_bar_area(10.0) / (400.0 * 100.0),
         );
@@ -290,7 +291,7 @@ mod tests {
             false,
             ag,
             info.main_area,
-            10.0 * ag,
+            Some(10.0 * ag),
             fc,
             2.0 * one_bar_area(10.0) / (400.0 * 100.0),
         );
@@ -314,7 +315,7 @@ mod tests {
             true,
             ag,
             info.main_area,
-            0.0,
+            None,
             24.0,
             2.0 * one_bar_area(10.0) / (400.0 * 100.0),
         );
@@ -334,7 +335,7 @@ mod tests {
             true,
             ag,
             info.main_area,
-            0.0,
+            None,
             24.0,
             2.0 * one_bar_area(10.0) / (400.0 * 100.0),
         );
