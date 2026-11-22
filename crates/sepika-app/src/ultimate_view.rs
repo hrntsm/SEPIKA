@@ -3,7 +3,7 @@
 use crate::app::{member_kind_label, App};
 use crate::table_util::Col;
 use sepika_core::units::to_display::{force_kn, moment_kn_m};
-use sepika_design_jp::ultimate::{ShearMethod, UltimateDemandMode};
+use sepika_design_jp::ultimate::UltimateDemandMode;
 
 /// 余裕度セルの色（1.0 未満＝せん断先行で NG を赤系に）。
 fn margin_color(margin: f64) -> egui::Color32 {
@@ -17,14 +17,14 @@ fn margin_color(margin: f64) -> egui::Color32 {
 fn demand_source_note(app: &App) -> Result<String, String> {
     app.ultimate_demand_by_elem()?;
     if !app.core.ultimate_use_pushover {
-        return Ok("静的重力参照: N/M/QL は保存長期組合せの応力、Rp は一律指定。両端ヒンジ略算は全体の保有水平耐力判定を完了しません".into());
+        return Ok("静的重力参照: N/M/QL は保存長期組合せの応力。両端ヒンジ略算は全体の保有水平耐力判定を完了しません".into());
     }
     let direction = app.core.scoped.pushover_view_dir;
     let point = app
         .pushover_for(direction)
         .and_then(|run| run.capacity_evaluation.as_ref())
         .ok_or("確定総応答の採用方向・stepが未指定です")?;
-    Ok(format!("確定総応答: {:?}方向・採用step={} のN/M/Q/Rp（同一runの初期重力を含む）。倍率1、総QへQLを追加しません", point.direction, point.step))
+    Ok(format!("確定総応答: {:?}方向・採用step={} のN/M/Q（同一runの初期重力を含む）。倍率1、総QへQLを追加しません", point.direction, point.step))
 }
 
 /// 終局検定表を描画する（設計タブ「終局検定」サブビュー）。
@@ -74,18 +74,6 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
     }
     ui.add_enabled_ui(app.study_is_main(), |ui| {
         ui.horizontal(|ui| {
-            ui.label("ヒンジ回転角 Rp:");
-            ui.add(
-                egui::DragValue::new(&mut app.core.ultimate_rp)
-                    .speed(0.001)
-                    .range(0.0..=0.1)
-                    .fixed_decimals(3),
-            )
-            .on_hover_text(
-                "終局限界状態でのヒンジ領域の回転角 Rp [rad]。ν=(1−15Rp)ν0、\
-             cotφ=2−50Rp に効きます。0 で塑性化前（cotφ=2.0, ν=ν0）の終局強度。",
-            );
-            ui.separator();
             ui.label("上限強度倍率:");
             ui.add(
                 egui::DragValue::new(&mut app.core.ultimate_upper_factor)
@@ -96,38 +84,12 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             .on_hover_text("Qmu = 上限強度倍率·2·Mu/内法 の倍率。");
         });
         ui.horizontal(|ui| {
-            ui.checkbox(
-                &mut app.core.ultimate_lightweight,
-                "軽量コンクリート（せん断・付着耐力を 0.9 倍）",
-            )
-            .on_hover_text("軽量コンクリート使用時のせん断終局耐力 0.9 倍低減（共通事項）。");
-            ui.checkbox(&mut app.core.ultimate_include_bond, "付着割裂を検定");
-        });
-        ui.horizontal(|ui| {
-            ui.label("終局せん断強度:");
-            ui.selectable_value(
-                &mut app.core.ultimate_shear_ductility,
-                false,
-                "塑性理論式(Qsu)",
-            )
-            .on_hover_text(
-                "藤井・森田式系の塑性理論式（終局強度型設計指針）で終局せん断強度を算定します。",
-            );
-            ui.selectable_value(
-                &mut app.core.ultimate_shear_ductility,
-                true,
-                "靭性指針式(Vu)",
-            )
-            .on_hover_text(
-                "AIJ「靭性保証型耐震設計指針」6.4 の Vu=min(Vu1,Vu2,Vu3)（トラス＋アーチ機構）\
-                 で終局せん断信頼強度を算定します。",
-            );
+            ui.checkbox(&mut app.core.ultimate_include_bond, "大地震時の付着を照査");
         });
         ui.horizontal(|ui| {
             ui.checkbox(&mut app.core.ultimate_biaxial_shear, "柱を2軸せん断で検定")
                 .on_hover_text(
-                    "静的・両端ヒンジ略算の二軸せん断は、両軸の長期せん断力がゼロの場合に算定します。\
-                     確定総応答では初期重力を含む両軸の総せん断力を使います。",
+                    "確定総応答を採用し、両軸の耐力を確認できる場合に、初期重力を含む両軸の総せん断力で算定します。",
                 );
             ui.checkbox(&mut app.core.ultimate_biaxial_bending, "柱を2軸曲げで検定")
                 .on_hover_text(
@@ -138,10 +100,10 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
         ui.horizontal(|ui| {
             ui.checkbox(
                 &mut app.core.ultimate_use_pushover,
-                "設計用応力・Rp を増分解析応答から反映",
+                "設計用応力を増分解析応答から反映",
             )
             .on_hover_text(
-                "総せん断力・需要曲げ・軸力・部材別 Rp を、明示した採用stepの\
+                "総せん断力・需要曲げ・軸力を、明示した採用stepの\
              確定総応答から直接反映します。不足時は未検定です。",
             );
             if app.core.ultimate_use_pushover {
@@ -202,19 +164,12 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             } else {
                 UltimateDemandMode::StaticHinge
             };
-            let method = if app.core.ultimate_shear_ductility {
-                ShearMethod::Ductility
-            } else {
-                ShearMethod::Plastic
-            };
-            let (shear_symbol, bond_symbol) = method.capacity_symbols();
+            let shear_symbol = "Qsu";
             let demand_symbol = mode.strong_shear_demand_symbol();
-            let shear_formula = mode.strong_shear_margin_formula(shear_symbol);
-            let bond_formula = mode.strong_shear_margin_formula(bond_symbol);
             let (table_id, demand_note) = match mode {
                 UltimateDemandMode::StaticHinge => (
                     "ultimate_checks_static_hinge",
-                    "静的・両端ヒンジ略算。QL は長期せん断力の最大絶対値、Qmu は上限強度倍率·2·Mu/内法（RC梁は未算定）。",
+                    "静的・両端ヒンジ略算。QL は長期せん断力の最大絶対値です。RC柱の参考需要 Qmu は上限強度倍率·2·Mu/内法で求めます。終局せん断耐力と余裕度の算定には確定総応答が必要です。",
                 ),
                 UltimateDemandMode::ConfirmedTotal => (
                     "ultimate_checks_confirmed_total",
@@ -222,9 +177,9 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                 ),
             };
             ui.label(demand_note);
-            ui.label(format!(
-                "（比較需要が正の場合）強軸せん断余裕度 {shear_formula}、付着余裕度 {bond_formula}"
-            ));
+            if mode == UltimateDemandMode::ConfirmedTotal {
+                ui.label("強軸せん断余裕度 Qsu/|Qtotal|。付着余裕度 Kfb/τD");
+            }
             crate::table_util::standard_table(
                 ui,
                 table_id,
@@ -235,7 +190,8 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                     Col::num(&format!("{demand_symbol}[kN]")),
                     Col::num(&format!("{shear_symbol}[kN]")),
                     Col::num("せん断余裕度"),
-                    Col::num(&format!("{bond_symbol}[kN]")),
+                    Col::num("τD[N/mm²]"),
+                    Col::num("Kfb[N/mm²]"),
                     Col::num("付着余裕度"),
                     Col::label("検定結果"),
                 ],
@@ -296,10 +252,19 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                     row.col(|ui| {
                         if !include_bond {
                             ui.label("無効");
-                        } else if c.qbu.is_nan() {
-                            ui.label("未算定");
+                        } else if let Some(stress) = c.bond_stress {
+                            ui.label(format!("{:.3}", stress.demand_mpa));
                         } else {
-                            ui.label(format!("{:.1}", force_kn(c.qbu)));
+                            ui.label("未算定");
+                        }
+                    });
+                    row.col(|ui| {
+                        if !include_bond {
+                            ui.label("無効");
+                        } else if let Some(stress) = c.bond_stress {
+                            ui.label(format!("{:.3}", stress.capacity_mpa));
+                        } else {
+                            ui.label("未算定");
                         }
                     });
                     row.col(|ui| {
@@ -328,21 +293,11 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             );
 
             ui.add_space(4.0);
-            let (shear_note, bond_note) = if app.core.ultimate_shear_ductility {
-                (
-                    "Vu=靭性指針式の終局せん断信頼強度 min(Vu1,Vu2,Vu3)（トラス＋アーチ機構）",
-                    "Vbu=付着考慮せん断信頼強度 min(Vbu1,Vbu2)",
-                )
-            } else {
-                ("Qsu=塑性理論式の終局せん断強度", "Qbu=付着割裂耐力")
-            };
             ui.colored_label(
                 crate::theme::UI_MUTED,
-                format!(
-                    "{shear_note}、{bond_note}。\
+                "Qsu=荒川mean式の終局せん断耐力。τDは大地震時の付着応力度、Kfbはその許容値。\
                      余裕度が 1.0 未満（赤）の場合、採用した需要に対して NG。\
-                     対象は RC梁・RC矩形柱・RC円形柱。"
-                ),
+                     対象は RC梁・RC矩形柱・RC円形柱。",
             );
         }
     }

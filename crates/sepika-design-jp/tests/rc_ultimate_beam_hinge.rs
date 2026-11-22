@@ -8,7 +8,7 @@ use sepika_core::model::{
 };
 use sepika_core::section_shape::{RebarSize, SectionShape, StandardRebar};
 use sepika_design_jp::ultimate::{
-    collect_rc_ultimate_checks, MemberDemand, ShearMethod, StaticBeamHingeMechanism, UltimateCheck,
+    collect_rc_ultimate_checks, MemberDemand, StaticBeamHingeMechanism, UltimateCheck,
     UltimateShearOptions,
 };
 use sepika_solver::statics::linear::linear_static_once;
@@ -47,302 +47,6 @@ fn assert_unchecked(check: UltimateCheck, code: &str) {
         reason.contains(code) && reason.contains("member=0"),
         "{reason}"
     );
-}
-
-const NONFINITE_STIRRUP_PITCH: &str = "あばら筋間隔が非有限です";
-
-fn stirrup_pitch_beam() -> Model {
-    let mut model = beam_input::model(false);
-    model.nodes[1].restraint = Dof6Mask::FIXED;
-    model.ultimate_gravity_combination = Some(0);
-    model.elements[0].rigid_zone.face_i = Some(0.0);
-    model.elements[0].rigid_zone.face_j = Some(0.0);
-    model
-}
-
-fn set_stirrup_pitch(model: &mut Model, pitch_mm: f64, legs: u32) {
-    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape else {
-        unreachable!();
-    };
-    rebar.stirrup.pitch = pitch_mm;
-    rebar.stirrup.legs = legs;
-}
-
-fn stirrup_pitch_demands(shear_n: f64, rp: f64) -> [MemberDemand; 2] {
-    [
-        MemberDemand {
-            mz: 10e6,
-            q_long: Some(shear_n),
-            rp: Some(rp),
-            static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::IBottomJTop),
-            ..Default::default()
-        },
-        MemberDemand::from_pushover(0.0, 10e6, 0.0, shear_n, 0.0, rp),
-    ]
-}
-
-fn verify_shear_method(
-    model: &Model,
-    demand: MemberDemand,
-    shear_method: ShearMethod,
-    include_bond: bool,
-) -> UltimateCheck {
-    let checks = collect_rc_ultimate_checks(
-        model,
-        &[(ElemId(0), demand)],
-        &UltimateShearOptions {
-            shear_method,
-            include_bond,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    let [check] = checks.try_into().expect("RC梁1本の終局検定結果");
-    check
-}
-
-#[test]
-fn nonfinite_beam_stirrup_pitch_leaves_shear_and_bond_unchecked() {
-    for (method, expected_shear_n, expected_bond_n, shear_symbol, bond_symbol) in [
-        (
-            ShearMethod::Plastic,
-            299_879.016_7,
-            613_310.232_3,
-            "Qsu",
-            "Qbu",
-        ),
-        (
-            ShearMethod::Ductility,
-            167_809.631_0,
-            182_839.2,
-            "Vu",
-            "Vbu",
-        ),
-    ] {
-        for demand in stirrup_pitch_demands(30_000.0, 0.0) {
-            let mut model = stirrup_pitch_beam();
-            let reference = verify_shear_method(&model, demand, method, true);
-            for pitch_mm in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-                set_stirrup_pitch(&mut model, pitch_mm, 2);
-                let check = verify_shear_method(&model, demand, method, true);
-                let reason = check.unchecked_reason.as_deref().unwrap_or("");
-                assert!(reason.contains(NONFINITE_STIRRUP_PITCH), "{check:?}");
-                assert!(reason.contains("member=0"), "{reason}");
-                assert!(!check.ok && check.qsu.is_nan() && check.shear_margin.is_nan());
-                assert!(check.qbu.is_nan() && check.bond_margin.is_nan());
-                assert_eq!(check.mu, reference.mu);
-                assert!(check.mu > 0.0);
-                if reference.qmu.is_nan() {
-                    assert!(check.qmu.is_nan());
-                    assert!(reason.contains("ultimate_beam_hinge_shear_upper_bound_unverified:"));
-                } else {
-                    assert_eq!(check.qmu, 30_000.0);
-                }
-                assert!(check.detail.contains(&format!("{shear_symbol}=未算定")));
-                assert!(check.detail.contains(&format!("{bond_symbol}=未算定")));
-
-                let disabled = verify_shear_method(&model, demand, method, false);
-                assert!(!disabled.ok && disabled.qsu.is_nan() && disabled.shear_margin.is_nan());
-                assert_eq!(disabled.qbu, 0.0);
-                assert!(disabled.detail.contains(&format!("{bond_symbol}=無効")));
-            }
-            assert!(
-                (reference.qsu - expected_shear_n).abs() < 0.001,
-                "{reference:?}"
-            );
-            assert!(
-                (reference.qbu - expected_bond_n).abs() < 0.001,
-                "{reference:?}"
-            );
-        }
-    }
-}
-
-#[test]
-fn nonfinite_beam_stirrup_pitch_preserves_zero_area_path() {
-    for method in [ShearMethod::Plastic, ShearMethod::Ductility] {
-        for demand in stirrup_pitch_demands(30_000.0, 0.0) {
-            let mut model = stirrup_pitch_beam();
-            for (pitch_mm, expected_shear_n, expected_bond_n) in [
-                (
-                    100.0,
-                    [35_404.932_1, 31_972.5],
-                    [114_959.388_8, 99_546.993_9],
-                ),
-                (
-                    f64::NAN,
-                    [35_404.932_1, 31_972.5],
-                    [114_959.388_8, 103_959.582_0],
-                ),
-                (f64::INFINITY, [35_404.932_1, 0.0], [114_959.388_8, 0.0]),
-                (
-                    f64::NEG_INFINITY,
-                    [35_404.932_1, 31_972.5],
-                    [114_959.388_8, 103_959.582_0],
-                ),
-            ] {
-                set_stirrup_pitch(&mut model, pitch_mm, 0);
-                let check = verify_shear_method(&model, demand, method, true);
-                let index = usize::from(method == ShearMethod::Ductility);
-                assert!(
-                    (check.qsu - expected_shear_n[index]).abs() < 0.001,
-                    "{check:?}"
-                );
-                assert!(
-                    (check.qbu - expected_bond_n[index]).abs() < 0.001,
-                    "{check:?}"
-                );
-                assert!(!check.detail.contains(NONFINITE_STIRRUP_PITCH));
-            }
-        }
-    }
-}
-
-#[test]
-fn independently_confirmed_beam_shear_failure_preserves_pitch_and_material_diagnostics() {
-    for (method, fc, rp) in [
-        (ShearMethod::Plastic, 140.0, 0.0),
-        (ShearMethod::Ductility, 24.0, 0.05),
-    ] {
-        for demand in stirrup_pitch_demands(30_000.0, rp) {
-            let mut model = stirrup_pitch_beam();
-            model.materials[0].fc = Some(fc);
-            let mut round = beam_input::material("SR295", MaterialCategory::Rebar);
-            round.id = MaterialId(2);
-            model.sections[0].rebar_material = Some(round.id);
-            model.materials.push(round);
-            let mut stirrup = beam_input::material("SD345", MaterialCategory::Rebar);
-            stirrup.id = MaterialId(3);
-            stirrup.fy = Some(f64::NAN);
-            model.sections[0].shear_rebar_material = Some(stirrup.id);
-            model.materials.push(stirrup);
-            set_stirrup_pitch(&mut model, f64::NAN, 2);
-
-            let check = verify_shear_method(&model, demand, method, true);
-            assert!(!check.ok && check.unchecked_reason.is_none(), "{check:?}");
-            assert_eq!(check.qsu, 0.0);
-            assert_eq!(check.shear_margin, 0.0);
-            assert!(check.qbu.is_nan() && check.bond_margin.is_nan());
-            for reason in [
-                NONFINITE_STIRRUP_PITCH,
-                "ultimate_bond_round_bar_unsupported:",
-                "降伏強度",
-            ] {
-                assert!(check.detail.contains(reason), "{check:?}");
-            }
-        }
-    }
-}
-
-#[test]
-fn ductility_zero_truss_upper_bound_preserves_independent_failure() {
-    for (width_mm, rp) in [(250.0, 0.05), (1_750.0, 0.0)] {
-        for demand in stirrup_pitch_demands(30_000.0, rp) {
-            let mut model = stirrup_pitch_beam();
-            model.sections[0] = beam_input::section(width_mm, 350.0, 19.0, &[3], &[3]);
-            set_stirrup_pitch(&mut model, f64::NAN, 2);
-            let check = verify_shear_method(&model, demand, ShearMethod::Ductility, true);
-            assert!(!check.ok && check.unchecked_reason.is_none(), "{check:?}");
-            assert_eq!((check.qsu, check.qbu), (0.0, 0.0));
-            assert_eq!((check.shear_margin, check.bond_margin), (0.0, 0.0));
-            assert!(check.detail.contains("τbu=未算定"));
-            assert!(check.detail.contains(NONFINITE_STIRRUP_PITCH));
-        }
-    }
-}
-
-#[test]
-fn confirmed_total_plastic_bond_failure_without_tension_bars_survives_nonfinite_stirrup_pitch() {
-    let mut model = stirrup_pitch_beam();
-    model.sections[0] = beam_input::section(250.0, 350.0, 19.0, &[], &[3]);
-    for pitch_mm in [100.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        set_stirrup_pitch(&mut model, pitch_mm, 2);
-        let demand = MemberDemand::from_pushover(0.0, -10e6, 0.0, 50_000.0, 0.0, 0.0);
-        let check = verify_shear_method(&model, demand, ShearMethod::Plastic, true);
-        assert!(check.mu.is_nan());
-        assert!(!check.ok && check.unchecked_reason.is_none());
-        assert!((check.qbu - 35_404.932_1).abs() < 0.001, "{check:?}");
-        assert!((check.bond_margin - 0.708_098_641_4).abs() < 1e-9);
-        assert_eq!(
-            check.detail.contains(NONFINITE_STIRRUP_PITCH),
-            !pitch_mm.is_finite()
-        );
-        if !pitch_mm.is_finite() {
-            assert!(check.qsu.is_nan() && check.shear_margin.is_nan());
-
-            let mut wrong_category = model.clone();
-            let mut stirrup = beam_input::material("SD345", MaterialCategory::Rebar);
-            stirrup.id = MaterialId(2);
-            stirrup.category = MaterialCategory::Steel;
-            wrong_category.sections[0].shear_rebar_material = Some(stirrup.id);
-            wrong_category.materials.push(stirrup);
-            let combined = verify_shear_method(&wrong_category, demand, ShearMethod::Plastic, true);
-            assert!(!combined.ok && combined.unchecked_reason.is_none());
-            assert_eq!(combined.qbu, check.qbu);
-            assert_eq!(combined.bond_margin, check.bond_margin);
-            assert!(combined.detail.contains(NONFINITE_STIRRUP_PITCH));
-            assert!(combined
-                .detail
-                .contains("せん断補強筋材料「SD345」の材料区分"));
-        }
-    }
-}
-
-#[test]
-fn confirmed_total_zero_bond_with_tension_axial_or_zero_top_factor_survives_nonfinite_pitch() {
-    for (method, fc, top, axial_n, expected_shear_n) in [
-        (
-            ShearMethod::Ductility,
-            24.0,
-            &[][..],
-            -10_000.0,
-            215_865.483_1,
-        ),
-        (ShearMethod::Plastic, 300.0, &[3][..], 0.0, 0.0),
-    ] {
-        let mut model = stirrup_pitch_beam();
-        model.sections[0] = beam_input::section(250.0, 350.0, 19.0, top, &[3]);
-        model.materials[0].fc = Some(fc);
-        let demand = MemberDemand::from_pushover(axial_n, -10e6, 0.0, 30_000.0, 0.0, 0.0);
-        for pitch_mm in [100.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            set_stirrup_pitch(&mut model, pitch_mm, 2);
-            let check = verify_shear_method(&model, demand, method, true);
-            assert_eq!((check.qbu, check.bond_margin), (0.0, 0.0), "{check:?}");
-            assert!(check.detail.contains("τbu=0.000 N/mm²"), "{check:?}");
-            assert!(!check.ok && check.unchecked_reason.is_none());
-            assert_eq!(
-                check.detail.contains(NONFINITE_STIRRUP_PITCH),
-                !pitch_mm.is_finite()
-            );
-            if !pitch_mm.is_finite() && method == ShearMethod::Ductility {
-                assert!(check.qsu.is_nan() && check.shear_margin.is_nan());
-            } else {
-                assert!((check.qsu - expected_shear_n).abs() < 0.001, "{check:?}");
-            }
-        }
-    }
-}
-
-#[test]
-fn static_beam_bond_failure_requires_independent_capacity_on_both_tension_sides() {
-    let mut model = stirrup_pitch_beam();
-    model.materials[0].fc = Some(300.0);
-    for (pitch_mm, expected_margin) in [(100.0, 0.0), (f64::NAN, f64::NAN)] {
-        set_stirrup_pitch(&mut model, pitch_mm, 2);
-        let demand = MemberDemand {
-            mz: -10e6,
-            q_long: Some(2e6),
-            static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
-            ..Default::default()
-        };
-        let check = verify_shear_method(&model, demand, ShearMethod::Plastic, true);
-        assert_eq!((check.qbu, check.shear_margin), (0.0, 0.0), "{check:?}");
-        assert!(!check.ok && check.unchecked_reason.is_none());
-        assert_eq!(check.bond_margin.is_nan(), expected_margin.is_nan());
-        if expected_margin.is_finite() {
-            assert_eq!(check.bond_margin, expected_margin);
-        }
-    }
 }
 
 #[test]
@@ -399,7 +103,7 @@ fn beam_end_restraints_and_gravity_moment_cannot_verify_the_hinge_mechanism() {
                 ..Default::default()
             },
         );
-        assert!(check.mu.is_finite() && check.qsu.is_finite() && check.qbu.is_finite());
+        assert!(check.mu.is_finite() && check.qsu.is_nan() && check.bond_stress.is_none());
         assert_unchecked(check, "ultimate_beam_hinge_mechanism_unverified:");
     }
 }
@@ -669,11 +373,18 @@ fn asymmetric_beam_returns_directional_reference_mu_and_withholds_static_hinge_d
 
         let result = verify(
             &model,
-            MemberDemand::from_pushover(0.0, moment, 0.0, 30_000.0, 0.0, 0.0),
+            MemberDemand {
+                min_axial_for_shear_n: Some(0.0),
+                ..MemberDemand::from_pushover(0.0, moment, 0.0, 30_000.0, 0.0, 0.0)
+            },
         );
         assert!((result.mu - mu_n_mm).abs() < 1e-6, "{result:?}");
         assert_eq!(result.qmu, 30_000.0);
-        assert!(result.ok && result.unchecked_reason.is_none(), "{result:?}");
+        assert!(
+            !result.ok && result.unchecked_reason.is_some(),
+            "{result:?}"
+        );
+        assert!(result.shear_margin > 1.0 && result.bond_stress.is_none());
         assert!(result.detail.contains("参考曲げ略算 Mu") && result.detail.contains(side));
         assert!(result
             .detail
@@ -709,130 +420,14 @@ fn static_hinge_shear_is_withheld_when_the_reference_demand_can_underestimate_it
     .unwrap()
     .remove(0);
     assert!((result.mu - 97_943_033.25).abs() < 1e-6, "{result:?}");
-    let old_demand_n = 48_971.516_625;
-    let reference_q_n = 54_677.241;
-    let remaining_n = result.qsu - q_long_n;
     assert!(
-        old_demand_n < remaining_n && remaining_n < reference_q_n,
+        result.qsu.is_nan() && result.shear_margin.is_nan(),
         "{result:?}"
     );
-    assert_unchecked(result, "ultimate_beam_hinge_shear_upper_bound_unverified:");
-}
-
-#[test]
-fn confirmed_total_shear_is_compared_even_when_reference_mu_cannot_be_calculated() {
-    let mut model = fully_fixed_beam();
-    model.sections[0] = beam_input::section(350.0, 610.0, 19.0, &[], &[2]);
-    let options = UltimateShearOptions {
-        include_bond: false,
-        ..Default::default()
-    };
-    for (q_n, ok) in [(30_000.0, true), (1_000_000.0, false)] {
-        let result = collect_rc_ultimate_checks(
-            &model,
-            &[(
-                ElemId(0),
-                MemberDemand::from_pushover(0.0, -10e6, 0.0, -q_n, 0.0, 0.0),
-            )],
-            &options,
-        )
+    assert!(result.bond_margin.is_infinite());
+    assert!(result
+        .unchecked_reason
+        .as_deref()
         .unwrap()
-        .remove(0);
-        assert_eq!(result.qmu, q_n);
-        assert_eq!(result.ok, ok);
-        assert_eq!(result.unchecked_reason, None);
-        assert!(result.mu.is_nan());
-        assert!(result.detail.contains("参考曲げ略算 Muは未算定"));
-        assert!(result.detail.contains("上端引張: 引張主筋がありません"));
-    }
-}
-
-#[test]
-fn static_shear_can_fail_on_gravity_response_without_confirming_hinge_demand() {
-    let model = fully_fixed_beam();
-    let opts = UltimateShearOptions {
-        include_bond: false,
-        ..Default::default()
-    };
-    let demand = MemberDemand {
-        static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
-        ..Default::default()
-    };
-    let capacity = collect_rc_ultimate_checks(
-        &model,
-        &[(
-            ElemId(0),
-            MemberDemand::from_pushover(0.0, -10e6, 0.0, 0.0, 0.0, 0.0),
-        )],
-        &opts,
-    )
-    .unwrap()[0]
-        .qsu;
-    assert!(capacity.is_finite() && capacity > 0.0);
-    for (ql, fails) in [(capacity, false), (capacity.next_up(), true)] {
-        let result = collect_rc_ultimate_checks(
-            &model,
-            &[(
-                ElemId(0),
-                MemberDemand {
-                    q_long: Some(-ql),
-                    ..demand
-                },
-            )],
-            &opts,
-        )
-        .unwrap()
-        .remove(0);
-        assert!(result.qmu.is_nan() && !result.ok);
-        if fails {
-            assert_eq!(result.shear_margin, 0.0);
-            assert_eq!(result.unchecked_reason, None);
-            assert!(result.detail.contains("がせん断耐力を超えます"));
-        } else {
-            assert_unchecked(result, "ultimate_beam_hinge_shear_upper_bound_unverified:");
-        }
-    }
-}
-
-#[test]
-fn static_bond_can_fail_on_gravity_response_only_if_both_directions_are_over_capacity() {
-    let mut model = fully_fixed_beam();
-    model.sections[0] = beam_input::section(400.0, 600.0, 22.0, &[1], &[1]);
-    let top = verify(
-        &model,
-        MemberDemand::from_pushover(0.0, -10e6, 0.0, 0.0, 0.0, 0.0),
-    );
-    let bottom = verify(
-        &model,
-        MemberDemand::from_pushover(0.0, 10e6, 0.0, 0.0, 0.0, 0.0),
-    );
-    assert!(0.0 < top.qbu && top.qbu < bottom.qbu && bottom.qbu < top.qsu);
-    for mechanism in [
-        StaticBeamHingeMechanism::ITopJBottom,
-        StaticBeamHingeMechanism::IBottomJTop,
-    ] {
-        for (ql, fails) in [
-            (top.qbu.next_up(), false),
-            (bottom.qbu, false),
-            (bottom.qbu.next_up(), true),
-        ] {
-            let result = verify(
-                &model,
-                MemberDemand {
-                    q_long: Some(ql),
-                    static_beam_hinge_mechanism: Some(mechanism),
-                    ..Default::default()
-                },
-            );
-            assert!(result.qmu.is_nan() && !result.ok);
-            if fails {
-                assert_eq!(result.bond_margin, 0.0);
-                assert!(result.shear_margin.is_nan());
-                assert_eq!(result.unchecked_reason, None);
-                assert!(result.detail.contains("双方の付着耐力を超えます"));
-            } else {
-                assert_unchecked(result, "ultimate_beam_hinge_shear_upper_bound_unverified:");
-            }
-        }
-    }
+        .contains("ultimate_beam_hinge_shear_upper_bound_unverified:"));
 }

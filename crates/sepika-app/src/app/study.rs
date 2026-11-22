@@ -3,17 +3,15 @@ mod comparison;
 use super::*;
 use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct StudySettings {
     pub design_term: LoadTerm,
     pub design_frame: sepika_design_jp::secondary::holding_capacity::FrameType,
     pub design_rank: sepika_design_jp::secondary::holding_capacity::MemberRank,
     pub design_rank_auto: bool,
     pub wall_structure: bool,
-    pub ultimate_rp: f64,
-    pub ultimate_lightweight: bool,
     pub ultimate_include_bond: bool,
     pub ultimate_upper_factor: f64,
-    pub ultimate_shear_ductility: bool,
     pub ultimate_biaxial_shear: bool,
     pub ultimate_biaxial_bending: bool,
     pub ultimate_use_pushover: bool,
@@ -34,11 +32,8 @@ impl StudySettings {
             design_rank: core.design_rank,
             design_rank_auto: core.design_rank_auto,
             wall_structure: core.wall_structure,
-            ultimate_rp: core.ultimate_rp,
-            ultimate_lightweight: core.ultimate_lightweight,
             ultimate_include_bond: core.ultimate_include_bond,
             ultimate_upper_factor: core.ultimate_upper_factor,
-            ultimate_shear_ductility: core.ultimate_shear_ductility,
             ultimate_biaxial_shear: core.ultimate_biaxial_shear,
             ultimate_biaxial_bending: core.ultimate_biaxial_bending,
             ultimate_use_pushover: core.ultimate_use_pushover,
@@ -51,11 +46,8 @@ impl StudySettings {
         core.design_rank = self.design_rank;
         core.design_rank_auto = self.design_rank_auto;
         core.wall_structure = self.wall_structure;
-        core.ultimate_rp = self.ultimate_rp;
-        core.ultimate_lightweight = self.ultimate_lightweight;
         core.ultimate_include_bond = self.ultimate_include_bond;
         core.ultimate_upper_factor = self.ultimate_upper_factor;
-        core.ultimate_shear_ductility = self.ultimate_shear_ductility;
         core.ultimate_biaxial_shear = self.ultimate_biaxial_shear;
         core.ultimate_biaxial_bending = self.ultimate_biaxial_bending;
         core.ultimate_use_pushover = self.ultimate_use_pushover;

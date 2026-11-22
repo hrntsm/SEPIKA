@@ -2068,6 +2068,7 @@ mod tests {
                 shear_strong: 0.0,
                 shear_weak: 0.0,
                 axial: 0.0,
+                min_axial_for_shear_n: None,
                 rp: 0.0,
                 horizontal_force: 0.0,
                 wall_shear_signed: None,

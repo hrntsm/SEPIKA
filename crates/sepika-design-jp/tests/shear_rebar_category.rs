@@ -10,7 +10,7 @@ use sepika_core::ids::{ElemId, MaterialId};
 use sepika_core::model::{default_combinations, default_load_cases, MaterialCategory, Model};
 use sepika_core::section_shape::{RebarSize, SectionShape, StandardRebar};
 use sepika_design_jp::ultimate::{
-    collect_rc_ultimate_checks, MemberDemand, ShearMethod, StaticBeamHingeMechanism, UltimateCheck,
+    collect_rc_ultimate_checks, MemberDemand, StaticBeamHingeMechanism, UltimateCheck,
     UltimateShearOptions,
 };
 use sepika_design_jp::{
@@ -285,53 +285,61 @@ fn ultimate_withholds_shear_and_bond_and_keeps_independent_moment_and_axial_capa
             static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
             ..Default::default()
         };
-        let total_demand = MemberDemand::from_pushover(0.0, 1e6, 0.0, 1000.0, 0.0, 0.0);
-        for shear_method in [ShearMethod::Plastic, ShearMethod::Ductility] {
-            let opts = UltimateShearOptions {
-                shear_method,
-                biaxial_shear: true,
-                biaxial_bending: true,
-                ..Default::default()
-            };
-            for demand in [static_demand, total_demand] {
-                let normal = ultimate(&model, demand, &opts);
-                assert!(normal.qsu.is_finite() && normal.qsu > 0.0, "{normal:?}");
-                assert!(normal.qbu.is_finite() && normal.qbu > 0.0, "{normal:?}");
+        let total_demand = MemberDemand {
+            min_axial_for_shear_n: Some(0.0),
+            ..MemberDemand::from_pushover(0.0, 1e6, 0.0, 1000.0, 0.0, 0.0)
+        };
+        let opts = UltimateShearOptions {
+            biaxial_shear: true,
+            biaxial_bending: true,
+            ..Default::default()
+        };
+        for demand in [static_demand, total_demand] {
+            let normal = ultimate(&model, demand, &opts);
+            assert_eq!(
+                normal.qsu.is_finite(),
+                demand.shear.is_some()
+                    && !matches!(
+                        model.sections[0].shape,
+                        Some(SectionShape::RcColumnCircle { .. })
+                    ),
+                "{normal:?}"
+            );
+            assert!(normal.bond_stress.is_none(), "{normal:?}");
 
-                let original = assign_shear_rebar(&mut model, MaterialCategory::Steel);
-                let partial = ultimate(&model, demand, &opts);
-                assert!(!partial.ok);
-                assert_diagnostic(
-                    partial.unchecked_reason.as_deref().unwrap(),
-                    &model,
-                    member,
-                    MaterialCategory::Steel,
-                );
-                assert!(partial.qsu.is_nan() && partial.shear_margin.is_nan());
-                assert!(partial.qbu.is_nan() && partial.bond_margin.is_nan());
-                assert!(partial.biaxial_shear_margin.is_none());
-                assert_eq!(partial.mu, normal.mu);
-                assert_eq!(
-                    partial.biaxial_bending_margin,
-                    normal.biaxial_bending_margin
-                );
-                let axial = |check: &UltimateCheck| check.axial.map(|axial| (axial.nuc, axial.nut));
-                assert_eq!(axial(&partial), axial(&normal));
-                if member == "RC柱" {
-                    let failed = ultimate(&model, MemberDemand { mz: 10e9, ..demand }, &opts);
-                    assert!(failed.biaxial_bending_margin.unwrap() < 1.0);
-                    assert!(!failed.ok && failed.unchecked_reason.is_none());
-                    assert_diagnostic(&failed.detail, &model, member, MaterialCategory::Steel);
-                }
-
-                model.materials[model.sections[0].shear_rebar_material.unwrap().index()].category =
-                    MaterialCategory::Rebar;
-                let repaired = ultimate(&model, demand, &opts);
-                assert_eq!(repaired.detail, normal.detail);
-                assert_eq!(repaired.ok, normal.ok);
-                assert_eq!(repaired.unchecked_reason, normal.unchecked_reason);
-                model.sections[0].shear_rebar_material = Some(original);
+            let original = assign_shear_rebar(&mut model, MaterialCategory::Steel);
+            let partial = ultimate(&model, demand, &opts);
+            assert!(!partial.ok);
+            assert_diagnostic(
+                partial.unchecked_reason.as_deref().unwrap(),
+                &model,
+                member,
+                MaterialCategory::Steel,
+            );
+            assert!(partial.qsu.is_nan() && partial.shear_margin.is_nan());
+            assert!(partial.bond_stress.is_none() && partial.bond_margin.is_nan());
+            assert!(partial.biaxial_shear_margin.is_none());
+            assert_eq!(partial.mu, normal.mu);
+            assert_eq!(
+                partial.biaxial_bending_margin,
+                normal.biaxial_bending_margin
+            );
+            let axial = |check: &UltimateCheck| check.axial.map(|axial| (axial.nuc, axial.nut));
+            assert_eq!(axial(&partial), axial(&normal));
+            if member == "RC柱" {
+                let failed = ultimate(&model, MemberDemand { mz: 10e9, ..demand }, &opts);
+                assert!(failed.biaxial_bending_margin.unwrap() < 1.0);
+                assert!(!failed.ok && failed.unchecked_reason.is_none());
+                assert_diagnostic(&failed.detail, &model, member, MaterialCategory::Steel);
             }
+
+            model.materials[model.sections[0].shear_rebar_material.unwrap().index()].category =
+                MaterialCategory::Rebar;
+            let repaired = ultimate(&model, demand, &opts);
+            assert_eq!(repaired.detail, normal.detail);
+            assert_eq!(repaired.ok, normal.ok);
+            assert_eq!(repaired.unchecked_reason, normal.unchecked_reason);
+            model.sections[0].shear_rebar_material = Some(original);
         }
     }
 }
@@ -344,64 +352,180 @@ fn ultimate_requires_finite_positive_shear_rebar_fy() {
         let material_id = model.sections[0].shear_rebar_material.unwrap();
         let original_fy = model.materials[material_id.index()].fy;
         let demand = MemberDemand {
-            mz: 1e6,
-            q_long: Some(0.0),
-            q_long_weak: Some(0.0),
-            static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
-            ..Default::default()
+            min_axial_for_shear_n: Some(0.0),
+            ..MemberDemand::from_pushover(0.0, 1e6, 0.0, 1000.0, 0.0, 0.0)
         };
 
-        for shear_method in [ShearMethod::Plastic, ShearMethod::Ductility] {
-            let opts = UltimateShearOptions {
-                shear_method,
-                biaxial_shear: true,
-                biaxial_bending: true,
-                ..Default::default()
-            };
-            let normal = ultimate(&model, demand, &opts);
-            assert!(normal.qsu.is_finite() && normal.qsu > 0.0, "{normal:?}");
-            assert!(normal.qbu.is_finite() && normal.qbu > 0.0, "{normal:?}");
-            for fy in [
-                Some(f64::INFINITY),
-                Some(f64::NAN),
-                Some(f64::NEG_INFINITY),
-                Some(0.0),
-                Some(-1.0),
-            ] {
-                model.materials[material_id.index()].fy = fy;
-                let partial = ultimate(&model, demand, &opts);
-                assert!(!partial.ok);
-                assert_fy_diagnostic(partial.unchecked_reason.as_deref().unwrap(), member);
-                assert!(partial.qsu.is_nan() && partial.shear_margin.is_nan());
-                assert_eq!(partial.qbu, normal.qbu);
-                if normal.bond_margin.is_nan() {
-                    assert!(partial.bond_margin.is_nan());
-                } else {
-                    assert_eq!(partial.bond_margin, normal.bond_margin);
-                }
-                assert!(partial.biaxial_shear_margin.is_none());
-                assert_eq!(partial.mu, normal.mu);
-                assert_eq!(
-                    partial.biaxial_bending_margin,
-                    normal.biaxial_bending_margin
-                );
-                let axial =
-                    |result: &UltimateCheck| result.axial.map(|axial| (axial.nuc, axial.nut));
-                assert_eq!(axial(&partial), axial(&normal));
-                if member == "RC柱" {
-                    let failed = ultimate(&model, MemberDemand { mz: 10e9, ..demand }, &opts);
-                    assert!(failed.biaxial_bending_margin.unwrap() < 1.0);
-                    assert!(!failed.ok && failed.unchecked_reason.is_none());
-                    assert_fy_diagnostic(&failed.detail, member);
-                }
+        let opts = UltimateShearOptions {
+            biaxial_shear: true,
+            biaxial_bending: true,
+            ..Default::default()
+        };
+        let normal = ultimate(&model, demand, &opts);
+        assert_eq!(
+            normal.qsu.is_finite(),
+            !matches!(
+                model.sections[0].shape,
+                Some(SectionShape::RcColumnCircle { .. })
+            ),
+            "{normal:?}"
+        );
+        assert!(normal.bond_stress.is_none(), "{normal:?}");
+        for fy in [
+            Some(f64::INFINITY),
+            Some(f64::NAN),
+            Some(f64::NEG_INFINITY),
+            Some(0.0),
+            Some(-1.0),
+        ] {
+            model.materials[material_id.index()].fy = fy;
+            let partial = ultimate(&model, demand, &opts);
+            assert!(!partial.ok);
+            assert_fy_diagnostic(partial.unchecked_reason.as_deref().unwrap(), member);
+            assert!(partial.qsu.is_nan() && partial.shear_margin.is_nan());
+            assert!(partial.bond_stress.is_none() && normal.bond_stress.is_none());
+            if normal.bond_margin.is_nan() {
+                assert!(partial.bond_margin.is_nan());
+            } else {
+                assert_eq!(partial.bond_margin, normal.bond_margin);
             }
-            model.materials[material_id.index()].fy = original_fy;
-            let repaired = ultimate(&model, demand, &opts);
+            assert!(partial.biaxial_shear_margin.is_none());
+            assert_eq!(partial.mu, normal.mu);
+            assert_eq!(
+                partial.biaxial_bending_margin,
+                normal.biaxial_bending_margin
+            );
+            let axial = |result: &UltimateCheck| result.axial.map(|axial| (axial.nuc, axial.nut));
+            assert_eq!(axial(&partial), axial(&normal));
+            if member == "RC柱" {
+                let failed = ultimate(&model, MemberDemand { mz: 10e9, ..demand }, &opts);
+                assert!(failed.biaxial_bending_margin.unwrap() < 1.0);
+                assert!(!failed.ok && failed.unchecked_reason.is_none());
+                assert_fy_diagnostic(&failed.detail, member);
+            }
+        }
+        model.materials[material_id.index()].fy = original_fy;
+        let repaired = ultimate(&model, demand, &opts);
+        if normal.qsu.is_finite() {
             assert_eq!(repaired.qsu, normal.qsu);
-            assert_eq!(repaired.qbu, normal.qbu);
-            assert_eq!(repaired.unchecked_reason, normal.unchecked_reason);
+        }
+        assert!(repaired.bond_stress.is_none() && normal.bond_stress.is_none());
+        assert_eq!(repaired.unchecked_reason, normal.unchecked_reason);
+    }
+}
+
+#[test]
+fn arakawa_mean_uses_unamplified_shear_rebar_strength_and_checks_its_limits() {
+    let demand = MemberDemand {
+        min_axial_for_shear_n: Some(0.0),
+        ..MemberDemand::from_pushover(0.0, 1e6, 1e6, 1000.0, 1000.0, 0.0)
+    };
+    let opts = UltimateShearOptions {
+        include_bond: false,
+        biaxial_shear: true,
+        ..Default::default()
+    };
+    for (mut model, _) in rc_members().into_iter().take(2) {
+        set_ultimate_input(&mut model);
+        assign_shear_rebar(&mut model, MaterialCategory::Rebar);
+        let material = model.sections[0].shear_rebar_material.unwrap().index();
+        for (grade, nominal, expected_reason) in [
+            ("SR295", 295.0_f64, "強度上限"),
+            ("SD490", 490.0, "強度上限"),
+            ("SD345", 345.0, "材種の基準強度を超えています"),
+        ] {
+            model.materials[material].name = grade.into();
+            model.materials[material].fy = Some(nominal);
+            model.materials[material].strength_factor = None;
+            let baseline = ultimate(&model, demand, &opts);
+            assert!(
+                baseline.qsu > 0.0 && baseline.shear_margin.is_finite(),
+                "{baseline:?}"
+            );
+
+            model.materials[material].strength_factor = Some(1.1);
+            let not_amplified = ultimate(&model, demand, &opts);
+            assert_eq!(not_amplified.qsu, baseline.qsu);
+            assert_eq!(
+                not_amplified.biaxial_shear_margin,
+                baseline.biaxial_shear_margin
+            );
+
+            model.materials[material].fy = Some(nominal.next_up());
+            let above = ultimate(&model, demand, &opts);
+            assert!(
+                above.qsu.is_nan() && above.shear_margin.is_nan(),
+                "{above:?}"
+            );
+            assert_eq!(above.biaxial_shear_margin, None);
+            assert!(
+                above
+                    .unchecked_reason
+                    .as_deref()
+                    .unwrap()
+                    .contains(expected_reason),
+                "{above:?}"
+            );
+            assert_eq!(above.mu, baseline.mu);
         }
     }
+}
+
+#[test]
+fn arakawa_mean_strength_limit_preserves_independent_bond_failure() {
+    use sepika_design_jp::ultimate::{
+        RcUltimateBondAxis, RcUltimateBondBar, RcUltimateBondConfinement, RcUltimateBondDemand,
+        RcUltimateBondInput, RcUltimateBondPlacement, RcUltimateThroughBarYield,
+    };
+
+    let mut model = rc_beam::model(false);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape else {
+        unreachable!()
+    };
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D19);
+    set_ultimate_input(&mut model);
+    assign_shear_rebar(&mut model, MaterialCategory::Rebar);
+    let material = model.sections[0].shear_rebar_material.unwrap().index();
+    model.materials[material].fy = Some(346.0);
+    let demand = MemberDemand {
+        min_axial_for_shear_n: Some(0.0),
+        bond: Some(RcUltimateBondDemand::Single(RcUltimateBondInput {
+            bar: RcUltimateBondBar::Through {
+                clear_span_mm: 3000.0,
+                cutoff_unnecessary_distance_mm: None,
+                yielding: RcUltimateThroughBarYield::BothEnds,
+            },
+            axis: RcUltimateBondAxis::Strong,
+            bar_designation_mm: 19.0,
+            effective_depth_mm: 290.5,
+            design_yield_stress_mpa: Some(345.0),
+            placement: RcUltimateBondPlacement::TopCast,
+            confinement: Some(RcUltimateBondConfinement {
+                clear_spacing_mm: 10.0,
+                minimum_cover_mm: 40.0,
+                splitting_plane_bar_count: 3,
+                transverse_rebar: None,
+            }),
+        })),
+        ..MemberDemand::from_pushover(0.0, 1e6, 0.0, 1000.0, 0.0, 0.0)
+    };
+    let result = ultimate(&model, demand, &UltimateShearOptions::default());
+    assert!(
+        result.qsu.is_nan() && result.shear_margin.is_nan(),
+        "{result:?}"
+    );
+    assert!(
+        result.bond_stress.is_some() && result.bond_margin < 1.0,
+        "{result:?}"
+    );
+    assert!(
+        !result.ok && result.unchecked_reason.is_none(),
+        "{result:?}"
+    );
+    assert!(
+        result.detail.contains("材種の基準強度を超えています"),
+        "{result:?}"
+    );
 }
 
 fn assert_fy_diagnostic(reason: &str, member: &str) {
@@ -435,121 +559,35 @@ fn allowable_shear_uses_the_supported_grade_table_with_infinite_fy() {
 }
 
 #[test]
-fn static_ultimate_keeps_independent_shear_and_bond_failures_with_invalid_fy() {
-    for (mut model, member) in rc_members() {
-        set_ultimate_input(&mut model);
-        match model.sections[0].shape.as_mut().unwrap() {
-            SectionShape::RcBeamRect { rebar, .. } => rebar.stirrup.pitch = 0.0,
-            SectionShape::RcColumnRect { rebar, .. } => rebar.hoop.pitch = 0.0,
-            SectionShape::RcColumnCircle { rebar, .. } => rebar.hoop.pitch = 0.0,
-            _ => unreachable!(),
-        }
-        let demand = MemberDemand {
-            mz: -1e7,
-            q_long: Some(10e6),
-            static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
-            ..Default::default()
-        };
-        let opts = UltimateShearOptions {
-            shear_method: ShearMethod::Plastic,
-            ..Default::default()
-        };
-        let baseline = ultimate(&model, demand, &opts);
-        assign_shear_rebar(&mut model, MaterialCategory::Rebar);
-        model.materials.last_mut().unwrap().fy = Some(f64::INFINITY);
-        let partial = ultimate(&model, demand, &opts);
-        assert_eq!(partial.qsu, baseline.qsu);
-        assert_eq!(partial.qbu, baseline.qbu);
-        assert_eq!(partial.shear_margin, baseline.shear_margin);
-        assert_eq!(partial.bond_margin, baseline.bond_margin);
-        assert!(partial.shear_margin < 1.0 && partial.bond_margin < 1.0);
-        assert!(!partial.ok && partial.unchecked_reason.is_none());
-        assert_fy_diagnostic(&partial.detail, member);
-    }
-}
-
-#[test]
-fn static_ultimate_keeps_bond_failure_with_positive_stirrup_ratio_and_invalid_fy() {
-    let mut model = rc_beam::model(false);
-    set_ultimate_input(&mut model);
-    let Some(SectionShape::RcBeamRect { b, rebar, .. }) = &model.sections[0].shape else {
-        unreachable!()
-    };
-    assert!(rebar.pw(*b) > 0.0);
-    let demand = MemberDemand {
-        mz: -1e7,
-        q_long: Some(10e6),
-        static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
-        ..Default::default()
-    };
-    let baseline = model.clone();
-    assign_shear_rebar(&mut model, MaterialCategory::Rebar);
-    model.materials.last_mut().unwrap().fy = Some(f64::INFINITY);
-
-    for shear_method in [ShearMethod::Plastic, ShearMethod::Ductility] {
-        let opts = UltimateShearOptions {
-            shear_method,
-            ..Default::default()
-        };
-        let normal = ultimate(&baseline, demand, &opts);
-        let partial = ultimate(&model, demand, &opts);
-        assert!(partial.qsu.is_nan() && partial.shear_margin.is_nan());
-        assert!(partial.qbu.is_finite() && partial.qbu > 0.0);
-        assert_eq!(partial.qbu, normal.qbu);
-        assert_eq!(partial.bond_margin, 0.0);
-        assert!(!partial.ok && partial.unchecked_reason.is_none());
-        assert!(partial
-            .detail
-            .contains("上端引張・下端引張の双方の付着耐力を超えます"));
-        assert_fy_diagnostic(&partial.detail, "RC梁");
-    }
-}
-
-#[test]
 fn ultimate_retains_confirmed_shear_failure_without_reinforcement_contribution() {
-    for (mut model, member) in rc_members() {
+    for (mut model, member) in rc_members().into_iter().take(2) {
         set_ultimate_input(&mut model);
         match model.sections[0].shape.as_mut().unwrap() {
-            SectionShape::RcBeamRect { rebar, .. } => rebar.stirrup.pitch = 0.0,
-            SectionShape::RcColumnRect { rebar, .. } => rebar.hoop.pitch = 0.0,
-            SectionShape::RcColumnCircle { rebar, .. } => rebar.hoop.pitch = 0.0,
+            SectionShape::RcBeamRect { rebar, .. } => rebar.stirrup.legs = 0,
+            SectionShape::RcColumnRect { rebar, .. } => {
+                rebar.hoop.legs_x = 0;
+                rebar.hoop.legs_y = 0;
+            }
             _ => unreachable!(),
         }
         let normal = model.clone();
         assign_shear_rebar(&mut model, MaterialCategory::Concrete);
-        for shear_method in [ShearMethod::Plastic, ShearMethod::Ductility] {
-            let opts = UltimateShearOptions {
-                shear_method,
-                ..Default::default()
-            };
-            for demand in [
-                MemberDemand {
-                    mz: -1e7,
-                    q_long: Some(10e6),
-                    static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::ITopJBottom),
-                    ..Default::default()
-                },
-                MemberDemand::from_pushover(0.0, -1e7, 0.0, 10e6, 0.0, 0.0),
-            ] {
-                let baseline = ultimate(&normal, demand, &opts);
-                let partial = ultimate(&model, demand, &opts);
-                assert_eq!(partial.qsu, baseline.qsu);
-                assert_eq!(partial.shear_margin, baseline.shear_margin);
-                assert!(partial.shear_margin < 1.0, "{partial:?}");
-                assert!(!partial.ok && partial.unchecked_reason.is_none());
-                match shear_method {
-                    ShearMethod::Plastic => {
-                        assert_eq!(partial.qbu, baseline.qbu);
-                        assert_eq!(partial.bond_margin, baseline.bond_margin);
-                        assert!(partial.bond_margin < 1.0);
-                    }
-                    ShearMethod::Ductility => {
-                        assert!(partial.qbu.is_nan() && partial.bond_margin.is_nan());
-                    }
-                }
-                assert_diagnostic(&partial.detail, &model, member, MaterialCategory::Concrete);
-            }
-        }
+        let opts = UltimateShearOptions {
+            ..Default::default()
+        };
+        let demand = MemberDemand {
+            min_axial_for_shear_n: Some(0.0),
+            ..MemberDemand::from_pushover(0.0, -1e7, 0.0, 10e6, 0.0, 0.0)
+        };
+        let baseline = ultimate(&normal, demand, &opts);
+        let partial = ultimate(&model, demand, &opts);
+        assert_eq!(partial.qsu, baseline.qsu);
+        assert_eq!(partial.shear_margin, baseline.shear_margin);
+        assert!(partial.shear_margin < 1.0, "{partial:?}");
+        assert!(!partial.ok && partial.unchecked_reason.is_none());
+        assert!(partial.bond_stress.is_none() && baseline.bond_stress.is_none());
+        assert!(partial.bond_margin.is_nan() && baseline.bond_margin.is_nan());
+        assert_diagnostic(&partial.detail, &model, member, MaterialCategory::Concrete);
     }
 }
 
@@ -566,26 +604,26 @@ fn ultimate_retains_weak_axis_failure_if_only_its_shear_capacity_is_independent(
     };
     rebar.hoop.legs_y = 0;
     assign_shear_rebar(&mut model, MaterialCategory::Steel);
-    for shear_method in [ShearMethod::Plastic, ShearMethod::Ductility] {
-        let opts = UltimateShearOptions {
-            shear_method,
-            biaxial_shear: true,
-            ..Default::default()
-        };
-        let damage = ultimate(
-            &model,
-            MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 10e6, 0.0),
-            &opts,
-        );
-        assert!(damage.shear_margin.is_nan());
-        assert!(damage.biaxial_shear_margin.is_none());
-        assert!(!damage.ok && damage.unchecked_reason.is_none());
-        assert!(
-            damage.detail.contains("弱軸せん断耐力を超えます"),
-            "{damage:?}"
-        );
-        assert_diagnostic(&damage.detail, &model, "RC柱", MaterialCategory::Steel);
-    }
+    let opts = UltimateShearOptions {
+        biaxial_shear: true,
+        ..Default::default()
+    };
+    let damage = ultimate(
+        &model,
+        MemberDemand {
+            min_axial_for_shear_n: Some(0.0),
+            ..MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 10e6, 0.0)
+        },
+        &opts,
+    );
+    assert!(damage.shear_margin.is_nan());
+    assert!(damage.biaxial_shear_margin.is_none());
+    assert!(!damage.ok && damage.unchecked_reason.is_none());
+    assert!(
+        damage.detail.contains("弱軸せん断耐力を超えます"),
+        "{damage:?}"
+    );
+    assert_diagnostic(&damage.detail, &model, "RC柱", MaterialCategory::Steel);
 }
 
 #[test]
@@ -709,116 +747,6 @@ fn allowable_rc1999_keeps_short_term_bond_failure_when_hoops_add_no_confinement(
 }
 
 #[test]
-fn ultimate_keeps_zero_shear_capacity_when_the_adopted_formula_has_no_reinforcement_contribution() {
-    for (method, fc, rp, pitch) in [
-        (ShearMethod::Ductility, 24.0, 0.05, 100.0),
-        (ShearMethod::Ductility, 24.0, 0.0, 2000.0),
-        (ShearMethod::Plastic, 140.0, 0.0, 100.0),
-    ] {
-        let mut model = rc_column::column_model(false, 0.0);
-        set_ultimate_input(&mut model);
-        model.materials[0].fc = Some(fc);
-        let Some(SectionShape::RcColumnRect { rebar, .. }) = model.sections[0].shape.as_mut()
-        else {
-            unreachable!()
-        };
-        rebar.hoop.pitch = pitch;
-
-        let opts = UltimateShearOptions {
-            shear_method: method,
-            include_bond: true,
-            ..Default::default()
-        };
-        let demand = MemberDemand::from_pushover(0.0, 0.0, 0.0, 10_000.0, 0.0, rp);
-        let baseline = ultimate(&model, demand, &opts);
-        assert_eq!(baseline.qsu, 0.0);
-        assign_shear_rebar(&mut model, MaterialCategory::Concrete);
-        let partial = ultimate(&model, demand, &opts);
-        assert_eq!(partial.qsu, baseline.qsu);
-        assert_eq!(partial.shear_margin, 0.0);
-        assert!(!partial.ok && partial.unchecked_reason.is_none());
-        assert_diagnostic(&partial.detail, &model, "RC柱", MaterialCategory::Concrete);
-
-        if method == ShearMethod::Ductility {
-            assert_eq!((baseline.qbu, baseline.bond_margin), (0.0, 0.0));
-            assert_eq!(
-                (partial.qbu, partial.bond_margin),
-                (baseline.qbu, baseline.bond_margin)
-            );
-            assert!(
-                partial
-                    .detail
-                    .contains("Vbu=0 N, τbu=未算定, 付着余裕度 Vbu/|Qtotal|=0.000"),
-                "{partial:?}"
-            );
-
-            let main = model.sections[0].rebar_material.unwrap();
-            model.materials[main.index()].name = "SR235".into();
-            let round = ultimate(&model, demand, &opts);
-            assert!(
-                round.qbu.is_nan() && round.bond_margin.is_nan(),
-                "{round:?}"
-            );
-            assert!(
-                round.detail.contains("ultimate_bond_round_bar_unsupported"),
-                "{round:?}"
-            );
-
-            model.materials[main.index()].category = MaterialCategory::Steel;
-            let unknown = ultimate(&model, demand, &opts);
-            assert!(
-                unknown.qbu.is_nan() && unknown.bond_margin.is_nan(),
-                "{unknown:?}"
-            );
-            assert!(
-                unknown
-                    .detail
-                    .contains("数値径から異形鉄筋であることを確認できない"),
-                "{unknown:?}"
-            );
-        }
-    }
-}
-
-#[test]
-fn ultimate_biaxial_shear_at_zero_capacity_requires_positive_demand_for_independent_failure() {
-    for (method, fc, rp) in [
-        (ShearMethod::Ductility, 24.0, 0.05),
-        (ShearMethod::Plastic, 140.0, 0.0),
-    ] {
-        let mut model = rc_column::column_model(false, 0.0);
-        set_ultimate_input(&mut model);
-        model.materials[0].fc = Some(fc);
-        assign_shear_rebar(&mut model, MaterialCategory::Steel);
-        let opts = UltimateShearOptions {
-            shear_method: method,
-            biaxial_shear: true,
-            include_bond: false,
-            ..Default::default()
-        };
-
-        for (qy, qz) in [(0.0, 0.0), (10_000.0, 0.0), (0.0, 10_000.0)] {
-            let demand = MemberDemand::from_pushover(0.0, 0.0, 0.0, qy, qz, rp);
-            let result = ultimate(&model, demand, &opts);
-            assert_eq!(result.qsu, 0.0, "{result:?}");
-            assert!(!result.ok);
-            if qy == 0.0 && qz == 0.0 {
-                assert_eq!(result.biaxial_shear_margin, Some(f64::INFINITY));
-                let reason = result
-                    .unchecked_reason
-                    .as_deref()
-                    .expect("材料の未算定理由");
-                assert_diagnostic(reason, &model, "RC柱", MaterialCategory::Steel);
-            } else {
-                assert_eq!(result.biaxial_shear_margin, Some(0.0));
-                assert!(result.unchecked_reason.is_none(), "{result:?}");
-                assert_diagnostic(&result.detail, &model, "RC柱", MaterialCategory::Steel);
-            }
-        }
-    }
-}
-
-#[test]
 fn both_invalid_rebar_assignments_keep_independent_failures_and_both_diagnostics() {
     let mut model = rc_beam::model(false);
     set_ultimate_input(&mut model);
@@ -858,18 +786,20 @@ fn both_invalid_rebar_assignments_keep_independent_failures_and_both_diagnostics
 
     let result = ultimate(
         &model,
-        MemberDemand::from_pushover(0.0, 0.0, 0.0, 10e6, 0.0, 0.0),
+        MemberDemand {
+            min_axial_for_shear_n: Some(0.0),
+            ..MemberDemand::from_pushover(0.0, 0.0, 0.0, 10e6, 0.0, 0.0)
+        },
         &UltimateShearOptions {
-            shear_method: ShearMethod::Plastic,
             ..Default::default()
         },
     );
     assert!(result.mu.is_nan());
     assert!(
-        result.shear_margin < 1.0 && result.bond_margin < 1.0,
+        result.shear_margin.is_nan() && result.bond_margin.is_nan(),
         "{result:?}"
     );
-    assert!(!result.ok && result.unchecked_reason.is_none());
+    assert!(!result.ok && result.unchecked_reason.is_some());
     assert_both_diagnostics(&result.detail, &model, "RC梁");
 
     for (mut model, member) in src_members() {

@@ -23,8 +23,7 @@ pub(crate) enum RcDirection {
 /// `b_dir`・`d_dir` は検討方向の幅・せい [mm]、`at`・`ac`・`ag` は引張側・圧縮側・
 /// 全主筋断面積 [mm²]、`dt` は引張縁〜引張鉄筋重心 [mm]、`d_eff` は有効せい [mm]、
 /// `pw` は検討方向のせん断補強筋比。`top_bar` は梁の上端主筋を引張側とする場合 true で、
-/// 付着検定の上端筋低減（`αt`）に用いる。`be`・`n_s` は靭性指針式のトラス機構有効幅 [mm]・
-/// 中子筋本数で、不要時は 0。
+/// 付着検定の上端筋低減（`αt`）に用いる。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct RcBarProps {
     pub b_dir: f64,
@@ -42,8 +41,6 @@ pub(crate) struct RcBarProps {
     pub shear_legs: u32,
     pub pw: f64,
     pub top_bar: bool,
-    pub be: f64,
-    pub n_s: u32,
 }
 
 /// 断面形状から、指定方向・指定引張側の RC 諸元を返す。
@@ -51,54 +48,21 @@ pub(crate) struct RcBarProps {
 /// 対象外（RC 以外・対応しない形状）・未入力・実配筋を生成できない配筋・
 /// 有効せいが 0 以下なら `None`。
 /// `tension_is_top` は梁の曲げ引張側で、柱・円形柱では無視する。
-/// `shear_method_needs_be` が true のときのみ靭性指針式の `be`・`n_s` を算定する。
 pub(crate) fn rc_bar_props(
     shape: &SectionShape,
     direction: RcDirection,
     tension_is_top: bool,
-    shear_method_needs_be: bool,
 ) -> Option<RcBarProps> {
     match shape {
-        SectionShape::RcBeamRect { b, d, rebar } => rc_beam_rect_props(
-            *b,
-            *d,
-            rebar,
-            direction,
-            tension_is_top,
-            shear_method_needs_be,
-        ),
-        SectionShape::RcColumnRect { b, d, rebar } => rc_column_rect_props(
-            *b,
-            *d,
-            rebar,
-            direction,
-            tension_is_top,
-            shear_method_needs_be,
-        ),
-        SectionShape::RcColumnCircle { d, rebar } => {
-            rc_column_circle_props(*d, rebar, shear_method_needs_be)
+        SectionShape::RcBeamRect { b, d, rebar } => {
+            rc_beam_rect_props(*b, *d, rebar, direction, tension_is_top)
         }
+        SectionShape::RcColumnRect { b, d, rebar } => {
+            rc_column_rect_props(*b, *d, rebar, direction, tension_is_top)
+        }
+        SectionShape::RcColumnCircle { d, rebar } => rc_column_circle_props(*d, rebar),
         _ => None,
     }
-}
-
-/// 靭性指針式のトラス機構有効幅 `be` [mm] と中子筋本数 `n_s`。
-///
-/// `needs_be` が false なら `(0.0, 0)`。`be = (b_dir − 2(かぶり + せん断補強筋径/2)).max(1.0)`、
-/// `n_s = (せん断補強脚数/2) − 1`（0 未満は 0）。
-fn ductility_be_ns_from(
-    b_dir: f64,
-    cover: f64,
-    shear_dia: f64,
-    shear_legs: u32,
-    needs_be: bool,
-) -> (f64, u32) {
-    if !needs_be {
-        return (0.0, 0);
-    }
-    let be = (b_dir - 2.0 * (cover + shear_dia / 2.0)).max(1.0);
-    let n_s = (shear_legs / 2).saturating_sub(1);
-    (be, n_s)
 }
 
 /// せん断補強筋比 `Aw/(b·s)`。`b`・`s` が 0 以下なら 0。
@@ -116,7 +80,6 @@ fn rc_beam_rect_props(
     rebar: &RcBeamRebar,
     direction: RcDirection,
     tension_is_top: bool,
-    needs_be: bool,
 ) -> Option<RcBarProps> {
     if direction == RcDirection::Weak {
         return None;
@@ -134,13 +97,6 @@ fn rc_beam_rect_props(
     if steel.effective_depth_mm <= 0.0 {
         return None;
     }
-    let (be, n_s) = ductility_be_ns_from(
-        b,
-        rebar.cover,
-        rebar.stirrup.dia.designation_or_diameter_mm(),
-        rebar.stirrup.legs,
-        needs_be,
-    );
     Some(RcBarProps {
         b_dir: b,
         d_dir: d,
@@ -157,8 +113,6 @@ fn rc_beam_rect_props(
         shear_legs: rebar.stirrup.legs,
         pw: rebar.pw(b),
         top_bar: tension_is_top,
-        be,
-        n_s,
     })
 }
 
@@ -169,7 +123,6 @@ fn rc_column_rect_props(
     rebar: &RcRectColumnRebar,
     direction: RcDirection,
     tension_is_top: bool,
-    needs_be: bool,
 ) -> Option<RcBarProps> {
     if b <= 0.0
         || d <= 0.0
@@ -197,13 +150,6 @@ fn rc_column_rect_props(
     if steel.effective_depth_mm <= 0.0 {
         return None;
     }
-    let (be, n_s) = ductility_be_ns_from(
-        b_dir,
-        rebar.cover,
-        rebar.hoop.dia.designation_or_diameter_mm(),
-        shear_legs,
-        needs_be,
-    );
     Some(RcBarProps {
         b_dir,
         d_dir,
@@ -220,19 +166,13 @@ fn rc_column_rect_props(
         shear_legs,
         pw: pw_from_aw(aw, b_dir, rebar.hoop.pitch),
         top_bar: false,
-        be,
-        n_s,
     })
 }
 
 /// 新 `RcColumnCircle` の諸元。等価正方形断面として扱い、方向によらず同じ値を返す。
 ///
 /// 円形帯筋は 1 組 2 本（閉鎖フープ、検討方向あたり 2 本）として `shear_legs`・`pw` を算定する。
-fn rc_column_circle_props(
-    d: f64,
-    rebar: &RcCircleColumnRebar,
-    needs_be: bool,
-) -> Option<RcBarProps> {
+fn rc_column_circle_props(d: f64, rebar: &RcCircleColumnRebar) -> Option<RcBarProps> {
     if d <= 0.0 || rebar.is_unset() || rebar.main_dia.designation_or_diameter_mm() <= 0.0 {
         return None;
     }
@@ -250,13 +190,6 @@ fn rc_column_circle_props(
         + main_dia.designation_or_diameter_mm() / 2.0;
     let at = rebar.equivalent_tension_area_mm2();
     let n_tension = (f64::from(rebar.count) / 4.0).round() as u32;
-    let (be, n_s) = ductility_be_ns_from(
-        side,
-        cover,
-        shear_dia.designation_or_diameter_mm(),
-        2,
-        needs_be,
-    );
     Some(RcBarProps {
         b_dir: side,
         d_dir: side,
@@ -273,8 +206,6 @@ fn rc_column_circle_props(
         shear_legs: 2,
         pw: rebar.pw(side),
         top_bar: false,
-        be,
-        n_s,
     })
 }
 
@@ -336,15 +267,8 @@ mod tests {
     }
 
     #[test]
-    fn test_rc_rect_ductility_be_ns() {
-        let p = rc_bar_props(&column_rect_shape(), RcDirection::Strong, true, true).unwrap();
-        assert!((p.be - (600.0 - 2.0 * (40.0 + 5.0))).abs() < 1e-9);
-        assert_eq!(p.n_s, 0);
-    }
-
-    #[test]
     fn test_rc_beam_rect_top_tension() {
-        let p = rc_bar_props(&beam_shape(), RcDirection::Strong, true, false).unwrap();
+        let p = rc_bar_props(&beam_shape(), RcDirection::Strong, true).unwrap();
         let a1 = one_bar_area(22.0);
         assert!((p.at - 6.0 * a1).abs() < 1e-9);
         assert!((p.ac - 5.0 * a1).abs() < 1e-9);
@@ -356,7 +280,7 @@ mod tests {
 
     #[test]
     fn test_rc_beam_rect_bottom_tension() {
-        let p = rc_bar_props(&beam_shape(), RcDirection::Strong, false, false).unwrap();
+        let p = rc_bar_props(&beam_shape(), RcDirection::Strong, false).unwrap();
         let a1 = one_bar_area(22.0);
         assert!((p.at - 5.0 * a1).abs() < 1e-9);
         assert!((p.ac - 6.0 * a1).abs() < 1e-9);
@@ -367,12 +291,12 @@ mod tests {
 
     #[test]
     fn test_rc_beam_rect_weak_none() {
-        assert!(rc_bar_props(&beam_shape(), RcDirection::Weak, true, false).is_none());
+        assert!(rc_bar_props(&beam_shape(), RcDirection::Weak, true).is_none());
     }
 
     #[test]
     fn test_rc_column_rect_strong_props() {
-        let p = rc_bar_props(&column_rect_shape(), RcDirection::Strong, true, false).unwrap();
+        let p = rc_bar_props(&column_rect_shape(), RcDirection::Strong, true).unwrap();
         let a1 = one_bar_area(22.0);
         let a10 = one_bar_area(10.0);
         assert!((p.b_dir - 600.0).abs() < 1e-9);
@@ -385,14 +309,12 @@ mod tests {
         assert_eq!(p.n_tension, 4);
         assert_eq!(p.shear_legs, 2);
         assert!(!p.top_bar);
-        assert_eq!(p.be, 0.0);
-        assert_eq!(p.n_s, 0);
         assert!((p.pw - 2.0 * a10 / (600.0 * 100.0)).abs() < 1e-15);
     }
 
     #[test]
     fn test_rc_column_rect_weak_props() {
-        let p = rc_bar_props(&column_rect_shape(), RcDirection::Weak, true, false).unwrap();
+        let p = rc_bar_props(&column_rect_shape(), RcDirection::Weak, true).unwrap();
         let a1 = one_bar_area(22.0);
         let a10 = one_bar_area(10.0);
         assert!((p.b_dir - 700.0).abs() < 1e-9);
@@ -408,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_rc_column_circle_equivalent_square() {
-        let p = rc_bar_props(&column_circle_shape(), RcDirection::Strong, true, false).unwrap();
+        let p = rc_bar_props(&column_circle_shape(), RcDirection::Strong, true).unwrap();
         let a1 = one_bar_area(22.0);
         let a10 = one_bar_area(10.0);
         let side = (std::f64::consts::PI * 600.0 * 600.0 / 4.0).sqrt();
@@ -421,7 +343,7 @@ mod tests {
         assert_eq!(p.shear_legs, 2);
         assert!(!p.top_bar);
         assert!((p.pw - 2.0 * a10 / (side * 100.0)).abs() < 1e-15);
-        let weak = rc_bar_props(&column_circle_shape(), RcDirection::Weak, false, false).unwrap();
+        let weak = rc_bar_props(&column_circle_shape(), RcDirection::Weak, false).unwrap();
         assert_eq!(p, weak);
     }
 
@@ -429,7 +351,6 @@ mod tests {
     #[test]
     fn test_rc_column_circle_hoop_contributes_to_shear() {
         use crate::rc::{axis_props_from_shape, rc_allow, shear_capacity};
-        use crate::ultimate::UltimateShearOptions;
         use crate::LoadTerm;
         use sepika_core::units::ConcreteClass;
 
@@ -448,8 +369,8 @@ mod tests {
         let with_hoop = circle(100.0);
         let without_hoop = circle(100_000.0);
 
-        let p = rc_bar_props(&with_hoop, RcDirection::Strong, true, false).unwrap();
-        let p0 = rc_bar_props(&without_hoop, RcDirection::Strong, true, false).unwrap();
+        let p = rc_bar_props(&with_hoop, RcDirection::Strong, true).unwrap();
+        let p0 = rc_bar_props(&without_hoop, RcDirection::Strong, true).unwrap();
         assert!(p.pw > 0.0, "円形柱の pw が正: pw={}", p.pw);
         assert!(p0.pw < p.pw, "pitch 大では pw が小さい");
 
@@ -459,27 +380,6 @@ mod tests {
         let qa = shear_capacity(&props, &allow, 1.5, LoadTerm::Short, true, true).unwrap();
         let qa0 = shear_capacity(&props0, &allow, 1.5, LoadTerm::Short, true, true).unwrap();
         assert!(qa > qa0, "許容せん断: with={qa}, without={qa0}");
-
-        let opts = UltimateShearOptions::default();
-        let qsu = super::super::rc_strength::member_shear_strength(
-            &p,
-            24.0,
-            0.0,
-            3000.0,
-            Some(opts.sigma_wy),
-            &opts,
-        )
-        .unwrap();
-        let qsu0 = super::super::rc_strength::member_shear_strength(
-            &p0,
-            24.0,
-            0.0,
-            3000.0,
-            Some(opts.sigma_wy),
-            &opts,
-        )
-        .unwrap();
-        assert!(qsu > qsu0, "終局せん断: with={qsu}, without={qsu0}");
     }
 
     #[test]
@@ -499,7 +399,7 @@ mod tests {
                 },
             },
         };
-        assert!(rc_bar_props(&beam, RcDirection::Strong, true, false).is_none());
+        assert!(rc_bar_props(&beam, RcDirection::Strong, true).is_none());
 
         let column = SectionShape::RcColumnRect {
             b: 600.0,
@@ -517,7 +417,7 @@ mod tests {
                 },
             },
         };
-        assert!(rc_bar_props(&column, RcDirection::Strong, true, false).is_none());
+        assert!(rc_bar_props(&column, RcDirection::Strong, true).is_none());
 
         let circle = SectionShape::RcColumnCircle {
             d: 600.0,
@@ -531,7 +431,7 @@ mod tests {
                 },
             },
         };
-        assert!(rc_bar_props(&circle, RcDirection::Strong, true, false).is_none());
+        assert!(rc_bar_props(&circle, RcDirection::Strong, true).is_none());
     }
 
     /// 実配筋が幾何的に成立しない矩形柱は諸元を生成しない。
@@ -553,8 +453,8 @@ mod tests {
                 },
             },
         };
-        assert!(rc_bar_props(&column, RcDirection::Strong, true, false).is_none());
-        assert!(rc_bar_props(&column, RcDirection::Weak, true, false).is_none());
+        assert!(rc_bar_props(&column, RcDirection::Strong, true).is_none());
+        assert!(rc_bar_props(&column, RcDirection::Weak, true).is_none());
     }
 
     #[test]
@@ -566,6 +466,6 @@ mod tests {
             web_thick: 9.0,
             flange_thick: 16.0,
         };
-        assert!(rc_bar_props(&shape, RcDirection::Strong, true, false).is_none());
+        assert!(rc_bar_props(&shape, RcDirection::Strong, true).is_none());
     }
 }

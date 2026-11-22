@@ -45,7 +45,7 @@ pub(crate) fn axis_props_from_shape(
     direction: RcDirection,
     tension_is_top: bool,
 ) -> Option<AxisProps> {
-    let p = rc_bar_props(shape, direction, tension_is_top, false)?;
+    let p = rc_bar_props(shape, direction, tension_is_top)?;
     Some(AxisProps {
         b: p.b_dir,
         d_full: p.d_dir,
@@ -311,7 +311,7 @@ mod tests {
     fn test_axis_props_from_shape_circle_matches_props() {
         let shape = column_circle_shape();
         let p = axis_props_from_shape(&shape, RcDirection::Strong, true).unwrap();
-        let r = rc_bar_props(&shape, RcDirection::Strong, true, false).unwrap();
+        let r = rc_bar_props(&shape, RcDirection::Strong, true).unwrap();
         let side = (600.0 / 2.0) * std::f64::consts::PI.sqrt();
         assert!((p.b - side).abs() < 1e-9);
         assert!((p.b - r.b_dir).abs() < 1e-12);

@@ -3,6 +3,8 @@
 - Status: accepted
 - Issue: #523
 
+適用するRC梁の式と軸力なしの基準の扱いは [ADR 0147](0147-rc-calculation-sources.md) に従う。
+
 ## 判断
 
 採用αy式の総部材角は、一定せん断・三角形モーメントの基準分布を用いる。

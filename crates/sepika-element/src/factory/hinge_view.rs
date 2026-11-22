@@ -521,6 +521,12 @@ mod tests {
         let kind = AnalysisKind::Incremental;
 
         let mut rc_model = make_model(Some(rc_shape()), Some(24.0));
+        let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut rc_model.sections[0].shape else {
+            unreachable!()
+        };
+        rebar.main_dia = sepika_core::section_shape::RebarSize::Standard(
+            sepika_core::section_shape::StandardRebar::D22,
+        );
         rc_model.materials[0].category = MaterialCategory::Concrete;
         rc_model.materials.push(Material {
             strength_factor: None,
@@ -539,7 +545,7 @@ mod tests {
         rc_model.set_member_hysteresis(ElemId(0), HysteresisModel::Takeda);
         rc_model.set_member_rc_beam_reference(
             ElemId(0),
-            Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+            Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
         );
         rc_model.sections[0].iy = 400.0 * 700.0_f64.powi(3) / 12.0;
         rc_model.sections[0].iz = 700.0 * 400.0_f64.powi(3) / 12.0;

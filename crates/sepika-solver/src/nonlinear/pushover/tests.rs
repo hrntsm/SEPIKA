@@ -2653,7 +2653,7 @@ fn pushover_uses_explicit_high_strength_main_rebar_without_increase() {
 }
 
 #[test]
-fn pushover_requires_direct_high_strength_main_rebar_for_concentrated_rc_beam() {
+fn pushover_withholds_reference_backbone_for_concentrated_rc_beam_with_usd685() {
     use sepika_core::model::{FrameSectionUse, RcBeamReference};
     use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, RebarSize, StandardRebar};
 
@@ -2713,7 +2713,10 @@ fn pushover_requires_direct_high_strength_main_rebar_for_concentrated_rc_beam() 
         nodes: smallvec::smallvec![NodeId(3), NodeId(2)],
         ..model.elements[0].clone()
     });
-    model.set_member_rc_beam_reference(ElemId(1), Some(RcBeamReference::AntisymmetricHalfMember));
+    model.set_member_rc_beam_reference(
+        ElemId(1),
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
+    );
 
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
@@ -2725,6 +2728,10 @@ fn pushover_requires_direct_high_strength_main_rebar_for_concentrated_rc_beam() 
     );
     assert!(diagnostic.contains("割増を 1.0"), "{diagnostic}");
     model.materials[3].strength_factor = Some(1.0);
+    let diagnostic = run(&model).expect_err("指定骨格の降伏モーメントを確認できません");
+    assert!(diagnostic.contains("降伏モーメント"), "{diagnostic}");
+    model.materials[3].name = "SD345".into();
+    model.materials[3].fy = Some(345.0);
     assert!(run(&model).unwrap().qu > 0.0);
 }
 

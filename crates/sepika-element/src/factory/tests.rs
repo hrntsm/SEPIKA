@@ -171,7 +171,7 @@ fn wall_girder_role_keeps_elastic_stiffness_force_mass_and_hinge_contract() {
             model.elements[0].force_regime = regime;
             model.set_member_rc_beam_reference(
                 ElemId(0),
-                Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+                Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
             );
             let data = &model.elements[0];
             assert!(is_elastic_wall_girder(&model, data));
@@ -956,9 +956,11 @@ fn test_resolve_member_hysteresis_and_flexural_springs() {
     fn rebar() -> RcBeamRebar {
         use sepika_core::section_shape::BeamStirrup;
         RcBeamRebar {
-            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
-            top: vec![2],
-            bottom: vec![2],
+            main_dia: sepika_core::section_shape::RebarSize::Standard(
+                sepika_core::section_shape::StandardRebar::D22,
+            ),
+            top: vec![3],
+            bottom: vec![3],
             cover: 50.0,
             stirrup: BeamStirrup {
                 dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
@@ -972,6 +974,7 @@ fn test_resolve_member_hysteresis_and_flexural_springs() {
     let mut rebar_material = model.materials[0].clone();
     rebar_material.id = MaterialId(1);
     rebar_material.category = MaterialCategory::Rebar;
+    rebar_material.name = "SD345".into();
     rebar_material.young = 205000.0;
     rebar_material.fc = None;
     rebar_material.fy = Some(345.0);
@@ -1018,7 +1021,7 @@ fn test_resolve_member_hysteresis_and_flexural_springs() {
     model.sections[0].iz = 700.0 * 400.0f64.powi(3) / 12.0;
     model.set_member_rc_beam_reference(
         ElemId(0),
-        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
     );
     model.materials[0].fc = Some(24.0);
     model.materials[0].fy = Some(345.0);
@@ -1250,13 +1253,14 @@ fn test_resolve_wall_shear_hysteresis_defaults_and_overrides() {
 
 /// 材端曲げバネの降伏時剛性低下率 αy。
 /// - 形状未設定・非 RC 矩形・鉛直材（柱）は既定 0.3。
-/// - RC 矩形の梁は菅野式。b=400・D=700・上下各2-D22（1 段）・かぶり 50・帯筋 D10・
-///   可撓長 5000・Ec=20000 のときの独立値 αy≈0.33475。
+/// - RC 矩形の梁は菅野式。b=400・D=700・上下各3-D22（1 段）・かぶり 50・帯筋 D10・
+///   可撓長 5000・Ec=20000 のときの独立値 αy≈0.21400。
 #[test]
 fn test_flexural_alpha_y_sugano_for_rc_beam() {
     use sepika_core::section_shape::{RcBeamRebar, SectionShape};
 
     let mut model = make_diaphragm_model();
+    model.materials[0].young = 20_000.0;
     let mut rebar_material = model.materials[0].clone();
     rebar_material.id = MaterialId(1);
     rebar_material.category = MaterialCategory::Rebar;
@@ -1286,8 +1290,8 @@ fn test_flexural_alpha_y_sugano_for_rc_beam() {
 
     let rebar = RcBeamRebar {
         main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
-        top: vec![2],
-        bottom: vec![2],
+        top: vec![3],
+        bottom: vec![3],
         cover: 50.0,
         stirrup: sepika_core::section_shape::BeamStirrup {
             dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
@@ -1302,7 +1306,7 @@ fn test_flexural_alpha_y_sugano_for_rc_beam() {
     });
     let got = flexural_alpha_y(&beam, &model);
     assert!(
-        (got - 0.334_749_510_190_037_85).abs() < 1e-12,
+        (got - 0.2139982161389453).abs() < 1e-12,
         "菅野式の αy: got={got}"
     );
     assert!(got > 0.0 && got < 1.0);
@@ -1369,6 +1373,7 @@ fn test_rc_beam_flexural_spring_exhibits_takeda_degradation() {
     let mut rebar_material = model.materials[0].clone();
     rebar_material.id = MaterialId(1);
     rebar_material.category = MaterialCategory::Rebar;
+    rebar_material.name = "SD345".into();
     rebar_material.young = 205000.0;
     rebar_material.fc = None;
     rebar_material.fy = Some(345.0);
@@ -1394,9 +1399,11 @@ fn test_rc_beam_flexural_spring_exhibits_takeda_degradation() {
         b: 400.0,
         d: 700.0,
         rebar: RcBeamRebar {
-            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
-            top: vec![2],
-            bottom: vec![2],
+            main_dia: sepika_core::section_shape::RebarSize::Standard(
+                sepika_core::section_shape::StandardRebar::D22,
+            ),
+            top: vec![3],
+            bottom: vec![3],
             cover: 50.0,
             stirrup: BeamStirrup {
                 dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
@@ -1411,7 +1418,7 @@ fn test_rc_beam_flexural_spring_exhibits_takeda_degradation() {
     model.sections[0].iz = 700.0 * 400.0f64.powi(3) / 12.0;
     model.set_member_rc_beam_reference(
         ElemId(0),
-        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
     );
     model.materials[0].young = 25_000.0;
     model.materials[0].fc = Some(24.0);

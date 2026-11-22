@@ -3665,7 +3665,7 @@ fn member_and_damper_addition_reject_a_hysteresis_ref_to_the_next_number() {
         elem: beam.id,
         rule: HysteresisModel::Auto,
         rule_th: None,
-        rc_beam_reference: Some(RcBeamReference::AntisymmetricHalfMember),
+        rc_beam_reference: Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
     });
     for edit in [
         Box::new(AddMember { elem: beam }) as Box<dyn EditCommand>,
@@ -3708,7 +3708,7 @@ fn deleting_a_member_removes_all_hysteresis_rows_and_undo_restores_their_order()
     use sepika_core::model::{HysteresisModel::*, MemberHysteresisAttr, RcBeamReference};
 
     let mut model = seeded_model(4, 3);
-    let reference = Some(RcBeamReference::AntisymmetricHalfMember);
+    let reference = Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce);
     model.member_hysteresis_attrs = [
         (1, Takeda, Some(Retrograde), reference),
         (2, MaxPointOriented, None, None),
@@ -5037,8 +5037,10 @@ fn copying_a_story_slab_rejects_dangling_attributes_before_generating_boundary_b
     dangling_damper.set_damper_props(new_beam, Some(Default::default()));
     let mut dangling_hysteresis = model.clone();
     dangling_hysteresis.set_member_hysteresis_th(new_beam, Some(HysteresisModel::Retrograde));
-    dangling_hysteresis
-        .set_member_rc_beam_reference(new_beam, Some(RcBeamReference::AntisymmetricHalfMember));
+    dangling_hysteresis.set_member_rc_beam_reference(
+        new_beam,
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
+    );
     model
         .member_detail_attrs
         .push(MemberDetailAttr::new(new_beam));
@@ -8383,12 +8385,12 @@ fn rc_reference_selection_undo_redo_preserves_hysteresis() {
         &mut model,
         Box::new(SetMemberRcBeamReference {
             elem: ElemId(0),
-            reference: Some(RcBeamReference::AntisymmetricHalfMember),
+            reference: Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
         }),
     );
     assert_eq!(
         model.member_rc_beam_reference(ElemId(0)),
-        Some(RcBeamReference::AntisymmetricHalfMember)
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce)
     );
     stack.undo(&mut model);
     assert_eq!(model.member_rc_beam_reference(ElemId(0)), None);
@@ -8399,11 +8401,11 @@ fn rc_reference_selection_undo_redo_preserves_hysteresis() {
     stack.redo(&mut model);
     assert_eq!(
         model.member_rc_beam_reference(ElemId(0)),
-        Some(RcBeamReference::AntisymmetricHalfMember)
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce)
     );
     let inverse = SetMemberRcBeamReference {
         elem: ElemId(99),
-        reference: Some(RcBeamReference::AntisymmetricHalfMember),
+        reference: Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
     }
     .apply(&mut model);
     assert!(inverse.is_noop());

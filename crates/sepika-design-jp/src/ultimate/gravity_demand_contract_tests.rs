@@ -11,13 +11,14 @@ fn cft_model() -> sepika_core::model::Model {
         corner_r: Some(0.0),
     });
     let mut steel = cft.materials[0].clone();
-    steel.id = sepika_core::ids::MaterialId(1);
+    let steel_id = sepika_core::ids::MaterialId(cft.materials.len() as u32);
+    steel.id = steel_id;
     steel.name = "SN400B".into();
     steel.category = sepika_core::model::MaterialCategory::Steel;
     steel.fy = Some(235.0);
     steel.fc = None;
     cft.materials.push(steel);
-    cft.sections[0].steel_material = Some(sepika_core::ids::MaterialId(1));
+    cft.sections[0].steel_material = Some(steel_id);
     cft.steel_design_attrs = super::tests::cft_test_direct_lengths();
     cft
 }
@@ -77,204 +78,6 @@ fn direct_rc_collector_rejects_missing_duplicate_nonfinite_and_unidentified_ql()
 }
 
 #[test]
-fn static_biaxial_shear_requires_explicit_zero_long_term_shear_on_both_axes() {
-    let mut model = super::tests::column_and_beam_model();
-    model.elements.truncate(1);
-    let elem = model.elements[0].id;
-    let opts = UltimateShearOptions {
-        include_bond: false,
-        biaxial_shear: true,
-        ..Default::default()
-    };
-    let missing_weak =
-        "ultimate_gravity_missing: 静的二軸せん断に必要な弱軸の長期せん断力がありません";
-    for (strong, weak, reason) in [
-        (0.0, Some(-0.0), None),
-        (0.0, None, Some(missing_weak)),
-        (12000.0, None, Some(missing_weak)),
-        (12000.0, Some(0.0), Some("適用範囲外")),
-        (0.0, Some(-4000.0), Some("適用範囲外")),
-        (12000.0, Some(4000.0), Some("適用範囲外")),
-    ] {
-        let demand = MemberDemand {
-            q_long: Some(strong),
-            q_long_weak: weak,
-            ..MemberDemand::axial(150000.0)
-        };
-        let checks = collect_rc_ultimate_checks(&model, &[(elem, demand)], &opts).unwrap();
-        let check = &checks[0];
-        assert!(check.shear_margin > 1.0);
-        if let Some(reason) = reason {
-            assert!(!check.ok);
-            assert_eq!(check.biaxial_shear_margin, None);
-            assert_resolved_demand_context(
-                check.unchecked_reason.as_deref().unwrap(),
-                reason,
-                elem.0,
-            );
-        } else {
-            assert!(check.ok);
-            assert_eq!(check.unchecked_reason, None);
-            assert!((check.biaxial_shear_margin.unwrap() - 2.083725).abs() < 1e-6);
-        }
-    }
-    let missing_strong = MemberDemand {
-        q_long_weak: Some(0.0),
-        ..MemberDemand::axial(150000.0)
-    };
-    let reason = collect_rc_ultimate_checks(&model, &[(elem, missing_strong)], &opts).unwrap_err();
-    assert_resolved_demand_context(&reason, "ultimate_gravity_missing", elem.0);
-}
-
-#[test]
-fn static_biaxial_shear_keeps_the_strong_axis_failure_from_issue_1412() {
-    let mut model = super::tests::column_and_beam_model();
-    model.elements.truncate(1);
-    let elem = model.elements[0].id;
-    let mut opts = UltimateShearOptions {
-        include_bond: false,
-        ..Default::default()
-    };
-    let demand = MemberDemand {
-        q_long: Some(500000.0),
-        ..MemberDemand::axial(150000.0)
-    };
-    let uniaxial = collect_rc_ultimate_checks(&model, &[(elem, demand)], &opts).unwrap();
-    assert!(!uniaxial[0].ok);
-    assert!((uniaxial[0].shear_margin - 0.916367).abs() < 1e-6);
-    opts.biaxial_shear = true;
-    for weak in [None, Some(0.0), Some(4000.0)] {
-        let demand = MemberDemand {
-            q_long_weak: weak,
-            ..demand
-        };
-        let checks = collect_rc_ultimate_checks(&model, &[(elem, demand)], &opts).unwrap();
-        assert!(!checks[0].ok);
-        assert_eq!(checks[0].unchecked_reason, None);
-        assert_eq!(checks[0].biaxial_shear_margin, None);
-        assert_eq!(checks[0].shear_margin, uniaxial[0].shear_margin);
-    }
-    let gravity_only = MemberDemand {
-        q_long: Some(800000.0),
-        q_long_weak: Some(0.0),
-        ..MemberDemand::axial(20000000.0)
-    };
-    let checks = collect_rc_ultimate_checks(&model, &[(elem, gravity_only)], &opts).unwrap();
-    assert_eq!(checks[0].qmu, 0.0);
-    assert_eq!(checks[0].shear_margin, 0.0);
-    assert!(!checks[0].ok);
-    assert_eq!(checks[0].unchecked_reason, None);
-}
-
-#[test]
-fn static_uniaxial_shear_checks_long_term_shear_when_hinge_demand_is_zero() {
-    let mut model = super::tests::column_and_beam_model();
-    model.elements.truncate(1);
-    let elem = model.elements[0].id;
-    let opts = UltimateShearOptions {
-        include_bond: false,
-        ..Default::default()
-    };
-    let check = |ql_n| {
-        let demand = MemberDemand {
-            q_long: Some(ql_n),
-            ..MemberDemand::axial(20_000_000.0)
-        };
-        collect_rc_ultimate_checks(&model, &[(elem, demand)], &opts)
-            .unwrap()
-            .remove(0)
-    };
-
-    let qsu_n = check(0.0).qsu;
-    assert!(0.0 < qsu_n && qsu_n < 800_000.0);
-    for (ql_n, margin, ok) in [
-        (800_000.0, 0.0, false),
-        (-800_000.0, 0.0, false),
-        (qsu_n, f64::INFINITY, true),
-        (0.0, f64::INFINITY, true),
-    ] {
-        let result = check(ql_n);
-        assert_eq!(result.qmu, 0.0);
-        assert_eq!(result.shear_margin, margin, "QL={ql_n}");
-        assert_eq!(result.ok, ok, "QL={ql_n}");
-        assert_eq!(result.unchecked_reason, None);
-        assert!(
-            result.detail.contains("強軸の長期せん断力を耐力と直接比較"),
-            "{}",
-            result.detail
-        );
-        assert!(
-            result
-                .detail
-                .contains(&format!("強軸せん断余裕度={margin:.3}")),
-            "{}",
-            result.detail
-        );
-        assert!(!result.detail.contains("/Qmu"), "{}", result.detail);
-    }
-}
-
-#[test]
-fn static_bond_split_checks_long_term_shear_when_hinge_demand_is_zero() {
-    let mut model = super::tests::column_and_beam_model();
-    model.elements.truncate(1);
-    let Some(sepika_core::section_shape::SectionShape::RcColumnRect { rebar, .. }) =
-        &mut model.sections[0].shape
-    else {
-        panic!("矩形柱の断面が必要");
-    };
-    rebar.x = vec![2];
-    rebar.y = vec![2];
-    rebar.hoop.pitch = 75.0;
-    model.materials[0].name = "SD490".into();
-    model.materials[0].fy = Some(490.0);
-    let elem = model.elements[0].id;
-    let check = |ql_n, include_bond| {
-        let demand = MemberDemand {
-            q_long: Some(ql_n),
-            ..MemberDemand::axial(20_000_000.0)
-        };
-        let opts = UltimateShearOptions {
-            include_bond,
-            ..Default::default()
-        };
-        collect_rc_ultimate_checks(&model, &[(elem, demand)], &opts)
-            .unwrap()
-            .remove(0)
-    };
-
-    let zero_demand = check(0.0, true);
-    assert!(
-        0.0 < zero_demand.qbu && zero_demand.qbu < zero_demand.qsu,
-        "Qbu={}, Qsu={}",
-        zero_demand.qbu,
-        zero_demand.qsu
-    );
-    for (ql_n, include_bond, margin, ok) in [
-        (zero_demand.qsu, true, 0.0, false),
-        (-zero_demand.qsu, true, 0.0, false),
-        (zero_demand.qsu, false, f64::INFINITY, true),
-        (zero_demand.qbu, true, f64::INFINITY, true),
-        (0.0, true, f64::INFINITY, true),
-    ] {
-        let result = check(ql_n, include_bond);
-        assert_eq!(result.qmu, 0.0);
-        assert_eq!(result.shear_margin, f64::INFINITY, "QL={ql_n}");
-        assert_eq!(result.bond_margin, margin, "QL={ql_n}");
-        assert_eq!(result.ok, ok, "QL={ql_n}");
-        assert_eq!(result.unchecked_reason, None);
-        if include_bond {
-            assert!(
-                result.detail.contains(&format!("付着余裕度={margin:.3}")),
-                "{}",
-                result.detail
-            );
-            assert!(!result.detail.contains("/Qmu"), "{}", result.detail);
-        }
-    }
-}
-
-#[test]
 fn static_biaxial_shear_keeps_independently_failed_bending_check() {
     let mut model = super::tests::column_and_beam_model();
     model.elements.truncate(1);
@@ -296,7 +99,7 @@ fn static_biaxial_shear_keeps_independently_failed_bending_check() {
     assert!(!check.ok);
     assert_eq!(check.unchecked_reason, None);
     assert_eq!(check.biaxial_shear_margin, None);
-    assert!(check.shear_margin >= 1.0);
+    assert!(check.shear_margin.is_nan());
     assert!(check.biaxial_bending_margin.unwrap() < 1.0);
 }
 
@@ -313,39 +116,27 @@ fn direct_rc_total_uses_total_q_once_and_rejects_nonunit_amplification_and_added
         .map(|e| {
             (
                 e.id,
-                MemberDemand::from_pushover(150000.0, 0.0, 0.0, 92000.0, -66000.0, 0.0),
+                MemberDemand {
+                    min_axial_for_shear_n: Some(150000.0),
+                    ..MemberDemand::from_pushover(150000.0, 0.0, 0.0, 92000.0, -66000.0, 0.0)
+                },
             )
         })
         .collect();
     let forward = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap();
-    for check in &forward {
-        assert_eq!(check.qmu, 92000.0);
-        assert!((check.shear_margin - check.qsu / 92000.0).abs() < 1e-12);
-        println!(
-            "member={} totalQ=92000 Qsu={} margin={}",
-            check.elem.0, check.qsu, check.shear_margin
-        );
-    }
     let column = &forward[0];
-    assert!(column.ok);
-    assert_eq!(column.unchecked_reason, None);
-    assert!(
-        (column.biaxial_shear_margin.unwrap() - 725654.571 / 92000.0_f64.hypot(66000.0)).abs()
-            < 1e-7
-    );
+    assert_eq!(column.qmu, 92000.0);
+    assert!((column.shear_margin - column.qsu / 92000.0).abs() < 1e-12);
+    assert!(column.biaxial_shear_margin.unwrap() < column.shear_margin);
+    assert_eq!(forward[1].qmu, 92000.0);
+    assert!(forward[1].qsu.is_nan() && forward[1].unchecked_reason.is_some());
     for (_, d) in &mut demand {
         d.shear = Some(-68000.0);
         d.shear_weak = Some(66000.0);
     }
     let reverse = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap();
-    assert!(
-        (reverse[0].biaxial_shear_margin.unwrap() - 725654.571 / 68000.0_f64.hypot(66000.0)).abs()
-            < 1e-7
-    );
-    for (a, b) in forward.iter().zip(&reverse) {
-        assert_eq!(b.qmu, 68000.0);
-        assert!((b.shear_margin / a.shear_margin - 92000.0 / 68000.0).abs() < 1e-12);
-    }
+    assert_eq!(reverse[0].qmu, 68000.0);
+    assert!((reverse[0].shear_margin / column.shear_margin - 92000.0 / 68000.0).abs() < 1e-12);
     for factor in [0.0, 0.5, 1.1, f64::NAN] {
         opts.upper_strength_factor = factor;
         let reason = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap_err();

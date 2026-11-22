@@ -1,7 +1,6 @@
 //! 終局検定の入力・算定オプション。
 //!
 //! - [`MemberDemand`] — 部材の設計用需要（軸力・二軸曲げ・せん断・Rp 等）。
-//! - [`ShearMethod`] — 終局せん断強度の算定方法（塑性理論式 / 靭性指針式）。
 //! - [`UltimateShearOptions`] — 終局検定の算定オプション。
 
 /// 終局需要の評価方式。
@@ -21,11 +20,11 @@ impl UltimateDemandMode {
         }
     }
 
-    /// 強軸のせん断または付着の余裕度を表す表示用の式。
+    /// 強軸せん断余裕度の表示式。静的・両端ヒンジ略算では「未算定」。
     pub fn strong_shear_margin_formula(self, capacity: &str) -> String {
         let demand = self.strong_shear_demand_symbol();
         match self {
-            Self::StaticHinge => format!("max({capacity}−QL, 0)/{demand}"),
+            Self::StaticHinge => "未算定".into(),
             Self::ConfirmedTotal => format!("{capacity}/{demand}"),
         }
     }
@@ -53,7 +52,7 @@ pub enum StaticBeamHingeMechanism {
 }
 
 /// 圧縮正の軸力 `[N]`、曲げ `[N·mm]` と方式を持つ終局需要。
-/// 静的ヒンジ需要は強軸の QL を要し、二軸せん断の判定には弱軸の QL も参照する。
+/// 静的ヒンジ需要は強軸の QL を要する。荒川mean式には確定総応答が必要。
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MemberDemand {
     pub mode: UltimateDemandMode,
@@ -73,17 +72,21 @@ pub struct MemberDemand {
     pub shear: Option<f64>,
     /// 弱軸の確定総せん断力 `[N]`。総応答モードで `Qmuy = |Qmy|` として採用する。
     pub shear_weak: Option<f64>,
-    /// 部材別のヒンジ回転角 Rp `[rad]`（プッシュオーバー終局時の部材変形角）。`Some`
-    /// のとき ν・cotφ・μ・tanθ に用いる Rp を [`UltimateShearOptions::rp`] から置き換える。
+    /// 検討区間で確認した最小軸力 [N]（圧縮正）。未確認は None。
+    /// 部材荷重がなく、両フェースを含む区間の確定総応答として曲げとせん断を確認し、最小軸力を得た場合にだけ指定できる。
+    pub min_axial_for_shear_n: Option<f64>,
+    /// 大地震時の付着応力度と必要延長を確認する配筋組。未確認は None。
+    pub bond: Option<super::rc_bond::RcUltimateBondDemand>,
+    /// 確定応答の部材変形角 [rad]。
     pub rp: Option<f64>,
     /// 強軸の長期せん断力 QL `[N]`。静的ヒンジでは必須、確定総応答では `None`（追加なし）。
     pub q_long: Option<f64>,
-    /// 弱軸の長期せん断力 QL `[N]`。静的ヒンジの二軸せん断で参照し、確定総応答では `None`。
+    /// 弱軸の長期せん断力 QL `[N]`。確定総応答では `None`。
     pub q_long_weak: Option<f64>,
 }
 
 impl MemberDemand {
-    /// 軸力のみ（曲げ・せん断需要 0、Rp は UI 一律指定に従う）の需要を作る。
+    /// 軸力のみ（曲げ・せん断需要 0）の需要を作る。
     pub fn axial(n_axial: f64) -> Self {
         Self {
             mode: UltimateDemandMode::StaticHinge,
@@ -94,7 +97,7 @@ impl MemberDemand {
 
     /// プッシュオーバー応答から部材需要を作る。軸力（圧縮正）・強軸/弱軸の設計用曲げ・
     /// 強軸/弱軸の設計用せん断・部材別 Rp を直接反映する（`Qmu`・弱軸 Qmuy・Rp を
-    /// 応答値で置き換える）。
+    /// 応答値で置き換える）。検討区間の最小軸力は別途確認して指定する。
     #[allow(clippy::too_many_arguments)]
     pub fn from_pushover(
         n_axial: f64,
@@ -117,45 +120,16 @@ impl MemberDemand {
     }
 }
 
-/// 終局せん断強度の算定方法（塑性理論式／靭性指針式の選択に対応）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum ShearMethod {
-    /// 塑性理論式（藤井・森田式系、「終局強度型設計指針」）。既定。
-    #[default]
-    Plastic,
-    /// 靭性指針式 Vu=min(Vu1,Vu2,Vu3)（AIJ「靭性保証型耐震設計指針」6.4）。
-    Ductility,
-}
-
-impl ShearMethod {
-    /// 表示用の耐力記号を（せん断、付着）の順で返す。
-    pub fn capacity_symbols(self) -> (&'static str, &'static str) {
-        match self {
-            Self::Plastic => ("Qsu", "Qbu"),
-            Self::Ductility => ("Vu", "Vbu"),
-        }
-    }
-}
-
 /// 終局検定の算定オプション。
 #[derive(Clone, Debug)]
 pub struct UltimateShearOptions {
-    /// 終局限界状態でのヒンジ領域の回転角 Rp `[rad]`（ν・cotφ に用いる。既定 0）。
-    pub rp: f64,
-    /// 軽量コンクリートを使用する場合 true（せん断終局耐力を 0.9 倍に低減）。
-    pub lightweight: bool,
-    /// せん断需要に掛ける上限強度倍率（無次元、既定 1.0）。
+    /// RC柱の静的・両端ヒンジ略算の参考せん断需要に掛ける倍率（無次元、既定 1.0）。
     /// 静的・両端ヒンジ略算は有限の正値、確定総応答は 1.0 を指定する。
     pub upper_strength_factor: f64,
-    /// せん断補強筋の降伏強度算定用強度 σwy [N/mm²]（断面に材料が割り当てられて
-    /// いない場合の代表値。既定 295 = SD295 相当）。
-    pub sigma_wy: f64,
-    /// 付着割裂の検定を含める場合 true。
+    /// 大地震時の付着照査を有効にする場合 true。カットオフ筋の必要延長は応力度と独立に判定する。
     pub include_bond: bool,
-    /// 終局せん断・付着耐力の算定方法（既定 塑性理論式）。
-    pub shear_method: ShearMethod,
     /// RC 柱の二軸せん断を検定する場合 true。
-    /// 静的ヒンジでの二軸せん断余裕度は、両軸の QL が明示的に 0 の場合に算定する。
+    /// 両軸の確定総応答に対する終局せん断耐力が必要。
     pub biaxial_shear: bool,
     /// 柱の曲げを 2 軸曲げとして検定する場合 true（採用応力）。
     /// 両軸の設計用曲げ Mm と終局曲げ強度 Mu を相互作用式
@@ -167,12 +141,8 @@ pub struct UltimateShearOptions {
 impl Default for UltimateShearOptions {
     fn default() -> Self {
         Self {
-            rp: 0.0,
-            lightweight: false,
             upper_strength_factor: 1.0,
-            sigma_wy: 295.0,
             include_bond: true,
-            shear_method: ShearMethod::default(),
             biaxial_shear: false,
             biaxial_bending: false,
         }

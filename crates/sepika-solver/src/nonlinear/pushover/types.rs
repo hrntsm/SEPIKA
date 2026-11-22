@@ -220,6 +220,9 @@ pub struct PushoverMemberResponse {
     pub shear_weak: f64,
     /// 部材軸力 `[N]`（**圧縮正**、両端のうち圧縮側の代表値）。
     pub axial: f64,
+    /// 材端断面力で区間の極値を確定できる場合の最小軸力 [N]（圧縮正）。
+    #[serde(default)]
+    pub min_axial_for_shear_n: Option<f64>,
     /// 終局時の部材変形角 Rp `[rad]`（弦回転角＝層間変形角相当の近似）。
     pub rp: f64,
     /// 終局時に部材が負担する**加力方向の水平力** `[N]`（材端力の載荷方向成分の

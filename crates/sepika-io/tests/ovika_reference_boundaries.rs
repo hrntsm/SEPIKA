@@ -278,7 +278,11 @@ fn ovika_rejects_each_hysteresis_attribute_without_a_member() {
     for (rule, rule_th, rc_beam_reference) in [
         (Takeda, None, None),
         (Auto, Some(Retrograde), None),
-        (Auto, None, Some(RcBeamReference::AntisymmetricHalfMember)),
+        (
+            Auto,
+            None,
+            Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
+        ),
     ] {
         let mut model = baseline();
         model.member_hysteresis_attrs.push(MemberHysteresisAttr {
@@ -356,7 +360,7 @@ fn ovika_preserves_hysteresis_selection_and_rc_beam_reference_for_both_analyses(
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: RebarSize::DiameterMm(28.0),
+            main_dia: RebarSize::Standard(sepika_core::section_shape::StandardRebar::D29),
             top: vec![3],
             bottom: vec![3],
             cover: 35.0,
@@ -389,7 +393,7 @@ fn ovika_preserves_hysteresis_selection_and_rc_beam_reference_for_both_analyses(
         plastic_zone: None,
         spring: None,
     });
-    let reference = Some(RcBeamReference::AntisymmetricHalfMember);
+    let reference = Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce);
     model.member_hysteresis_attrs = vec![
         MemberHysteresisAttr {
             elem: id,

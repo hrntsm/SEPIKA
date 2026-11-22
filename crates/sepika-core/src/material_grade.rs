@@ -293,6 +293,23 @@ pub fn has_jis_rebar_strength_limit(mat: &crate::model::Material) -> bool {
         .is_some_and(|grade| grade == "SD490" || ordinary_jis_rebar_fy(grade).is_some())
 }
 
+/// D41以下のRC規準4条の異形鉄筋で、材種と入力が一致する降伏強度 [N/mm²]。
+pub fn rc_standard_deformed_rebar_fy(
+    mat: &crate::model::Material,
+    size: crate::section_shape::RebarSize,
+) -> Option<f64> {
+    let grade = main_rebar_grade(mat)?;
+    if !matches!(
+        grade,
+        "SD295" | "SD295A" | "SD295B" | "SD345" | "SD390" | "SD490"
+    ) || !matches!(size, crate::section_shape::RebarSize::Standard(_))
+    {
+        return None;
+    }
+    let fy = rebar_f_value(grade)?;
+    (mat.fy == Some(fy)).then_some(fy)
+}
+
 /// 梁・柱の主筋で、適用条件の確認に基づく材料強度の直接入力が必要かを返す。
 /// 既知の高強度鉄筋名と、対応済みJIS材種以外の490 N/mm²を超えるFyを対象とする。
 pub fn requires_direct_high_strength_main_rebar(mat: &crate::model::Material) -> bool {

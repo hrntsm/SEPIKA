@@ -198,9 +198,15 @@ pub fn rc_qsu_simple(inp: &RcCapacityInput) -> f64 {
     if inp.b <= 0.0 || inp.d_eff <= 0.0 || inp.at <= 0.0 || inp.fc <= 0.0 || inp.clear_span <= 0.0 {
         return 0.0;
     }
+    rc_qsu_arakawa_mean(inp, inp.clear_span / (2.0 * inp.d_eff))
+}
+
+/// 終局せん断耐力 [N]。正の幾何・配筋と強度および非負のせん断スパン比を要する。
+/// スパン比、せん断補強筋比、圧縮応力度の上限を適用する。
+pub fn rc_qsu_arakawa_mean(inp: &RcCapacityInput, shear_span_ratio: f64) -> f64 {
     let pt_shear_percent = 100.0 * inp.at / (inp.b * inp.d_eff);
     let j = 7.0 * inp.d_eff / 8.0;
-    let shear_span_ratio = (inp.clear_span / (2.0 * inp.d_eff)).clamp(1.0, 3.0);
+    let shear_span_ratio = shear_span_ratio.clamp(1.0, 3.0);
     let pw_ratio = inp.pw.clamp(0.0, 0.012);
     let concrete_term =
         0.068 * pt_shear_percent.powf(0.23) * (inp.fc + 18.0) / (shear_span_ratio + 0.12);
@@ -219,16 +225,16 @@ pub fn rc_qsu_simple_checked(inp: &RcCapacityInput) -> Result<f64, crate::error:
 
 /// 採用RC梁式のαyを数値評価する。pt=at/(bD)は小数、a/D・d/D・nは無次元。
 /// 入力域へのクランプ・結果の非正値補正は行わない。設計適用・ばね接続可否は別途診断する。
-pub fn rc_alpha_y_sugano(pt_alpha_ratio: f64, a_over_d: f64, d_over_full: f64, n: f64) -> f64 {
-    let base = if a_over_d <= 2.0 {
-        0.043 + 1.64 * n * pt_alpha_ratio + 0.043 * a_over_d
+fn rc_alpha_y_sugano(pt_alpha_ratio: f64, a_over_d: f64, d_over_full: f64, n: f64) -> f64 {
+    let base = if a_over_d < 2.0 {
+        -0.0836 + 0.159 * a_over_d
     } else {
-        -0.0336 - 0.1935 * n * pt_alpha_ratio + 0.1270 * a_over_d
+        0.043 + 1.64 * n * pt_alpha_ratio + 0.043 * a_over_d
     };
     base * d_over_full * d_over_full
 }
 
-/// 正の有限比率・d/D≤1を診断してαyを評価する。有限な非正結果もそのまま返す。
+/// 軸力ゼロのRC梁のαy。適用範囲外のせん断スパン比・鉄筋比はエラー。
 pub fn rc_alpha_y_sugano_checked(
     pt_alpha_ratio: f64,
     a_over_d: f64,
@@ -252,10 +258,20 @@ pub fn rc_alpha_y_sugano_checked(
             "有効せい d は全せい D 以下が必要です".into(),
         ));
     }
-    let alpha = rc_alpha_y_sugano(pt_alpha_ratio, a_over_d, d_over_full, n);
-    if !alpha.is_finite() {
+    if !(1.0..=5.0).contains(&a_over_d) {
         return Err(crate::error::CoreError::InvalidInput(
-            "αyを有限値として算定できません".into(),
+            "降伏時剛性低下率に用いるせん断スパン比 a/D は1.0〜5.0に限ります".into(),
+        ));
+    }
+    if a_over_d >= 2.0 && !(0.004..=0.028).contains(&pt_alpha_ratio) {
+        return Err(crate::error::CoreError::InvalidInput(
+            "基本式の引張鉄筋比は0.4〜2.8％に限ります".into(),
+        ));
+    }
+    let alpha = rc_alpha_y_sugano(pt_alpha_ratio, a_over_d, d_over_full, n);
+    if !alpha.is_finite() || alpha <= 0.0 {
+        return Err(crate::error::CoreError::InvalidInput(
+            "αyを正の有限値として算定できません".into(),
         ));
     }
     Ok(alpha)
@@ -316,12 +332,9 @@ mod tests {
         assert!((top.pt_alpha_ratio - 0.013_333_333_333_333_3).abs() < 1e-15);
         assert_eq!(bottom.pt_shear_percent, rect.pt_shear_percent);
         assert_eq!(top.pt_shear_percent, rect.pt_shear_percent);
+        assert!((rc_alpha_y_sugano(rect.pt_alpha_ratio, 3.0, 0.9, 10.0) - 0.272_16).abs() < 1e-12);
         assert!(
-            (rc_alpha_y_sugano(rect.pt_alpha_ratio, 3.0, 0.9, 10.0) - 0.265_720_5).abs() < 1e-12
-        );
-        assert!(
-            (rc_alpha_y_sugano(rect.pt_alpha_ratio * 100.0, 3.0, 0.9, 10.0) - 0.265_720_5).abs()
-                > 1.0
+            (rc_alpha_y_sugano(rect.pt_alpha_ratio * 100.0, 3.0, 0.9, 10.0) - 0.272_16).abs() > 1.0
         );
         let input = RcCapacityInput {
             b: 300.0,
@@ -509,21 +522,22 @@ mod tests {
     }
 
     #[test]
-    fn adopted_alpha_branches_preserve_boundary_and_extrapolation() {
+    fn rc_beam_alpha_uses_short_span_below_two_and_basic_from_two() {
         for (r, expected) in [
-            (1.0, 0.2025),
+            (1.0, 0.061074),
+            (1.5, 0.125469),
             (2.0, 0.23733),
-            (5.0, 0.4714605),
-            (0.5, 0.185085),
-            (8.0, 0.7800705),
+            (5.0, 0.34182),
         ] {
-            assert!((rc_alpha_y_sugano(0.01, r, 0.9, 10.0) - expected).abs() < 1e-12);
+            let alpha = rc_alpha_y_sugano_checked(0.01, r, 0.9, 10.0).unwrap();
+            assert!((alpha - expected).abs() < 1e-12, "a/D={r}: {alpha}");
         }
         let epsilon = 1e-8;
-        assert!((rc_alpha_y_sugano(0.01, 2.0 - epsilon, 0.9, 10.0) - 0.23733).abs() < 1e-9);
-        assert!((rc_alpha_y_sugano(0.01, 2.0 + epsilon, 0.9, 10.0) - 0.1628505).abs() < 2e-9);
-        assert!(rc_alpha_y_sugano_checked(0.5, 3.0, 0.9, 10.0).unwrap() < 0.0);
-        assert!(rc_alpha_y_sugano_checked(0.01, 20.0, 0.9, 10.0).unwrap() > 1.0);
+        assert!((rc_alpha_y_sugano(0.01, 2.0 - epsilon, 0.9, 10.0) - 0.189864).abs() < 2e-9);
+        assert!((rc_alpha_y_sugano(0.01, 2.0 + epsilon, 0.9, 10.0) - 0.23733).abs() < 1e-9);
+        assert!(rc_alpha_y_sugano_checked(0.5, 3.0, 0.9, 10.0).is_err());
+        assert!(rc_alpha_y_sugano_checked(0.01, 0.5, 0.9, 10.0).is_err());
+        assert!(rc_alpha_y_sugano_checked(0.01, 8.0, 0.9, 10.0).is_err());
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             assert!(rc_alpha_y_sugano_checked(bad, 3.0, 0.9, 10.0).is_err());
             assert!(rc_alpha_y_sugano_checked(0.01, bad, 0.9, 10.0).is_err());

@@ -6,8 +6,8 @@ use sepika_core::model::{
     Node, RigidZone, Section,
 };
 use sepika_core::section_shape::{
-    BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar,
-    RectColumnHoop, SectionShape,
+    BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, RebarSize,
+    RectColumnHoop, SectionShape, StandardRebar,
 };
 use smallvec::SmallVec;
 
@@ -48,8 +48,8 @@ fn rc_beam_rect_section(
         thickness: None,
         shape: Some(SectionShape::RcBeamRect { b, d, rebar }),
         material: Some(MaterialId(0)),
-        rebar_material: Some(MaterialId(0)),
-        shear_rebar_material: Some(MaterialId(0)),
+        rebar_material: Some(MaterialId(1)),
+        shear_rebar_material: Some(MaterialId(1)),
         steel_material: None,
         property_basis: Default::default(),
     }
@@ -94,8 +94,8 @@ fn rc_column_rect_section(
         thickness: None,
         shape: Some(SectionShape::RcColumnRect { b, d, rebar }),
         material: Some(MaterialId(0)),
-        rebar_material: Some(MaterialId(0)),
-        shear_rebar_material: Some(MaterialId(0)),
+        rebar_material: Some(MaterialId(1)),
+        shear_rebar_material: Some(MaterialId(1)),
         steel_material: None,
         property_basis: Default::default(),
     }
@@ -105,15 +105,26 @@ fn material() -> Material {
     Material {
         strength_factor: None,
         concrete_class: Default::default(),
-        id: MaterialId(0),
+        id: MaterialId(1),
         name: "SD345".to_string(),
         category: MaterialCategory::Rebar,
         young: 21000.0,
         poisson: 0.2,
         density: 2.4e-9,
         shear: None,
-        fc: Some(24.0),
+        fc: None,
         fy: Some(345.0),
+    }
+}
+
+fn concrete_material() -> Material {
+    Material {
+        id: MaterialId(0),
+        name: "Fc24".into(),
+        category: MaterialCategory::Concrete,
+        fc: Some(24.0),
+        fy: None,
+        ..material()
     }
 }
 
@@ -164,7 +175,7 @@ pub(super) fn column_and_beam_model() -> Model {
         rc_column_rect_section(0, 600.0, 600.0, 25.0, 4, 4, 100.0),
         rc_beam_rect_section(1, 400.0, 700.0, 25.0, 4, 100.0),
     ];
-    let materials = vec![material()];
+    let materials = vec![concrete_material(), material()];
     let elements = vec![frame_element(0, 0, 0, 1), frame_element(1, 1, 1, 2)];
     Model {
         load_cases: sepika_core::model::default_load_cases(),
@@ -211,8 +222,8 @@ fn test_collect_rc_ultimate_checks_column_and_beam() {
     assert_eq!(col.kind, MemberKind::Column);
     assert_eq!(beam.kind, MemberKind::Girder);
 
-    assert!(col.mu > 0.0 && col.qmu > 0.0 && col.qsu > 0.0 && col.qbu > 0.0);
-    assert!(beam.mu > 0.0 && beam.qmu.is_nan() && beam.qsu > 0.0);
+    assert!(col.mu > 0.0 && col.qmu > 0.0 && col.qsu.is_nan() && col.bond_stress.is_none());
+    assert!(beam.mu > 0.0 && beam.qmu.is_nan() && beam.qsu.is_nan());
     assert!(!beam.ok && beam.unchecked_reason.is_some());
 
     let ax = col.axial.expect("柱は軸終局耐力を持つ");
@@ -220,106 +231,20 @@ fn test_collect_rc_ultimate_checks_column_and_beam() {
     assert!(ax.nut < 0.0);
     assert!(beam.axial.is_none());
 
-    assert!((col.shear_margin - col.qsu / col.qmu).abs() < 1e-9);
+    assert!(col.shear_margin.is_nan());
 }
 
-/// 終局 σwy は断面のせん断補強筋材料の `fy` から解決する。材料名の数値ではなく
-/// 材料の `fy` が効き、対応グレードで `fy` 未設定は入力不備として停止する。
-#[test]
-fn test_ultimate_sigma_wy_from_shear_rebar_material_fy() {
-    let demand = [
-        (
-            ElemId(0),
-            MemberDemand {
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-        (
-            ElemId(1),
-            MemberDemand {
-                mz: 1.0e6,
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-    ];
-    let opts = UltimateShearOptions::default();
-    let qsu_with_sigma_wy = |model: &Model, sigma_wy: f64| -> f64 {
-        let shape = model.sections[1].shape.clone().unwrap();
-        let p = super::rc_props::rc_bar_props(
-            &shape,
-            super::rc_props::RcDirection::Strong,
-            false,
-            false,
-        )
-        .expect("梁断面の諸元");
-        let l_clear = 6000.0;
-        super::rc_strength::member_shear_strength(&p, 24.0, 0.0, l_clear, Some(sigma_wy), &opts)
-            .unwrap()
-    };
-    let model_with_shear_fy = |shear_fy: Option<f64>| -> Model {
-        let mut model = column_and_beam_model();
-        model.materials.push(Material {
-            id: MaterialId(model.materials.len() as u32),
-            name: "SD345".to_string(),
-            fy: shear_fy,
-            ..material()
-        });
-        let shear_id = MaterialId(model.materials.len() as u32 - 1);
-        model.sections[1].shear_rebar_material = Some(shear_id);
-        model
-    };
-
-    let model = model_with_shear_fy(Some(345.0));
-    let checks = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap();
-    let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
-    let qsu_345 = qsu_with_sigma_wy(&model, 345.0);
-    assert!(
-        (beam.qsu - qsu_345).abs() / qsu_345 < 1e-12,
-        "材料 fy=345 を σwy に用いるはず: qsu={}, expected={qsu_345}",
-        beam.qsu
-    );
-
-    let model_490 = model_with_shear_fy(Some(490.0));
-    let checks_490 = collect_rc_ultimate_checks(&model_490, &demand, &opts).unwrap();
-    let beam_490 = checks_490.iter().find(|c| c.elem == ElemId(1)).unwrap();
-    let qsu_490 = qsu_with_sigma_wy(&model_490, 490.0);
-    assert!(
-        (beam_490.qsu - qsu_490).abs() / qsu_490 < 1e-12,
-        "材料 fy=490 を σwy に用いるはず: qsu={}, expected={qsu_490}",
-        beam_490.qsu
-    );
-    assert!(beam_490.qsu > beam.qsu, "fy の増加に伴い Qsu も増える");
-
-    let model_none = model_with_shear_fy(None);
-    let err = collect_rc_ultimate_checks(&model_none, &demand, &opts).unwrap_err();
-    assert!(err.contains("fy"), "{err}");
-    assert!(err.contains("部材 ID 1"), "{err}");
-}
-
-/// SR235 は対応グレードだが、fy 未設定なら入力不備として停止する
-/// （既定 295 で評価すると σwy が 235→295 に増える危険側）。fy を設定すれば算定できる。
 #[test]
 fn test_ultimate_sr235_requires_fy() {
-    let demand = [
-        (
-            ElemId(0),
-            MemberDemand {
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-        (
-            ElemId(1),
-            MemberDemand {
-                mz: 1.0e6,
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-    ];
-    let opts = UltimateShearOptions::default();
+    let confirmed = MemberDemand {
+        min_axial_for_shear_n: Some(0.0),
+        ..MemberDemand::from_pushover(0.0, 1e6, 0.0, 1000.0, 0.0, 0.0)
+    };
+    let demand = [(ElemId(0), confirmed), (ElemId(1), confirmed)];
+    let opts = UltimateShearOptions {
+        include_bond: false,
+        ..Default::default()
+    };
     let model_with_shear = |name: &str, fy: Option<f64>| -> Model {
         let mut model = column_and_beam_model();
         model.materials.push(Material {
@@ -333,19 +258,24 @@ fn test_ultimate_sr235_requires_fy() {
         model
     };
 
-    let err =
-        collect_rc_ultimate_checks(&model_with_shear("SR235", None), &demand, &opts).unwrap_err();
-    assert!(err.contains("SR235") && err.contains("fy"), "{err}");
+    let unavailable =
+        collect_rc_ultimate_checks(&model_with_shear("SR235", None), &demand, &opts).unwrap();
+    let column = unavailable.iter().find(|c| c.elem == ElemId(0)).unwrap();
+    let beam = unavailable.iter().find(|c| c.elem == ElemId(1)).unwrap();
+    let reason = beam.unchecked_reason.as_deref().unwrap();
+    assert!(
+        reason.contains("SR235") && reason.contains("fy"),
+        "{reason}"
+    );
+    assert!(beam.qsu.is_nan() && beam.mu.is_finite() && column.qsu.is_finite());
 
     let checks =
         collect_rc_ultimate_checks(&model_with_shear("SR235", Some(235.0)), &demand, &opts)
             .unwrap();
     let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
-    assert!(beam.qsu > 0.0);
+    assert!(beam.qsu.is_finite());
 }
 
-/// `SD295` の未知名（`SD295X` 等）は未対応として停止し、設定した `fy` を
-/// 終局 σwy に使わない（`SD295` の前方一致で任意の `fy` をすり抜けさせない）。
 #[test]
 fn test_ultimate_unknown_sd295_is_unsupported() {
     let opts = UltimateShearOptions::default();
@@ -359,7 +289,7 @@ fn test_ultimate_unknown_sd295_is_unsupported() {
         });
         let shear_id = MaterialId(model.materials.len() as u32 - 1);
         model.sections[1].shear_rebar_material = Some(shear_id);
-        let err = collect_rc_ultimate_checks(
+        let checks = collect_rc_ultimate_checks(
             &model,
             &[
                 (
@@ -380,120 +310,16 @@ fn test_ultimate_unknown_sd295_is_unsupported() {
             ],
             &opts,
         )
-        .unwrap_err();
+        .unwrap();
+        let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
+        assert!(beam.qsu.is_nan());
+        let err = beam.unchecked_reason.as_deref().unwrap();
         assert!(err.contains(name), "{name}: {err}");
         assert!(err.contains("未対応"), "{name}: {err}");
     }
 }
 
-#[test]
-fn test_ultimate_check_ql_subtraction_and_unsupported_error() {
-    let ql = 50_000.0;
-    let demand = vec![
-        (
-            ElemId(1),
-            MemberDemand {
-                mz: 1.0e6,
-                static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::IBottomJTop),
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-        (
-            ElemId(0),
-            MemberDemand {
-                q_long: Some(ql),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-    ];
-    let opts = UltimateShearOptions::default();
-
-    let mut model = column_and_beam_model();
-    model.nodes[1].restraint = Dof6Mask::FIXED;
-    model.nodes[2].restraint = Dof6Mask::FIXED;
-    let checks = collect_rc_ultimate_checks(&model, &demand, &opts).unwrap();
-    let col = checks.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    assert!((col.shear_margin - (col.qsu - ql).max(0.0) / col.qmu).abs() < 1e-9);
-
-    let mut model_kh = column_and_beam_model();
-    model_kh.materials.push(Material {
-        id: MaterialId(model_kh.materials.len() as u32),
-        name: "KH785".to_string(),
-        fy: Some(785.0),
-        ..material()
-    });
-    let kh = MaterialId(model_kh.materials.len() as u32 - 1);
-    model_kh.sections[1].shear_rebar_material = Some(kh);
-    let err = collect_rc_ultimate_checks(&model_kh, &demand, &opts).unwrap_err();
-    assert!(err.contains("KH785"), "{err}");
-    assert!(
-        err.contains("SR235・SR295・SD295・SD345・SD390・SD490"),
-        "{err}"
-    );
-    assert!(err.contains("部材 ID 1"), "部材 ID を含むはず: {err}");
-}
-
 /// 算定オプション（軽量コンクリートの低減・付着検定の省略）が機能する。
-#[test]
-fn test_ultimate_check_option_flags() {
-    let demand = [
-        (
-            ElemId(0),
-            MemberDemand {
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-        (
-            ElemId(1),
-            MemberDemand {
-                mz: 1.0e6,
-                static_beam_hinge_mechanism: Some(StaticBeamHingeMechanism::IBottomJTop),
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-    ];
-    let mut model = column_and_beam_model();
-    model.nodes[1].restraint = Dof6Mask::FIXED;
-    model.nodes[2].restraint = Dof6Mask::FIXED;
-
-    let std =
-        collect_rc_ultimate_checks(&model, &demand, &UltimateShearOptions::default()).unwrap();
-    let lw = collect_rc_ultimate_checks(
-        &model,
-        &demand,
-        &UltimateShearOptions {
-            lightweight: true,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    let col_std = std.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    let col_lw = lw.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    assert!((col_lw.qsu - 0.9 * col_std.qsu).abs() < 1e-3);
-    assert!((col_lw.qbu - 0.9 * col_std.qbu).abs() < 1e-3);
-
-    let no_bond = collect_rc_ultimate_checks(
-        &model,
-        &demand,
-        &UltimateShearOptions {
-            include_bond: false,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    for c in &no_bond {
-        assert_eq!(c.qbu, 0.0);
-        if c.kind == MemberKind::Column {
-            assert!(c.bond_margin.is_infinite());
-        } else {
-            assert!(c.bond_margin.is_nan());
-        }
-    }
-}
-
 #[test]
 fn test_ultimate_check_skips_non_rc() {
     let mut model = column_and_beam_model();
@@ -526,50 +352,6 @@ fn test_biaxial_margin_handcalc() {
 }
 
 /// 柱の 2 軸せん断余裕度オプションが機能し、強軸単独より小さい（不利側）になる。
-#[test]
-fn test_ultimate_check_biaxial_shear() {
-    let model = column_and_beam_model();
-    let axial = vec![
-        (
-            ElemId(0),
-            MemberDemand {
-                q_long: Some(0.0),
-                q_long_weak: Some(0.0),
-                ..MemberDemand::axial(2_000_000.0)
-            },
-        ),
-        (
-            ElemId(1),
-            MemberDemand {
-                mz: 1.0e6,
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-    ];
-    let uni = collect_rc_ultimate_checks(&model, &axial, &UltimateShearOptions::default()).unwrap();
-    let bi = collect_rc_ultimate_checks(
-        &model,
-        &axial,
-        &UltimateShearOptions {
-            biaxial_shear: true,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    let col_uni = uni.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    let col_bi = bi.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    assert!(col_uni.biaxial_shear_margin.is_none());
-    let bm = col_bi.biaxial_shear_margin.expect("2軸指定で Some");
-    assert!(
-        bm > 0.0 && bm <= col_bi.shear_margin + 1e-9,
-        "bm={bm} uni={}",
-        col_bi.shear_margin
-    );
-    let beam_bi = bi.iter().find(|c| c.elem == ElemId(1)).unwrap();
-    assert!(beam_bi.biaxial_shear_margin.is_none());
-}
-
 /// 柱の 2 軸曲げ余裕度オプションが機能する（設計用曲げ需要を与えたとき Some・正）。
 #[test]
 fn test_ultimate_check_biaxial_bending() {
@@ -647,177 +429,8 @@ fn test_ultimate_check_biaxial_bending() {
     assert!(beam_bi.biaxial_bending_margin.is_none());
 }
 
-/// 終局せん断強度に靭性指針式 Vu を選択するオプションが機能する。
-#[test]
-fn test_ultimate_check_shear_method_ductility() {
-    let demand = [
-        (
-            ElemId(0),
-            MemberDemand {
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-        (
-            ElemId(1),
-            MemberDemand {
-                mz: 1.0e6,
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-    ];
-    let model = column_and_beam_model();
-    let plastic =
-        collect_rc_ultimate_checks(&model, &demand, &UltimateShearOptions::default()).unwrap();
-    let ductility = collect_rc_ultimate_checks(
-        &model,
-        &demand,
-        &UltimateShearOptions {
-            shear_method: ShearMethod::Ductility,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    for c in &plastic {
-        assert!(c.qsu > 0.0, "塑性 Qsu>0: elem={:?}", c.elem);
-    }
-    let col_p = plastic.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    let col_d = ductility.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    assert!(col_d.qsu > 0.0, "靭性 Vu>0");
-    assert!(
-        (col_p.qsu - col_d.qsu).abs() > 1e-3,
-        "塑性 Qsu={} と靭性 Vu={} は一般に異なるはず",
-        col_p.qsu,
-        col_d.qsu
-    );
-    assert!(col_d.basis.contains("靭性指針式"), "basis={}", col_d.basis);
-    assert!(col_p.basis.contains("塑性理論式"), "basis={}", col_p.basis);
-    assert!(col_d.qbu > 0.0, "靭性 Vbu>0");
-    assert!(col_p.qbu > 0.0, "塑性 Qbu>0");
-    assert!(
-        (col_p.qbu - col_d.qbu).abs() > 1e-3,
-        "塑性 Qbu={} と靭性 Vbu={} は一般に異なるはず",
-        col_p.qbu,
-        col_d.qbu
-    );
-}
-
 /// プッシュオーバー応答からの部材別 Rp・設計用せん断力（強軸・2 軸せん断の
 /// 弱軸）の直接反映が機能する。
-#[test]
-fn test_ultimate_check_pushover_demand() {
-    let model = column_and_beam_model();
-
-    let qm = 123_456.0_f64;
-    let demand = vec![
-        (
-            ElemId(0),
-            MemberDemand::from_pushover(1_000_000.0, 1.0e8, 5.0e7, qm, 0.0, 0.0),
-        ),
-        (
-            ElemId(1),
-            MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        ),
-    ];
-    let checks =
-        collect_rc_ultimate_checks(&model, &demand, &UltimateShearOptions::default()).unwrap();
-    let col = checks.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    assert!(
-        (col.qmu - qm).abs() < 1e-3,
-        "Qmu={} は応答せん断 Qm={} を反映するはず",
-        col.qmu,
-        qm
-    );
-
-    let d_rp3 = vec![
-        (
-            ElemId(0),
-            MemberDemand::from_pushover(1_000_000.0, 1.0e8, 5.0e7, qm, 0.0, 0.03),
-        ),
-        (
-            ElemId(1),
-            MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        ),
-    ];
-    let c3 = collect_rc_ultimate_checks(&model, &d_rp3, &UltimateShearOptions::default()).unwrap();
-    let q0 = col.qsu;
-    let q3 = c3.iter().find(|c| c.elem == ElemId(0)).unwrap().qsu;
-    assert!(
-        q3 < q0,
-        "部材別 Rp=0.03 の Qsu={q3} は Rp=0 の Qsu={q0} より小さいはず"
-    );
-
-    let d_axial = vec![
-        (
-            ElemId(0),
-            MemberDemand {
-                q_long: Some(0.0),
-                ..MemberDemand::axial(1_000_000.0)
-            },
-        ),
-        (
-            ElemId(1),
-            MemberDemand {
-                mz: 1.0e6,
-                q_long: Some(0.0),
-                ..MemberDemand::axial(0.0)
-            },
-        ),
-    ];
-    let ca =
-        collect_rc_ultimate_checks(&model, &d_axial, &UltimateShearOptions::default()).unwrap();
-    let col_a = ca.iter().find(|c| c.elem == ElemId(0)).unwrap();
-    assert!(
-        (col_a.qmu - qm).abs() > 1.0,
-        "shear 未指定時は Qmu が応答せん断と一致しないはず（両端ヒンジ略算）"
-    );
-
-    let opts = UltimateShearOptions {
-        biaxial_shear: true,
-        ..Default::default()
-    };
-    let qm = 200_000.0_f64;
-    let small = vec![
-        (
-            ElemId(0),
-            MemberDemand::from_pushover(1_000_000.0, 0.0, 0.0, qm, 10_000.0, 0.0),
-        ),
-        (
-            ElemId(1),
-            MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        ),
-    ];
-    let large = vec![
-        (
-            ElemId(0),
-            MemberDemand::from_pushover(1_000_000.0, 0.0, 0.0, qm, 400_000.0, 0.0),
-        ),
-        (
-            ElemId(1),
-            MemberDemand::from_pushover(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        ),
-    ];
-    let cs = collect_rc_ultimate_checks(&model, &small, &opts).unwrap();
-    let cl = collect_rc_ultimate_checks(&model, &large, &opts).unwrap();
-    let ms = cs
-        .iter()
-        .find(|c| c.elem == ElemId(0))
-        .unwrap()
-        .biaxial_shear_margin
-        .expect("2軸指定で Some");
-    let ml = cl
-        .iter()
-        .find(|c| c.elem == ElemId(0))
-        .unwrap()
-        .biaxial_shear_margin
-        .expect("2軸指定で Some");
-    assert!(
-        ml < ms,
-        "弱軸需要大の余裕度 {ml} は弱軸需要小 {ms} より小さいはず"
-    );
-}
-
 pub(super) fn cft_test_direct_lengths() -> Vec<sepika_core::model::SteelDesignAttr> {
     vec![sepika_core::model::SteelDesignAttr {
         elem: ElemId(0),
@@ -944,8 +557,8 @@ fn single_shape_model(shape: SectionShape, b: f64, d: f64, horizontal: bool) -> 
         thickness: None,
         shape: Some(shape),
         material: Some(MaterialId(0)),
-        rebar_material: Some(MaterialId(0)),
-        shear_rebar_material: Some(MaterialId(0)),
+        rebar_material: Some(MaterialId(1)),
+        shear_rebar_material: Some(MaterialId(1)),
         steel_material: None,
         property_basis: Default::default(),
     };
@@ -960,7 +573,7 @@ fn single_shape_model(shape: SectionShape, b: f64, d: f64, horizontal: bool) -> 
         ultimate_gravity_combination: Some(0),
         nodes,
         sections: vec![sec],
-        materials: vec![material()],
+        materials: vec![concrete_material(), material()],
         elements: vec![frame_element(0, 0, 0, 1)],
         ..Default::default()
     }
@@ -1063,7 +676,10 @@ fn test_ultimate_check_new_rc_shapes_supported() {
         &beam,
         &[(
             ElemId(0),
-            MemberDemand::from_pushover(0.0, -1.0e6, 0.0, 30_000.0, 0.0, 0.0),
+            MemberDemand {
+                min_axial_for_shear_n: Some(0.0),
+                ..MemberDemand::from_pushover(0.0, -1.0e6, 0.0, 30_000.0, 0.0, 0.0)
+            },
         )],
         &opts,
     )
@@ -1088,7 +704,7 @@ fn test_ultimate_check_new_rc_shapes_supported() {
     .unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0].kind, MemberKind::Column);
-    assert!(checks[0].mu > 0.0 && checks[0].qsu > 0.0 && checks[0].qmu > 0.0);
+    assert!(checks[0].mu > 0.0 && checks[0].qsu.is_nan() && checks[0].qmu > 0.0);
     assert!(checks[0].axial.is_some());
 
     let circle = single_shape_model(column_circle_shape(), 600.0, 600.0, false);
@@ -1106,7 +722,7 @@ fn test_ultimate_check_new_rc_shapes_supported() {
     .unwrap();
     assert_eq!(checks.len(), 1);
     assert_eq!(checks[0].kind, MemberKind::Column);
-    assert!(checks[0].mu > 0.0 && checks[0].qsu > 0.0 && checks[0].qmu > 0.0);
+    assert!(checks[0].mu > 0.0 && checks[0].qsu.is_nan() && checks[0].qmu > 0.0);
     assert!(checks[0].axial.is_some());
 }
 
@@ -1200,7 +816,7 @@ fn test_ultimate_new_columns_mu_matches_handcalc() {
 
 /// 梁の上下非対称では曲げモーメントの符号で引張側が変わり Mu に反映される。
 #[test]
-fn test_ultimate_beam_rect_tension_side_affects_mu_and_qbu() {
+fn test_ultimate_beam_rect_tension_side_affects_mu() {
     let opts = UltimateShearOptions::default();
     let model = single_shape_model(beam_rect_shape(), 400.0, 600.0, true);
 
@@ -1230,12 +846,927 @@ fn test_ultimate_beam_rect_tension_side_affects_mu_and_qbu() {
         "上端引張 {mu_top} と下端引張 {mu_bottom} は異なるはず"
     );
     assert!(mu_top > mu_bottom, "mu_top={mu_top} mu_bottom={mu_bottom}");
+}
 
-    let qbu_top = top[0].qbu;
-    let qbu_bottom = bottom[0].qbu;
-    assert!(qbu_top > 0.0 && qbu_bottom > 0.0);
+#[test]
+fn rectangular_beam_arakawa_mean_uses_analysis_shear_span_and_withholds_unverified_response() {
+    let mut shape = beam_rect_shape();
+    let SectionShape::RcBeamRect { rebar, .. } = &mut shape else {
+        unreachable!()
+    };
+    rebar.top = vec![4];
+    rebar.bottom = vec![4];
+    let model = single_shape_model(shape, 400.0, 600.0, true);
+    let opts = UltimateShearOptions {
+        include_bond: false,
+        ..Default::default()
+    };
+    let check = |demand| {
+        collect_rc_ultimate_checks(&model, &[(ElemId(0), demand)], &opts)
+            .unwrap()
+            .remove(0)
+    };
+    let demand = MemberDemand::from_pushover(0.0, 107_800_000.0, 0.0, 100_000.0, 0.0, 0.0);
+    let result = check(MemberDemand {
+        min_axial_for_shear_n: Some(0.0),
+        ..demand
+    });
+    // 式(付1.3-7)に d=539 mm と M/(Qd)=2 を代入。
+    assert!((result.qsu - 421174.748973273).abs() < 1e-5, "{result:?}");
+    assert!(result.ok && result.qmu == 100_000.0, "{result:?}");
+    assert!(check(demand).qsu.is_nan());
+    for axial in [Some(-1.0), Some(1.0)] {
+        let result = check(MemberDemand {
+            min_axial_for_shear_n: axial,
+            ..demand
+        });
+        assert!(
+            result.qsu.is_nan() && result.unchecked_reason.is_some(),
+            "{result:?}"
+        );
+    }
+    let result = check(MemberDemand {
+        q_long: Some(0.0),
+        mz: demand.mz,
+        ..Default::default()
+    });
     assert!(
-        qbu_top < qbu_bottom,
-        "上端引張 Qbu={qbu_top} は下端引張 Qbu={qbu_bottom} より小さいはず（αt 低減）"
+        result.qsu.is_nan() && result.shear_margin.is_nan(),
+        "{result:?}"
     );
+}
+
+#[test]
+fn arakawa_mean_distinguishes_invalid_pitch_from_absent_reinforcement() {
+    let opts = UltimateShearOptions {
+        include_bond: false,
+        ..Default::default()
+    };
+    let demand = MemberDemand {
+        min_axial_for_shear_n: Some(0.0),
+        ..MemberDemand::from_pushover(0.0, 107_800_000.0, 107_800_000.0, 100_000.0, 100_000.0, 0.0)
+    };
+    for (base, width, depth, beam) in [
+        (beam_rect_shape(), 400.0, 600.0, true),
+        (column_rect_shape(), 600.0, 700.0, false),
+    ] {
+        for (pitch, legs) in [
+            (100.0, 2),
+            (0.0, 2),
+            (-100.0, 2),
+            (f64::NAN, 2),
+            (f64::INFINITY, 2),
+            (f64::NEG_INFINITY, 2),
+            (f64::NAN, 0),
+        ] {
+            let mut shape = base.clone();
+            match &mut shape {
+                SectionShape::RcBeamRect { rebar, .. } => {
+                    rebar.stirrup.pitch = pitch;
+                    rebar.stirrup.legs = legs;
+                }
+                SectionShape::RcColumnRect { rebar, .. } => {
+                    rebar.hoop.pitch = pitch;
+                    rebar.hoop.legs_x = legs;
+                    rebar.hoop.legs_y = legs;
+                }
+                _ => unreachable!(),
+            }
+            let model = single_shape_model(shape, width, depth, beam);
+            let result = collect_rc_ultimate_checks(&model, &[(ElemId(0), demand)], &opts)
+                .unwrap()
+                .remove(0);
+            if legs == 0 || pitch == 100.0 {
+                assert!(
+                    result.qsu.is_finite() && result.qsu > 0.0 && result.ok,
+                    "{result:?}"
+                );
+            } else {
+                assert!(
+                    result.qsu.is_nan() && result.shear_margin.is_nan() && !result.ok,
+                    "{result:?}"
+                );
+                let reason = result.unchecked_reason.as_deref().unwrap();
+                assert!(
+                    reason.contains("間隔") || reason.contains("pitch_nonfinite"),
+                    "{reason}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn biaxial_ultimate_shear_distinguishes_zero_demand_and_unresolved_shear_span() {
+    let model = single_shape_model(column_rect_shape(), 600.0, 700.0, false);
+    let opts = UltimateShearOptions {
+        include_bond: false,
+        biaxial_shear: true,
+        ..Default::default()
+    };
+    let check_demand = |demand| {
+        collect_rc_ultimate_checks(&model, &[(ElemId(0), demand)], &opts)
+            .unwrap()
+            .remove(0)
+    };
+    let check = |moment_nmm| {
+        let demand = MemberDemand {
+            min_axial_for_shear_n: Some(0.0),
+            ..MemberDemand::from_pushover(0.0, moment_nmm, moment_nmm, 0.0, 0.0, 0.0)
+        };
+        check_demand(demand)
+    };
+    let pure_bending = check(10_000_000.0);
+    assert!(pure_bending.qsu.is_finite() && pure_bending.qsu > 0.0);
+    assert_eq!(pure_bending.biaxial_shear_margin, Some(f64::INFINITY));
+    assert!(pure_bending.ok);
+
+    let zero_response = check(0.0);
+    assert!(zero_response.qsu.is_nan() && zero_response.shear_margin.is_nan());
+    assert_eq!(zero_response.biaxial_shear_margin, None);
+    assert!(
+        !zero_response.ok
+            && zero_response
+                .unchecked_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("MとQがともにゼロ")),
+        "{zero_response:?}"
+    );
+    let strong_axis_ng = check_demand(MemberDemand {
+        min_axial_for_shear_n: Some(0.0),
+        ..MemberDemand::from_pushover(0.0, 100e6, 0.0, 5_000_000.0, 0.0, 0.0)
+    });
+    assert!(
+        !strong_axis_ng.ok
+            && strong_axis_ng.unchecked_reason.is_none()
+            && strong_axis_ng.shear_margin < 1.0
+            && strong_axis_ng.biaxial_shear_margin.is_none()
+            && strong_axis_ng.detail.contains("弱軸せん断は未算定")
+            && strong_axis_ng.detail.contains("MとQがともにゼロ"),
+        "{strong_axis_ng:?}"
+    );
+}
+
+#[test]
+fn rectangular_column_arakawa_mean_uses_the_verified_minimum_compression() {
+    let model = single_shape_model(column_rect_shape(), 600.0, 700.0, false);
+    let opts = UltimateShearOptions {
+        include_bond: false,
+        ..Default::default()
+    };
+    let mut demand =
+        MemberDemand::from_pushover(1_000_000.0, 127_800_000.0, 0.0, 100_000.0, 0.0, 0.0);
+    let check = |demand| {
+        collect_rc_ultimate_checks(&model, &[(ElemId(0), demand)], &opts)
+            .unwrap()
+            .remove(0)
+    };
+    let unverified = check(demand);
+    assert!(unverified.qsu.is_nan() && unverified.shear_margin.is_nan());
+    assert!(unverified
+        .unchecked_reason
+        .unwrap()
+        .contains("断面力の範囲"));
+    demand.min_axial_for_shear_n = Some(840_000.0);
+    let result = check(demand);
+    // 式(付1.3-16)に d=639 mm、M/(Qd)=2 と圧縮応力度 2 N/mm² を代入。
+    assert!((result.qsu - 680049.569603855).abs() < 1e-5, "{result:?}");
+    assert!(result.ok, "{result:?}");
+    demand.min_axial_for_shear_n = Some(-1.0);
+    let result = check(demand);
+    assert!(
+        result.qsu.is_nan() && result.unchecked_reason.is_some(),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn bond_stress_can_fail_independently_of_unavailable_shear() {
+    use super::{
+        RcUltimateBondAxis, RcUltimateBondBar, RcUltimateBondConfinement, RcUltimateBondDemand,
+        RcUltimateBondInput, RcUltimateBondPlacement, RcUltimateThroughBarYield,
+    };
+
+    let multiple_layers = beam_rect_shape();
+    let mut single_layer = multiple_layers.clone();
+    let SectionShape::RcBeamRect { rebar, .. } = &mut single_layer else {
+        unreachable!()
+    };
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D22);
+    rebar.top = vec![4];
+    rebar.bottom = vec![4];
+    let bond = RcUltimateBondInput {
+        bar: RcUltimateBondBar::Through {
+            clear_span_mm: 6000.0,
+            cutoff_unnecessary_distance_mm: None,
+            yielding: RcUltimateThroughBarYield::BothEnds,
+        },
+        axis: RcUltimateBondAxis::Strong,
+        bar_designation_mm: 22.0,
+        effective_depth_mm: 539.0,
+        design_yield_stress_mpa: Some(345.0),
+        placement: RcUltimateBondPlacement::TopCast,
+        confinement: Some(RcUltimateBondConfinement {
+            clear_spacing_mm: 13.0,
+            minimum_cover_mm: 40.0,
+            splitting_plane_bar_count: 4,
+            transverse_rebar: None,
+        }),
+    };
+    let demand = MemberDemand {
+        q_long: Some(0.0),
+        mz: 10e6,
+        bond: Some(RcUltimateBondDemand::Single(bond)),
+        ..Default::default()
+    };
+    let check = |shape, demand| {
+        let model = single_shape_model(shape, 400.0, 600.0, true);
+        collect_rc_ultimate_checks(
+            &model,
+            &[(ElemId(0), demand)],
+            &UltimateShearOptions::default(),
+        )
+        .unwrap()
+        .remove(0)
+    };
+    let result = check(single_layer.clone(), demand);
+    let stress = result.bond_stress.unwrap();
+    assert!(
+        (stress.demand_mpa - 0.6949276689251053).abs() < 1e-12,
+        "{result:?}"
+    );
+    assert!(
+        result.bond_margin < 1.0 && result.qsu.is_nan(),
+        "{result:?}"
+    );
+    assert!(
+        !result.ok && result.unchecked_reason.is_none(),
+        "{result:?}"
+    );
+    let mismatched = check(
+        single_layer,
+        MemberDemand {
+            bond: Some(RcUltimateBondDemand::Single(RcUltimateBondInput {
+                effective_depth_mm: 500.0,
+                ..bond
+            })),
+            ..demand
+        },
+    );
+    assert!(mismatched.bond_stress.is_none());
+    assert!(mismatched
+        .unchecked_reason
+        .unwrap()
+        .contains("有効せいが検討方向"));
+    let multilayer = check(multiple_layers, demand);
+    assert!(multilayer.bond_stress.is_none());
+    assert!(multilayer.unchecked_reason.unwrap().contains("一段配筋"));
+
+    let mut column_shape = column_rect_shape();
+    let SectionShape::RcColumnRect { rebar, .. } = &mut column_shape else {
+        unreachable!()
+    };
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D22);
+    let column = single_shape_model(column_shape, 600.0, 700.0, false);
+    let check_column = |bond| {
+        collect_rc_ultimate_checks(
+            &column,
+            &[(
+                ElemId(0),
+                MemberDemand {
+                    bond: Some(RcUltimateBondDemand::Single(RcUltimateBondInput {
+                        bar: RcUltimateBondBar::Through {
+                            clear_span_mm: 3000.0,
+                            cutoff_unnecessary_distance_mm: None,
+                            yielding: RcUltimateThroughBarYield::OneEndWithOtherElastic,
+                        },
+                        placement: RcUltimateBondPlacement::Other,
+                        ..bond
+                    })),
+                    ..demand
+                },
+            )],
+            &UltimateShearOptions::default(),
+        )
+        .unwrap()
+        .remove(0)
+    };
+    for (axis, depth, expected) in [
+        (RcUltimateBondAxis::Strong, 639.0, 0.803685),
+        (RcUltimateBondAxis::Weak, 539.0, 0.771028),
+    ] {
+        let entry = RcUltimateBondInput {
+            axis,
+            effective_depth_mm: depth,
+            ..bond
+        };
+        let result = check_column(entry);
+        assert!(
+            (result.bond_stress.unwrap().demand_mpa - expected).abs() < 1e-6,
+            "{result:?}"
+        );
+        let mismatched = check_column(RcUltimateBondInput {
+            effective_depth_mm: depth - 50.0,
+            ..entry
+        });
+        assert!(mismatched.bond_stress.is_none());
+        assert!(mismatched
+            .unchecked_reason
+            .unwrap()
+            .contains("有効せいが検討方向"));
+    }
+}
+
+#[test]
+fn ultimate_bond_uses_yield_stress_and_keeps_an_independent_cutoff_length_failure() {
+    use super::{
+        RcUltimateBondAxis, RcUltimateBondBar, RcUltimateBondConfinement, RcUltimateBondDemand,
+        RcUltimateBondElasticStress, RcUltimateBondInput, RcUltimateBondMomentDistribution,
+        RcUltimateBondPlacement, RcUltimateCutoffBarStress, RcUltimateThroughBarYield,
+    };
+
+    let mut shape = beam_rect_shape();
+    let SectionShape::RcBeamRect { rebar, .. } = &mut shape else {
+        unreachable!()
+    };
+    rebar.top = vec![4];
+    rebar.bottom = vec![4];
+    rebar.cover = 79.0;
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D22);
+    let model = single_shape_model(shape, 400.0, 600.0, true);
+    let bond_input = |bar, placement, design_yield_stress_mpa| RcUltimateBondInput {
+        bar,
+        axis: RcUltimateBondAxis::Strong,
+        bar_designation_mm: 22.0,
+        effective_depth_mm: 500.0,
+        design_yield_stress_mpa,
+        placement,
+        confinement: Some(RcUltimateBondConfinement {
+            clear_spacing_mm: 2.0,
+            minimum_cover_mm: 79.0,
+            splitting_plane_bar_count: 4,
+            transverse_rebar: None,
+        }),
+    };
+    let run_bond_with_strength =
+        |model: &Model, bar, placement, demand, design_yield_stress_mpa| {
+            let demand = MemberDemand {
+                bond: Some(RcUltimateBondDemand::Single(bond_input(
+                    bar,
+                    placement,
+                    design_yield_stress_mpa,
+                ))),
+                ..demand
+            };
+            collect_rc_ultimate_checks(
+                model,
+                &[(ElemId(0), demand)],
+                &UltimateShearOptions::default(),
+            )
+        };
+    let run_bond = |model: &Model, bar, placement, demand| {
+        run_bond_with_strength(model, bar, placement, demand, Some(345.0))
+    };
+    let run_with_placement = |model: &Model, bar, bending, mz, placement| {
+        run_bond(
+            model,
+            bar,
+            placement,
+            MemberDemand {
+                q_long: Some(0.0),
+                mz,
+                static_beam_bending: bending,
+                ..Default::default()
+            },
+        )
+    };
+    let run = |model: &Model, bar, bending| {
+        run_with_placement(model, bar, bending, 10e6, RcUltimateBondPlacement::TopCast)
+    };
+    let check = |bar, bending| run(&model, bar, bending).unwrap().remove(0);
+    let through = |yielding| RcUltimateBondBar::Through {
+        clear_span_mm: 6000.0,
+        cutoff_unnecessary_distance_mm: None,
+        yielding,
+    };
+    let both = check(
+        through(RcUltimateThroughBarYield::BothEnds),
+        StaticBeamBending::Signed,
+    );
+    assert!((both.bond_stress.unwrap().demand_mpa - 0.69).abs() < 1e-12);
+    assert!(
+        both.bond_margin < 1.0 && !both.ok && both.unchecked_reason.is_none(),
+        "{both:?}"
+    );
+    let demand = MemberDemand {
+        q_long: Some(0.0),
+        mz: 10e6,
+        ..Default::default()
+    };
+    let pair_demand = MemberDemand {
+        min_axial_for_shear_n: Some(0.0),
+        ..MemberDemand::from_pushover(0.0, 10e6, 0.0, 1000.0, 0.0, 0.0)
+    };
+    let check_pair = |bond| {
+        collect_rc_ultimate_checks(
+            &model,
+            &[(
+                ElemId(0),
+                MemberDemand {
+                    bond: Some(bond),
+                    ..pair_demand
+                },
+            )],
+            &UltimateShearOptions::default(),
+        )
+        .unwrap()
+        .remove(0)
+    };
+    for (distribution, l_prime, expected_stress) in [
+        (
+            RcUltimateBondMomentDistribution::NearAntisymmetric,
+            1000.0,
+            11.0 / 18.0,
+        ),
+        (
+            RcUltimateBondMomentDistribution::NearPinnedEnd,
+            2000.0,
+            11.0 / 28.0,
+        ),
+    ] {
+        let bar = RcUltimateBondBar::Through {
+            clear_span_mm: 6000.0,
+            cutoff_unnecessary_distance_mm: Some(l_prime),
+            yielding: RcUltimateThroughBarYield::WithoutFlexuralYield {
+                moment_distribution: distribution,
+                stress: RcUltimateBondElasticStress {
+                    long_term_tensile_stress_mpa: 100.0,
+                    lateral_tensile_stress_mpa: 100.0,
+                    lateral_factor: 1.5,
+                },
+            },
+        };
+        let through = bond_input(bar, RcUltimateBondPlacement::TopCast, Some(345.0));
+        let cutoff = |development_length_mm, unnecessary_distance_mm, stress| {
+            bond_input(
+                RcUltimateBondBar::Cutoff {
+                    development_length_mm,
+                    clear_span_mm: 6000.0,
+                    unnecessary_distance_mm,
+                    stress,
+                },
+                RcUltimateBondPlacement::TopCast,
+                Some(345.0),
+            )
+        };
+        let combined =
+            |cutoff| check_pair(RcUltimateBondDemand::ThroughAndCutoff { through, cutoff });
+        let low_cutoff_stress =
+            RcUltimateCutoffBarStress::WithoutFlexuralYield(RcUltimateBondElasticStress {
+                long_term_tensile_stress_mpa: 100.0,
+                lateral_tensile_stress_mpa: 0.0,
+                lateral_factor: 1.5,
+            });
+        let result = combined(cutoff(3500.0, l_prime, low_cutoff_stress));
+        assert!((result.bond_stress.unwrap().demand_mpa - expected_stress).abs() < 1e-12);
+        assert_eq!(result.bond_development_length_ok, Some(true));
+        assert_eq!(result.ok, expected_stress < 0.5, "{result:?}");
+        let cutoff_governs = combined(cutoff(
+            3000.0,
+            l_prime,
+            RcUltimateCutoffBarStress::WithoutFlexuralYield(RcUltimateBondElasticStress {
+                long_term_tensile_stress_mpa: 300.0,
+                lateral_tensile_stress_mpa: 0.0,
+                lateral_factor: 1.5,
+            }),
+        ));
+        assert!((cutoff_governs.bond_stress.unwrap().demand_mpa - 0.66).abs() < 1e-12);
+        assert!(!cutoff_governs.ok && cutoff_governs.unchecked_reason.is_none());
+        let missing = check_pair(RcUltimateBondDemand::Single(through));
+        assert!(!missing.ok && missing.bond_development_length_ok.is_none());
+        assert!(missing.detail.contains("併用するカットオフ筋の照査入力"));
+        let mismatched = combined(cutoff(3500.0, l_prime + 100.0, low_cutoff_stress));
+        assert!(!mismatched.ok && mismatched.bond_stress.is_none());
+        assert!(mismatched
+            .unchecked_reason
+            .unwrap()
+            .contains("距離が一致しません"));
+        let conflicting = combined(cutoff(
+            5000.0,
+            l_prime,
+            RcUltimateCutoffBarStress::FlexuralYield,
+        ));
+        assert!(!conflicting.ok && conflicting.bond_stress.is_none());
+        assert!(conflicting
+            .unchecked_reason
+            .unwrap()
+            .contains("曲げ降伏条件が一致しません"));
+        let unknown = combined(cutoff(
+            3500.0,
+            l_prime,
+            RcUltimateCutoffBarStress::Unverified,
+        ));
+        assert!(!unknown.ok && unknown.detail.contains("カットオフ筋の曲げ降伏状態"));
+        assert_eq!(unknown.bond_development_length_ok, Some(true));
+        if expected_stress < 0.5 {
+            assert!(missing.unchecked_reason.is_some());
+            assert!(unknown.unchecked_reason.is_some());
+        } else {
+            assert!(unknown.bond_margin < 1.0 && unknown.unchecked_reason.is_none());
+        }
+        let short = combined(cutoff(400.0, l_prime, low_cutoff_stress));
+        assert_eq!(short.bond_development_length_ok, Some(false));
+        assert!(!short.ok && short.unchecked_reason.is_none());
+        let conflicting_and_short = combined(cutoff(
+            400.0,
+            l_prime,
+            RcUltimateCutoffBarStress::FlexuralYield,
+        ));
+        assert!(conflicting_and_short.bond_stress.is_none());
+        assert_eq!(
+            conflicting_and_short.bond_development_length_ok,
+            Some(false)
+        );
+        assert!(!conflicting_and_short.ok && conflicting_and_short.unchecked_reason.is_none());
+        assert!(conflicting_and_short
+            .detail
+            .contains("曲げ降伏条件が一致しません"));
+    }
+    let measured_yield = run_bond_with_strength(
+        &model,
+        through(RcUltimateThroughBarYield::BothEnds),
+        RcUltimateBondPlacement::TopCast,
+        demand,
+        Some(379.5),
+    )
+    .unwrap()
+    .remove(0);
+    assert!((measured_yield.bond_stress.unwrap().demand_mpa - 0.759).abs() < 1e-12);
+    let unknown = check(
+        through(RcUltimateThroughBarYield::Unverified),
+        StaticBeamBending::Signed,
+    );
+    assert!(unknown.bond_stress.is_none() && unknown.bond_development_length_ok.is_none());
+    assert!(unknown
+        .unchecked_reason
+        .unwrap()
+        .contains("通し筋の曲げ降伏状態"));
+
+    let cutoff = |development_length_mm, stress| RcUltimateBondBar::Cutoff {
+        development_length_mm,
+        clear_span_mm: 6000.0,
+        unnecessary_distance_mm: 200.0,
+        stress,
+    };
+    let low_stress = RcUltimateCutoffBarStress::WithoutFlexuralYield(RcUltimateBondElasticStress {
+        long_term_tensile_stress_mpa: 5.0,
+        lateral_tensile_stress_mpa: 5.0,
+        lateral_factor: 1.5,
+    });
+    for (design_strength, expected) in [
+        (None, "実降伏強度または強度上昇"),
+        (Some(344.0), "規格降伏強度を下回っています"),
+    ] {
+        let unverified = run_bond_with_strength(
+            &model,
+            cutoff(1000.0, low_stress),
+            RcUltimateBondPlacement::TopCast,
+            demand,
+            design_strength,
+        )
+        .unwrap()
+        .remove(0);
+        assert!(
+            unverified.bond_stress.is_none() && unverified.bond_development_length_ok == Some(true)
+        );
+        assert!(unverified.unchecked_reason.unwrap().contains(expected));
+    }
+    let check_cast = |model: &Model, placement| {
+        run_with_placement(
+            model,
+            cutoff(1000.0, low_stress),
+            StaticBeamBending::Signed,
+            0.0,
+            placement,
+        )
+        .unwrap()
+        .remove(0)
+    };
+    let other = check_cast(&model, RcUltimateBondPlacement::Other);
+    assert!((other.bond_stress.unwrap().capacity_mpa - 0.6409090909090909).abs() < 1e-12);
+    assert!(other.bond_margin > 1.0 && !other.ok);
+    assert_eq!(other.bond_development_length_ok, Some(true));
+    assert!(other
+        .unchecked_reason
+        .as_deref()
+        .unwrap()
+        .contains("長期強軸曲げが0"));
+    assert!(other.detail.contains("カットオフ筋の必要延長を満たします"));
+    let top = check_cast(&model, RcUltimateBondPlacement::TopCast);
+    assert!((top.bond_stress.unwrap().capacity_mpa - 0.5127272727272727).abs() < 1e-12);
+    let mut lightweight = model.clone();
+    lightweight.materials[0].concrete_class = sepika_core::units::ConcreteClass::Lightweight1;
+    let light = check_cast(&lightweight, RcUltimateBondPlacement::TopCast);
+    assert!((light.bond_stress.unwrap().capacity_mpa - 0.4101818181818182).abs() < 1e-12);
+    let unverified_cast = check_cast(&model, RcUltimateBondPlacement::Unverified);
+    assert!(unverified_cast.bond_stress.is_none());
+    assert_eq!(unverified_cast.bond_development_length_ok, Some(true));
+    assert!(unverified_cast
+        .unchecked_reason
+        .unwrap()
+        .contains("上端筋区分"));
+    let mut unknown_concrete_class = model.clone();
+    unknown_concrete_class.materials[0].concrete_class =
+        sepika_core::units::ConcreteClass::UserDefined;
+    let unverified_concrete = check_cast(&unknown_concrete_class, RcUltimateBondPlacement::Other);
+    assert!(unverified_concrete.bond_stress.is_none());
+    assert_eq!(unverified_concrete.bond_development_length_ok, Some(true));
+    assert!(unverified_concrete
+        .unchecked_reason
+        .unwrap()
+        .contains("コンクリート区分"));
+    for (class, upper_fc) in [
+        (sepika_core::units::ConcreteClass::Normal, 60.0_f64),
+        (sepika_core::units::ConcreteClass::Lightweight1, 36.0),
+        (sepika_core::units::ConcreteClass::Lightweight2, 27.0),
+    ] {
+        let mut concrete = model.clone();
+        concrete.materials[0].concrete_class = class;
+        for fc in [18.0, upper_fc] {
+            concrete.materials[0].fc = Some(fc);
+            let within = check_cast(&concrete, RcUltimateBondPlacement::Other);
+            assert!(
+                within.bond_stress.is_some(),
+                "{class:?} Fc={fc}: {within:?}"
+            );
+        }
+        for fc in [18.0_f64.next_down(), upper_fc.next_up()] {
+            concrete.materials[0].fc = Some(fc);
+            let outside = check_cast(&concrete, RcUltimateBondPlacement::Other);
+            assert!(
+                outside.bond_stress.is_none() && outside.bond_development_length_ok == Some(true)
+            );
+            assert!(outside.unchecked_reason.unwrap().contains("Fcの適用範囲外"));
+        }
+    }
+    let mut numeric_rebar = model.clone();
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = numeric_rebar.sections[0].shape.as_mut()
+    else {
+        unreachable!()
+    };
+    rebar.main_dia = RebarSize::DiameterMm(22.0);
+    let numeric = check_cast(&numeric_rebar, RcUltimateBondPlacement::Other);
+    assert!(numeric.bond_stress.is_none() && numeric.bond_development_length_ok == Some(true));
+    assert!(numeric.unchecked_reason.unwrap().contains("標準呼び名"));
+    for (grade, fy) in [("USD685", 685.0), ("SD345", 346.0)] {
+        let mut unverified_rebar = model.clone();
+        unverified_rebar.materials[1].name = grade.into();
+        unverified_rebar.materials[1].fy = Some(fy);
+        let unsupported = check_cast(&unverified_rebar, RcUltimateBondPlacement::Other);
+        assert!(unsupported.bond_stress.is_none());
+        assert_eq!(unsupported.bond_development_length_ok, Some(true));
+        assert!(unsupported
+            .unchecked_reason
+            .unwrap()
+            .contains("D41以下のJIS異形鉄筋"));
+    }
+    let total = MemberDemand {
+        min_axial_for_shear_n: Some(0.0),
+        ..MemberDemand::from_pushover(0.0, 1e6, 0.0, 1000.0, 0.0, 0.0)
+    };
+    let mut nonconcrete = model.clone();
+    nonconcrete.materials[0].category = MaterialCategory::Steel;
+    let nonconcrete = run_bond(
+        &nonconcrete,
+        cutoff(400.0, low_stress),
+        RcUltimateBondPlacement::Other,
+        total,
+    )
+    .unwrap()
+    .remove(0);
+    assert!(
+        nonconcrete.mu.is_nan() && nonconcrete.qsu.is_nan() && nonconcrete.bond_stress.is_none()
+    );
+    assert_eq!(nonconcrete.bond_development_length_ok, Some(false));
+    assert!(!nonconcrete.ok && nonconcrete.unchecked_reason.is_none());
+    assert!(nonconcrete
+        .detail
+        .contains("断面主材料に「コンクリート」区分"));
+    let yielded = check(
+        cutoff(1000.0, RcUltimateCutoffBarStress::FlexuralYield),
+        StaticBeamBending::Signed,
+    );
+    assert!((yielded.bond_stress.unwrap().demand_mpa - 3.795).abs() < 1e-12);
+    let elastic = |lateral_factor| {
+        RcUltimateCutoffBarStress::WithoutFlexuralYield(RcUltimateBondElasticStress {
+            long_term_tensile_stress_mpa: 50.0,
+            lateral_tensile_stress_mpa: 100.0,
+            lateral_factor,
+        })
+    };
+    let below_yield = check(cutoff(1000.0, elastic(1.5)), StaticBeamBending::Signed);
+    assert!((below_yield.bond_stress.unwrap().demand_mpa - 2.2).abs() < 1e-12);
+    let capped = check(cutoff(1000.0, elastic(3.0)), StaticBeamBending::Signed);
+    assert!((capped.bond_stress.unwrap().demand_mpa - 3.795).abs() < 1e-12);
+    let zero = check(
+        cutoff(
+            1000.0,
+            RcUltimateCutoffBarStress::WithoutFlexuralYield(RcUltimateBondElasticStress {
+                long_term_tensile_stress_mpa: 0.0,
+                lateral_tensile_stress_mpa: 0.0,
+                lateral_factor: 1.5,
+            }),
+        ),
+        StaticBeamBending::Signed,
+    );
+    assert_eq!(zero.bond_stress.unwrap().demand_mpa, 0.0);
+    assert_eq!(zero.bond_margin, f64::INFINITY);
+    assert_eq!(zero.bond_development_length_ok, Some(true));
+    let unverified = check(cutoff(1000.0, elastic(1.49)), StaticBeamBending::Signed);
+    assert!(
+        unverified.bond_stress.is_none() && unverified.bond_development_length_ok == Some(true)
+    );
+    assert!(unverified
+        .unchecked_reason
+        .unwrap()
+        .contains("鉄筋応力度または割増"));
+
+    for (length, stress, bending) in [
+        (
+            400.0,
+            RcUltimateCutoffBarStress::FlexuralYield,
+            StaticBeamBending::Signed,
+        ),
+        (
+            500.0,
+            RcUltimateCutoffBarStress::Unverified,
+            StaticBeamBending::Signed,
+        ),
+        (
+            600.0,
+            RcUltimateCutoffBarStress::Unverified,
+            StaticBeamBending::Unverified,
+        ),
+    ] {
+        let short = check(cutoff(length, stress), bending);
+        assert!(
+            short.bond_stress.is_none() && short.bond_margin.is_nan(),
+            "{short:?}"
+        );
+        assert_eq!(short.bond_development_length_ok, Some(false), "{short:?}");
+        assert!(!short.ok && short.unchecked_reason.is_none(), "{short:?}");
+        assert!(
+            short
+                .detail
+                .contains("カットオフ筋の付着長さが必要な延長を満たしません")
+                && short.detail.contains("τD=未算定"),
+            "{short:?}"
+        );
+    }
+
+    let mut rebar_without_yield = model.clone();
+    rebar_without_yield.materials.push(Material {
+        id: MaterialId(2),
+        fy: None,
+        ..model.materials[1].clone()
+    });
+    rebar_without_yield.sections[0].rebar_material = Some(MaterialId(2));
+    let mut unsupported_stirrup = model.clone();
+    unsupported_stirrup.materials.push(Material {
+        id: MaterialId(2),
+        name: "USD685".into(),
+        fy: Some(685.0),
+        ..model.materials[1].clone()
+    });
+    unsupported_stirrup.sections[0].shear_rebar_material = Some(MaterialId(2));
+    let mut stirrup_without_yield = unsupported_stirrup.clone();
+    stirrup_without_yield.materials[2].name = "SD345".into();
+    stirrup_without_yield.materials[2].fy = None;
+    let mut mismatched_stirrup = unsupported_stirrup.clone();
+    mismatched_stirrup.materials[2].name = "SR235".into();
+    mismatched_stirrup.materials[2].fy = Some(235.0);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) =
+        mismatched_stirrup.sections[0].shape.as_mut()
+    else {
+        unreachable!()
+    };
+    rebar.stirrup.dia = RebarSize::Standard(StandardRebar::D10);
+    let incompatible = run_bond(
+        &mismatched_stirrup,
+        cutoff(1000.0, low_stress),
+        RcUltimateBondPlacement::Other,
+        total,
+    )
+    .unwrap()
+    .remove(0);
+    assert!(incompatible.qsu.is_nan() && incompatible.bond_stress.is_some());
+    assert!(incompatible.bond_margin > 1.0 && !incompatible.ok);
+    assert!(incompatible
+        .unchecked_reason
+        .unwrap()
+        .contains("標準異形鉄筋 D10 に丸鋼材種 SR235"));
+
+    for (invalid_model, diagnostic, hard_error) in [
+        (&rebar_without_yield, "主筋の降伏強度を解決できません", true),
+        (&unsupported_stirrup, "せん断補強筋グレード", false),
+        (
+            &stirrup_without_yield,
+            "せん断補強筋材料「SD345」に降伏強度",
+            false,
+        ),
+    ] {
+        let short = run(
+            invalid_model,
+            cutoff(400.0, RcUltimateCutoffBarStress::FlexuralYield),
+            StaticBeamBending::Signed,
+        )
+        .unwrap()
+        .remove(0);
+        assert_eq!(short.bond_development_length_ok, Some(false), "{short:?}");
+        assert!(
+            short.bond_stress.is_none() && short.bond_margin.is_nan(),
+            "{short:?}"
+        );
+        assert!(!short.ok && short.unchecked_reason.is_none(), "{short:?}");
+        assert!(
+            short.detail.contains(diagnostic)
+                && short.detail.contains("τD=未算定")
+                && short
+                    .detail
+                    .contains("カットオフ筋の付着長さが必要な延長を満たしません"),
+            "{short:?}"
+        );
+
+        let unverified = run(
+            invalid_model,
+            through(RcUltimateThroughBarYield::Unverified),
+            StaticBeamBending::Signed,
+        );
+        if hard_error {
+            let error = unverified.unwrap_err();
+            assert!(error.contains(diagnostic), "{error}");
+        } else {
+            let result = unverified.unwrap().remove(0);
+            assert!(result.bond_stress.is_none() && result.mu.is_finite() && !result.ok);
+            assert!(result
+                .unchecked_reason
+                .as_deref()
+                .unwrap()
+                .contains(diagnostic));
+        }
+    }
+
+    for (invalid_model, diagnostic) in [
+        (&unsupported_stirrup, "せん断補強筋グレード"),
+        (
+            &stirrup_without_yield,
+            "せん断補強筋材料「SD345」に降伏強度",
+        ),
+    ] {
+        let stress_failure = run(
+            invalid_model,
+            cutoff(1000.0, RcUltimateCutoffBarStress::FlexuralYield),
+            StaticBeamBending::Signed,
+        )
+        .unwrap()
+        .remove(0);
+        assert_eq!(stress_failure.bond_development_length_ok, Some(true));
+        assert!((stress_failure.bond_stress.unwrap().demand_mpa - 3.795).abs() < 1e-12);
+        assert!(stress_failure.bond_margin < 1.0);
+        assert!(!stress_failure.ok && stress_failure.unchecked_reason.is_none());
+        assert!(
+            stress_failure.detail.contains(diagnostic),
+            "{stress_failure:?}"
+        );
+        let bond_pass = run(
+            invalid_model,
+            cutoff(1000.0, low_stress),
+            StaticBeamBending::Signed,
+        )
+        .unwrap()
+        .remove(0);
+        assert!(bond_pass.bond_stress.is_some() && bond_pass.bond_margin > 1.0);
+        assert!(
+            !bond_pass.ok
+                && bond_pass
+                    .unchecked_reason
+                    .as_deref()
+                    .unwrap()
+                    .contains(diagnostic)
+        );
+    }
+    for fc in [None, Some(f64::NAN)] {
+        let mut invalid_concrete = model.clone();
+        invalid_concrete.materials[0].fc = fc;
+        let short = run(
+            &invalid_concrete,
+            cutoff(400.0, RcUltimateCutoffBarStress::FlexuralYield),
+            StaticBeamBending::Signed,
+        )
+        .unwrap()
+        .remove(0);
+        assert_eq!(short.bond_development_length_ok, Some(false));
+        assert!(short.bond_stress.is_none() && !short.ok && short.unchecked_reason.is_none());
+        assert!(short.detail.contains("Fc") && short.detail.contains("必要な延長を満たしません"));
+    }
 }

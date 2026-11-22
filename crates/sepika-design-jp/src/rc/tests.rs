@@ -658,11 +658,8 @@ fn test_rc_column_circle_hoop_pw_provision_ok() {
         d,
         3000.0,
         ConcreteClass::Normal,
-        false,
         gross,
         info.main_area,
-        Some(0.0),
-        24.0,
         props.pw,
     );
     assert!(

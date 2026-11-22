@@ -1583,7 +1583,9 @@ fn rc_reference_actual_entries_use_material_strength_for_pushover_and_nominal_fo
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
+            main_dia: sepika_core::section_shape::RebarSize::Standard(
+                sepika_core::section_shape::StandardRebar::D25,
+            ),
             top: vec![3],
             bottom: vec![3],
             cover: 50.0,
@@ -1615,7 +1617,10 @@ fn rc_reference_actual_entries_use_material_strength_for_pushover_and_nominal_fo
     model.materials.push(rebar);
     model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
     model.set_member_hysteresis(ElemId(1), HysteresisModel::Takeda);
-    model.set_member_rc_beam_reference(ElemId(1), Some(RcBeamReference::AntisymmetricHalfMember));
+    model.set_member_rc_beam_reference(
+        ElemId(1),
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
+    );
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
     for factor in [0.1, 0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {

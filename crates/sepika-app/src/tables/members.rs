@@ -531,12 +531,20 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                 });
                 row.col(|ui| {
                     let enabled = generated_wall.is_none() && elem.kind == ElementKind::Beam && matches!(view.model.element_section(elem).and_then(|section| section.shape.as_ref()), Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. }));
+                    use sepika_core::model::RcBeamReference;
                     let current = app.core.model.member_rc_beam_reference(elem.id);
+                    let reference = RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce;
+                    let label = "逆対称・同一半部材（軸力なし）";
+                    let current_label = match current {
+                        Some(RcBeamReference::AntisymmetricHalfMember) => "要再指定",
+                        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce) => label,
+                        None => "未指定",
+                    };
                     ui.add_enabled_ui(enabled, |ui| {
-                        table_util::cell_combo(ui, format!("elem_rc_reference_{i}"), if current.is_some() { "逆対称・同一半部材の基準" } else { "未指定" }, |ui| {
+                        table_util::cell_combo(ui, format!("elem_rc_reference_{i}"), current_label, |ui| {
                             if ui.selectable_label(current.is_none(), "未指定").clicked() { pending_rc_reference.push((elem.id, None)); }
-                            if ui.selectable_label(current.is_some(), "逆対称・同一半部材の基準").clicked() { pending_rc_reference.push((elem.id, Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember))); }
-                        }).response.on_hover_text("一定せん断・逆対称曲げ・同一半部材の基準骨格を選択します。実応力分布への適合を確認済みという意味ではありません。矩形RC梁の武田型・逆行型・最大点指向型に限定します。");
+                            if ui.selectable_label(current == Some(reference), label).clicked() { pending_rc_reference.push((elem.id, Some(reference))); }
+                        }).response.on_hover_text("部材軸力を見込まない設計の矩形RC梁に、一定せん断・逆対称曲げ・同一半部材の基準を指定します。武田型・逆行型・最大点指向型の集中ばねに適用します。");
                     });
                 });
                 row.col(|ui| {

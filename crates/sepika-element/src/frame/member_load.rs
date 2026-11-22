@@ -267,6 +267,11 @@ impl LoadedFrameSection {
         }
     }
 
+    /// 部材荷重を持たないとき true。
+    pub fn is_unloaded(&self) -> bool {
+        self.map.loads.is_empty()
+    }
+
     /// 部材荷重の元節点における等価並進力を全体系 `[N]` で返す。
     pub fn applied_nodal_forces_global(&self) -> [[f64; 3]; 2] {
         let (li, lj) = self.map.rigid_lengths_mm();

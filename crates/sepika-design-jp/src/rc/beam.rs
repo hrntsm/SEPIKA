@@ -110,7 +110,10 @@ fn bending_component(
                 "圧縮縁から圧縮筋重心までの距離と引張縁から引張筋重心までの距離が一致しません",
             );
         }
-        let bm = beam_moment_capacity(props, ft, allow.fc, allow.n_ratio)
+        let n_ratio = allow
+            .n_ratio
+            .ok_or(super::allowable::UNSUPPORTED_YOUNG_RATIO)?;
+        let bm = beam_moment_capacity(props, ft, allow.fc, n_ratio)
             .ok_or("矩形断面の許容曲げを求められません")?;
         let (top_inner, bottom_inner) = rebar.innermost_bar_distances_from_edges_mm();
         let (tension_inner, compression_inner) = if tension_is_top {

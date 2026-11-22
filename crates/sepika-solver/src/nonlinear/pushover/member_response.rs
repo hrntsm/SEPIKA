@@ -220,8 +220,8 @@ pub(crate) fn compute_member_response_with_responses(
         let f_i = [f.data[0], f.data[1], f.data[2]];
         let f_j = [f.data[6], f.data[7], f.data[8]];
 
-        let (m_strong, m_weak) = match recording_face_force(model, elem, &f.data, response.as_ref())
-        {
+        let face_force = recording_face_force(model, elem, &f.data, response.as_ref());
+        let (m_strong, m_weak) = match face_force {
             Some(fl) => (fl[5].abs().max(fl[11].abs()), fl[4].abs().max(fl[10].abs())),
             None => {
                 let m_i = [f.data[3], f.data[4], f.data[5]];
@@ -235,6 +235,12 @@ pub(crate) fn compute_member_response_with_responses(
         let shear_strong = dot3(f_i, ey).abs().max(dot3(f_j, ey).abs());
         let shear_weak = dot3(f_i, ez).abs().max(dot3(f_j, ez).abs());
         let axial = axial_compression(f_i, f_j, ex);
+        let min_axial_for_shear_n = face_force
+            .filter(|force| {
+                [force[0], force[6]].into_iter().all(f64::is_finite)
+                    && response.as_ref().is_none_or(|r| r.section.is_unloaded())
+            })
+            .map(|force| force[0].min(-force[6]));
         let rp = member_rp_angle(model, dofmap, total_disp, elem);
         let horizontal_force = horizontal_force_in_dir(&f, elem.nodes.len(), dir_idx);
 
@@ -245,6 +251,7 @@ pub(crate) fn compute_member_response_with_responses(
             shear_strong,
             shear_weak,
             axial,
+            min_axial_for_shear_n,
             rp,
             horizontal_force,
             wall_shear_signed: None,

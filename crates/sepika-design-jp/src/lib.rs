@@ -29,8 +29,7 @@ pub mod quantity;
 pub mod rc;
 pub mod srrc;
 pub mod steel;
-/// 終局検定（靭性保証型指針・技術基準解説書）。荷重増分解析後の各部材の終局せん断強度
-/// （塑性理論式）・付着割裂耐力・軸終局耐力に対する余裕度を検定する。
+/// 部材の終局せん断・曲げ・軸力と大地震時の付着を照査する。
 pub mod ultimate;
 pub mod wall_opening;
 
