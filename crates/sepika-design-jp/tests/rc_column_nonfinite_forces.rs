@@ -1,5 +1,6 @@
 use sepika_core::ids::ElemId;
 use sepika_core::model::Model;
+use sepika_core::section_shape::{RebarSize, SectionShape};
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, DesignCheck, DesignCtx, LoadTerm,
     MemberDesignCheckOptions, MemberForcesAt, MemberKind, QdMethod, RcDesign, SeismicQd,
@@ -261,6 +262,49 @@ fn time_history_keeps_only_finite_shear_failures_when_axial_force_is_nonfinite()
                         && c.ratio.is_finite() && c.ratio > 1.0)),
                     "{outcomes:?}"
                 );
+            }
+        }
+    }
+}
+
+#[test]
+fn short_term_keeps_proven_shear_failure_when_the_ratio_overflows() {
+    for circle in [false, true] {
+        let mut model = input::column_model(circle, 0.0);
+        model.materials[0].fc = Some(1.0e-6);
+        let hoop_dia = RebarSize::DiameterMm(1.0);
+        match model.sections[0].shape.as_mut().unwrap() {
+            SectionShape::RcColumnRect { rebar, .. } => rebar.hoop.dia = hoop_dia,
+            SectionShape::RcColumnCircle { rebar, .. } => rebar.hoop.dia = hoop_dia,
+            shape => panic!("{shape:?}"),
+        }
+        for (qy, lower_bound) in [(1.0, false), (f64::MAX, true)] {
+            let checks = check_column(
+                &model,
+                vec![(0.5, [f64::NAN, qy, 0.0, 0.0, 0.0, 0.0])],
+                MemberDesignCheckOptions {
+                    term: LoadTerm::Short,
+                    rc_damage_control: false,
+                    ..Default::default()
+                },
+            );
+            let [(_, 0.5, CheckOutcome::Checked(result)), (_, 0.5, CheckOutcome::Skipped { reason })] =
+                checks.as_slice()
+            else {
+                panic!("{checks:?}");
+            };
+            assert!(reason.contains("軸力Nが非有限"), "{reason}");
+            let [component] = result.components.as_slice() else {
+                panic!("{result:?}");
+            };
+            assert_eq!(component.kind, CheckKind::Shear);
+            assert!(
+                component.ratio.is_finite() && component.ratio > 1.0,
+                "{component:?}"
+            );
+            assert_eq!(component.detail.contains("検定比の下限"), lower_bound);
+            if lower_bound {
+                assert_eq!(component.ratio, f64::MAX);
             }
         }
     }

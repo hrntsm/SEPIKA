@@ -422,6 +422,7 @@ pub(super) fn column_check(
         }
         super::shear_demand_without_main_rebar(ctx, forces.pos, q, index)
     };
+    let short_partial = short_force_issue || span_issue;
     let shear_ratio = |demands: [Option<f64>; 2],
                        capacities: [Option<f64>; 2],
                        boundary_shear_only,
@@ -435,11 +436,12 @@ pub(super) fn column_check(
                 let qa = capacity?;
                 let (m, span_q) = spans[axis];
                 let ratio = if qa > 0.0 { q / qa } else { 0.0 };
-                if (boundary_shear_only || short_force_issue || span_issue)
+                let lower_bound = short_partial && ratio == f64::INFINITY && q > qa;
+                if (boundary_shear_only || short_partial)
                     && (!q.is_finite()
                         || !qa.is_finite()
                         || qa <= 0.0
-                        || !ratio.is_finite()
+                        || !ratio.is_finite() && !lower_bound
                         || (long_term || ctx.rc_damage_control)
                             && !(m.is_finite() && span_q.is_finite()))
                 {
@@ -449,9 +451,16 @@ pub(super) fn column_check(
                     );
                     return None;
                 }
-                Some(ratio)
+                Some((if lower_bound { f64::MAX } else { ratio }, lower_bound))
             })
-            .reduce(f64::max)
+            .reduce(|(a, a_bound), (b, b_bound)| (a.max(b), a_bound || b_bound))
+    };
+    let shear_ratio_note = |lower_bound| {
+        if lower_bound {
+            "、検定比の下限"
+        } else {
+            ""
+        }
     };
     let capacity = |qa: Option<f64>| qa.map_or_else(|| "未算定".into(), |qa| format!("{qa:.1} N"));
 
@@ -552,7 +561,7 @@ pub(super) fn column_check(
         let basis = "RC 規準14条（円形柱、等価矩形近似）".to_string();
         let mut detail = format!("at={:.1} mm², d={:.1} mm", props.at, props.d);
 
-        if let Some(ratio) = shear_ratio(
+        if let Some((ratio, lower_bound)) = shear_ratio(
             [q_design_y, q_design_z],
             [qay, qaz],
             confirmed_shear_only,
@@ -562,12 +571,13 @@ pub(super) fn column_check(
                 kind: CheckKind::Shear,
                 ratio,
                 detail: format!(
-                    "QAy={}, QAz={}, αy={}, αz={}, pw={:.5}",
+                    "QAy={}, QAz={}, αy={}, αz={}, pw={:.5}{}",
                     capacity(qay),
                     capacity(qaz),
                     alpha_y,
                     alpha_z,
                     props.pw,
+                    shear_ratio_note(lower_bound),
                 ),
             });
         }
@@ -714,7 +724,7 @@ pub(super) fn column_check(
         let basis = "RC 規準14条（柱、軸力+二軸曲げ+せん断）".to_string();
         let mut detail = String::new();
 
-        if let Some(ratio) = shear_ratio(
+        if let Some((ratio, lower_bound)) = shear_ratio(
             [q_design_y, q_design_z],
             [qay, qaz],
             confirmed_shear_only,
@@ -724,13 +734,14 @@ pub(super) fn column_check(
                 kind: CheckKind::Shear,
                 ratio,
                 detail: format!(
-                    "QAy={}, QAz={}, αy={}, αz={}, pw_z={:.5}, pw_y={:.5}",
+                    "QAy={}, QAz={}, αy={}, αz={}, pw_z={:.5}, pw_y={:.5}{}",
                     capacity(qay),
                     capacity(qaz),
                     alpha_y,
                     alpha_z,
                     props_z.pw,
                     props_y.pw,
+                    shear_ratio_note(lower_bound),
                 ),
             });
         }
