@@ -362,12 +362,21 @@ pub(super) fn column_check(
         }
         Ok(())
     };
+    let short_partial = short_force_issue
+        || span_issue
+        || matches!(
+            column_gravity,
+            ColumnGravityMode::Ordinary {
+                response_end_axial_issue: Some(_),
+                ..
+            }
+        );
     let push_axial_bending = |components: &mut Vec<CheckComponent>,
                               bending_unchecked,
                               na,
                               nt,
                               ratio_moment: f64,
-                              detail| {
+                              mut detail: String| {
         let mut ratio_axial = if forces.n > 0.0 {
             forces.n / nt
         } else if forces.n < 0.0 && na > 0.0 {
@@ -385,9 +394,22 @@ pub(super) fn column_check(
                 return;
             }
         }
+        let ratio = if short_partial
+            && (ratio_moment == f64::INFINITY
+                || ratio_axial == f64::INFINITY
+                    && column_axial_overload(n_design, na, nt).is_some())
+        {
+            if !bending_partial {
+                detail.push_str("、検定比の下限");
+            }
+            detail.push_str("（表現可能な最大値）");
+            f64::MAX
+        } else {
+            ratio_axial.max(ratio_moment)
+        };
         components.push(CheckComponent {
             kind: CheckKind::AxialBending,
-            ratio: ratio_axial.max(ratio_moment),
+            ratio,
             detail,
         });
     };
@@ -422,7 +444,6 @@ pub(super) fn column_check(
         }
         super::shear_demand_without_main_rebar(ctx, forces.pos, q, index)
     };
-    let short_partial = short_force_issue || span_issue;
     let shear_ratio = |demands: [Option<f64>; 2],
                        capacities: [Option<f64>; 2],
                        boundary_shear_only,

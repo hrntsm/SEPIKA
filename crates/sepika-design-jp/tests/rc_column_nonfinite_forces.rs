@@ -268,6 +268,108 @@ fn time_history_keeps_only_finite_shear_failures_when_axial_force_is_nonfinite()
 }
 
 #[test]
+fn short_term_keeps_bending_failure_at_the_numeric_limit_during_a_partial_check() {
+    for circle in [false, true] {
+        let model = input::column_model(circle, 0.0);
+        let gravity = [(
+            ElemId(0),
+            MemberForces {
+                at: vec![(0.0, [0.0; 6]), (0.5, [0.0; 6]), (1.0, [0.0; 6])],
+            },
+        )];
+        for (local_my, damage_control, end_n, missing_reason) in [
+            (f64::NAN, false, 0.0, "曲げMyが非有限"),
+            (0.0, true, 0.0, "損傷制御用せん断スパン"),
+            (0.0, false, f64::NAN, "柱端の応答軸力が非有限"),
+        ] {
+            let checks = check_column(
+                &model,
+                vec![
+                    (0.0, [end_n, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                    (0.25, [0.0, 0.0, 0.0, 0.0, f64::NAN, 0.0]),
+                    (0.5, [0.0, 0.0, 0.0, 0.0, local_my, f64::MAX]),
+                    (1.0, [0.0; 6]),
+                ],
+                MemberDesignCheckOptions {
+                    term: LoadTerm::Short,
+                    rc_damage_control: damage_control,
+                    qd_method: QdMethod::Min,
+                    long_member_forces: end_n.is_nan().then_some(&gravity),
+                    ..Default::default()
+                },
+            );
+            let center: Vec<_> = checks.iter().filter(|(_, pos, _)| *pos == 0.5).collect();
+            let [(_, 0.5, CheckOutcome::Checked(result)), (_, 0.5, CheckOutcome::Skipped { reason })] =
+                center.as_slice()
+            else {
+                panic!("{center:?}");
+            };
+            assert!(reason.contains(missing_reason), "{reason}");
+            let [component] = result.components.as_slice() else {
+                panic!("{result:?}");
+            };
+            assert_eq!(component.kind, CheckKind::AxialBending);
+            assert!(
+                component.ratio.is_finite() && component.ratio > 1.0,
+                "{component:?}"
+            );
+            if circle {
+                assert_eq!(component.ratio, f64::MAX);
+                assert_eq!(
+                    component.detail.matches("検定比の下限").count(),
+                    1,
+                    "{component:?}"
+                );
+                assert!(
+                    component.detail.contains("表現可能な最大値"),
+                    "{component:?}"
+                );
+            } else {
+                assert!(component.ratio < f64::MAX, "{component:?}");
+                assert_eq!(component.detail.contains("検定比の下限"), local_my.is_nan());
+            }
+        }
+    }
+}
+
+#[test]
+fn short_term_keeps_axial_failure_at_the_numeric_limit_when_only_damage_control_span_is_missing() {
+    for circle in [false, true] {
+        let mut model = input::column_model(circle, 0.0);
+        let main_dia = RebarSize::DiameterMm(0.01);
+        match model.sections[0].shape.as_mut().unwrap() {
+            SectionShape::RcColumnRect { rebar, .. } => rebar.main_dia = main_dia,
+            SectionShape::RcColumnCircle { rebar, .. } => rebar.main_dia = main_dia,
+            shape => panic!("{shape:?}"),
+        }
+        let checks = check_column(
+            &model,
+            vec![
+                (0.25, [0.0, 0.0, 0.0, 0.0, f64::NAN, 0.0]),
+                (0.5, [f64::MAX, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            ],
+            MemberDesignCheckOptions {
+                term: LoadTerm::Short,
+                rc_damage_control: true,
+                ..Default::default()
+            },
+        );
+        let [(_, 0.5, CheckOutcome::Checked(result)), (_, 0.5, CheckOutcome::Skipped { reason })] =
+            checks.as_slice()
+        else {
+            panic!("{checks:?}");
+        };
+        assert!(reason.contains("損傷制御用せん断スパン"), "{reason}");
+        let [component] = result.components.as_slice() else {
+            panic!("{result:?}");
+        };
+        assert_eq!(component.kind, CheckKind::AxialBending);
+        assert_eq!(component.ratio, f64::MAX);
+        assert!(component.detail.contains("検定比の下限"), "{component:?}");
+    }
+}
+
+#[test]
 fn short_term_keeps_proven_shear_failure_when_the_ratio_overflows() {
     for circle in [false, true] {
         let mut model = input::column_model(circle, 0.0);
