@@ -403,16 +403,27 @@ pub fn run_member_design_checks(
             lateral_bracing_references.push((*elem_id, reference.clone()));
         }
         let kind = MemberKind::of_element(elem, model);
-        let shear_span = mf
-            .at
-            .iter()
-            .map(|(_, f)| (f[5].abs(), f[1].abs()))
-            .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-        let shear_span_y = mf
-            .at
-            .iter()
-            .map(|(_, f)| (f[4].abs(), f[2].abs()))
-            .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let rc_column_damage_control = structure == StructureKind::Rc
+            && kind == MemberKind::Column
+            && options.term == LoadTerm::Short
+            && options.rc_damage_control;
+        let shear_span = |moment: usize, shear: usize| {
+            mf.at
+                .iter()
+                .map(|(_, f)| (f[moment].abs(), f[shear].abs()))
+                .max_by(|a, b| {
+                    if rc_column_damage_control {
+                        // 最大曲げを確定できない方向では、有限の試料を採用できない。
+                        b.0.is_finite()
+                            .cmp(&a.0.is_finite())
+                            .then_with(|| a.0.total_cmp(&b.0))
+                    } else {
+                        a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                })
+        };
+        let shear_span_y = shear_span(4, 2);
+        let shear_span = shear_span(5, 1);
         let m_at = |target: f64| {
             mf.at
                 .iter()
@@ -549,7 +560,8 @@ pub fn run_member_design_checks(
         let wrong_shear_rebar = shear_rebar_material.is_some_and(|material| {
             material.category != sepika_core::model::MaterialCategory::Rebar
         });
-        let (column_sum_my, column_end_axial_issue) = if structure == StructureKind::Rc
+        let (column_sum_my, column_end_axial_issue, response_end_axial_issue) = if structure
+            == StructureKind::Rc
             && kind == MemberKind::Column
             && options.term == LoadTerm::Short
             && seismic_qd
@@ -573,6 +585,10 @@ pub fn run_member_design_checks(
                     closest_axial(&mf.at, end),
                 )
             });
+            let response_end_axial_issue = end_forces
+                .iter()
+                .any(|(_, _, response)| response.is_some_and(|(_, n)| !n.is_finite()))
+                .then_some("設計用せん断力に必要な柱端の応答軸力が非有限です");
             let [(n_long_i, n_combo_i), (n_long_j, n_combo_j)] =
                 end_forces.map(|(_, long, response)| {
                     (
@@ -580,17 +596,21 @@ pub fn run_member_design_checks(
                         response.map_or(0.0, |(_, n)| n),
                     )
                 });
-            let column_sum_my = crate::rc::compute_column_mechanism_sum_my(
-                model,
-                column_mechanism_topology
-                    .get_or_insert_with(|| crate::rc::ColumnMechanismTopology::new(model)),
-                elem,
-                n_long_i,
-                n_long_j,
-                n_combo_i,
-                n_combo_j,
-                axial_factor,
-            );
+            let column_sum_my = if response_end_axial_issue.is_some() {
+                None
+            } else {
+                crate::rc::compute_column_mechanism_sum_my(
+                    model,
+                    column_mechanism_topology
+                        .get_or_insert_with(|| crate::rc::ColumnMechanismTopology::new(model)),
+                    elem,
+                    n_long_i,
+                    n_long_j,
+                    n_combo_i,
+                    n_combo_j,
+                    axial_factor,
+                )
+            };
             let column_end_axial_issue =
                 end_forces.into_iter().find_map(|(end, long, response)| {
                     let end_axial = |point: Option<(f64, f64)>| {
@@ -616,9 +636,13 @@ pub fn run_member_design_checks(
                         }
                     }
                 });
-            (column_sum_my, column_end_axial_issue)
+            (
+                column_sum_my,
+                column_end_axial_issue,
+                response_end_axial_issue,
+            )
         } else {
-            (None, None)
+            (None, None, None)
         };
 
         let ctx = DesignCtx {
@@ -750,6 +774,7 @@ pub fn run_member_design_checks(
                     missing_shear_reference,
                     crate::rc::ColumnGravityMode::Ordinary {
                         boundary_shear_issue,
+                        response_end_axial_issue,
                         saved_long_term: long_term_shear.is_some(),
                     },
                 );

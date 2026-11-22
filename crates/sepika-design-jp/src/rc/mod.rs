@@ -59,6 +59,7 @@ pub(crate) enum ColumnGravityMode {
     SingleOutcome,
     Ordinary {
         boundary_shear_issue: Option<&'static str>,
+        response_end_axial_issue: Option<&'static str>,
         saved_long_term: bool,
     },
     TimeHistory {
