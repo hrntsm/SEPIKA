@@ -28,7 +28,8 @@ use super::options::{
 use super::rc_axial::{rc_column_axial_ultimate, RcAxialUltimate};
 use super::rc_props::{rc_bar_props, RcBarProps, RcDirection};
 use super::rc_shear::{
-    bond_reliable_strength_deformed, rc_shear_qbu_bond, BondStrengthInput, RcBondSplitInput,
+    bond_reliable_strength_deformed, bond_reliable_strength_factor, plastic_nu, rc_shear_qbu_bond,
+    BondStrengthInput, RcBondSplitInput,
 };
 use super::rc_shear_ductility::{
     ductility_nu, ductility_truss_upper_bound, rc_shear_vbu_ductility, truss_lambda, RcVbuInput,
@@ -439,6 +440,14 @@ fn check_member(
             .and_then(sepika_core::material_grade::shear_rebar_fy_issue)
             .map(|reason| format!("部材 ID {}（断面「{}」）の{reason}", elem.id.0, sec.name))
     });
+    let shear_pitch_issue = match shape {
+        SectionShape::RcBeamRect { rebar, .. }
+            if rebar.aw_mm2() > 0.0 && !rebar.stirrup.pitch.is_finite() =>
+        {
+            Some("ultimate_beam_stirrup_pitch_nonfinite: あばら筋間隔が非有限です。断面のあばら筋間隔を確認してください".to_owned())
+        }
+        _ => None,
+    };
     let grade = main_rebar_grade(main_rebar);
     let round_bond_reason = (opts.include_bond
         && main_rebar_issue.is_none()
@@ -453,7 +462,7 @@ fn check_member(
         let reason = main_rebar_issue
             .as_ref()
             .map_or_else(|| reason.to_owned(), |issue| format!("{issue}。{reason}"));
-        let reason = [shear_rebar_issue.as_deref(), round_bond_reason.as_deref()]
+        let reason = [&shear_pitch_issue, &shear_rebar_issue, &round_bond_reason]
             .into_iter()
             .flatten()
             .fold(reason, |reason, issue| format!("{reason}。{issue}"));
@@ -640,12 +649,35 @@ fn check_member(
         format!("{value}（{selection}{direction}）")
     });
 
-    let shear_strength = member_shear_strength(&p, fc, n_axial, l_clear, sigma_wy, opts);
+    let ductility_zero_upper =
+        need_be && (shear_pitch_issue.is_some() || shear_category_issue.is_some()) && {
+            // 不明な間隔を耐力式に代入せず、非負の間隔全域で上限が0かを確認する。
+            let pitch_mm = if shear_pitch_issue.is_some() {
+                0.0
+            } else {
+                p.shear_pitch
+            };
+            ductility_truss_upper_bound(
+                truss_lambda(pitch_mm, jt, p.be, p.n_s),
+                ductility_nu(fc, rp) * fc,
+                p.be,
+                jt,
+            ) == 0.0
+        };
+    let shear_strength = if shear_pitch_issue.is_some() {
+        let zero_upper = match opts.shear_method {
+            ShearMethod::Plastic => plastic_nu(fc, rp) * fc == 0.0,
+            ShearMethod::Ductility => ductility_zero_upper,
+        };
+        zero_upper.then_some(0.0)
+    } else {
+        member_shear_strength(&p, fc, n_axial, l_clear, sigma_wy, opts)
+    };
     let qsu = shear_strength.unwrap_or(f64::NAN);
 
     let bond_strength = |p: &RcBarProps| {
         let jt = 7.0 * p.d_eff / 8.0;
-        let tau_bu = bond_reliable_strength_deformed(&BondStrengthInput {
+        let stress_input = BondStrengthInput {
             fc,
             b: p.b_dir,
             db1: p.main_dia.designation_or_diameter_mm(),
@@ -656,7 +688,22 @@ fn check_member(
             hoop_pitch: p.shear_pitch,
             pw: p.pw,
             top_bar: p.top_bar,
-        });
+        };
+        let tau_bu = if shear_pitch_issue.is_some() {
+            let zero_bond_stress = bond_reliable_strength_factor(&stress_input) == 0.0;
+            let tau_bu = if zero_bond_stress { 0.0 } else { f64::NAN };
+            match opts.shear_method {
+                ShearMethod::Plastic if zero_bond_stress => tau_bu,
+                ShearMethod::Ductility
+                    if ductility_zero_upper || (zero_bond_stress && n_axial < 0.0) =>
+                {
+                    return (0.0, tau_bu);
+                }
+                _ => return (f64::NAN, tau_bu),
+            }
+        } else {
+            bond_reliable_strength_deformed(&stress_input)
+        };
         let sum_phi = p.n_tension as f64 * p.main_dia.perimeter_mm();
         let qbu = match opts.shear_method {
             ShearMethod::Plastic => rc_shear_qbu_bond(&RcBondSplitInput {
@@ -694,24 +741,13 @@ fn check_member(
     let bond_unknown_bar_type = opts.include_bond
         && main_rebar_issue.is_some()
         && !matches!(p.main_dia, RebarSize::Standard(_));
-    let bond_uses_transverse_rebar = opts.shear_method == ShearMethod::Ductility
-        || (p.shear_pitch > 0.0 && p.shear_legs > 0 && p.shear_dia.area_mm2() > 0.0);
+    let bond_uses_transverse_rebar =
+        need_be || (p.shear_pitch > 0.0 && p.shear_legs > 0 && p.shear_dia.area_mm2() > 0.0);
     let bond_bar_type_unverified = bond_unknown_bar_type || round_bond_reason.is_some();
-    let bond_zero_upper = opts.include_bond
-        && !bond_bar_type_unverified
+    let bond_category_unverified = shear_pitch_issue.is_none()
+        && !ductility_zero_upper
         && shear_category_issue.is_some()
-        && opts.shear_method == ShearMethod::Ductility
-        && ductility_truss_upper_bound(
-            truss_lambda(p.shear_pitch, jt, p.be, p.n_s),
-            ductility_nu(fc, rp) * fc,
-            p.be,
-            jt,
-        ) == 0.0;
-    let bond_unverified = bond_bar_type_unverified
-        || (opts.include_bond
-            && shear_category_issue.is_some()
-            && bond_uses_transverse_rebar
-            && !bond_zero_upper);
+        && bond_uses_transverse_rebar;
     let main_rebar_issue = main_rebar_issue.map(|reason| {
         if bond_unknown_bar_type {
             format!("{reason}。数値径から異形鉄筋であることを確認できないため付着は未算定です")
@@ -719,25 +755,30 @@ fn check_member(
             reason
         }
     });
-    let (qbu, tau_bu) = match (opts.include_bond, bond_unverified) {
+    let (qbu, tau_bu) = match (
+        opts.include_bond,
+        bond_bar_type_unverified || bond_category_unverified,
+    ) {
         (false, _) => (0.0, 0.0),
         // Vbu2 が0なら拘束効果を含む τbu が未算定でも Vbu は0となる。
-        (true, false) if bond_zero_upper => (0.0, f64::NAN),
+        (true, false) if ductility_zero_upper && shear_pitch_issue.is_none() => (0.0, f64::NAN),
         (true, false) => bond_strength(&p),
         (true, true) => (f64::NAN, f64::NAN),
     };
+    let bond_unverified = qbu.is_nan();
     if static_beam_rebar.is_some() {
         static_beam_reasons.extend(beam_reference);
         static_beam_reasons.extend(main_rebar_issue);
         static_beam_reasons.extend(round_bond_reason);
         static_beam_reasons.extend(shear_rebar_issue.iter().cloned());
+        static_beam_reasons.extend(shear_pitch_issue.iter().cloned());
         let ql = demand.q_long.unwrap_or_default().abs();
         let shear_ng = beam_mechanism.is_some() && qsu.is_finite() && ql > qsu;
         let bond_ng = beam_mechanism.is_some()
             && opts.include_bond
             && qbu.is_finite()
             && ql > qbu
-            && (bond_zero_upper || {
+            && (ductility_zero_upper || {
                 // QLの最大位置と各端の付着耐力を対応付けられないため、両側での超過を要する。
                 let (opposite_qbu, _) = bond_strength(&RcBarProps {
                     top_bar: !p.top_bar,
@@ -956,6 +997,8 @@ fn check_member(
     if let Some(reason) = main_rebar_issue {
         let reason =
             combine_incomplete_reasons(Some(reason), shear_rebar_issue.as_deref()).unwrap();
+        let reason =
+            combine_incomplete_reasons(Some(reason), shear_pitch_issue.as_deref()).unwrap();
         let shear_ng = shear_margin < 1.0;
         let biaxial_shear_ng = biaxial_shear_margin.is_some_and(|margin| margin < 1.0);
         let bond_ng = bond_margin < 1.0;
@@ -1014,6 +1057,7 @@ fn check_member(
             round_bond_reason.as_deref(),
         );
         let reason = combine_incomplete_reasons(reason, shear_rebar_issue.as_deref());
+        let reason = combine_incomplete_reasons(reason, shear_pitch_issue.as_deref());
         combine_incomplete_reasons(reason, hinge_issue.as_deref())
     } else {
         None
@@ -1051,16 +1095,26 @@ fn check_member(
         _ => format!("Mu={mu:.0} N·mm"),
     };
     let bond_detail = bond_detail(&bond_margin_label, qbu, tau_bu, bond_margin);
+    let pw_detail = if shear_pitch_issue.is_some() {
+        "未算定".into()
+    } else {
+        format!("{pw:.5}")
+    };
     let mut detail = format!(
         "{bending_detail}, {demand_detail}, {shear_detail}, {bond_detail}\
-         {biaxial_str}{bend_str}{ql_str}, pw={pw:.5}, jt={jt:.1} mm, L={l_clear} mm, Rp={rp:.4}",
+         {biaxial_str}{bend_str}{ql_str}, pw={pw_detail}, jt={jt:.1} mm, L={l_clear} mm, Rp={rp:.4}",
     );
     if weak_shear_ng {
         detail.push_str("。弱軸せん断耐力を超えます");
     }
-    for reason in [&round_bond_reason, &shear_rebar_issue, &hinge_issue]
-        .into_iter()
-        .flatten()
+    for reason in [
+        &round_bond_reason,
+        &shear_rebar_issue,
+        &shear_pitch_issue,
+        &hinge_issue,
+    ]
+    .into_iter()
+    .flatten()
     {
         detail.push('。');
         detail.push_str(reason);
