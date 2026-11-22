@@ -150,13 +150,16 @@ fn check_app(app: &mut App, cft: bool, expected_n: f64, total_q: Option<f64>) {
         assert_eq!(checks.len(), 1);
         let c = &checks[0];
         assert_eq!(c.elem, ElemId(0));
-        assert!(c.qsu.is_finite() && c.qsu > 12000.0 && c.qmu > 0.0);
         if let Some(q) = total_q {
             close(c.qmu, q.abs());
-            close(c.shear_margin, c.qsu / q.abs());
-            assert!((c.shear_margin - (c.qsu - 12000.0) / q.abs()).abs() > 1e-4);
+            // Fc24・400×600、主筋3-D22相当、補強筋2-D10相当@150、N=150 kN、M/(Qd)の上限3。
+            let expected_capacity_n = 301_867.305_080_403_2;
+            close(c.qsu, expected_capacity_n);
+            close(c.shear_margin, expected_capacity_n / q.abs());
         } else {
-            close(c.shear_margin, (c.qsu - 12000.0) / c.qmu);
+            assert!(c.qmu > 0.0);
+            assert!(c.qsu.is_nan() && c.shear_margin.is_nan());
+            assert!(c.detail.contains("強軸せん断余裕度=未算定") && !c.detail.contains("max("));
         }
         println!(
             "RC App observed N={expected_n} Qsu={} Qmu={} margin={} detail={}",
@@ -352,78 +355,6 @@ fn static_rc_cft_reject_case_superposition_with_iterated_tension_only_brace() {
 
 #[cfg(feature = "gui")]
 #[test]
-fn static_rc_biaxial_table_distinguishes_ok_ng_and_unchecked() {
-    for (load, status, margin, summary) in [
-        (
-            0.0,
-            "OK",
-            "二軸 ",
-            "対象部材の限定検定 OK（全体判定は未完了）",
-        ),
-        (12000.0, "未検定", "強軸 ", "未検定 1 本"),
-        (500000.0, "NG", "強軸 ", "NG 1 本"),
-    ] {
-        let mut app = column(false);
-        for case in &mut app.core.model.load_cases {
-            case.nodal[0].values[0] = 0.0;
-        }
-        app.core.model.load_cases[0].nodal[0].values[0] = load;
-        app.core.ultimate_biaxial_shear = true;
-        app.core.ultimate_include_bond = false;
-        solve_statics(&mut app);
-
-        let check = &app.compute_ultimate_checks().unwrap()[0];
-        assert!(
-            check
-                .detail
-                .contains("強軸せん断余裕度 max(Qsu−QL, 0)/Qmu="),
-            "{}",
-            check.detail
-        );
-        assert_eq!(check.detail.contains("二軸せん断余裕度="), status == "OK");
-
-        let ctx = egui::Context::default();
-        let frame = || egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1600.0, 1000.0),
-            )),
-            ..Default::default()
-        };
-        let mut draw = |ui: &mut egui::Ui| crate::ultimate_view::ultimate_table(ui, &mut app);
-        let _ = ctx.run_ui(frame(), &mut draw);
-        let output = ctx.run_ui(frame(), draw);
-        let labels: Vec<_> = output
-            .shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) => Some(text.galley.text()),
-                _ => None,
-            })
-            .collect();
-        assert!(labels.contains(&status), "load={load}: {labels:?}");
-        assert!(labels.contains(&summary), "load={load}: {labels:?}");
-        assert!(labels.iter().any(|s| s.starts_with(margin)), "{labels:?}");
-        assert!(labels
-            .iter()
-            .any(|s| s.contains("強軸せん断余裕度 max(Qsu−QL, 0)/Qmu")));
-        assert_eq!(
-            labels
-                .iter()
-                .any(|s| s.starts_with("対象部材の限定検定 OK")),
-            status == "OK",
-            "{labels:?}"
-        );
-        assert_eq!(labels.contains(&"NG 1 本"), status == "NG");
-        assert_eq!(labels.contains(&"未検定 1 本"), status == "未検定");
-        assert_eq!(
-            labels.iter().any(|s| s.starts_with("二軸 ")),
-            status == "OK"
-        );
-    }
-}
-
-#[test]
 fn actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallback() {
     for cft in [false, true] {
         let mut app = column(cft);
@@ -508,10 +439,24 @@ fn actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallbac
         close(d.rp.unwrap(), r.rp);
         check_app(&mut app, cft, 150000.0, d.shear);
         if !cft {
+            close(r.min_axial_for_shear_n.unwrap(), 150000.0);
+            close(d.min_axial_for_shear_n.unwrap(), 150000.0);
+            close(d.shear.unwrap(), 39_694.589_12);
+            #[cfg(feature = "gui")]
+            {
+                let labels = ultimate_table_labels(&mut app);
+                for text in ["301.9", "7.60"] {
+                    assert!(labels.iter().any(|label| label == text), "{labels:?}");
+                }
+            }
             close(d.shear_weak.unwrap().abs(), 6000.0);
             app.core.ultimate_biaxial_shear = true;
             let check = &app.compute_ultimate_checks().unwrap()[0];
-            assert_eq!(check.unchecked_reason, None);
+            assert!(check
+                .unchecked_reason
+                .as_deref()
+                .unwrap()
+                .contains("終局付着を未算定"));
             assert!(check.biaxial_shear_margin.unwrap() < check.shear_margin);
             close(check.qmu, d.shear.unwrap().abs());
         }
@@ -765,7 +710,6 @@ fn solve_beam_model(model: sepika_core::model::Model) -> App {
     app.core.analysis_cfg.threads = 1;
     app.core.ultimate_upper_factor = 1.0;
     app.core.ultimate_include_bond = true;
-    app.core.ultimate_shear_ductility = false;
     solve_statics(&mut app);
     app
 }
@@ -797,12 +741,11 @@ fn beam_forces(app: &App, load_case: u32) -> &sepika_element::frame::beam::Membe
 
 #[test]
 fn actual_rc_beam_reports_reference_strengths_from_signed_gravity_without_passing_a_free_end() {
-    // b/D=400/600、dt=61 mm、SD295・Fc24。引張側の付着信頼強度は上端4-D22で
-    // 8.253952 N/mm²（上端筋係数0.69）、下端2-D22・3-D22で12.038422 N/mm²。
-    for (direction, top, bottom, expected_mu, expected_qbu) in [
-        (-1.0, 4, 2, 217_594_806.213, 1_091_221.650),
-        (1.0, 4, 2, 108_797_403.107, 818_332.214),
-        (1.0, 2, 3, 163_196_104.660, 1_185_842.203),
+    // b/D=400/600、dt=61 mm、SD295・Fc24。
+    for (direction, top, bottom, expected_mu) in [
+        (-1.0, 4, 2, 217_594_806.213),
+        (1.0, 4, 2, 108_797_403.107),
+        (1.0, 2, 3, 163_196_104.660),
     ] {
         let mut model = beam_model(&[top], &[bottom]);
         for (index, force_n) in [(0, -20_000.0), (2, 30_000.0)] {
@@ -836,7 +779,7 @@ fn actual_rc_beam_reports_reference_strengths_from_signed_gravity_without_passin
         let checks = app.compute_ultimate_checks().unwrap();
         let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
         close(beam.mu, expected_mu);
-        close(beam.qbu, expected_qbu);
+        assert!(beam.bond_stress.is_none());
         assert!(!beam.ok);
         let reason = beam.unchecked_reason.as_deref().unwrap();
         assert!(
@@ -928,219 +871,40 @@ fn rc_ultimate_table_and_member_hover_distinguish_disabled_and_unavailable_bond(
     app.core.model.sections[0].rebar_material = Some(MaterialId(2));
     solve_statics(&mut app);
 
-    for (ductility, symbol) in [(false, "Qbu"), (true, "Vbu")] {
-        app.core.ultimate_shear_ductility = ductility;
-        for (include_bond, status, verdict) in [(false, "無効", "OK"), (true, "未算定", "未検定")]
-        {
-            app.core.ultimate_include_bond = include_bond;
-            let labels = ultimate_table_labels(&mut app);
-            assert_eq!(
-                labels.iter().filter(|&label| label == status).count(),
-                2,
-                "{labels:?}"
-            );
-            assert!(labels.iter().any(|label| label == verdict), "{labels:?}");
-            let check = &app.compute_ultimate_checks().unwrap()[0];
-            if include_bond {
-                assert!(check.qbu.is_nan() && check.bond_margin.is_nan());
-            } else {
-                assert_eq!(check.qbu, 0.0);
-                assert_eq!(check.bond_margin, f64::INFINITY);
-            }
-
-            let detail = ultimate_table_hover(&mut app, "0", "τbu=");
-            for expected in [
-                format!("{symbol}={status}, τbu={status}"),
-                format!("付着余裕度 max({symbol}−QL, 0)/Qmu={status}"),
-            ] {
-                assert!(detail.contains(&expected), "{expected}: {detail}");
-            }
-            assert_eq!(
-                detail.contains("ultimate_bond_round_bar_unsupported:") && detail.contains("SR235"),
-                include_bond,
-                "{detail}"
-            );
+    for (include_bond, status, verdict) in [(false, "無効", "未検定"), (true, "未算定", "未検定")]
+    {
+        app.core.ultimate_include_bond = include_bond;
+        let labels = ultimate_table_labels(&mut app);
+        assert_eq!(
+            labels.iter().filter(|&label| label == status).count(),
+            3,
+            "{labels:?}"
+        );
+        assert!(labels.iter().any(|label| label == verdict), "{labels:?}");
+        let check = &app.compute_ultimate_checks().unwrap()[0];
+        if include_bond {
+            assert!(check.bond_stress.is_none() && check.bond_margin.is_nan());
+        } else {
+            assert!(check.bond_stress.is_none());
+            assert_eq!(check.bond_margin, f64::INFINITY);
         }
+
+        let detail = ultimate_table_hover(&mut app, "0", "τD=");
+        for expected in [
+            format!("τD={status}, Kfb={status}"),
+            format!("付着余裕度={status}"),
+        ] {
+            assert!(detail.contains(&expected), "{expected}: {detail}");
+        }
+        assert_eq!(
+            detail.contains("ultimate_bond_round_bar_unsupported:") && detail.contains("SR235"),
+            include_bond,
+            "{detail}"
+        );
     }
 }
 
 #[cfg(feature = "gui")]
-#[test]
-fn rc_ultimate_table_and_member_hover_show_mode_and_method_specific_margins() {
-    let mut app = column(false);
-    app.core.ultimate_include_bond = true;
-    solve_statics(&mut app);
-    app.generate_stories_action();
-    app.run_seismic(SeismicDir::X);
-    app.core.analysis_cfg.push_steps = 3;
-    app.run_pushover();
-    assert!(
-        app.core.scoped.last_error.is_none(),
-        "{:?}",
-        app.core.scoped.last_error
-    );
-    let po = app
-        .core
-        .scoped
-        .results
-        .as_mut()
-        .unwrap()
-        .pushover_x
-        .as_mut()
-        .unwrap();
-    let response = &po.confirmed_history.as_ref().unwrap()[1];
-    po.capacity_evaluation = Some(
-        po.evaluation_point(
-            EvaluationPurpose::HoldingCapacity,
-            SeismicDir::X,
-            response.step,
-            "初期重力を含む確定総応答を採用".into(),
-        )
-        .unwrap(),
-    );
-
-    for (confirmed, ductility, demand, shear, bond, shear_formula, bond_formula) in [
-        (
-            false,
-            false,
-            "Qmu",
-            "Qsu",
-            "Qbu",
-            "max(Qsu−QL, 0)/Qmu",
-            "max(Qbu−QL, 0)/Qmu",
-        ),
-        (
-            false,
-            true,
-            "Qmu",
-            "Vu",
-            "Vbu",
-            "max(Vu−QL, 0)/Qmu",
-            "max(Vbu−QL, 0)/Qmu",
-        ),
-        (
-            true,
-            false,
-            "|Qtotal|",
-            "Qsu",
-            "Qbu",
-            "Qsu/|Qtotal|",
-            "Qbu/|Qtotal|",
-        ),
-        (
-            true,
-            true,
-            "|Qtotal|",
-            "Vu",
-            "Vbu",
-            "Vu/|Qtotal|",
-            "Vbu/|Qtotal|",
-        ),
-    ] {
-        app.core.ultimate_use_pushover = confirmed;
-        app.core.ultimate_shear_ductility = ductility;
-        let check = &app.compute_ultimate_checks().unwrap()[0];
-        let verdict = if check.ok { "OK" } else { "NG" };
-        assert!(check.unchecked_reason.is_none(), "{check:?}");
-
-        let ctx = egui::Context::default();
-        app.core.ultimate_use_pushover = !confirmed;
-        ultimate_table_frame(&ctx, &mut app, vec![]);
-        let before_toggle = ultimate_table_frame(&ctx, &mut app, vec![]);
-        let toggle = before_toggle
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Text(text)
-                    if text.galley.text() == "設計用応力・Rp を増分解析応答から反映" =>
-                {
-                    Some(text.galley.rect.translate(text.pos.to_vec2()).center())
-                }
-                _ => None,
-            })
-            .expect("需要モードのチェックボックス");
-        let settled = ultimate_table_frame(
-            &ctx,
-            &mut app,
-            vec![
-                egui::Event::PointerMoved(toggle),
-                egui::Event::PointerButton {
-                    pos: toggle,
-                    button: egui::PointerButton::Primary,
-                    pressed: true,
-                    modifiers: egui::Modifiers::NONE,
-                },
-                egui::Event::PointerButton {
-                    pos: toggle,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    modifiers: egui::Modifiers::NONE,
-                },
-            ],
-        );
-        assert_eq!(app.core.ultimate_use_pushover, confirmed);
-        let texts: Vec<_> = settled
-            .shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) => Some(text),
-                _ => None,
-            })
-            .collect();
-        let demand_header = format!("{demand}[kN]");
-        let header = texts
-            .iter()
-            .find(|text| text.galley.text() == demand_header)
-            .expect("比較需要の列見出し");
-        assert!(
-            !header.galley.elided,
-            "{demand_header} が切り詰められています"
-        );
-        let labels: Vec<_> = texts.iter().map(|text| text.galley.text()).collect();
-        let source = if confirmed {
-            "確定総応答:"
-        } else {
-            "静的重力参照:"
-        };
-        assert!(
-            labels.iter().any(|label| label.starts_with(source)),
-            "{labels:?}"
-        );
-        for expected in [
-            format!("{shear}[kN]"),
-            format!("{bond}[kN]"),
-            format!(
-                "（比較需要が正の場合）強軸せん断余裕度 {shear_formula}、付着余裕度 {bond_formula}"
-            ),
-            format!("{:.2}", check.shear_margin),
-            format!("{:.2}", check.bond_margin),
-            verdict.into(),
-        ] {
-            assert!(
-                labels.contains(&expected.as_str()),
-                "{expected}: {labels:?}"
-            );
-        }
-        let detail = ultimate_table_hover(&mut app, "0", "τbu=");
-        for expected in [
-            format!("{demand}={:.0} N", check.qmu),
-            format!("{shear}={:.0} N", check.qsu),
-            format!("{bond}={:.0} N", check.qbu),
-            format!("強軸せん断余裕度 {shear_formula}={:.3}", check.shear_margin),
-            format!("付着余裕度 {bond_formula}={:.3}", check.bond_margin),
-            if confirmed {
-                "初期重力込み"
-            } else {
-                "QL=12000 N（強軸）"
-            }
-            .into(),
-        ] {
-            assert!(detail.contains(&expected), "{expected}: {detail}");
-        }
-        assert_eq!(detail.contains("QL="), !confirmed, "{detail}");
-    }
-}
-
 #[test]
 fn rc_column_with_no_clear_span_keeps_its_unchecked_reason_in_the_ultimate_table() {
     use sepika_core::model::{GirderTorsionMode, PanelZoneMode, ZoneSource};
@@ -1169,7 +933,7 @@ fn rc_column_with_no_clear_span_keeps_its_unchecked_reason_in_the_ultimate_table
         .unchecked_reason
         .as_deref()
         .is_some_and(|reason| reason.contains("ultimate_beam_hinge_free_end:")));
-    assert!(beam.qsu.is_finite());
+    assert!(beam.qsu.is_nan());
     assert!(!column.ok);
     assert!(column.qsu.is_nan() && column.bond_margin.is_nan());
     let reason = column.unchecked_reason.as_deref().unwrap();
@@ -1184,7 +948,7 @@ fn rc_column_with_no_clear_span_keeps_its_unchecked_reason_in_the_ultimate_table
     #[cfg(feature = "gui")]
     {
         ultimate_table_hover(&mut app, "未検定", reason);
-        for (include_bond, status, count) in [(false, "無効", 4), (true, "未算定", 3)] {
+        for (include_bond, status, count) in [(false, "無効", 6), (true, "未算定", 6)] {
             app.core.ultimate_include_bond = include_bond;
             let labels = ultimate_table_labels(&mut app);
             assert_eq!(
@@ -1192,12 +956,12 @@ fn rc_column_with_no_clear_span_keeps_its_unchecked_reason_in_the_ultimate_table
                 count,
                 "{labels:?}"
             );
-            let detail = ultimate_table_hover(&mut app, "0", "τbu=");
+            let detail = ultimate_table_hover(&mut app, "0", "τD=");
             for expected in cause {
                 assert!(detail.contains(expected), "{expected}: {detail}");
             }
             assert!(
-                detail.contains(&format!("Qbu={status}, τbu={status}, 付着余裕度={status}")),
+                detail.contains(&format!("τD={status}, Kfb={status}, 付着余裕度={status}")),
                 "{detail}"
             );
         }
@@ -1205,7 +969,7 @@ fn rc_column_with_no_clear_span_keeps_its_unchecked_reason_in_the_ultimate_table
 }
 
 #[test]
-fn actual_rc_beam_mixed_static_bending_leaves_only_the_beam_unchecked() {
+fn actual_rc_beam_mixed_static_bending_withholds_reference_mu() {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::model::{MemberLoad, MemberLoadKind};
 
@@ -1230,7 +994,7 @@ fn actual_rc_beam_mixed_static_bending_leaves_only_the_beam_unchecked() {
     let checks = app.compute_ultimate_checks().unwrap();
     let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
     assert!(!beam.ok);
-    assert!(beam.mu.is_nan() && beam.qbu.is_nan());
+    assert!(beam.mu.is_nan() && beam.bond_stress.is_none());
     let reason = beam.unchecked_reason.as_deref().unwrap();
     for evidence in [
         "ultimate_beam_mz_mixed_signs:",
@@ -1240,25 +1004,25 @@ fn actual_rc_beam_mixed_static_bending_leaves_only_the_beam_unchecked() {
         assert!(reason.contains(evidence), "{reason}");
     }
     let column = checks.iter().find(|check| check.elem == ElemId(0)).unwrap();
-    assert_eq!(column.unchecked_reason, None);
-    assert!(column.mu > 0.0 && column.qbu > 0.0);
+    assert!(column.unchecked_reason.is_some());
+    assert!(column.mu > 0.0 && column.bond_stress.is_none());
     #[cfg(feature = "gui")]
     {
         let labels = ultimate_table_labels(&mut app);
         assert!(
-            labels.iter().any(|label| label == "未検定 1 本"),
+            labels.iter().any(|label| label == "未検定 2 本"),
             "{labels:?}"
         );
         assert!(labels.iter().any(|label| label == "未検定"), "{labels:?}");
         assert!(labels.iter().any(|label| label.contains("両端ヒンジ略算")));
         assert_eq!(
             labels.iter().filter(|&label| label == "-").count(),
-            4,
+            6,
             "{labels:?}"
         );
         assert_eq!(
             labels.iter().filter(|&label| label == "未算定").count(),
-            2,
+            6,
             "{labels:?}"
         );
         assert!(
@@ -1275,7 +1039,7 @@ fn actual_rc_beam_without_static_bending_has_no_tension_side() {
         let checks = app.compute_ultimate_checks().unwrap();
         let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
         assert!(!beam.ok);
-        assert!(beam.mu.is_nan() && beam.qbu.is_nan());
+        assert!(beam.mu.is_nan() && beam.bond_stress.is_none());
         let reason = beam.unchecked_reason.as_deref().unwrap();
         assert!(reason.contains("ultimate_beam_mz_zero:"), "{reason}");
     }
@@ -1302,7 +1066,7 @@ fn public_unsigned_static_forces_leave_only_the_rc_beam_unchecked() {
     let reason = beam.unchecked_reason.as_deref().unwrap();
     assert!(reason.contains("ultimate_beam_mz_unverified:"), "{reason}");
     let column = checks.iter().find(|check| check.elem == ElemId(0)).unwrap();
-    assert_eq!(column.unchecked_reason, None);
+    assert!(column.unchecked_reason.is_some());
     assert!(column.mu > 0.0);
 }
 
@@ -1330,7 +1094,7 @@ fn actual_rc_beam_without_reinforcement_on_the_tension_side_leaves_only_the_beam
         );
         assert!(reason.contains(side), "{reason}");
         let column = checks.iter().find(|check| check.elem == ElemId(0)).unwrap();
-        assert_eq!(column.unchecked_reason, None);
+        assert!(column.unchecked_reason.is_some());
         assert!(column.mu > 0.0);
     }
 }
@@ -1355,18 +1119,17 @@ fn actual_rc_free_end_never_shows_an_ok_or_ng_from_an_inapplicable_hinge_demand(
             [3_000_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         ));
         let mut app = solve_beam_model(model);
-        app.core.ultimate_rp = 0.05;
         close(beam_forces(&app, 0).at[0].1[5], -3_000.0 * ql_n);
         close(beam_forces(&app, 0).at.last().unwrap().1[5], 0.0);
         let checks = app.compute_ultimate_checks().unwrap();
         let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
         let column = checks.iter().find(|check| check.elem == ElemId(0)).unwrap();
         close(beam.mu, 108_797_403.107);
-        close(beam.qsu, 117_755.918);
-        close(beam.qbu, 278_854.410);
+        assert!(beam.qsu.is_nan());
+        assert!(beam.bond_stress.is_none());
         assert!(!beam.ok);
-        assert_eq!(column.unchecked_reason, None);
-        assert!(!column.ok && column.shear_margin < 1.0);
+        assert!(column.unchecked_reason.is_some());
+        assert!(!column.ok && column.shear_margin.is_nan());
         let reason = beam.unchecked_reason.as_deref().unwrap();
         let cause = "ultimate_beam_hinge_free_end: j端";
         assert!(reason.contains(cause), "{reason}");
@@ -1374,25 +1137,16 @@ fn actual_rc_free_end_never_shows_an_ok_or_ng_from_an_inapplicable_hinge_demand(
         #[cfg(feature = "gui")]
         {
             let labels = ultimate_table_labels(&mut app);
-            for text in [
-                "108.8（参考）",
-                "117.8",
-                "278.9",
-                "未算定",
-                "未検定",
-                "未検定 1 本",
-                "NG 1 本",
-            ] {
+            for text in ["108.8（参考）", "未算定", "未検定", "未検定 2 本"] {
                 assert!(labels.iter().any(|label| label == text), "{labels:?}");
             }
             assert_eq!(
                 labels.iter().filter(|&label| label == "-").count(),
-                2,
+                5,
                 "{labels:?}"
             );
-            ultimate_table_hover(&mut app, "未検定", reason);
-            let detail = ultimate_table_hover(&mut app, "1", "τbu=");
-            for expected in ["Qbu=278854 N", "付着余裕度=未算定", cause] {
+            let detail = ultimate_table_hover(&mut app, "1", "τD=");
+            for expected in ["τD=未算定", "付着余裕度=未算定", cause] {
                 assert!(detail.contains(expected), "{expected}: {detail}");
             }
         }
@@ -1400,13 +1154,102 @@ fn actual_rc_free_end_never_shows_an_ok_or_ng_from_an_inapplicable_hinge_demand(
 }
 
 #[test]
-fn actual_rc_beam_compares_confirmed_shear_with_mu_displayed_as_reference() {
-    use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
+fn actual_rc_beam_with_verified_zero_axial_force_displays_arakawa_mean_capacity() {
+    use sepika_core::model::{ForceRegime, RcBeamReference};
+
+    let mut model = beam_model(&[4], &[4]);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[1].shape else {
+        unreachable!()
+    };
+    rebar.main_dia = sepika_core::section_shape::RebarSize::Standard(
+        sepika_core::section_shape::StandardRebar::D22,
+    );
+    model.nodes[3]
+        .restraint
+        .set_fixed(sepika_core::dof::Dof::Ux);
+    model.elements[1].force_regime = ForceRegime::UniaxialBendingShear;
+    model.set_member_rc_beam_reference(
+        ElemId(1),
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
+    );
+    model.load_cases[0].nodal.push(NodalLoad::manual(
+        NodeId(3),
+        [0.0, 0.0, -10_000.0, 0.0, 0.0, 0.0],
+    ));
+    let mut app = solve_beam_model(model);
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::Y);
+    app.core.analysis_cfg.push_dir = SeismicDir::Y;
+    app.core.analysis_cfg.push_steps = 3;
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.core.ultimate_use_pushover = true;
+    let po = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .pushover_y
+        .as_mut()
+        .unwrap();
+    let response = &po.confirmed_history.as_ref().unwrap()[1];
+    let member = response
+        .members
+        .iter()
+        .find(|member| member.elem == ElemId(1))
+        .unwrap();
+    assert_eq!(member.min_axial_for_shear_n, Some(0.0), "{member:?}");
+    po.capacity_evaluation = Some(
+        po.evaluation_point(
+            EvaluationPurpose::HoldingCapacity,
+            SeismicDir::Y,
+            response.step,
+            "RC梁の軸力なしを確認したstep".into(),
+        )
+        .unwrap(),
+    );
+
+    let demands = app.ultimate_demand_by_elem().unwrap();
+    let demand = &demands.iter().find(|(id, _)| *id == ElemId(1)).unwrap().1;
+    assert_eq!(demand.min_axial_for_shear_n, Some(0.0));
+    let checks = app.compute_ultimate_checks().unwrap();
+    let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
+    // Fc24・400×600、主筋4-D22相当、補強筋2-D10相当@100、N=0、M/(Qd)の上限3。
+    close(beam.qmu, 10_000.0);
+    close(beam.qsu, 332_617.813_860_871_25);
+    close(beam.shear_margin, 33.261_781_386_087_13);
+    #[cfg(feature = "gui")]
+    {
+        let labels = ultimate_table_labels(&mut app);
+        for text in ["332.6", "33.26"] {
+            assert!(labels.iter().any(|label| label == text), "{labels:?}");
+        }
+    }
+}
+
+#[test]
+fn actual_rc_beam_with_member_load_displays_unavailable_capacity_and_reference_mu() {
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
 
     let mut model = beam_model(&[4], &[2]);
     model.load_cases[0].nodal.push(NodalLoad::manual(
         NodeId(3),
         [0.0, 0.0, -10_000.0, 0.0, 0.0, 0.0],
+    ));
+    model.load_cases[0].member.push(MemberLoad::manual(
+        ElemId(1),
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 6000.0,
+            w1: 0.5,
+            w2: 0.5,
+        },
     ));
     let mut app = solve_beam_model(model);
     app.generate_stories_action();
@@ -1436,6 +1279,7 @@ fn actual_rc_beam_compares_confirmed_shear_with_mu_displayed_as_reference() {
         .unwrap();
     let shear = member.shear_strong.abs();
     assert!(shear > 0.0);
+    assert_eq!(member.min_axial_for_shear_n, None);
     po.capacity_evaluation = Some(
         po.evaluation_point(
             EvaluationPurpose::HoldingCapacity,
@@ -1448,8 +1292,14 @@ fn actual_rc_beam_compares_confirmed_shear_with_mu_displayed_as_reference() {
     let checks = app.compute_ultimate_checks().unwrap();
     let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
     close(beam.qmu, shear);
-    close(beam.shear_margin, beam.qsu / shear);
-    assert!(beam.ok && beam.unchecked_reason.is_none(), "{beam:?}");
+    assert!(beam.qsu.is_nan() && beam.shear_margin.is_nan(), "{beam:?}");
+    assert!(
+        beam.unchecked_reason
+            .as_deref()
+            .unwrap()
+            .contains("部材荷重"),
+        "{beam:?}"
+    );
     assert!(
         beam.detail.contains("参考曲げ略算 Mu")
             && beam
@@ -1463,7 +1313,8 @@ fn actual_rc_beam_compares_confirmed_shear_with_mu_displayed_as_reference() {
             labels.iter().any(|label| label.ends_with("（参考）")),
             "{labels:?}"
         );
-        assert!(labels.iter().any(|label| label == "OK"), "{labels:?}");
+        assert!(labels.iter().any(|label| label == "未検定"), "{labels:?}");
+        assert!(labels.iter().any(|label| label == "未算定"), "{labels:?}");
     }
 }
 

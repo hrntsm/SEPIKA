@@ -108,6 +108,111 @@ fn checked_components(outcome: CheckOutcome) -> Vec<CheckComponent> {
 }
 
 #[test]
+fn rc_allowable_uses_fc60_for_bending_and_retains_independent_shear_above_it() {
+    let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1_000_000.0];
+    for mut model in rc_members() {
+        let concrete = model.sections[0].material.unwrap().index();
+        model.materials[concrete].fc = Some(60.0);
+        let boundary = allowable_checks_with_demand(&model, demand, &short_term());
+        assert_eq!(boundary.len(), 1, "{boundary:?}");
+        let at_boundary = checked_components(boundary.into_iter().next().unwrap().2);
+        assert!(
+            at_boundary.iter().any(|row| {
+                matches!(row.kind, CheckKind::Bending | CheckKind::AxialBending)
+                    && row.ratio.is_finite()
+            }),
+            "{at_boundary:?}"
+        );
+
+        model.materials[concrete].fc = Some(60.0_f64.next_up());
+        let above = allowable_checks_with_demand(&model, demand, &short_term());
+        assert!(
+            above.iter().any(|(_, _, outcome)| matches!(
+                outcome, CheckOutcome::Skipped { reason } if reason.contains("Fcが60")
+            )),
+            "{above:?}"
+        );
+        assert!(above
+            .into_iter()
+            .filter_map(|(_, _, outcome)| match outcome {
+                CheckOutcome::Checked(result) => Some(result.components),
+                CheckOutcome::Skipped { .. } => None,
+            })
+            .flatten()
+            .any(|row| row.kind == CheckKind::Shear && row.ratio > 1.0));
+    }
+}
+
+#[test]
+fn rc_column_pure_tension_uses_steel_above_fc60() {
+    for circular in [false, true] {
+        let mut model = rc_column::column_model(circular, 0.0);
+        let concrete = model.sections[0].material.unwrap().index();
+        let design = |model: &Model, axial_n: f64, moment_nmm: f64| {
+            allowable_checks_with_demand(
+                model,
+                [axial_n, 0.0, 0.0, 0.0, 0.0, moment_nmm],
+                &short_term(),
+            )
+        };
+        for axial_n in [100_000.0, 1_000_000.0] {
+            model.materials[concrete].fc = Some(60.0);
+            let at_boundary = checked_components(design(&model, axial_n, 0.0).remove(0).2);
+            model.materials[concrete].fc = Some(60.0_f64.next_up());
+            let above = design(&model, axial_n, 0.0);
+            assert_eq!(above.len(), 1, "{above:?}");
+            let components = checked_components(above.into_iter().next().unwrap().2);
+            let axial_ratio = |components: &[CheckComponent]| {
+                components
+                    .iter()
+                    .find(|row| row.kind == CheckKind::AxialBending)
+                    .unwrap()
+                    .ratio
+            };
+            assert_eq!(axial_ratio(&components), axial_ratio(&at_boundary));
+            assert_eq!(axial_ratio(&components) < 1.0, axial_n == 100_000.0);
+        }
+        for (axial, moment) in [(-100_000.0, 0.0), (100_000.0, 1e6)] {
+            let above = design(&model, axial, moment);
+            assert!(
+                above.iter().any(|(_, _, outcome)| matches!(
+                    outcome, CheckOutcome::Skipped { reason } if reason.contains("Fcが60")
+                )),
+                "{above:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn rc_allowable_usd685_grades_withhold_main_bar_checks_and_keep_shear_failure() {
+    let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1_000_000.0];
+    for mut model in rc_members() {
+        assign_main_rebar(&mut model, MaterialCategory::Rebar);
+        let main = model.sections[0].rebar_material.unwrap().index();
+        model.materials[main].fy = Some(685.0);
+        for grade in ["USD685", "USD685A", "USD685B"] {
+            model.materials[main].name = grade.into();
+            let outcomes = allowable_checks_with_demand(&model, demand, &short_term());
+            assert!(
+                outcomes.iter().any(|(_, _, outcome)| matches!(
+                    outcome, CheckOutcome::Skipped { reason } if reason.contains("USD685系主筋")
+                )),
+                "{grade}: {outcomes:?}"
+            );
+            assert!(outcomes
+                .into_iter()
+                .filter_map(|(_, _, outcome)| match outcome {
+                    CheckOutcome::Checked(result) => Some(result.components),
+                    CheckOutcome::Skipped { .. } => None,
+                })
+                .flatten()
+                .any(|row| row.kind == CheckKind::Shear && row.ratio > 1.0));
+        }
+    }
+}
+
+#[test]
 fn rc_allowable_preserves_elastic_shear_and_cover_failures() {
     for mut model in rc_members() {
         match model.sections[0].shape.as_mut().unwrap() {
@@ -358,7 +463,10 @@ fn rc_ultimate_checks_require_rebar_for_beam_and_columns() {
     for mut model in rc_members() {
         set_ultimate_input(&mut model);
         let original_assignment = model.sections[0].rebar_material;
-        let demand = MemberDemand::from_pushover(0.0, 1_000_000.0, 0.0, 1_000.0, 0.0, 0.0);
+        let demand = MemberDemand {
+            min_axial_for_shear_n: Some(0.0),
+            ..MemberDemand::from_pushover(0.0, 1_000_000.0, 0.0, 1_000.0, 0.0, 0.0)
+        };
         let run = |model: &Model| {
             collect_rc_ultimate_checks(
                 model,
@@ -380,12 +488,15 @@ fn rc_ultimate_checks_require_rebar_for_beam_and_columns() {
         model.sections[0].rebar_material = original_assignment;
         let check = run(&model);
         assert!(check.mu > 0.0 && check.mu.is_finite(), "{check:?}");
-        assert!(check.ok && check.unchecked_reason.is_none(), "{check:?}");
+        assert!(
+            check.bond_stress.is_none() && check.unchecked_reason.is_some(),
+            "{check:?}"
+        );
     }
 }
 
 #[test]
-fn static_rc_beam_keeps_shear_and_only_confirmed_bond_failure_with_wrong_main_rebar() {
+fn static_rc_beam_reports_wrong_main_rebar_and_unverified_capacities() {
     for main_dia in [
         RebarSize::Standard(StandardRebar::D19),
         RebarSize::DiameterMm(19.0),
@@ -412,22 +523,10 @@ fn static_rc_beam_keeps_shear_and_only_confirmed_bond_failure_with_wrong_main_re
         )
         .unwrap()
         .remove(0);
-        assert!(!check.ok && check.unchecked_reason.is_none(), "{check:?}");
+        assert!(!check.ok && check.unchecked_reason.is_some(), "{check:?}");
         assert!(check.mu.is_nan() && check.qmu.is_nan(), "{check:?}");
-        assert_eq!(check.shear_margin, 0.0);
-        match main_dia {
-            RebarSize::Standard(_) => {
-                assert!(check.qbu.is_finite(), "{check:?}");
-                assert_eq!(check.bond_margin, 0.0);
-            }
-            RebarSize::DiameterMm(_) => {
-                assert!(
-                    check.qbu.is_nan() && check.bond_margin.is_nan(),
-                    "{check:?}"
-                );
-                assert!(check.detail.contains("付着は未算定"), "{check:?}");
-            }
-        }
+        assert!(check.shear_margin.is_nan());
+        assert!(check.bond_stress.is_none() && check.bond_margin.is_nan());
         for text in ["SR235", "主筋", "鋼材", "断面タブ", "「鉄筋」"] {
             assert!(check.detail.contains(text), "{check:?}");
         }
@@ -435,7 +534,7 @@ fn static_rc_beam_keeps_shear_and_only_confirmed_bond_failure_with_wrong_main_re
 }
 
 #[test]
-fn rc_ultimate_keeps_failures_on_members_with_and_without_wrong_main_rebar() {
+fn rc_ultimate_keeps_other_members_failure_when_main_rebar_is_unverified() {
     let mut model = rc_column::column_model(false, 0.0);
     set_ultimate_input(&mut model);
     let mut other_section = model.sections[0].clone();
@@ -447,7 +546,10 @@ fn rc_ultimate_keeps_failures_on_members_with_and_without_wrong_main_rebar() {
     model.sections.push(other_section);
     model.elements.push(other_element);
     assign_main_rebar(&mut model, MaterialCategory::Steel);
-    let demand = MemberDemand::from_pushover(0.0, 1_000_000.0, 0.0, 10_000_000.0, 0.0, 0.0);
+    let demand = MemberDemand {
+        min_axial_for_shear_n: Some(0.0),
+        ..MemberDemand::from_pushover(0.0, 1_000_000.0, 0.0, 10_000_000.0, 0.0, 0.0)
+    };
     let checks = collect_rc_ultimate_checks(
         &model,
         &[(ElemId(0), demand), (ElemId(1), demand)],
@@ -455,21 +557,61 @@ fn rc_ultimate_keeps_failures_on_members_with_and_without_wrong_main_rebar() {
     )
     .unwrap();
     assert_eq!(checks.len(), 2);
-    for check in &checks {
-        assert!(!check.ok && check.unchecked_reason.is_none(), "{check:?}");
-        assert!(check.shear_margin < 1.0, "{check:?}");
-    }
+    assert!(!checks[0].ok && checks[0].unchecked_reason.is_some());
+    assert!(checks[0].shear_margin.is_nan());
+    assert!(!checks[1].ok && checks[1].unchecked_reason.is_none());
+    assert!(checks[1].shear_margin < 1.0);
     assert!(checks[0].mu.is_nan(), "{:?}", checks[0]);
     assert!(
-        checks[0].qbu.is_nan() && checks[0].bond_margin.is_nan(),
+        checks[0].bond_stress.is_none() && checks[0].bond_margin.is_nan(),
         "{:?}",
         checks[0]
     );
-    assert!(checks[0].detail.contains("付着は未算定"), "{:?}", checks[0]);
+    assert!(checks[0].detail.contains("τD=未算定"), "{:?}", checks[0]);
     assert_material_diagnostic(&checks[0].detail, MaterialCategory::Steel);
     assert!(
-        checks[1].mu.is_finite() && checks[1].qbu.is_finite(),
+        checks[1].mu.is_finite() && checks[1].bond_stress.is_none(),
         "{:?}",
         checks[1]
+    );
+}
+
+#[test]
+fn arakawa_mean_withholds_capacity_for_usd685_main_rebar() {
+    let mut model = rc_beam::model(false);
+    set_ultimate_input(&mut model);
+    assign_main_rebar(&mut model, MaterialCategory::Rebar);
+    let main = model.sections[0].rebar_material.unwrap().index();
+    let demand = MemberDemand {
+        min_axial_for_shear_n: Some(0.0),
+        ..MemberDemand::from_pushover(0.0, 1e6, 0.0, 1000.0, 0.0, 0.0)
+    };
+    let check = |model: &Model| {
+        collect_rc_ultimate_checks(
+            model,
+            &[(ElemId(0), demand)],
+            &UltimateShearOptions {
+                include_bond: false,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .remove(0)
+    };
+    assert!(check(&model).qsu.is_finite());
+    model.materials[main].name = "USD685".into();
+    model.materials[main].fy = Some(685.0);
+    let result = check(&model);
+    assert!(
+        result.qsu.is_nan() && result.shear_margin.is_nan(),
+        "{result:?}"
+    );
+    assert!(
+        result
+            .unchecked_reason
+            .as_deref()
+            .unwrap()
+            .contains("大臣認定材料"),
+        "{result:?}"
     );
 }

@@ -88,8 +88,10 @@ pub fn default_fiber_concrete_hysteresis(kind: AnalysisKind) -> HysteresisModel 
 /// RC梁集中ばねで採用する明示基準分布。実応力分布を確認したという意味ではない。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum RcBeamReference {
-    /// 一定せん断、逆対称曲げ、同一の両半部材を基準とする。
+    /// 軸力の前提を保持していない旧入力。再指定が必要。
     AntisymmetricHalfMember,
+    /// 軸力を見込まず、一定せん断・逆対称曲げ・同一の両半部材を基準とする。
+    AntisymmetricHalfMemberWithoutAxialForce,
 }
 
 /// 部材の履歴則の指定。

@@ -31,7 +31,7 @@ fn column_nm_at_xn(axis: &ColumnAxis, allow: &RcAllow, xn: f64) -> Option<(f64, 
     let p = &axis.props;
     let d_full = p.d_full;
     let b = p.b;
-    let n_ratio = allow.n_ratio;
+    let n_ratio = allow.n_ratio?;
     let fc = allow.fc;
     let r_fc = axis.ft;
     let ft = axis.ft;

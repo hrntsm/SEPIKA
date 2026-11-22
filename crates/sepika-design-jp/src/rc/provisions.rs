@@ -114,21 +114,17 @@ pub(crate) fn beam_provisions(
     ProvisionCheck { errors, warnings }
 }
 
-/// 実配筋モデル柱の構造規定（マニュアル 2.5.3(5)）。
+/// 実配筋モデル柱の構造規定。
 ///
 /// `length` は支点間距離 [mm]。呼び出し側は内法（`DesignCtx.clear_length`）を
 /// 優先して渡す。`pw_min` は検討方向のせん断補強筋比の最小値。
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn column_provisions_info(
     info: &RcRebarInfo,
     d_min: f64,
     length: f64,
     concrete_class: ConcreteClass,
-    long_term: bool,
     ag: f64,
     as_total: f64,
-    n_short_comp: Option<f64>,
-    fc_raw: f64,
     pw_min: f64,
 ) -> ProvisionCheck {
     let mut errors = Vec::new();
@@ -171,14 +167,6 @@ pub(crate) fn column_provisions_info(
         let pg = as_total / ag;
         if pg + 1e-12 < 0.008 {
             warnings.push(format!("主筋比 pg={:.3}% < 0.8%", pg * 100.0));
-        }
-        if let Some(n_short_comp) = n_short_comp.filter(|&n| !long_term && fc_raw > 0.0 && n > 0.0)
-        {
-            let sigma = n_short_comp / ag;
-            let lim = fc_raw / 3.0;
-            if sigma + 1e-9 < lim {
-                warnings.push(format!("短期軸応力度 {:.2} < Fc/3={:.2} N/mm²", sigma, lim));
-            }
         }
     }
 
@@ -240,11 +228,8 @@ mod tests {
             400.0,
             4000.0,
             ConcreteClass::Normal,
-            true,
             800.0 * 400.0,
             info.main_area,
-            None,
-            24.0,
             2.0 * one_bar_area(10.0) / (800.0 * 250.0),
         );
         // pw_d = 2·(π·5²)/(400·250) ≈ 0.00157 < 0.002
@@ -258,51 +243,6 @@ mod tests {
     }
 
     #[test]
-    fn column_short_axial_warns_below_fc_over_3() {
-        let info = sample_info(40.0, 100.0, 22.0, 4);
-        let ag = 400.0 * 400.0;
-        let fc = 24.0;
-        // σ = 1.0 < Fc/3=8 → 警告
-        let low = column_provisions_info(
-            &info,
-            400.0,
-            4000.0,
-            ConcreteClass::Normal,
-            false,
-            ag,
-            info.main_area,
-            Some(1.0 * ag),
-            fc,
-            2.0 * one_bar_area(10.0) / (400.0 * 100.0),
-        );
-        assert!(
-            low.warnings
-                .iter()
-                .any(|w| w.contains("短期軸応力度") && w.contains("Fc/3")),
-            "warnings={:?}",
-            low.warnings
-        );
-        // σ = 10.0 > Fc/3=8 → 警告なし
-        let ok = column_provisions_info(
-            &info,
-            400.0,
-            4000.0,
-            ConcreteClass::Normal,
-            false,
-            ag,
-            info.main_area,
-            Some(10.0 * ag),
-            fc,
-            2.0 * one_bar_area(10.0) / (400.0 * 100.0),
-        );
-        assert!(
-            ok.warnings.iter().all(|w| !w.contains("短期軸応力度")),
-            "warnings={:?}",
-            ok.warnings
-        );
-    }
-
-    #[test]
     fn column_slenderness_uses_passed_span_length() {
         // d_min/L: 400/7000 < 1/15 → 警告、400/5000 > 1/15 → なし
         let info = sample_info(40.0, 100.0, 22.0, 8);
@@ -312,11 +252,8 @@ mod tests {
             400.0,
             7000.0,
             ConcreteClass::Normal,
-            true,
             ag,
             info.main_area,
-            None,
-            24.0,
             2.0 * one_bar_area(10.0) / (400.0 * 100.0),
         );
         assert!(
@@ -332,11 +269,8 @@ mod tests {
             400.0,
             5000.0,
             ConcreteClass::Normal,
-            true,
             ag,
             info.main_area,
-            None,
-            24.0,
             2.0 * one_bar_area(10.0) / (400.0 * 100.0),
         );
         assert!(

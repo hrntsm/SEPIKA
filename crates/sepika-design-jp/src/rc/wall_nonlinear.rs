@@ -106,8 +106,13 @@ pub fn wall_shear_crack(inp: &WallShearTrilinearInput) -> Result<f64, String> {
     {
         return Err("Qc用のFc・実壁厚・柱心距離は有限の正値が必要です".into());
     }
+    const N_PER_MM2_PER_KGF_PER_CM2: f64 = 0.0980665;
+    if inp.fc > 360.0 * N_PER_MM2_PER_KGF_PER_CM2 {
+        return Err("Qcの算定はFcが360 kgf/cm²（約35.3 N/mm²）以下の範囲です".into());
+    }
     let aw_qc_mm2 = inp.t * inp.wall_length_mm;
-    let qc_n = 0.1 * inp.fc * aw_qc_mm2;
+    let tau_cr = (inp.fc / 20.0).min(1.5 * (5.0 * N_PER_MM2_PER_KGF_PER_CM2 + inp.fc / 100.0));
+    let qc_n = tau_cr * aw_qc_mm2;
     if !aw_qc_mm2.is_finite() || aw_qc_mm2 <= 0.0 || !qc_n.is_finite() || qc_n <= 0.0 {
         return Err("Qc用壁板面積・ひび割れ耐力を有限の正値として算定できません".into());
     }
@@ -240,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn vertical_limit_prevents_overstated_reference_skeleton() {
+    fn reference_skeleton_caps_horizontal_reinforcement_contribution() {
         let mut input = base_input();
         input.t = 300.0;
         input.te = 300.0;
@@ -262,13 +267,8 @@ mod tests {
         ] {
             input.method = method;
             assert!((wall_shear_ultimate(&input).unwrap() - expected).abs() < 1e-6);
-            assert!(wall_shear_trilinear(&input)
-                .unwrap_err()
-                .contains("Qc < Qu"));
-            input.t = 200.0;
             let skeleton = wall_shear_trilinear(&input).unwrap();
             assert!((skeleton.qu - expected).abs() < 1e-6);
-            input.t = 300.0;
         }
         for invalid in [f64::NAN, f64::INFINITY, -0.001] {
             input.pwv_ratio = invalid;
@@ -329,14 +329,14 @@ mod tests {
         let mut input = base_input();
         input.t = 200.0;
         input.wall_length_mm = 4200.0;
-        assert!((wall_shear_crack(&input).unwrap() - 2_016_000.0).abs() < 1e-6);
+        assert!((wall_shear_crack(&input).unwrap() - 920_218.95).abs() < 1e-6);
         input.te = 300.0;
         input.tension_column_at = 100_000.0;
         input.sigma_0 = 5.0;
         input.pwh_ratio = 0.015;
-        assert!((wall_shear_crack(&input).unwrap() - 2_016_000.0).abs() < 1e-6);
+        assert!((wall_shear_crack(&input).unwrap() - 920_218.95).abs() < 1e-6);
         input.wall_length_mm = 2100.0;
-        assert!((wall_shear_crack(&input).unwrap() - 1_008_000.0).abs() < 1e-6);
+        assert!((wall_shear_crack(&input).unwrap() - 460_109.475).abs() < 1e-6);
     }
     #[test]
     fn full_shear_skeleton_matches_independent_hand_calculation() {
@@ -353,13 +353,13 @@ mod tests {
         assert_eq!(properties.area, 1_332_000.0);
         assert!((properties.shear_area - 783_187.0050213936).abs() < 1e-6);
         let tri = wall_shear_trilinear(&input).unwrap();
-        assert!((tri.qc - 1_224_000.0).abs() < 1e-6);
+        assert!((tri.qc - 612_000.0).abs() < 1e-6);
         assert!((tri.qu - 2_443_056.1431899336).abs() < 1e-6);
         assert!((tri.beta_s - 0.25973529411764706).abs() < 1e-12);
         let points = tri
             .displacement_points(10_000.0, properties.shear_area, 3000.0)
             .unwrap();
-        assert!((points[1].0 - 0.4688535402728873).abs() < 1e-12);
+        assert!((points[1].0 - 0.23442677013644364).abs() < 1e-12);
         assert!((points[2].0 - 3.602950218988746).abs() < 1e-12);
     }
 
@@ -379,7 +379,7 @@ mod tests {
                 assert!(wall_shear_trilinear(&input).is_err());
             }
         }
-        for (t, l, fc) in [(f64::MAX, 2.0, 24.0), (1e200, 1e100, 1e100)] {
+        for (t, l, fc) in [(f64::MAX, 2.0, 24.0), (1e200, 1e200, 1.0)] {
             let mut input = base_input();
             input.t = t;
             input.wall_length_mm = l;
@@ -389,6 +389,11 @@ mod tests {
             );
         }
         let mut input = base_input();
+        input.fc = 36.0;
+        assert!(wall_shear_crack(&input)
+            .unwrap_err()
+            .contains("360 kgf/cm²"));
+        input.fc = 24.0;
         input.opening = Some((200.0, 200.0, 3000.0, 4000.0));
         assert!(
             matches!(wall_shear_crack(&input), Err(reason) if reason.contains("Qc用開口低減率が未確定"))

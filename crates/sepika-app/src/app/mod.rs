@@ -108,7 +108,7 @@ pub enum ResultsView {
 pub enum DesignView {
     #[default]
     Table,
-    /// 終局検定（靭性保証型耐震設計指針による終局せん断・付着余裕度）。
+    /// 終局検定（終局せん断・付着余裕度）。
     Ultimate,
     MnSurface,
     /// 数量積算（部位別の概算数量）。
@@ -881,19 +881,14 @@ pub struct AppCore {
     /// 告示「耐力壁の種別」表は壁式構造で限界値が厳しい（τu/Fc: WA 0.1・WB 0.125・
     /// WC 0.15）。既定は false（壁式構造以外: WA 0.20・WB 0.25）。
     pub wall_structure: bool,
-    /// 終局検定（靭性保証型耐震設計指針）のヒンジ回転角 Rp `[rad]`（ν・cotφ 用。既定 0）。
-    pub ultimate_rp: f64,
-    /// 終局検定で軽量コンクリートのせん断終局耐力 0.9 倍低減を適用するか。
-    pub ultimate_lightweight: bool,
-    /// 終局検定で付着割裂耐力 Qbu の余裕度を算定するか。
+    /// 矩形RC梁・柱の終局検定に大地震時の付着照査を含めるか。
     pub ultimate_include_bond: bool,
-    /// 終局検定の上限強度倍率（Qmu = 上限強度倍率·2·Mu/内法。既定 1.0）。
+    /// RC柱の静的・両端ヒンジ略算の参考せん断需要に掛ける倍率（既定 1.0）。
+    /// 確定総応答では 1.0 を指定する。
     pub ultimate_upper_factor: f64,
-    /// 終局検定の終局せん断強度に靭性指針式 Vu を用いるか（false=塑性理論式 Qsu）。
-    pub ultimate_shear_ductility: bool,
-    /// 終局検定で柱のせん断を 2 軸せん断として検定するか（RC 柱の 2 軸せん断余裕度）。
+    /// 確定総応答を用いる矩形RC柱の二軸せん断余裕度を算定するか。
     pub ultimate_biaxial_shear: bool,
-    /// 終局検定で柱の曲げを 2 軸曲げとして検定するか（RC 柱の 2 軸曲げ余裕度）。
+    /// 矩形・円形RC柱の二軸曲げ余裕度を算定するか。
     pub ultimate_biaxial_bending: bool,
     /// 終局検定の設計用応力（Qmu・需要曲げ）と部材別 Rp を増分解析応答から
     /// 直接反映するか（false は静的解析応答＋UI 一律 Rp）。増分解析未実行時は
@@ -915,11 +910,8 @@ impl Default for AppCore {
             design_rank: sepika_design_jp::secondary::holding_capacity::MemberRank::FA,
             design_rank_auto: false,
             wall_structure: false,
-            ultimate_rp: 0.0,
-            ultimate_lightweight: false,
             ultimate_include_bond: true,
             ultimate_upper_factor: 1.0,
-            ultimate_shear_ductility: false,
             ultimate_biaxial_shear: false,
             ultimate_biaxial_bending: false,
             ultimate_use_pushover: false,

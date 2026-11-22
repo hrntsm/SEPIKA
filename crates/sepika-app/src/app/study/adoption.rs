@@ -612,10 +612,10 @@ mod tests {
             });
         assert!(app.study_main_changed(0));
         app.core.model = baseline;
-        let ultimate_rp = app.core.ultimate_rp;
-        app.core.ultimate_rp += 0.1;
+        app.core.ultimate_include_bond = !app.core.ultimate_include_bond;
         assert!(app.study_main_changed(0));
-        app.core.ultimate_rp = ultimate_rp;
+        app.core.ultimate_include_bond = !app.core.ultimate_include_bond;
+        assert!(!app.study_main_changed(0));
         app.ui
             .scoped
             .selection
@@ -688,11 +688,8 @@ mod tests {
         app.core.design_rank = MemberRank::FD;
         app.core.design_rank_auto = !app.core.design_rank_auto;
         app.core.wall_structure = !app.core.wall_structure;
-        app.core.ultimate_rp = 0.1;
-        app.core.ultimate_lightweight = !app.core.ultimate_lightweight;
         app.core.ultimate_include_bond = !app.core.ultimate_include_bond;
         app.core.ultimate_upper_factor = 1.7;
-        app.core.ultimate_shear_ductility = !app.core.ultimate_shear_ductility;
         app.core.ultimate_biaxial_shear = !app.core.ultimate_biaxial_shear;
         app.core.ultimate_biaxial_bending = !app.core.ultimate_biaxial_bending;
         app.core.ultimate_use_pushover = !app.core.ultimate_use_pushover;

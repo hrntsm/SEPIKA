@@ -95,9 +95,9 @@ fn gui_wall_check_draws_crack_force_and_both_reference_axes() {
         );
     }
     for expected in [
-        "Qc=2016.0 kN",
+        "Qc=920.2 kN",
         "Qc用Aw=840000.0 mm²",
-        "81244.598 N/mm",
+        "120700.627 N/mm",
         "純せん断変位 δ [mm]",
         "純せん断角 γ [rad]",
         "せん断力 Q [kN]",
@@ -233,7 +233,7 @@ fn crack_reference_input_edits_undo_redo_and_save_never_reauthenticate_old_resul
                 .iter()
                 .find_map(|w| w.reference_skeleton.as_ref())
                 .unwrap();
-            assert!((skeleton.displacement_points[1].1 - 1_848_000.0).abs() < 1e-6);
+            assert!((skeleton.displacement_points[1].1 - 895_018.95).abs() < 1e-6);
         }
     }
 }

@@ -1645,20 +1645,23 @@ fn rc_beam_reference_is_explicit_persistent_and_survives_member_operations() {
     let mut model = Model::default();
     let elem = ElemId(4);
     assert_eq!(model.member_rc_beam_reference(elem), None);
-    model.set_member_rc_beam_reference(elem, Some(RcBeamReference::AntisymmetricHalfMember));
+    model.set_member_rc_beam_reference(
+        elem,
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
+    );
     model.set_member_hysteresis(elem, HysteresisModel::Takeda);
     model.set_member_hysteresis_th(elem, Some(HysteresisModel::Retrograde));
     model.set_member_hysteresis(elem, HysteresisModel::Auto);
     model.set_member_hysteresis_th(elem, None);
     assert_eq!(
         model.member_rc_beam_reference(elem),
-        Some(RcBeamReference::AntisymmetricHalfMember)
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce)
     );
     let encoded = rmp_serde::to_vec_named(&model).unwrap();
     let mut decoded: Model = rmp_serde::from_slice(&encoded).unwrap();
     assert_eq!(
         decoded.member_rc_beam_reference(elem),
-        Some(RcBeamReference::AntisymmetricHalfMember)
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce)
     );
     decoded.shift_elem_attr_refs(|id| {
         if *id == elem {
@@ -1668,14 +1671,14 @@ fn rc_beam_reference_is_explicit_persistent_and_survives_member_operations() {
     assert_eq!(decoded.member_rc_beam_reference(elem), None);
     assert_eq!(
         decoded.member_rc_beam_reference(ElemId(7)),
-        Some(RcBeamReference::AntisymmetricHalfMember)
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce)
     );
     let attrs = decoded.take_elem_attrs(ElemId(7));
     assert_eq!(decoded.member_rc_beam_reference(ElemId(7)), None);
     decoded.restore_elem_attrs(ElemId(8), attrs);
     assert_eq!(
         decoded.member_rc_beam_reference(ElemId(8)),
-        Some(RcBeamReference::AntisymmetricHalfMember)
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce)
     );
     decoded.set_member_rc_beam_reference(ElemId(8), None);
     assert!(decoded.member_hysteresis_attrs.is_empty());

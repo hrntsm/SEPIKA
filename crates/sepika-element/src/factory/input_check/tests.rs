@@ -573,15 +573,16 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
     model.nodes[1].coord[0] = 3600.0;
     model.materials[0].young = 20_000.0;
     model.materials[1].young = 200_000.0;
-    let bar_dia = (2400.0 / std::f64::consts::PI).sqrt();
     model.sections[0].shape = Some(SectionShape::RcBeamRect {
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(bar_dia),
+            main_dia: sepika_core::section_shape::RebarSize::Standard(
+                sepika_core::section_shape::StandardRebar::D29,
+            ),
             top: vec![3],
             bottom: vec![3],
-            cover: 60.0 - 10.0 - bar_dia / 2.0,
+            cover: 35.5,
             stirrup: sepika_core::section_shape::BeamStirrup {
                 dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
@@ -591,7 +592,7 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
     });
     model.set_member_rc_beam_reference(
         ElemId(0),
-        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
     );
     model.sections[0].iy = 5_400_000_000.0;
     model.sections[0].iz = 1_350_000_000.0;
@@ -599,7 +600,7 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
     model.sections[0].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
     assert!(ensure_nonlinear_input(&model).is_ok());
     assert!(
-        (super::super::springs::flexural_alpha_y(&model.elements[0], &model) - 0.265_720_5).abs()
+        (super::super::springs::flexural_alpha_y(&model.elements[0], &model) - 0.281_547_36).abs()
             < 1e-12
     );
     let (_, _, backbone) = super::super::springs::build_flexural_springs(
@@ -609,7 +610,7 @@ fn rc_ratio_factory_fixture_and_invalid_geometry_are_diagnosed() {
         crate::factory::StrengthBasis::Nominal,
     );
     let [theta_y, my] = backbone.points[2];
-    assert!((my / (backbone.k_rot * theta_y) - 0.265_720_5).abs() < 1e-12);
+    assert!((my / (backbone.k_rot * theta_y) - 0.281_547_36).abs() < 1e-12);
     for bad in [f64::NAN, f64::INFINITY, 0.0, -1.0] {
         let mut invalid = model.clone();
         if let Some(SectionShape::RcBeamRect { b, .. }) = invalid.sections[0].shape.as_mut() {
@@ -738,10 +739,13 @@ fn slab_cooperating_rc_concentrated_spring_stops_without_tension_slab_rebar() {
     assert!(error.contains(&public_generation_diagnostic(&model)));
     model.set_member_rc_beam_reference(
         ElemId(0),
-        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
     );
     if let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() {
         rebar.top = rebar.bottom.clone();
+        rebar.main_dia = sepika_core::section_shape::RebarSize::Standard(
+            sepika_core::section_shape::StandardRebar::D22,
+        );
     }
     model.elements.truncate(1);
     model.floor_assignment_regions.regions.clear();
@@ -853,15 +857,16 @@ fn src_stiffness_errors_reach_nonlinear_input_diagnostics_and_public_factories()
 
 fn explicit_rc_reference_fixture() -> Model {
     let mut model = beam_model(rc_section(), concrete_material());
-    let bar_dia = (2400.0 / std::f64::consts::PI).sqrt();
     let mut section = SectionShape::RcBeamRect {
         b: 300.0,
         d: 600.0,
         rebar: RcBeamRebar {
-            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(bar_dia),
+            main_dia: sepika_core::section_shape::RebarSize::Standard(
+                sepika_core::section_shape::StandardRebar::D29,
+            ),
             top: vec![3],
             bottom: vec![3],
-            cover: 60.0 - 10.0 - bar_dia / 2.0,
+            cover: 35.5,
             stirrup: sepika_core::section_shape::BeamStirrup {
                 dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                 pitch: 100.0,
@@ -881,9 +886,133 @@ fn explicit_rc_reference_fixture() -> Model {
     model.set_member_hysteresis(ElemId(0), sepika_core::model::HysteresisModel::Retrograde);
     model.set_member_rc_beam_reference(
         ElemId(0),
-        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
     );
     model
+}
+
+#[test]
+fn rc_reference_requires_explicit_zero_axial_force_and_applies_both_documented_spans() {
+    use crate::factory::{build_hinge_view, StrengthBasis};
+    use sepika_core::model::{AnalysisKind, RcBeamReference};
+
+    let mut model = explicit_rc_reference_fixture();
+    for (span, alpha, crack_angle, yield_angle) in [
+        (1800.0, 0.125469, 0.000187927925706259, 0.007065585921622073),
+        (
+            2400.0,
+            0.24671736,
+            0.000250570567608345,
+            0.004790972147237632,
+        ),
+        (
+            3600.0,
+            0.28154736,
+            0.000375855851412518,
+            0.006297427189514404,
+        ),
+    ] {
+        model.nodes[1].coord[0] = span;
+        ensure_nonlinear_input(&model).unwrap();
+        let calculated =
+            crate::factory::springs::flexural_alpha_y_checked(&model.elements[0], &model).unwrap();
+        assert!((calculated - alpha).abs() < 1e-12, "L={span}: {calculated}");
+        let total = build_hinge_view(
+            &model.elements[0],
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+            0.0,
+            8,
+            24,
+        )
+        .unwrap()
+        .total_backbone
+        .unwrap();
+        assert!(
+            (total[1][0] - crack_angle).abs() < 1e-14,
+            "L={span}: {total:?}"
+        );
+        assert!((total[1][1] - 67_654_053.254_253_16).abs() < 1e-5);
+        assert!(
+            (total[2][0] - yield_angle).abs() < 1e-14,
+            "L={span}: {total:?}"
+        );
+        assert!((total[2][1] - 319_144_320.0).abs() < 1e-5);
+    }
+    model.nodes[1].coord[0] = 6600.0;
+    assert!(ensure_nonlinear_input(&model)
+        .unwrap_err()
+        .contains("1.0〜5.0"));
+    model.nodes[1].coord[0] = 3600.0;
+    model.set_member_rc_beam_reference(ElemId(0), Some(RcBeamReference::AntisymmetricHalfMember));
+    assert!(ensure_nonlinear_input(&model)
+        .unwrap_err()
+        .contains("軸力を見込まない前提"));
+}
+
+#[test]
+fn symmetric_multilayer_rc_backbone_uses_both_rebar_centroids() {
+    use crate::factory::{build_hinge_view, StrengthBasis};
+
+    let mut model = explicit_rc_reference_fixture();
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape else {
+        unreachable!()
+    };
+    rebar.top = vec![2, 1];
+    rebar.bottom = vec![2, 1];
+    let view = build_hinge_view(
+        &model.elements[0],
+        &model,
+        StrengthBasis::Nominal,
+        sepika_core::model::AnalysisKind::Incremental,
+        0.0,
+        8,
+        24,
+    )
+    .unwrap();
+    let total = view
+        .total_backbone
+        .unwrap_or_else(|| panic!("{:?}", view.unavailability_reason));
+    assert!((total[2][1] - 287_008_260.0).abs() < 1e-5, "{total:?}");
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() else {
+        unreachable!()
+    };
+    rebar.main_dia = sepika_core::section_shape::RebarSize::DiameterMm(29.0);
+    assert!(ensure_nonlinear_input(&model)
+        .unwrap_err()
+        .contains("D41以下"));
+}
+
+#[test]
+fn rc_reference_checks_the_yield_moment_domain_for_short_and_basic_spans() {
+    let mut model = explicit_rc_reference_fixture();
+    for span in [1800.0, 2400.0] {
+        model.nodes[1].coord[0] = span;
+        let mut inadequate = model.clone();
+        let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut inadequate.sections[0].shape else {
+            unreachable!();
+        };
+        rebar.main_dia = sepika_core::section_shape::RebarSize::DiameterMm(15.0);
+        let reason = ensure_nonlinear_input(&inadequate).unwrap_err();
+        assert!(
+            reason.contains("降伏モーメント") && reason.contains("0.4〜2.8%"),
+            "{reason}"
+        );
+
+        let mut unsupported = model.clone();
+        unsupported.materials[1].name = "USD685".into();
+        unsupported.materials[1].fy = Some(685.0);
+        unsupported.materials[1].strength_factor = Some(1.0);
+        unsupported.materials[2] = Material {
+            id: MaterialId(2),
+            ..model.materials[1].clone()
+        };
+        unsupported.sections[0].shear_rebar_material = Some(MaterialId(2));
+        assert!(ensure_nonlinear_input(&unsupported)
+            .unwrap_err()
+            .contains("降伏モーメント"));
+    }
 }
 
 #[test]
@@ -912,8 +1041,8 @@ fn actual_rc_factory_connects_additional_angle_and_publishes_both_backbones() {
     .unwrap();
     let total = reference.total_backbone.unwrap();
     let additional = reference.backbone.unwrap();
-    assert!((total[2][0] - 0.005927325831114165).abs() < 1e-14);
-    assert!((additional[2][0] - 0.003132825831114165).abs() < 1e-14);
+    assert!((total[2][0] - 0.008_413_946_678_110_617).abs() < 1e-14);
+    assert!((additional[2][0] - 0.005_458_906_678_110_617).abs() < 1e-14);
     assert!(additional[1][0].abs() < 1e-15);
     let elastic = crate::frame::beam::BeamElement::new(data, &model);
     let ctx = Ctx { model: &model };
@@ -953,7 +1082,7 @@ fn actual_rc_factory_connects_additional_angle_and_publishes_both_backbones() {
         elastic.mass_matrix(MassOption::Lumped).data
     );
     let mut local = [0.0; 12];
-    local[5] = 0.005927325831114165;
+    local[5] = 0.008_413_946_678_110_617;
     local[11] = local[5];
     let global = elastic.axis.rotate_to_global(&local);
     behavior
@@ -968,10 +1097,10 @@ fn actual_rc_factory_connects_additional_angle_and_publishes_both_backbones() {
     let force = behavior.internal_force(&ctx);
     let force_global: [f64; 12] = std::array::from_fn(|i| force.data[i]);
     let force_local = elastic.axis.rotate_to_local(&force_global);
-    assert!((force_local[5] - 301806000.0).abs() < 0.1);
-    assert!((force_local[11] - 301806000.0).abs() < 0.1);
+    assert!((force_local[5] - 319_144_320.0).abs() < 0.1);
+    assert!((force_local[11] - 319_144_320.0).abs() < 0.1);
     for extra in behavior.end_spring_rotations().unwrap() {
-        assert!((extra - 0.003132825831114165).abs() < 1e-12);
+        assert!((extra - 0.005_458_906_678_110_617).abs() < 1e-12);
     }
 }
 
@@ -1100,7 +1229,7 @@ fn rc_reference_cracking_uses_the_same_rectangular_geometry_as_alpha_and_yield()
     assert_eq!(before.total_backbone, after.total_backbone);
     assert_eq!(before.backbone, after.backbone);
     let mc = after.total_backbone.unwrap()[1][1];
-    assert!((mc - 0.56 * 24.0_f64.sqrt() * 18_000_000.0).abs() < 1e-6);
+    assert!((mc - 0.56 * 24.0_f64.sqrt() * 24_660_403.2).abs() < 1e-6);
 }
 
 #[test]
@@ -1155,7 +1284,7 @@ fn unsupported_concentrated_rc_law_never_falls_through_to_takeda_without_basis()
     // 未実行側の指定が対応済みの実行側を拒否する根拠にはならない。
     model.set_member_rc_beam_reference(
         ElemId(0),
-        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
     );
     model.set_member_hysteresis_th(ElemId(0), Some(HysteresisModel::Takeda));
     assert!(ensure_nonlinear_input_for_kind(&model, AnalysisKind::TimeHistory).is_ok());
@@ -1264,7 +1393,6 @@ fn rc_reference_backbone_diagnostics_follow_the_actual_strength_basis() {
         ..base.materials[1].clone()
     });
     base.sections[0].shear_rebar_material = Some(MaterialId(3));
-    base.materials[1].name = "入力強度で評価する主筋".into();
     let view = |model: &Model, basis| {
         crate::factory::build_hinge_view(
             &model.elements[0],
@@ -1319,24 +1447,20 @@ fn rc_reference_backbone_diagnostics_follow_the_actual_strength_basis() {
         });
         let factory_reason = *result.err().unwrap().downcast::<String>().unwrap();
         assert_eq!(factory_reason, reason);
-        if factor == 0.1 {
-            assert!(reason.contains("Mc<My"), "{reason}");
-        } else {
-            assert!(reason.contains("My"), "{reason}");
-        }
+        assert!(reason.contains("割増は空欄または 1.0～1.1"), "{reason}");
     }
-    let mut reduced = base.clone();
-    reduced.materials[1].strength_factor = Some(0.8);
+    let mut enhanced = base.clone();
+    enhanced.materials[1].strength_factor = Some(1.1);
     assert!(ensure_nonlinear_input_with_basis(
-        &reduced,
+        &enhanced,
         AnalysisKind::Incremental,
         StrengthBasis::MaterialStrength
     )
     .is_ok());
-    let backbone = view(&reduced, StrengthBasis::MaterialStrength)
+    let backbone = view(&enhanced, StrengthBasis::MaterialStrength)
         .total_backbone
         .unwrap();
-    assert!((backbone[2][1] - nominal[2][1] * 0.8).abs() < 1e-6);
+    assert!((backbone[2][1] - nominal[2][1] * 1.1).abs() < 1e-6);
 }
 
 #[test]

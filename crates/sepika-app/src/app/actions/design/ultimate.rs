@@ -12,16 +12,8 @@ impl App {
         let demand = self.ultimate_demand_by_elem()?;
 
         let opts = sepika_design_jp::ultimate::UltimateShearOptions {
-            rp: self.core.ultimate_rp.max(0.0),
-            lightweight: self.core.ultimate_lightweight,
             upper_strength_factor: self.core.ultimate_upper_factor.max(0.0),
-            sigma_wy: 295.0,
             include_bond: self.core.ultimate_include_bond,
-            shear_method: if self.core.ultimate_shear_ductility {
-                sepika_design_jp::ultimate::ShearMethod::Ductility
-            } else {
-                sepika_design_jp::ultimate::ShearMethod::Plastic
-            },
             biaxial_shear: self.core.ultimate_biaxial_shear,
             biaxial_bending: self.core.ultimate_biaxial_bending,
         };

@@ -1,10 +1,9 @@
 //! **終局検定（保有水平耐力計算における部材の終局強度検定）**。
 //!
-//! 崩壊機構形成後の各部材について、終局せん断強度・付着割裂耐力に対する
-//! 余裕度（せん断・付着が曲げに先行して破壊しないこと）を検定する。
-//! 両端ヒンジを仮定した終局せん断応力を設計用せん断力とする。
+//! 矩形RC梁・柱では、確定総応答による終局せん断と、大地震時の付着応力度・
+//! カットオフ筋の必要延長を照査する。円形RC柱は軸・曲げの終局耐力を扱う。
 //!
-//! 検定対象は矩形 RC 梁・矩形および円形 RC 柱。CFT 柱の軸終局耐力は [`cft`]、
+//! CFT 柱の軸終局耐力は [`cft`]、
 //! 柱梁接合部の終局耐力は [`crate::ultimate::joint`] を参照。
 
 #[cfg(test)]
@@ -16,8 +15,7 @@ pub mod cft;
 pub mod cft_nm;
 pub mod joint;
 pub mod rc_axial;
-pub mod rc_shear;
-pub mod rc_shear_ductility;
+mod rc_bond;
 
 mod cft_check;
 mod demand_diagnostic;
@@ -32,28 +30,24 @@ pub use cft::{
     cft_concrete_buckling_stress, cft_concrete_slenderness, cft_ncu1, CftAxialInput,
     CftAxialUltimate, CftColumnClass, CftLongBuckling,
 };
+pub(crate) use cft_check::cft_circular_qd1_mu;
+pub use cft_check::{cft_mu_nm, collect_cft_ultimate_checks, CftUltimateCheck};
 pub use cft_nm::{
     cft_long_medium_column_mu, cft_nk, cft_short_column_mu, CftBendingInput, CftLongMediumInput,
 };
 pub use joint::{
     joint_fj, joint_kappa, rc_joint_ultimate, RcJointUltimateInput, RcJointUltimateResult,
 };
-pub use rc_axial::{rc_axial_margin, rc_column_axial_ultimate, RcAxialUltimate};
-pub use rc_shear::{
-    bond_reliable_strength_deformed, bond_split_ratio, plastic_cot_phi, plastic_k1, plastic_k2,
-    plastic_nu, plastic_nu0, rc_shear_qbu_bond, rc_shear_qsu_plastic, BondStrengthInput,
-    RcBondSplitInput, RcPlasticShearInput,
-};
-pub use rc_shear_ductility::{
-    arch_tan_theta, bond_force_tx, ductility_mu, ductility_nu, rc_shear_vbu_ductility,
-    rc_shear_vu_ductility, truss_lambda, RcDuctilityShearInput, RcVbuInput,
-};
-
-pub(crate) use cft_check::cft_circular_qd1_mu;
-pub use cft_check::{cft_mu_nm, collect_cft_ultimate_checks, CftUltimateCheck};
 pub use options::{
-    MemberDemand, ShearMethod, StaticBeamBending, StaticBeamHingeMechanism, UltimateDemandMode,
+    MemberDemand, StaticBeamBending, StaticBeamHingeMechanism, UltimateDemandMode,
     UltimateShearOptions,
+};
+pub use rc_axial::{rc_axial_margin, rc_column_axial_ultimate, RcAxialUltimate};
+pub use rc_bond::{
+    RcUltimateBondAxis, RcUltimateBondBar, RcUltimateBondConfinement, RcUltimateBondDemand,
+    RcUltimateBondElasticStress, RcUltimateBondInput, RcUltimateBondMomentDistribution,
+    RcUltimateBondPlacement, RcUltimateBondStress, RcUltimateBondTransverseRebar,
+    RcUltimateCutoffBarStress, RcUltimateThroughBarYield,
 };
 pub use rc_check::{collect_rc_ultimate_checks, UltimateCheck};
 pub use rc_strength::biaxial_margin;

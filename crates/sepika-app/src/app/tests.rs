@@ -7327,10 +7327,10 @@ fn test_compute_ultimate_checks_rc_frame() {
     let beam = checks.iter().find(|c| c.elem == ElemId(1)).unwrap();
     assert_eq!(col.kind, MemberKind::Column);
     assert_eq!(beam.kind, MemberKind::Girder);
-    assert!(col.qsu > 0.0 && col.qmu > 0.0 && col.shear_margin > 0.0);
+    assert!(col.qsu.is_nan() && col.qmu > 0.0 && col.shear_margin.is_nan());
     assert!(col.axial.is_some(), "柱は軸終局耐力を持つ");
     assert!(beam.axial.is_none(), "梁は軸終局耐力なし");
-    assert!(col.qbu > 0.0 && col.bond_margin.is_finite());
+    assert!(col.bond_stress.is_none() && col.bond_margin.is_nan());
 }
 
 /// CFT 柱の軸終局検定を App 経由で算定する。

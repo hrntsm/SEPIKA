@@ -592,6 +592,10 @@ fn prepared_steel_portal(four_story: bool) -> App {
 
 /// 床なし4層RC矩形。柱600角・梁400×700、D25主筋、Fc24/SD345を明示した独立fixture。
 fn prepared_rectangular_rc_portal() -> App {
+    prepared_rectangular_rc_portal_with_beam_cover(40.0)
+}
+
+fn prepared_rectangular_rc_portal_with_beam_cover(beam_cover: f64) -> App {
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::model::{FrameSectionUse, Material, MaterialCategory};
     use sepika_core::section_shape::{
@@ -619,10 +623,12 @@ fn prepared_rectangular_rc_portal() -> App {
             b: 400.0,
             d: 700.0,
             rebar: RcBeamRebar {
-                main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
+                main_dia: sepika_core::section_shape::RebarSize::Standard(
+                    sepika_core::section_shape::StandardRebar::D25,
+                ),
                 top: vec![4],
                 bottom: vec![4],
-                cover: 40.0,
+                cover: beam_cover,
                 stirrup: BeamStirrup {
                     dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
                     pitch: 100.0,
@@ -684,7 +690,7 @@ fn prepared_rectangular_rc_portal() -> App {
     for elem in rc_beams {
         model.set_member_rc_beam_reference(
             elem,
-            Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+            Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
         );
     }
     let mut app = App::default();
@@ -1788,7 +1794,7 @@ fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
             "{reason}"
         );
         assert!(!check.ok);
-        assert!(check.mu.is_nan() && check.qsu.is_nan() && check.qbu.is_nan());
+        assert!(check.mu.is_nan() && check.qsu.is_nan() && check.bond_stress.is_none());
         assert!(check.qmu.is_nan() && check.shear_margin.is_nan() && check.bond_margin.is_nan());
     }
 }
@@ -2057,7 +2063,8 @@ fn time_history_nonlinear_long_duration_has_no_false_non_convergence() {
 /// 明示RC矩形フレームの減衰末尾で、ピーク力下限を欠く旧判定による偽非収束を検出する。
 #[test]
 fn rectangular_rc_decay_tail_has_no_false_non_convergence() {
-    let mut app = prepared_rectangular_rc_portal();
+    // 標準D25では、かぶり50 mmで元の検証断面に近い梁の降伏モーメントとなる。
+    let mut app = prepared_rectangular_rc_portal_with_beam_cover(50.0);
     app.core.analysis_cfg.th_dir = ThDir::X;
     app.core.analysis_cfg.th_nonlinear = true;
     app.core.analysis_cfg.th_apply_long_term = false;
@@ -3367,7 +3374,7 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
 
     app.core.model.set_member_rc_beam_reference(
         sepika_core::ids::ElemId(11),
-        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+        Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
     );
     app.run_seismic(sepika_solver::statics::analysis::SeismicDir::X);
     assert_no_error(&app, "GL跨ぎ混合構造の地震静的");

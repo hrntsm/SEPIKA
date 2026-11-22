@@ -484,6 +484,25 @@ pub(super) fn column_check(
         }
     };
     let capacity = |qa: Option<f64>| qa.map_or_else(|| "未算定".into(), |qa| format!("{qa:.1} N"));
+    let push_without_young_ratio =
+        |components: &mut Vec<CheckComponent>, nt, incomplete: &mut Option<String>| {
+            if n_design <= 0.0 && forces.my == 0.0 && forces.mz == 0.0 {
+                push_axial_bending(
+                    components,
+                    false,
+                    f64::NAN,
+                    nt,
+                    0.0,
+                    format!("NT={nt:.1} N, N={n_design:.1} N（圧縮正）{partial_detail}"),
+                );
+            } else {
+                *incomplete = combine_incomplete_reasons(
+                    incomplete.take(),
+                    Some(super::allowable::UNSUPPORTED_YOUNG_RATIO),
+                );
+                components.extend(column_axial_overload(n_design, f64::NAN, nt));
+            }
+        };
 
     if let SectionShape::RcColumnCircle { d, .. } = shape {
         let d_full = *d;
@@ -501,35 +520,40 @@ pub(super) fn column_check(
                 info.main_dia.designation_or_diameter_mm(),
                 long_term,
             );
-            let na = column_axial_capacity(gross_area, as_total, allow.fc, ft, allow.n_ratio);
-
-            let axis = ColumnAxis {
-                props,
-                at_perp: 0.0,
-                ft,
-            };
-            let curve = column_nm_curve(&axis, &allow, na);
-            let ma = column_allowable_moment(&curve, n_design);
-            let ratio_moment = match column_moment_ratio(forces, na, ma, ma, true, check_finite) {
-                Ok(ratio) => ratio,
-                Err(reason) => {
-                    bending_issue = Some(reason);
-                    available_column_moment_ratio(forces, ma, ma, true, check_finite)
-                }
-            };
             let nt = as_total * ft;
-            let axial_bending_detail = format!(
-            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA={:.1} N·mm（等価矩形近似）, mz={:.1} N·mm, my={:.1} N·mm{partial_detail}",
-            na, nt, n_design, ma, forces.mz, forces.my,
-        );
-            push_axial_bending(
-                &mut components,
-                bending_issue.is_some() || short_force_issue && bending_partial,
-                na,
-                nt,
-                ratio_moment,
-                axial_bending_detail,
+            if let Some(n_ratio) = allow.n_ratio {
+                let na = column_axial_capacity(gross_area, as_total, allow.fc, ft, n_ratio);
+
+                let axis = ColumnAxis {
+                    props,
+                    at_perp: 0.0,
+                    ft,
+                };
+                let curve = column_nm_curve(&axis, &allow, na);
+                let ma = column_allowable_moment(&curve, n_design);
+                let ratio_moment = match column_moment_ratio(forces, na, ma, ma, true, check_finite)
+                {
+                    Ok(ratio) => ratio,
+                    Err(reason) => {
+                        bending_issue = Some(reason);
+                        available_column_moment_ratio(forces, ma, ma, true, check_finite)
+                    }
+                };
+                let axial_bending_detail = format!(
+                "NA={:.1} N, NT={:.1} N, N={:.1} N, MA={:.1} N·mm（等価矩形近似）, mz={:.1} N·mm, my={:.1} N·mm{partial_detail}",
+                na, nt, n_design, ma, forces.mz, forces.my,
             );
+                push_axial_bending(
+                    &mut components,
+                    bending_issue.is_some() || short_force_issue && bending_partial,
+                    na,
+                    nt,
+                    ratio_moment,
+                    axial_bending_detail,
+                );
+            } else {
+                push_without_young_ratio(&mut components, nt, incomplete);
+            }
         }
 
         let boundary_shear_only = ordinary && bending_issue.is_some();
@@ -611,11 +635,8 @@ pub(super) fn column_check(
                 d_full,
                 ctx.clear_length.filter(|&l| l > 1e-9).unwrap_or(ctx.length),
                 mat.concrete_class,
-                long_term,
                 gross_area,
                 as_total,
-                axial_available.then_some(n_design),
-                fc_raw,
                 props.pw,
             );
             if let Some(c) = prov.provision_component() {
@@ -649,47 +670,51 @@ pub(super) fn column_check(
                 long_term,
             );
             let ft_y = ft_z;
-            let na = column_axial_capacity(gross_area, as_total, allow.fc, ft_z, allow.n_ratio);
-
-            let at_perp_for_z = rect_column_at_perp(as_total, props_z.at, props_z.ac);
-            let at_perp_for_y = rect_column_at_perp(as_total, props_y.at, props_y.ac);
-
-            let axis_z = ColumnAxis {
-                props: props_z,
-                at_perp: at_perp_for_z,
-                ft: ft_z,
-            };
-            let axis_y = ColumnAxis {
-                props: props_y,
-                at_perp: at_perp_for_y,
-                ft: ft_y,
-            };
-
-            let curve_z = column_nm_curve(&axis_z, &allow, na);
-            let curve_y = column_nm_curve(&axis_y, &allow, na);
-            let ma_z = column_allowable_moment(&curve_z, n_design);
-            let ma_y = column_allowable_moment(&curve_y, n_design);
-            let ratio_moment =
-                match column_moment_ratio(forces, na, ma_z, ma_y, false, check_finite) {
-                    Ok(ratio) => ratio,
-                    Err(reason) => {
-                        bending_issue = Some(reason);
-                        available_column_moment_ratio(forces, ma_z, ma_y, false, check_finite)
-                    }
-                };
             let nt = as_total * ft_z;
-            let axial_bending_detail = format!(
-            "NA={:.1} N, NT={:.1} N, N={:.1} N, MA_z={:.1} N·mm, MA_y={:.1} N·mm, mz={:.1} N·mm, my={:.1} N·mm{partial_detail}",
-            na, nt, n_design, ma_z, ma_y, forces.mz, forces.my,
-        );
-            push_axial_bending(
-                &mut components,
-                bending_issue.is_some() || short_force_issue && bending_partial,
-                na,
-                nt,
-                ratio_moment,
-                axial_bending_detail,
+            if let Some(n_ratio) = allow.n_ratio {
+                let na = column_axial_capacity(gross_area, as_total, allow.fc, ft_z, n_ratio);
+
+                let at_perp_for_z = rect_column_at_perp(as_total, props_z.at, props_z.ac);
+                let at_perp_for_y = rect_column_at_perp(as_total, props_y.at, props_y.ac);
+
+                let axis_z = ColumnAxis {
+                    props: props_z,
+                    at_perp: at_perp_for_z,
+                    ft: ft_z,
+                };
+                let axis_y = ColumnAxis {
+                    props: props_y,
+                    at_perp: at_perp_for_y,
+                    ft: ft_y,
+                };
+
+                let curve_z = column_nm_curve(&axis_z, &allow, na);
+                let curve_y = column_nm_curve(&axis_y, &allow, na);
+                let ma_z = column_allowable_moment(&curve_z, n_design);
+                let ma_y = column_allowable_moment(&curve_y, n_design);
+                let ratio_moment =
+                    match column_moment_ratio(forces, na, ma_z, ma_y, false, check_finite) {
+                        Ok(ratio) => ratio,
+                        Err(reason) => {
+                            bending_issue = Some(reason);
+                            available_column_moment_ratio(forces, ma_z, ma_y, false, check_finite)
+                        }
+                    };
+                let axial_bending_detail = format!(
+                "NA={:.1} N, NT={:.1} N, N={:.1} N, MA_z={:.1} N·mm, MA_y={:.1} N·mm, mz={:.1} N·mm, my={:.1} N·mm{partial_detail}",
+                na, nt, n_design, ma_z, ma_y, forces.mz, forces.my,
             );
+                push_axial_bending(
+                    &mut components,
+                    bending_issue.is_some() || short_force_issue && bending_partial,
+                    na,
+                    nt,
+                    ratio_moment,
+                    axial_bending_detail,
+                );
+            } else {
+                push_without_young_ratio(&mut components, nt, incomplete);
+            }
         }
 
         let boundary_shear_only = ordinary && bending_issue.is_some();
@@ -776,11 +801,8 @@ pub(super) fn column_check(
                 d_min,
                 ctx.clear_length.filter(|&l| l > 1e-9).unwrap_or(ctx.length),
                 mat.concrete_class,
-                long_term,
                 gross_area,
                 as_total,
-                axial_available.then_some(n_design),
-                fc_raw,
                 props_z.pw.min(props_y.pw),
             );
             if let Some(c) = prov.provision_component() {
@@ -929,11 +951,11 @@ mod tests {
         let ft = rebar_allowable_tension("SD345", 22.0, true);
 
         let props_z = axis_props_from_shape(&shape, RcDirection::Strong, true).unwrap();
-        let bm = beam_moment_capacity(&props_z, ft, allow.fc, allow.n_ratio).unwrap();
+        let bm = beam_moment_capacity(&props_z, ft, allow.fc, allow.n_ratio.unwrap()).unwrap();
 
         let gross_area = sec.width * sec.depth;
         let as_total = rebar.total_main_area();
-        let na = column_axial_capacity(gross_area, as_total, allow.fc, ft, allow.n_ratio);
+        let na = column_axial_capacity(gross_area, as_total, allow.fc, ft, allow.n_ratio.unwrap());
 
         let axis_z = ColumnAxis {
             props: props_z,
@@ -973,7 +995,7 @@ mod tests {
         let props_z = axis_props_from_shape(&shape, RcDirection::Strong, true).unwrap();
         let gross_area = sec.width * sec.depth;
         let as_total = rebar.total_main_area();
-        let na = column_axial_capacity(gross_area, as_total, allow.fc, ft, allow.n_ratio);
+        let na = column_axial_capacity(gross_area, as_total, allow.fc, ft, allow.n_ratio.unwrap());
 
         let axis_z = ColumnAxis {
             props: props_z,
@@ -1170,7 +1192,13 @@ mod tests {
             rebar_allowable_tension("SD345", rebar.main_dia.designation_or_diameter_mm(), false);
         let gross_area = sec.width * sec.depth;
         let as_total = rebar.total_main_area();
-        let na = column_axial_capacity(gross_area, as_total, allow.fc, ft_axial, allow.n_ratio);
+        let na = column_axial_capacity(
+            gross_area,
+            as_total,
+            allow.fc,
+            ft_axial,
+            allow.n_ratio.unwrap(),
+        );
         let axis_z = ColumnAxis {
             props: props_z,
             at_perp: rect_column_at_perp(as_total, props_z.at, props_z.ac),

@@ -210,6 +210,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0144](0144-rc-column-qd1-girder-end-conditions.md) | accepted | RC柱の短期地震時QD1では柱側梁端の曲げ伝達条件を確認する |
 | [0145](0145-rc-column-long-term-shear-span.md) | accepted | RC柱の長期設計用せん断力を両材端フェース間で求める |
 | [0146](0146-rc-column-long-term-shear-alpha.md) | accepted | RC柱の長期せん断で必要な方向に両材端フェースの小さい割増係数を使う |
+| [0147](0147-rc-calculation-sources.md) | accepted | RCの算定根拠を技術基準解説書とRC規準にそろえる |
 
 ## 規約
 

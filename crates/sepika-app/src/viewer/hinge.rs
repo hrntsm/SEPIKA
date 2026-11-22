@@ -2780,7 +2780,10 @@ mod tests {
             app.core.scoped.staleness.results_stale,
         );
         assert_eq!(refresh_reference_cache(&mut app), (None, true));
-        for reference in [Some(RcBeamReference::AntisymmetricHalfMember), None] {
+        for reference in [
+            Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
+            None,
+        ] {
             let old_key = app.ui.scoped.hinge_view_cache.as_ref().unwrap().key.clone();
             app.core.scoped.undo.run(
                 &mut app.core.model,
@@ -2827,7 +2830,13 @@ mod tests {
     fn reference_cache_app() -> App {
         let mut app = App::default();
         app.core.model = key_test_model_rc();
-        let shape = app.core.model.sections[0].shape.clone().unwrap();
+        let mut shape = app.core.model.sections[0].shape.clone().unwrap();
+        let SectionShape::RcBeamRect { rebar, .. } = &mut shape else {
+            unreachable!()
+        };
+        rebar.main_dia = sepika_core::section_shape::RebarSize::Standard(
+            sepika_core::section_shape::StandardRebar::D22,
+        );
         let mut section = shape.to_section(SectionId(0), "RC基準".into());
         section.material = Some(MaterialId(0));
         section.rebar_material = Some(MaterialId(1));
@@ -2845,7 +2854,7 @@ mod tests {
             .set_member_hysteresis(ElemId(0), HysteresisModel::Takeda);
         app.core.model.set_member_rc_beam_reference(
             ElemId(0),
-            Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMember),
+            Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
         );
         app.core.scoped.staleness.mark_edited();
         app

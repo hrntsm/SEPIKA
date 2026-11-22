@@ -13,13 +13,13 @@ fn positive(name: &str, value: f64) -> Result<(), CoreError> {
     }
 }
 
-/// αyの数値評価と設計適用の診断。数式の有限値は適用範囲外でも保持する。
+/// 軸力ゼロのRC梁のαyと設計適用の診断。
 #[derive(Clone, Debug)]
 pub struct RcAlphaEvaluation {
     pub alpha_y: f64,
     /// 原研究の入力資料域と正値の診断。Okも未確認原典や実験Validationの保証ではない。
     pub research_input_range: Result<(), CoreError>,
-    /// 採用分岐の原典裏付けと対象実験Validationが未了のため、設計適用を保証しない。
+    /// 設計適用には軸力・載荷状態と骨格の条件確認が必要。
     pub design_applicability: Result<(), CoreError>,
 }
 
@@ -43,6 +43,11 @@ pub fn rc_beam_alpha_evaluation(
         tension_area_mm2,
         section,
     )?;
+    if !matches!(section, RcAlphaSection::Rectangular) && a_over_d < 2.0 {
+        return Err(CoreError::InvalidInput(
+            "T形梁の降伏時剛性低下率は基本式の範囲で評価します".into(),
+        ));
+    }
     let raw = rc_alpha_y_sugano_checked(
         ratios.pt_alpha_ratio,
         a_over_d,
@@ -67,17 +72,13 @@ pub fn rc_beam_alpha_evaluation(
     if !alpha_y.is_finite() {
         return Err(CoreError::InvalidInput("方向補正後のαyが非有限です".into()));
     }
-    let research_input_range = if alpha_y <= 0.0 {
-        Err(CoreError::InvalidInput(
-            "αyが非正のため降伏骨格へ適用できません".into(),
-        ))
-    } else if !(0.004..=0.028).contains(&ratios.pt_alpha_ratio) || !(2.0..=5.0).contains(&a_over_d)
-    {
-        Err(CoreError::InvalidInput("原研究の資料域（pt=0.4–2.8%、a/D=2–5）外です。採用式の数値評価と設計適用を区別してください".into()))
-    } else {
-        Ok(())
-    };
-    Ok(RcAlphaEvaluation { alpha_y, research_input_range, design_applicability: Err(CoreError::InvalidInput("採用分岐の1987原典と対象実験Validationは未確認です。数式評価・資料域内を設計適用合格と扱いません".into())) })
+    Ok(RcAlphaEvaluation {
+        alpha_y,
+        research_input_range: Ok(()),
+        design_applicability: Err(CoreError::InvalidInput(
+            "数式の評価に加えて断面・軸力・載荷状態と骨格の適用条件を確認してください".into(),
+        )),
+    })
 }
 
 /// 三角形曲げ分布の明示条件。逆対称形のLは剛域控除後の柔部材長`[mm]`。
@@ -239,8 +240,8 @@ mod tests {
         let top_eval =
             rc_beam_alpha_evaluation(300.0, 600.0, 540.0, 1800.0, top, 3.0, 10.0, Some(it))
                 .unwrap();
-        assert!((top_eval.alpha_y - 0.130248).abs() < 1e-12);
-        assert!((top_eval.alpha_y * 360e9 - 46_889_280_000.0).abs() < 1e-4);
+        assert!((top_eval.alpha_y - 0.15822).abs() < 1e-12);
+        assert!((top_eval.alpha_y * 360e9 - 56_959_200_000.0).abs() < 1e-4);
         assert!(top_eval.research_input_range.is_ok());
         assert!(top_eval.design_applicability.is_err());
         assert!(
@@ -250,39 +251,26 @@ mod tests {
             effective_width_mm: 1500.0,
         };
         let without_it =
-            rc_beam_alpha_evaluation(300.0, 600.0, 540.0, 1800.0, bottom, 3.0, 10.0, None).unwrap();
+            rc_beam_alpha_evaluation(300.0, 600.0, 540.0, 4500.0, bottom, 3.0, 10.0, None).unwrap();
         let with_it =
-            rc_beam_alpha_evaluation(300.0, 600.0, 540.0, 1800.0, bottom, 3.0, 10.0, Some(it))
+            rc_beam_alpha_evaluation(300.0, 600.0, 540.0, 4500.0, bottom, 3.0, 10.0, Some(it))
                 .unwrap();
-        assert!((without_it.alpha_y - 0.2782593).abs() < 1e-12);
+        assert!((without_it.alpha_y - 0.20574).abs() < 1e-12);
         assert_eq!(with_it.alpha_y, without_it.alpha_y);
-        assert!(with_it.research_input_range.is_err());
-        let outside = rc_beam_alpha_evaluation(
-            300.0,
-            600.0,
-            540.0,
-            1800.0,
-            RcAlphaSection::Rectangular,
-            8.0,
-            10.0,
-            None,
-        )
-        .unwrap();
-        assert!((outside.alpha_y - 0.7800705).abs() < 1e-12);
-        assert!(outside.design_applicability.is_err());
-        let nonpositive = rc_beam_alpha_evaluation(
-            300.0,
-            600.0,
-            540.0,
-            90000.0,
-            RcAlphaSection::Rectangular,
-            3.0,
-            10.0,
-            None,
-        )
-        .unwrap();
-        assert!(nonpositive.alpha_y < 0.0);
-        assert!(nonpositive.design_applicability.is_err());
+        assert!(with_it.research_input_range.is_ok());
+        for (tension_area, a_over_d) in [(1800.0, 8.0), (90000.0, 3.0)] {
+            assert!(rc_beam_alpha_evaluation(
+                300.0,
+                600.0,
+                540.0,
+                tension_area,
+                RcAlphaSection::Rectangular,
+                a_over_d,
+                10.0,
+                None,
+            )
+            .is_err());
+        }
     }
 
     #[test]

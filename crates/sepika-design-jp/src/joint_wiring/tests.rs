@@ -2849,7 +2849,7 @@ fn bulk_design_wall_crack_reference_matches_independent_geometry_and_points() {
             .find_map(|w| w.reference_skeleton.as_ref())
             .unwrap();
         assert!((skeleton.aw_qc_mm2 - 840_000.0).abs() < 1e-6);
-        assert!((skeleton.displacement_points[1].1 - 2_016_000.0).abs() < 1e-6);
+        assert!((skeleton.displacement_points[1].1 - 920_218.95).abs() < 1e-6);
     }
     let mut valid_report =
         crate::run_member_design_checks(&model, &forces, &[], &Default::default()).unwrap();

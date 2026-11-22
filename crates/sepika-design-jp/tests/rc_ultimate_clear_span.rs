@@ -10,8 +10,7 @@ use sepika_core::{
 };
 use sepika_design_jp::{
     ultimate::{
-        collect_rc_ultimate_checks, MemberDemand, ShearMethod, StaticBeamHingeMechanism,
-        UltimateShearOptions,
+        collect_rc_ultimate_checks, MemberDemand, StaticBeamHingeMechanism, UltimateShearOptions,
     },
     MemberKind,
 };
@@ -42,7 +41,10 @@ fn demands() -> [MemberDemand; 2] {
             q_long_weak: Some(0.0),
             ..MemberDemand::axial(0.0)
         },
-        MemberDemand::from_pushover(0.0, -1e7, 0.0, 30_000.0, 20_000.0, 0.0),
+        MemberDemand {
+            min_axial_for_shear_n: Some(0.0),
+            ..MemberDemand::from_pushover(0.0, -1e7, 0.0, 30_000.0, 20_000.0, 0.0)
+        },
     ]
 }
 
@@ -60,47 +62,45 @@ fn confirmed_faces_supply_the_same_demands_and_capacities_as_the_equivalent_clea
             equivalent.elements[0].rigid_zone.face_i = Some(0.0);
             equivalent.elements[0].rigid_zone.face_j = Some(0.0);
 
-            for shear_method in [ShearMethod::Plastic, ShearMethod::Ductility] {
-                let opts = UltimateShearOptions {
-                    shear_method,
-                    biaxial_shear: true,
-                    include_bond: true,
-                    ..Default::default()
-                };
-                for demand in demands() {
-                    let input = [(ElemId(0), demand)];
-                    let faced = &collect_rc_ultimate_checks(&model, &input, &opts).unwrap()[0];
-                    let clear = &collect_rc_ultimate_checks(&equivalent, &input, &opts).unwrap()[0];
-                    assert_eq!(faced.kind, kind);
-                    assert!(faced.qsu.is_finite() && faced.qsu > 0.0);
-                    assert!(faced.qbu.is_finite() && faced.qbu > 0.0);
-                    for (actual, expected) in [(faced.qsu, clear.qsu), (faced.qbu, clear.qbu)] {
-                        assert!((actual - expected).abs() < 1e-6);
+            let opts = UltimateShearOptions {
+                biaxial_shear: true,
+                include_bond: true,
+                ..Default::default()
+            };
+            for demand in demands() {
+                let input = [(ElemId(0), demand)];
+                let faced = &collect_rc_ultimate_checks(&model, &input, &opts).unwrap()[0];
+                let clear = &collect_rc_ultimate_checks(&equivalent, &input, &opts).unwrap()[0];
+                assert_eq!(faced.kind, kind);
+                assert_eq!(faced.qsu.is_nan(), clear.qsu.is_nan());
+                if faced.qsu.is_finite() {
+                    assert!((faced.qsu - clear.qsu).abs() < 1e-6);
+                }
+                assert!(faced.bond_stress.is_none() && clear.bond_stress.is_none());
+                if kind == MemberKind::Girder && demand.shear.is_none() {
+                    for check in [faced, clear] {
+                        assert!(!check.ok && check.qmu.is_nan());
+                        assert!(check
+                            .unchecked_reason
+                            .as_deref()
+                            .unwrap()
+                            .contains("ultimate_beam_hinge_shear_upper_bound_unverified:"));
                     }
-                    if kind == MemberKind::Girder && demand.shear.is_none() {
-                        for check in [faced, clear] {
-                            assert!(!check.ok && check.qmu.is_nan());
-                            assert!(check
-                                .unchecked_reason
-                                .as_deref()
-                                .unwrap()
-                                .contains("ultimate_beam_hinge_shear_upper_bound_unverified:"));
-                        }
-                        continue;
-                    }
-                    assert_eq!(faced.unchecked_reason, None);
-                    assert_eq!(clear.unchecked_reason, None);
-                    assert!(
-                        faced.detail.contains(&format!("L={span_mm} mm")),
-                        "{}",
-                        faced.detail
-                    );
-                    let expected_qmu = demand.shear.unwrap_or_else(|| 2.0 * faced.mu / span_mm);
-                    assert!((faced.qmu - expected_qmu).abs() < 1e-6);
-                    if kind == MemberKind::Column {
-                        assert_eq!(faced.biaxial_shear_margin, clear.biaxial_shear_margin);
-                        assert!(faced.biaxial_shear_margin.unwrap().is_finite());
-                    }
+                    continue;
+                }
+                assert_eq!(
+                    faced.unchecked_reason.is_some(),
+                    clear.unchecked_reason.is_some()
+                );
+                assert!(
+                    faced.detail.contains(&format!("L={span_mm} mm")),
+                    "{}",
+                    faced.detail
+                );
+                let expected_qmu = demand.shear.unwrap_or_else(|| 2.0 * faced.mu / span_mm);
+                assert!((faced.qmu - expected_qmu).abs() < 1e-6);
+                if kind == MemberKind::Column {
+                    assert_eq!(faced.biaxial_shear_margin, clear.biaxial_shear_margin);
                 }
             }
         }
@@ -155,7 +155,7 @@ fn missing_or_inconsistent_faces_leave_the_member_unchecked_in_both_modes() {
                 for expected in [&format!("ultimate_clear_span_{code}:"), message, "member=0"] {
                     assert!(reason.contains(expected), "{reason}");
                 }
-                assert!(check.qmu.is_nan() && check.qsu.is_nan() && check.qbu.is_nan());
+                assert!(check.qmu.is_nan() && check.qsu.is_nan() && check.bond_stress.is_none());
                 assert!(check.shear_margin.is_nan() && check.bond_margin.is_nan());
                 assert!(check.biaxial_shear_margin.is_none());
             }
