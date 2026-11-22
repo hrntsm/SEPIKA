@@ -110,7 +110,69 @@ pub(crate) fn with_explicit_pushover_gravity(
             member: vec![],
         });
     }
-    with_explicit_frame_gravity(model)
+    with_explicit_frame_gravity(without_panel_zones(model))
+}
+
+pub(crate) fn without_panel_zones(
+    mut model: sepika_core::model::Model,
+) -> sepika_core::model::Model {
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    model
+}
+
+pub(super) fn use_standard_two_axis_panel_columns(
+    model: &mut sepika_core::model::Model,
+    joint_nodes: &[NodeId],
+) {
+    use sepika_core::model::FrameSectionUse;
+    use sepika_core::section_shape::SectionShape;
+
+    let mut section = SectionShape::SteelBox {
+        height: 300.0,
+        width: 300.0,
+        thick: 15.0,
+        horizontal_thick: 15.0,
+        corner_r: Some(0.0),
+    }
+    .to_section(SectionId(0), "正方形等厚鋼管柱".into());
+    section.frame_use = Some(FrameSectionUse::Column);
+    section.material = model.sections[0].material;
+    model.sections[0] = section;
+    for &joint_node in joint_nodes {
+        let mut far = model.node(joint_node).unwrap().clone();
+        far.id = NodeId(model.nodes.len() as u32);
+        far.coord[2] += 3_000.0;
+        far.restraint = sepika_core::dof::Dof6Mask::FREE;
+        far.support_spring = Some([1.0e8; 6]);
+        let story = model
+            .stories
+            .iter()
+            .find(|story| story.sl_mm() == Some(far.coord[2]))
+            .map(|story| story.id)
+            .unwrap_or_else(|| {
+                let id = StoryId(
+                    model
+                        .stories
+                        .iter()
+                        .map(|story| story.id.0 + 1)
+                        .max()
+                        .unwrap_or(0),
+                );
+                model.stories.push(sepika_core::model::Story::new(
+                    id,
+                    format!("{}F", id.0 + 1),
+                    Some(far.coord[2]),
+                    Some(0.0),
+                ));
+                id
+            });
+        far.story = Some(story);
+        let mut upper = model.elements[0].clone();
+        upper.id = ElemId(model.elements.len() as u32);
+        upper.nodes = [joint_node, far.id].into_iter().collect();
+        model.nodes.push(far);
+        model.elements.push(upper);
+    }
 }
 
 fn analyze_frame_gravity(app: &mut App) {
@@ -591,7 +653,7 @@ fn preparation_wall_rebuild_preserves_assigned_boundary_and_node_selection() {
         SecondaryMemberKind, SupportMemberId,
     };
 
-    let mut model = super::steel_wall_notice_tests::steel_wall_model();
+    let mut model = super::steel_wall_tests::steel_wall_model();
     let plate = model.wall_plates.remove(0);
     model.wall_regions.clear();
     model.wall_assignment_regions = Default::default();
@@ -2259,7 +2321,7 @@ fn test_time_history_rayleigh_requires_two_modes() {
 #[test]
 fn test_nonlinear_time_history_flow_records_story_response() {
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
+    app.load_model(without_panel_zones(crate::sample::portal_frame()));
     app.generate_stories_action();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -2361,7 +2423,7 @@ fn test_story_shear_layer0_matches_history_base_shear() {
 #[test]
 fn test_nonlinear_time_history_with_long_term_flow() {
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
+    app.load_model(without_panel_zones(crate::sample::portal_frame()));
     app.generate_stories_action();
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -2534,7 +2596,7 @@ fn test_async_pushover_job_flow() {
 #[test]
 fn test_async_time_history_job_flow() {
     let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
+    app.load_model(without_panel_zones(crate::sample::portal_frame()));
     app.core.analysis_cfg.th_duration = 2.0;
     let wave = App::sample_wave(&app.core.analysis_cfg).unwrap();
 
@@ -9436,37 +9498,6 @@ fn test_stale_preparation_not_persisted() {
 }
 
 #[test]
-fn preparation_lists_only_the_steel_girder_when_the_portal_has_no_slabs() {
-    let mut app = App::default();
-    app.load_model(crate::sample::portal_frame());
-    app.run_preparation();
-
-    let prep = app.core.scoped.preparation.as_ref().unwrap();
-    let [row] = prep.member_stiffness.as_slice() else {
-        panic!("{:?}", prep.member_stiffness);
-    };
-    assert_eq!(row.elem, ElemId(2));
-    assert_eq!(row.slab_factor, Some(1.0));
-    assert_eq!(
-        row.steel_slab,
-        Some(sepika_element::frame::beam::SteelSlabStiffness::NoSlab)
-    );
-    let n_beams = app
-        .core
-        .model
-        .elements
-        .iter()
-        .filter(|e| e.kind == sepika_core::model::ElementKind::Beam)
-        .count();
-    assert_eq!(
-        prep.member_stiffness_candidates, n_beams,
-        "候補数（梁要素数）は数える"
-    );
-}
-
-/// SRC/CFT 断面の部材は等価断面性能が算定され、部材剛性の表に現れる。
-/// 表示値は要素構築が実際に用いる等価換算と一致する。
-#[test]
 fn test_preparation_member_stiffness_reports_composite_props() {
     use sepika_core::ids::SectionId;
     use sepika_core::section_shape::SectionShape;
@@ -9508,8 +9539,8 @@ fn test_preparation_member_stiffness_reports_composite_props() {
     let c = row.composite.expect("等価断面性能が算定されるはず");
     assert!(c.iy > row.section_iy, "{} vs {}", c.iy, row.section_iy);
     assert!(c.area_ax > 0.0);
-    assert_eq!(row.slab_factor, Some(1.0));
-    assert_eq!(row.wall_girder_factor, Some(1.0));
+    assert_eq!(row.slab_factor, 1.0);
+    assert_eq!(row.wall_girder_factor, 1.0);
     assert_eq!(row.effective_iy, Some(c.iy));
     assert_eq!(row.effective_area, Some(c.area_ax));
 
@@ -10634,6 +10665,7 @@ fn dummy_static_once() -> sepika_solver::statics::linear::StaticOnce {
         member_forces: vec![],
         panel_moments: vec![],
         girder_column_face_forces: Vec::new(),
+        steel_panel_column_face_forces: Vec::new(),
         column_end_axial_forces: Vec::new(),
         column_end_horizontal_forces: Vec::new(),
     }
@@ -11712,7 +11744,7 @@ fn rejected_prepared_model_never_leaves_old_auto_seismic_loads_usable() {
 fn wall_opening_edit_undo_and_preparation_refresh_independent_band_weight() {
     use sepika_core::model::{WallDlSupport, WallOpening, WallWeightGenerationMode};
     let mut app = App::default();
-    let mut model = super::steel_wall_notice_tests::steel_wall_model();
+    let mut model = super::steel_wall_tests::steel_wall_model();
     model.wall_weight_generation = None;
     model.wall_plates[0].dl_support = Some(WallDlSupport::LowerBeam);
     model.wall_plates[0].openings = vec![WallOpening {
@@ -12223,277 +12255,6 @@ mod steel_slab_density_fixture {
 }
 
 #[test]
-fn undoing_a_composite_connection_edit_restores_the_same_calculation_input() {
-    use sepika_core::model::SlabCompositeConnection;
-    let mut model = steel_slab_density_fixture::one_cubic_metre(false);
-    let mut girders = model
-        .elements
-        .iter()
-        .filter(|e| model.is_steel_h_girder(e))
-        .map(|e| e.id);
-    let (first, second) = (girders.next().unwrap(), girders.next().unwrap());
-    let mut undo = sepika_edit::UndoStack::new();
-    for (elem, connection) in [
-        (first, SlabCompositeConnection::Confirmed),
-        (second, SlabCompositeConnection::NonComposite),
-    ] {
-        assert!(undo.run(
-            &mut model,
-            Box::new(sepika_edit::SetSlabCompositeConnection { elem, connection })
-        ));
-    }
-    let input = bincode::serialize(&model.calculation_model()).unwrap();
-    for connection in [
-        SlabCompositeConnection::NonComposite,
-        SlabCompositeConnection::Unconfirmed,
-    ] {
-        assert!(undo.run(
-            &mut model,
-            Box::new(sepika_edit::SetSlabCompositeConnection {
-                elem: first,
-                connection
-            })
-        ));
-        assert_ne!(
-            bincode::serialize(&model.calculation_model()).unwrap(),
-            input
-        );
-        undo.undo(&mut model);
-        assert_eq!(
-            bincode::serialize(&model.calculation_model()).unwrap(),
-            input
-        );
-    }
-}
-
-#[test]
-fn steel_h_girder_floor_composite_agrees_in_preparation_and_linear_analysis() {
-    use sepika_core::model::{
-        FrameSectionUse, LoadCase, LoadCaseKind, MaterialCategory, MemberLoad, MemberLoadKind,
-        PlateAssignment, PropertyBasis, SlabCompositeConnection,
-    };
-    use sepika_core::section_shape::SectionShape;
-    use sepika_element::frame::beam::SteelSlabStiffness;
-
-    let load = LoadCaseId(0);
-    let steel_iy = 229_648_682.666_666_66;
-    let composite_iy = 355_326_103.382_548_63;
-    let cases = [
-        (
-            Some(MaterialCategory::Steel),
-            SlabCompositeConnection::Confirmed,
-            Some((SteelSlabStiffness::SteelSlab, steel_iy)),
-        ),
-        (
-            Some(MaterialCategory::Concrete),
-            SlabCompositeConnection::NonComposite,
-            Some((SteelSlabStiffness::NonComposite, steel_iy)),
-        ),
-        (
-            Some(MaterialCategory::Concrete),
-            SlabCompositeConnection::Unconfirmed,
-            None,
-        ),
-        (
-            Some(MaterialCategory::Concrete),
-            SlabCompositeConnection::Confirmed,
-            Some((SteelSlabStiffness::Confirmed, composite_iy)),
-        ),
-        (
-            None,
-            SlabCompositeConnection::Unconfirmed,
-            Some((SteelSlabStiffness::NoSlab, steel_iy)),
-        ),
-    ];
-    for (material, connection, expected) in cases {
-        let mut model = steel_slab_density_fixture::one_cubic_metre(false);
-        let elem = model
-            .elements
-            .iter()
-            .find(|e| e.nodes.as_slice() == [NodeId(2), NodeId(3)])
-            .unwrap()
-            .id;
-        let section = SectionId(1);
-        model.sections[section.index()] = SectionShape::SteelH {
-            root_r: Some(0.0),
-            height: 400.0,
-            width: 200.0,
-            web_thick: 8.0,
-            flange_thick: 13.0,
-        }
-        .to_section(section, "H-400×200×8×13".into());
-        model.sections[section.index()].material = Some(MaterialId(0));
-        model.sections[section.index()].frame_use = Some(FrameSectionUse::Girder);
-        model.sections[0] = SectionShape::SteelH {
-            root_r: Some(0.0),
-            height: 300.0,
-            width: 300.0,
-            web_thick: 10.0,
-            flange_thick: 15.0,
-        }
-        .to_section(SectionId(0), "H-300×300×10×15".into());
-        model.sections[0].material = Some(MaterialId(0));
-        model.sections[0].frame_use = Some(FrameSectionUse::Column);
-        match material {
-            Some(MaterialCategory::Concrete) => {
-                model.materials[1].category = MaterialCategory::Concrete;
-                model.materials[1].fc = Some(21.0);
-                model.materials[1].density = 2.4e-9;
-                model.sections[2].shape = Some(SectionShape::RcSlab { thickness: 100.0 });
-            }
-            Some(MaterialCategory::Steel) => {
-                model.materials[1].young = 205_000.0;
-                model.materials[1].poisson = 0.3;
-            }
-            None => {
-                model.slabs.clear();
-                for region in &mut model.floor_regions {
-                    region.slab_ids.clear();
-                }
-                for region in &mut model.floor_assignment_regions.regions {
-                    region.assignment = PlateAssignment::NoPlate;
-                }
-            }
-            _ => unreachable!(),
-        }
-        model.load_cases.push(LoadCase {
-            id: load,
-            origin: Default::default(),
-            name: "剛性確認用鉛直荷重".into(),
-            kind: LoadCaseKind::Other,
-            nodal: Vec::new(),
-            member: vec![MemberLoad::manual(
-                elem,
-                [0.0, 0.0, -1.0],
-                MemberLoadKind::Distributed {
-                    a: 0.0,
-                    b: 5000.0,
-                    w1: 10.0,
-                    w2: 10.0,
-                },
-            )],
-        });
-        let other_girders: Vec<_> = model
-            .elements
-            .iter()
-            .filter(|e| e.id != elem && model.is_steel_h_girder(e))
-            .map(|e| e.id)
-            .collect();
-        for other in other_girders {
-            model.set_slab_composite_connection(other, SlabCompositeConnection::NonComposite);
-        }
-
-        let mut app = App::default();
-        assert!(app.load_model(model));
-        if connection != SlabCompositeConnection::Unconfirmed {
-            assert!(app.core.scoped.undo.run(
-                &mut app.core.model,
-                Box::new(sepika_edit::SetSlabCompositeConnection { elem, connection })
-            ));
-            app.core.scoped.undo.undo(&mut app.core.model);
-            assert_eq!(
-                app.core.model.slab_composite_connection(elem),
-                SlabCompositeConnection::Unconfirmed
-            );
-            app.core.scoped.undo.redo(&mut app.core.model);
-            assert_eq!(app.core.model.slab_composite_connection(elem), connection);
-        }
-        app.run_preparation();
-        assert!(
-            app.core.scoped.last_error.is_none(),
-            "{:?}",
-            app.core.scoped.last_error
-        );
-        let prep = app.core.scoped.preparation.as_ref().unwrap();
-        let row = prep
-            .member_stiffness
-            .iter()
-            .find(|r| r.elem == elem)
-            .unwrap();
-        if let Some((status, iy)) = expected {
-            assert_eq!(row.steel_slab, Some(status));
-            assert!((row.effective_iy.unwrap() - iy).abs() < 1e-5);
-            assert!((row.slab_factor.unwrap() - iy / steel_iy).abs() < 1e-12);
-
-            let mut reference = app.core.model.clone();
-            let mut explicit = reference.sections[section.index()].clone();
-            explicit.id = SectionId(reference.sections.len() as u32);
-            explicit.j = explicit.resolved_j().unwrap();
-            explicit.shape = None;
-            explicit.iy = iy;
-            explicit.property_basis.area = PropertyBasis::Supplied;
-            explicit.property_basis.iy = PropertyBasis::Supplied;
-            explicit.property_basis.j = PropertyBasis::Supplied;
-            reference.elements[elem.index()].section = Some(explicit.id);
-            reference.sections.push(explicit);
-            let reference = sepika_job::compute::compute_linear_static(reference, load).unwrap();
-            app.run_linear_static(load);
-            assert!(
-                app.core.scoped.last_error.is_none(),
-                "{:?}",
-                app.core.scoped.last_error
-            );
-            let actual = app.current_static().unwrap();
-            let expected_rotation = reference.disp[2][4];
-            assert!(expected_rotation.abs() > 1e-8);
-            assert!((actual.disp[2][4] - expected_rotation).abs() < 1e-12);
-            if status == SteelSlabStiffness::Confirmed {
-                let path = test_tmp().join("steel-slab-composite-confirmation.ovika");
-                app.save_project_to(path.clone());
-                assert!(
-                    app.core.scoped.last_error.is_none(),
-                    "{:?}",
-                    app.core.scoped.last_error
-                );
-                let mut restored = App::default();
-                restored.open_project_from(path.clone());
-                std::fs::remove_file(path).unwrap();
-                assert!(
-                    restored.core.scoped.last_error.is_none(),
-                    "{:?}",
-                    restored.core.scoped.last_error
-                );
-                assert_eq!(
-                    restored.core.model.slab_composite_connection(elem),
-                    connection
-                );
-                let row = restored
-                    .core
-                    .scoped
-                    .preparation
-                    .as_ref()
-                    .unwrap()
-                    .member_stiffness
-                    .iter()
-                    .find(|r| r.elem == elem)
-                    .unwrap();
-                assert_eq!(row.steel_slab, Some(status));
-                assert!((row.effective_iy.unwrap() - iy).abs() < 1e-5);
-            }
-        } else {
-            assert!(row.slab_factor.is_none());
-            assert!(row.effective_iy.is_none());
-            assert!(!prep.is_ready());
-            let reason = row.unavailable_reason.clone().unwrap();
-            assert!(reason.contains("RC床板との接合条件が未確認"));
-            assert!(prep.diag_errors > 0);
-            assert!(app.core.scoped.diagnostics.iter().any(|diag| {
-                diag.target == Some(DiagTarget::Member(elem))
-                    && diag.severity == DiagSeverity::Error
-                    && diag.message.ends_with(&reason)
-            }));
-            let error = sepika_job::compute::compute_linear_static(app.core.model.clone(), load)
-                .unwrap_err()
-                .to_string();
-            assert!(error.contains(&reason), "{error}");
-            app.run_linear_static(load);
-            assert!(app.current_static().is_none());
-            assert_eq!(app.core.scoped.last_error.as_deref(), Some(reason.as_str()));
-        }
-    }
-}
-
-#[test]
 fn high_density_steel_gui_preparation_sync_rejects_and_undo_recovers() {
     for (mut model, material) in [
         (high_density_steel_fixture::steel_frame(), 0),
@@ -12693,6 +12454,7 @@ fn panel_505_ovika_old_checked_is_unavailable_but_current_gated_results_are_reta
     orthogonal.id = ElemId(4);
     orthogonal.nodes = smallvec::smallvec![NodeId(2), NodeId(5)];
     model.elements.push(orthogonal);
+    use_standard_two_axis_panel_columns(&mut model, &[NodeId(2)]);
     let mut original = App::default();
     original.load_model(model);
     original.run_linear_static(LoadCaseId(0));

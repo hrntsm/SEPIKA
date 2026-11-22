@@ -53,7 +53,7 @@ use sepika_core::rc_capacity::{rc_qsu_simple, RcCapacityInput};
 use sepika_element::behavior::{Ctx, ElementBehavior, LocalVec};
 #[cfg(test)]
 use shear_yield::{
-    compute_shear_yield_qy, compute_shear_yield_thresholds, track_shear_yield, DirThreshold,
+    build_shear_yield_thresholds, compute_shear_yield_qy, track_shear_yield, DirThreshold,
     SecMaterials, ShearDir,
 };
 #[cfg(test)]

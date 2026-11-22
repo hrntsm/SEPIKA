@@ -155,13 +155,6 @@ impl App {
         self.core.scoped.last_notice = Some(msg);
     }
 
-    fn notice_steel_seismic_walls(&mut self) {
-        let (model, index, _) = sepika_core::wall_expand::expand_wall_elements(&self.core.model);
-        if let Some(notice) = sepika_job::notices::steel_seismic_wall_notice(&model, &index) {
-            self.append_analysis_notice(notice);
-        }
-    }
-
     fn append_analysis_notice(&mut self, notice: String) {
         self.core.log.push(LogLevel::Notice, notice.clone());
         match &mut self.core.scoped.last_notice {
@@ -277,16 +270,6 @@ impl App {
         self.core.scoped.last_notice = None;
         self.reject_result_contracts();
         self.ensure_preparation();
-        let slab_error = self
-            .core
-            .scoped
-            .preparation
-            .as_ref()
-            .and_then(super::preparation::PreparationResult::slab_composite_unavailable_reason)
-            .map(str::to_owned);
-        if let Some(reason) = slab_error {
-            self.report_error(reason);
-        }
         self.core.scoped.last_error.is_none()
     }
 

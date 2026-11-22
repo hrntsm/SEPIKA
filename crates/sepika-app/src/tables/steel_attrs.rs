@@ -2,7 +2,7 @@
 //! 継手フランジ／ウェブ欠損率・スカラップ欠損率、横座屈長さ lb の直接入力、
 //! 等間隔横補剛本数、座屈長さ lk_y/lk_z の直接入力、横座屈修正係数 C の
 //! 直接入力）の編集 UI。
-//! 対象は `ElementKind::Beam` の部材と、`Fiber`・`MultiSpring` の CFT柱・一般H形鋼柱。
+//! 対象は `ElementKind::Beam` の部材と、`Fiber`・`MultiSpring` の SRC柱・CFT柱・一般H形鋼柱。
 //! 編集は `sepika_edit::{SetSteelDesignAttr, RemoveSteelDesignAttr}` 経由
 //! （undo 対応）。空（すべて既定値）を適用した場合は削除として扱う
 //! （[`SteelDesignAttr::is_empty`]）。
@@ -195,7 +195,7 @@ fn opt_count_desc(v: Option<u32>) -> String {
 }
 
 const STEEL_BUCKLING_GUIDANCE: &str =
-    "通常S部材では各軸の有限な正値を優先します。空欄は柱1.2L・大梁と一般ブレース1.0L（Lは材軸長）。支持条件から求めた座屈長さが既定値を超える場合は直接入力してください。";
+    "通常S部材・SRC柱の座屈長さは軸ごとに直接入力を優先します。空欄は節点間距離の柱1.2倍、梁・ブレース1.0倍です。";
 
 pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
     ui.label(
@@ -212,12 +212,18 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
         .elements
         .iter()
         .filter(|e| match e.kind {
-            ElementKind::Beam => true,
+            ElementKind::Beam | ElementKind::Brace { .. } => true,
             ElementKind::Fiber | ElementKind::MultiSpring => {
-                is_symmetric_h_column(model, e)
-                    || model.element_section(e).is_some_and(|sec| {
-                        sec.frame_use == Some(FrameSectionUse::Column) && sec.is_cft()
-                    })
+                is_symmetric_h_column(model, e) || model.element_section(e).is_some_and(|sec| {
+                    sec.frame_use == Some(FrameSectionUse::Column)
+                        && (sec.is_cft()
+                            || matches!(
+                                sec.shape,
+                                Some(
+                                    sepika_core::section_shape::SectionShape::SrcColumnRect { .. }
+                                )
+                            ))
+                })
             }
             _ => false,
         })
@@ -369,7 +375,9 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
         );
     })
     .response
-    .on_hover_text("大梁用。3欄すべて空欄なら自動算定(等間隔横補剛本数、または部材長)。");
+    .on_hover_text(
+        "大梁用。3欄すべて空欄なら等間隔横補剛による区間長か、材端節点間距離を用います。",
+    );
 
     ui.horizontal(|ui| {
         ui.label("等間隔横補剛本数:");
@@ -378,7 +386,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
                 .desired_width(50.0),
         )
         .on_hover_text(
-            "大梁では lb を直接入力しない場合、部材長/(本数+1) を用います。空欄では部材長を用います。柱では本数から支持点を決めません。",
+            "大梁で lb の直接入力がなく本数が正の場合、実材軸長/(本数+1) を用います。本数が空欄または0の場合は材端節点間距離を用います。柱では本数から支持点を決めません。",
         );
     });
 
@@ -435,6 +443,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
     .response
     .on_hover_text(STEEL_BUCKLING_GUIDANCE);
     ui.label("CFT柱は両軸に有限な正の座屈長さが必要です。空欄や0があると未検定です。");
+    ui.label("SRC柱の軸力・一軸曲げには、各方向の断面せいの12倍以下で正の座屈長さを指定します。");
 
     ui.horizontal(|ui| {
         ui.label("C 係数直接入力（空欄=自動）:");
@@ -850,7 +859,7 @@ mod tests {
     }
 
     #[test]
-    fn steel_table_shows_ordinary_defaults_and_cft_direct_lengths() {
+    fn steel_table_shows_direct_buckling_length_requirements_for_steel_and_cft() {
         let mut app = App::default();
         app.load_model(crate::app::cft_column_buckling_tests::input::cantilever(
             false, 1000.0,
@@ -865,17 +874,12 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n");
-        assert!(text.contains("各軸の有限な正値を優先"), "{text}");
         assert!(
-            text.contains("空欄は柱1.2L・大梁と一般ブレース1.0L"),
+            text.contains("空欄は節点間距離の柱1.2倍、梁・ブレース1.0倍"),
             "{text}"
         );
         assert!(
             text.contains("CFT柱は両軸に有限な正の座屈長さが必要"),
-            "{text}"
-        );
-        assert!(
-            !text.contains("通常S柱・CFT柱はlk_y/lk_zの両軸直接入力"),
             "{text}"
         );
     }

@@ -17,7 +17,7 @@ fn analyzed() -> App {
         terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(2), 1.0)],
     }];
     model.ultimate_gravity_combination = Some(0);
-    app.load_model(model);
+    app.load_model(crate::app::tests::without_panel_zones(model));
     app.core.analysis_cfg.threads = 1;
     for id in [LoadCaseId(0), LoadCaseId(2)] {
         app.run_linear_static(id);

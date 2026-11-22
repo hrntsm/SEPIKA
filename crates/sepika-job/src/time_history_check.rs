@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use sepika_core::model::{Material, Model, Section};
-use sepika_design_jp::steel::{buckling::resolve_steel_buckling_lengths, SteelDesign};
+use sepika_design_jp::steel::SteelDesign;
 use sepika_design_jp::{DesignCtx, LoadTerm, MemberForcesAt, MemberKind};
 use sepika_element::frame::beam::{eval_sections_of, MemberForces};
 use sepika_solver::dynamic::timehistory::{
@@ -39,12 +39,8 @@ pub(crate) fn collect_asymmetric_column_sections<T, E>(
                 .iter()
                 .find(|attr| attr.elem == elem.id);
             let item = history.entry(index).or_default();
-            let (lk_y, lk_z) = resolve_steel_buckling_lengths(elem.id, kind, length, steel_attr)
-                .map(|(y, z)| (Some(y), Some(z)))
-                .unwrap_or_else(|reason| {
-                    item.unavailable.insert(reason);
-                    (None, None)
-                });
+            let (lk_y, lk_z) =
+                sepika_design_jp::steel::frame_buckling_lengths(model, elem, kind, steel_attr);
             if item.positions.is_empty() {
                 item.positions = eval_sections_of(elem, model, length)
                     .into_iter()
@@ -71,8 +67,8 @@ pub(crate) fn collect_asymmetric_column_sections<T, E>(
                     term: LoadTerm::Short,
                     kind,
                     length,
-                    lk_y,
-                    lk_z,
+                    lk_y: Some(lk_y),
+                    lk_z: Some(lk_z),
                     steel_attr: steel_attr.cloned(),
                     ..Default::default()
                 },

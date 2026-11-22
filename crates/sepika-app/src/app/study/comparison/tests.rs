@@ -3,7 +3,10 @@ use super::{projection::*, *};
 use references::{EvidenceReference, ReferenceTarget};
 
 pub(in crate::app::study) fn computed() -> App {
-    let mut app = app();
+    compute(app())
+}
+
+fn compute(mut app: App) -> App {
     app.core
         .model
         .combinations
@@ -186,9 +189,19 @@ fn fixed_volume_signed_displacement_and_every_case_design_match_normal_results_a
             .collect();
         assert!(
             column_rows.iter().any(|row| {
-                !row.complete
+                row.case == "荷重ケース0 長期"
+                    && row.complete
+                    && row.ratio.is_some_and(f64::is_finite)
+                    && row.evidence.is_some()
+            }),
+            "{column_rows:?}"
+        );
+        assert!(
+            column_rows.iter().any(|row| {
+                row.case == "組合せ 長期＋地震X"
+                    && !row.complete
                     && row.ratio.is_none()
-                    && row.reason.contains("中間横補剛なしが未確認")
+                    && row.reason.contains("固定荷重Gと架構用積載Pを含む組合せ")
                     && row.evidence.is_some()
             }),
             "{column_rows:?}"
@@ -458,7 +471,11 @@ fn equal_skipped_counts_do_not_hide_different_rated_positions_but_fully_rated_ma
 
 #[test]
 fn saved_expected_targets_positions_and_component_multisets_reject_missing_result_structure() {
-    let app = computed();
+    let mut app = app();
+    let mut model = app.core.model.clone();
+    crate::app::tests::use_standard_two_axis_panel_columns(&mut model, &[NodeId(2)]);
+    assert!(app.load_model(model));
+    let app = compute(app);
     let original = app.studies.items[0].runs[0].comparison_checks[0].clone();
     let expected = rmp_serde::to_vec_named(&original.expected_checks).unwrap();
     for change in 0..7 {
@@ -514,7 +531,7 @@ fn saved_expected_targets_positions_and_component_multisets_reject_missing_resul
                 assert!(check.ratio() < before);
             }
             5 => {
-                evidence.bundle.joint_checks.pop();
+                assert!(evidence.bundle.joint_checks.pop().is_some());
             }
             _ => evidence.expected_checks = None,
         }

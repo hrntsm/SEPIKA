@@ -13,6 +13,18 @@ use crate::common::csc_cache::CscCache;
 use sepika_core::dof::DofMap;
 use sepika_core::model::Model;
 use sepika_element::behavior::{Ctx, ElementBehavior};
+use sepika_math::solver::SolverBackend;
+
+pub(crate) fn tangent_solver_backend(behaviors: &[Box<dyn ElementBehavior>]) -> SolverBackend {
+    if behaviors
+        .iter()
+        .any(|behavior| behavior.panel_column_sections().is_some())
+    {
+        SolverBackend::DirectSparseLu
+    } else {
+        SolverBackend::DirectSparseCholesky
+    }
+}
 
 /// 全体接線剛性行列を組み立てる。
 pub(crate) fn assemble_k(
@@ -79,7 +91,9 @@ fn assemble_k_triplets_into(
     let elem_triplets = |b: &dyn ElementBehavior| -> Vec<sepika_math::sparse::Triplet> {
         let gdofs = b.global_dofs(dofmap);
         let k = b.tangent_stiffness(&ctx);
-        k.to_triplets(&gdofs)
+        let mut triplets = k.to_triplets(&gdofs);
+        triplets.extend(b.panel_coupled_tangent(dofmap));
+        triplets
     };
     crate::common::elem_loop::fold_behaviors_ordered(
         behaviors,

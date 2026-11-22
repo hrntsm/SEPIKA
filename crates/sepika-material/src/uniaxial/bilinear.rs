@@ -26,6 +26,12 @@ struct BilinearState {
 }
 
 impl Bilinear {
+    /// 確定状態からの試行予測応力の載荷方向。耐力変化に対する塑性接線の算定に用いる。
+    pub fn trial_loading_sign(&self, strain: f64) -> f64 {
+        let ep = self.committed.plastic_strain;
+        (self.e * (strain - ep) - self.hp() * ep).signum()
+    }
+
     /// 硬化率は0以上1未満。範囲外（非有限値を含む）では panic する。
     pub fn new(e: f64, fy: f64, hardening: f64) -> Self {
         assert!(

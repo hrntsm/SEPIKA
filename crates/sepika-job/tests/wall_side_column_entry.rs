@@ -83,7 +83,7 @@ fn short_wave() -> sepika_solver::dynamic::timehistory::GroundMotion {
 }
 
 #[test]
-fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice() {
+fn pure_steel_walls_are_supported_in_linear_time_history_only() {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::model::{ElementKind, MassMethod};
@@ -134,12 +134,6 @@ fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice()
             }
             model.elements.retain(|e| e.kind != ElementKind::Wall);
             model.generated_wall_origins.clear();
-            let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
-            let notice = sepika_job::notices::steel_seismic_wall_notice(&expanded, &index);
-            assert_eq!(notice.is_some(), steel_wall);
-            if let Some(notice) = notice {
-                assert!(notice.contains("せん断座屈") && notice.contains("壁版 ID: 0"));
-            }
             for nonlinear in [false, true] {
                 let mut input = model.clone();
                 if !nonlinear {
@@ -178,8 +172,16 @@ fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice()
                         ..Default::default()
                     },
                     short_wave(),
-                )
-                .unwrap_or_else(|e| {
+                );
+                if steel_wall && nonlinear {
+                    let error = result.unwrap_err().to_string();
+                    assert!(
+                        error.contains("鋼板耐震壁 ID") && error.contains("非線形解析の対象外"),
+                        "{error}"
+                    );
+                    continue;
+                }
+                let result = result.unwrap_or_else(|e| {
                     panic!("{kind:?} steel_wall={steel_wall} nonlinear={nonlinear}: {e}")
                 });
                 assert_eq!(result.nonlinear, nonlinear);

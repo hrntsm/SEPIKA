@@ -592,8 +592,7 @@ fn draw_peak_check(
     draw_long_term_note(ui, th_nonlinear, th_applied_long_term);
     ui.label(
         egui::RichText::new(
-            "簡易検定です。通常S部材の未入力軸の座屈長さは柱1.2L・大梁と一般ブレース1.0Lです。\
-             実効座屈長さが既定値を超える場合は、支持条件に応じた長さを直接入力してください。CFT柱は両軸の直接入力が必要です。\
+            "簡易検定です。S部材とSRC柱の座屈長さは軸別の直接入力を優先し、空欄では節点間距離の柱1.2倍、梁・ブレース1.0倍とします。CFT柱は両軸の直接入力が必要です。\
              継手・スカラップ欠損による断面性能の低減や一本部材合成は行いません。\
              上下非対称組立H形鋼柱の圧縮時・軸力ゼロ時の強軸曲げは、欠損を指定した位置では応力度が未算定です。\
              有限長では座屈が未算定となり、独立に確定できる不適合は表示します。",
@@ -670,6 +669,13 @@ fn draw_peak_check(
         );
     }
     let structure = sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
+    if structure == StructureKind::Src {
+        ui.label(if kind == MemberKind::Column {
+            "SRC柱の短期照査は軸力・一軸曲げと、分担を確認できるせん断を表示します。"
+        } else {
+            "SRC梁の短期照査は強軸曲げと、分担を確認できる強軸せん断を表示します。"
+        });
+    }
     let steel_column = structure == StructureKind::S && kind == MemberKind::Column;
     let symmetric_h_column = steel_column && sepika_design_jp::steel::is_symmetric_h_section(sec);
     let torsion_reason =
@@ -683,9 +689,6 @@ fn draw_peak_check(
         length
     };
     let wire_qd = th_nonlinear && th_applied_long_term && !signed_bending;
-    let src_column = structure == StructureKind::Src && kind == MemberKind::Column;
-    let src_beam = structure == StructureKind::Src
-        && matches!(sec.shape, Some(SectionShape::SrcBeamRect { .. }));
     let rc_column = structure == StructureKind::Rc
         && matches!(
             sec.shape,
@@ -743,27 +746,22 @@ fn draw_peak_check(
             clear_length: clear_span,
             method: qd_method,
         });
+    let frame_buckling = structure == StructureKind::S
+        || (structure == StructureKind::Src && kind == MemberKind::Column);
     let buckling_lengths = match structure {
         StructureKind::Cft => {
             sepika_design_jp::cft::direct_column_buckling_lengths(elem.id, attr).map(Some)
         }
-        StructureKind::S => sepika_design_jp::steel::buckling::resolve_steel_buckling_lengths(
-            elem.id,
-            kind,
-            model.member_length(elem),
-            attr,
-        )
-        .map(Some),
+        _ if frame_buckling => Ok(Some(sepika_design_jp::steel::frame_buckling_lengths(
+            model, elem, kind, attr,
+        ))),
         _ => Ok(None),
     };
     let (lk_y, lk_z) = match buckling_lengths {
-        Ok(Some((strong, weak))) => {
-            if structure == StructureKind::S {
-                ui.label(format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
-            }
-            (Some(strong), Some(weak))
-        }
-        Ok(None) => (None, None),
+        Ok(Some((strong, weak))) => (Some(strong), Some(weak)),
+        Ok(None) => attr
+            .map(|attr| (attr.lk_y_direct, attr.lk_z_direct))
+            .unwrap_or_default(),
         Err(reason) => {
             let cft_qd2 = seismic_qd
                 .as_ref()
@@ -779,6 +777,15 @@ fn draw_peak_check(
             return;
         }
     };
+
+    if frame_buckling {
+        if let Some((strong, weak)) = lk_y
+            .zip(lk_z)
+            .filter(|(y, z)| [*y, *z].into_iter().all(|v| v.is_finite() && v > 0.0))
+        {
+            ui.label(format!("採用座屈長さ [mm]　強軸 {strong} ／ 弱軸 {weak}"));
+        }
+    }
 
     let missing_rc_beam_gravity = wire_qd
         && rc_beam
@@ -812,6 +819,8 @@ fn draw_peak_check(
         term: LoadTerm::Short,
         kind,
         length,
+        node_span_mm: (structure == StructureKind::S)
+            .then(|| sepika_design_jp::steel::frame_node_span_mm(model, elem)),
         column_lateral_buckling_length: symmetric_h_column
             .then(|| sepika_design_jp::steel::column_lateral_buckling_length(model, elem, attr)),
         lk_y,
@@ -824,7 +833,9 @@ fn draw_peak_check(
         steel_material: app.core.model.element_steel_material(elem).cloned(),
         steel_attr: attr
             .filter(|_| {
-                symmetric_h_column
+                structure == StructureKind::Src
+                    || symmetric_h_column
+                    || (structure == StructureKind::S && kind == MemberKind::Girder)
                     || (structure == StructureKind::S
                         && kind == MemberKind::Column
                         && matches!(
@@ -832,10 +843,16 @@ fn draw_peak_check(
                             Some(sepika_core::section_shape::SectionShape::SteelBuiltH { .. })
                         ))
             })
-            .map(|attr| sepika_core::model::SteelDesignAttr {
+            .map(|attr| {
+                let mut attr = attr.clone();
                 // 簡易検定のCには直接指定を適用しない。
-                c_direct: None,
-                ..attr.clone()
+                attr.c_direct = None;
+                if kind == MemberKind::Girder && structure == StructureKind::S {
+                    attr.joint_flange_loss = 0.0;
+                    attr.joint_web_loss = 0.0;
+                    attr.scallop_web_loss = 0.0;
+                }
+                attr
             }),
         beam_has_slab: kind == MemberKind::Girder
             && sepika_design_jp::beam_has_attached_slab(&app.core.model, elem),
@@ -922,13 +939,12 @@ fn draw_peak_check(
                     }
                 };
                 if structure == StructureKind::Src {
-                    for outcome in sepika_design_jp::SrcDesign.check_outcomes(
+                    for outcome in sepika_design_jp::SrcDesign.check_time_history_outcomes(
                         &mfa,
                         sec,
                         mat,
                         &ctx,
-                        missing_gravity
-                            && (src_column || src_beam || wrong_main_rebar || wrong_shear_rebar),
+                        missing_gravity,
                     ) {
                         draw_outcome(&outcome);
                     }
@@ -953,7 +969,7 @@ fn draw_peak_check(
                     {
                         draw_outcome(&outcome);
                     }
-                } else if symmetric_h_column {
+                } else if structure == StructureKind::S {
                     for outcome in
                         sepika_design_jp::SteelDesign.check_outcomes(&mfa, sec, mat, &ctx)
                     {
@@ -1214,7 +1230,7 @@ mod tests {
                 Some(0),
                 false,
                 Some("lb=3000 mm"),
-                "検定比 0.974 (OK)",
+                "検定比 0.973 (OK)",
             ),
             (
                 500.0,
@@ -1224,7 +1240,14 @@ mod tests {
                 Some("lb=3500 mm"),
                 "検定比 1.039 (NG)",
             ),
-            (500.0, false, Some(0), false, None, "中間横補剛なしが未確認"),
+            (
+                500.0,
+                false,
+                Some(0),
+                false,
+                Some("lb=3000 mm"),
+                "検定比 0.973 (OK)",
+            ),
             (
                 500.0,
                 true,
@@ -1296,7 +1319,11 @@ mod tests {
             if let Some(length_text) = length_text {
                 assert!(
                     labels.iter().any(|text| text.contains(length_text)
-                        && text.contains("両実材端で横移動・ねじれを拘束")),
+                        && text.contains(if confirmed {
+                            "両実材端で横移動・ねじれを拘束"
+                        } else {
+                            "節点間距離の既定値"
+                        })),
                     "{labels:?}"
                 );
                 for pos in ["ξ=0.00:", "ξ=0.50:", "ξ=1.00:"] {
@@ -1413,6 +1440,7 @@ mod tests {
                     column_end_axial_forces: Vec::new(),
                     panel_moments: Vec::new(),
                     girder_column_face_forces: Vec::new(),
+                    steel_panel_column_face_forces: Vec::new(),
                 },
             )],
             ..Default::default()
@@ -1647,7 +1675,10 @@ mod tests {
     #[test]
     fn asymmetric_built_h_peak_check_respects_section_loss_without_using_direct_c() {
         let mut app = App::default();
-        assert!(app.load_model(crate::app::steel_column_k_tests::asymmetric_built_h_cantilever()));
+        let mut model = crate::app::steel_column_k_tests::asymmetric_built_h_cantilever();
+        model.steel_design_attrs[0].lk_y_direct = Some(3600.0);
+        model.steel_design_attrs[0].lk_z_direct = Some(3600.0);
+        assert!(app.load_model(model));
 
         let forces = [
             [0.0, 0.0, 0.0, 0.0, 0.0, 60e6],
@@ -1946,41 +1977,44 @@ mod tests {
     }
 
     #[test]
-    fn steel_peak_check_default_and_independent_column_length_cross_the_limit() {
+    fn steel_peak_check_fills_missing_column_buckling_lengths_per_axis() {
         use crate::app::steel_column_k_tests::input;
         let mut app = App::default();
         assert!(app.load_model(input::portal(1.0)));
 
         for (strong, weak, lengths, ratio) in [
-            (None, None, "強軸 3600 ／ 弱軸 3600", "0.956 (OK)"),
-            (None, Some(3000.0), "強軸 3600 ／ 弱軸 3000", "0.956 (OK)"),
+            (None, None, "強軸 3600 ／ 弱軸 3600", "検定比 0.956 (OK)"),
+            (
+                None,
+                Some(3000.0),
+                "強軸 3600 ／ 弱軸 3000",
+                "検定比 0.956 (OK)",
+            ),
             (
                 Some(6983.630277482522),
                 None,
                 "強軸 6983.630277482522 ／ 弱軸 3600",
-                "1.036 (NG)",
-            ),
-            (
-                Some(6983.630277482522),
-                Some(3000.0),
-                "強軸 6983.630277482522 ／ 弱軸 3000",
-                "1.036 (NG)",
+                "検定比 1.036 (NG)",
             ),
         ] {
             let attr = &mut app.core.model.steel_design_attrs[0];
             attr.lk_y_direct = strong;
             attr.lk_z_direct = weak;
             let text = peak_check_text(&app, 0, [-3_322_800.0, 0.0, 0.0, 0.0, 0.0, 10_000_000.0]);
-            assert!(text.contains(lengths), "{text}");
-            assert!(text.contains(&format!("検定比 {ratio}")), "{text}");
+            assert!(text.contains(lengths) && text.contains(ratio), "{text}");
         }
+        app.core.model.steel_design_attrs[0].lk_y_direct = Some(6983.630277482522);
+        app.core.model.steel_design_attrs[0].lk_z_direct = Some(3000.0);
+        let text = peak_check_text(&app, 0, [-3_322_800.0, 0.0, 0.0, 0.0, 0.0, 10_000_000.0]);
+        assert!(
+            text.contains("強軸 6983.630277482522 ／ 弱軸 3000"),
+            "{text}"
+        );
+        assert!(text.contains("検定比 1.036 (NG)"), "{text}");
         for direct in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             app.core.model.steel_design_attrs[0].lk_z_direct = Some(direct);
             let text = peak_check_text(&app, 0, [-3_322_800.0, 0.0, 0.0, 0.0, 0.0, 10_000_000.0]);
-            assert!(
-                text.contains("部材 ID 0: 弱軸の座屈長さの直接指定"),
-                "{text}"
-            );
+            assert!(text.contains("座屈長さ"), "{text}");
             assert!(!text.contains("検定比"), "{text}");
         }
     }
@@ -2099,7 +2133,7 @@ mod tests {
     }
 
     #[test]
-    fn steel_peak_check_girder_and_ordinary_brace_use_physical_length() {
+    fn steel_peak_check_girder_and_ordinary_brace_use_node_span_for_unset_axis() {
         use crate::app::steel_column_k_tests::input;
         use sepika_core::model::FrameSectionUse;
 
@@ -2107,6 +2141,7 @@ mod tests {
         model.elements[2].end_offsets_mm = [[100.0, 200.0, 0.0], [600.0, 200.0, 0.0]];
         let mut attr = model.steel_design_attrs[0].clone();
         attr.elem = ElemId(2);
+        attr.lk_y_direct = Some(3000.0);
         model.steel_design_attrs.push(attr);
         let mut app = App::default();
         assert!(app.load_model(model));
@@ -2123,8 +2158,8 @@ mod tests {
             app.core.model.elements[2].kind = kind;
             app.core.model.sections[1].frame_use = Some(usage);
             for (weak, expected) in [
-                (None, "強軸 3500 ／ 弱軸 3500"),
-                (Some(1000.0), "強軸 3500 ／ 弱軸 1000"),
+                (None, "強軸 3000 ／ 弱軸 3000"),
+                (Some(1000.0), "強軸 3000 ／ 弱軸 1000"),
             ] {
                 app.core.model.steel_design_attrs[2].lk_z_direct = weak;
                 let text = peak_check_text(&app, 2, [-100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0]);

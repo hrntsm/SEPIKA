@@ -44,6 +44,7 @@ fn member_moment_thresholds(elem: &ElementData, model: &Model) -> HingeThreshold
     let ze = section_elastic_modulus(sec);
     let kind = sepika_core::structure_kind::structure_kind_of(Some(sec), mat.map(|m| m.category));
     match (&sec.shape, kind) {
+        (_, StructureKind::Src) => HingeThreshold { mc: 0.0, my: 0.0 },
         (
             Some(SectionShape::RcBeamRect { .. })
             | Some(SectionShape::RcColumnRect { .. })

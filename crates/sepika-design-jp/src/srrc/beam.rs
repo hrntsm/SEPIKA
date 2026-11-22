@@ -1,54 +1,35 @@
-//! 鉄骨鉄筋コンクリート造梁の断面検定（許容応力度検定。
-//! SRC 規準 1987 の累加強度式）。
-//!
-//! 曲げは鉄骨・RC の許容曲げモーメントを単純累加する
-//! `MA = sMo + rMA`（`sMo = sZ・sft`、`rMA = at・ft・j`）、せん断は鉄骨・RC
-//! への弾性分担後にそれぞれの許容せん断力と比較する（[`super::src_shear_check`]
-//! に委譲）。
-
-use super::{ratio_or_large, src_shear_check, steel_h_props, SrcAxisProps, SrcSeismicCtx};
-use crate::material_strength::{main_rebar_grade, rebar_sigma_y_of};
-use crate::rc::{concrete_allowable_shear_class, rebar_allowable_shear, rebar_allowable_tension};
+//! 鉄骨鉄筋コンクリート造梁の許容応力度検定。
+use super::{ratio_or_large, shear_alpha, steel_h_props, SrcAxisProps};
+use crate::material_strength::{main_rebar_grade, shear_rebar_grade};
+use crate::rc::{
+    concrete_allowable_compression, concrete_allowable_shear_class, rebar_allowable_shear,
+    rebar_allowable_tension, young_ratio_n,
+};
 use crate::steel::{steel_fs, steel_ft};
 use crate::{CheckComponent, CheckKind, CheckResult, DesignCtx, LoadTerm, MemberForcesAt};
 use sepika_core::model::Material;
-use sepika_core::rc_capacity::{rc_mu_simple, RcCapacityInput};
 
-/// SRC 梁の断面検定。曲げは `MA = sMo + rMA`（単純累加式）、せん断は
-/// 鉄骨・RC への弾性分担＋各許容せん断力の比較で行う。
-///
-/// `props` は曲げ引張側の RC 部分諸元、`props_other` は反対側の諸元で、
-/// 崩壊系に用いる `rMu` は両側の小さい方を採る。
+/// SRC梁の強軸曲げと、負担曲げを確定できる位置の強軸せん断を検定する。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn src_beam_check(
     forces: &MemberForcesAt,
-    mat: &Material,
     ctx: &DesignCtx,
+    mat: &Material,
     props: SrcAxisProps,
-    props_other: SrcAxisProps,
+    compression_depth_mm: f64,
     main_dia: f64,
     steel_height: f64,
     steel_width: f64,
     steel_web_thick: f64,
     steel_flange_thick: f64,
     f_value: f64,
-    fc_raw: f64,
+    short_seismic: bool,
+    ordinary_shear_issue: Option<&str>,
     main_rebar_valid: bool,
     shear_rebar_valid: bool,
-    gravity_shear: Result<Option<f64>, &str>,
-) -> CheckResult {
+) -> (CheckResult, Option<String>) {
+    let fc_raw = mat.fc.unwrap_or_default();
     let long_term = ctx.term == LoadTerm::Long;
-
-    let fs = concrete_allowable_shear_class(fc_raw, mat.concrete_class, long_term);
-    let w_ft = shear_rebar_valid.then(|| {
-        rebar_allowable_shear(
-            crate::material_strength::shear_rebar_grade(ctx.shear_rebar_material.as_ref()),
-            long_term,
-        )
-    });
-    let s_ft = steel_ft(f_value, ctx.term);
-    let s_fs = steel_fs(f_value, ctx.term);
-
     let (_sa, sz, _sz_weak) = steel_h_props(
         steel_height,
         steel_width,
@@ -56,110 +37,127 @@ pub(crate) fn src_beam_check(
         steel_flange_thick,
     );
 
-    let mut components = Vec::new();
-    if main_rebar_valid {
-        let grade = main_rebar_grade(ctx.rebar_material.as_ref());
-        let ft = rebar_allowable_tension(grade, main_dia, long_term);
-        let s_mo = sz * s_ft;
-        let r_ma = props.at * ft * props.j;
-        let ma = s_mo + r_ma;
-        components.push(CheckComponent {
-            kind: CheckKind::Bending,
-            ratio: ratio_or_large(forces.mz, ma),
-            detail: format!(
-                "sMo={:.1} N·mm, rMA={:.1} N·mm, MA={:.1} N·mm, |mz|={:.1} N·mm",
-                s_mo, r_ma, ma, forces.mz,
-            ),
-        });
-    }
-
-    let basis = if main_rebar_valid {
-        "SRC規準(1987) 梁: 累加強度式(曲げ)+ せん断弾性分担".to_string()
-    } else {
-        "SRC規準(1987) 梁: せん断".to_string()
-    };
     let mut result = CheckResult {
-        basis,
+        basis: "SRC規準16条 SRC梁: 強軸曲げのみ".into(),
         detail: String::new(),
-        components,
+        components: Vec::new(),
     };
-    let Ok(gravity_shear_n) = gravity_shear else {
-        return result;
-    };
-
-    let (m_alpha, q_alpha) = ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
-    let b_prime = (props.b - steel_width).max(0.0);
-    let dw = steel_height - 2.0 * steel_flange_thick;
-
-    let seismic = gravity_shear_n
-        .zip(ctx.seismic_qd.as_ref())
-        .map(|(ql_signed, qd)| SrcSeismicCtx {
-            ctx,
-            ql_signed,
-            s_ft_short: steel_ft(f_value, LoadTerm::Short),
-            r_mu: (main_rebar_valid && qd.method != crate::QdMethod::Qd2).then(|| {
-                let sigma_y = rebar_sigma_y_of(ctx.rebar_material.as_ref());
-                let rc_mu = |p: &SrcAxisProps| {
-                    rc_mu_simple(&RcCapacityInput {
-                        b: p.b,
-                        d: p.d_full,
-                        at: p.at,
-                        d_eff: p.d,
-                        sigma_y,
-                        fc: fc_raw,
-                        pw: p.pw,
-                        sigma_wy: 0.0,
-                        clear_span: 0.0,
-                        sigma_0: 0.0,
-                    })
-                };
-                rc_mu(&props).min(rc_mu(&props_other))
-            }),
+    if let Some((quantity, _)) = [
+        ("軸力N", forces.n),
+        ("曲げモーメントMy", forces.my),
+        ("曲げモーメントMz", forces.mz),
+    ]
+    .into_iter()
+    .find(|(_, value)| !value.is_finite())
+    {
+        return (
+            result,
+            Some(format!("SRC梁検定: 組合せの{quantity}が非有限です")),
+        );
+    }
+    if forces.n != 0.0 || forces.my != 0.0 {
+        return (
+            result,
+            Some(
+                "SRC梁検定: 軸力Nまたは弱軸曲げMyが作用するため、16条の強軸曲げの適用範囲外です"
+                    .into(),
+            ),
+        );
+    }
+    if !main_rebar_valid {
+        return (result, None);
+    }
+    let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+    let ft = rebar_allowable_tension(grade, main_dia, long_term);
+    let fc = concrete_allowable_compression(fc_raw, long_term);
+    let n_ratio = young_ratio_n(fc_raw);
+    let gamma = props.ac / props.at;
+    let dc_over_d = compression_depth_mm / props.d;
+    let ft_over_fc = ft / fc;
+    let balanced_denominator = 2.0
+        * (1.0 + ft_over_fc / n_ratio)
+        * (ft_over_fc * (1.0 + gamma * dc_over_d) - n_ratio * gamma * (1.0 - dc_over_d));
+    let tensile_ratio = props.at / (props.b * props.d);
+    if !balanced_denominator.is_finite()
+        || balanced_denominator <= 0.0
+        || !tensile_ratio.is_finite()
+        || tensile_ratio > balanced_denominator.recip()
+    {
+        return (
+            result,
+            Some("SRC梁検定: 引張鉄筋比が釣合鉄筋比以下となる条件を確認できません".into()),
+        );
+    }
+    let s_mo = sz * steel_ft(f_value, ctx.term);
+    let r_ma = props.at * ft * props.j;
+    let ma = s_mo + r_ma;
+    result.components.push(CheckComponent {
+        kind: CheckKind::Bending,
+        ratio: ratio_or_large(forces.mz, ma),
+        detail: format!(
+            "sMo={:.1} N·mm, rMA={:.1} N·mm, MA={:.1} N·mm, |mz|={:.1} N·mm",
+            s_mo, r_ma, ma, forces.mz,
+        ),
+    });
+    if let Some(reason) = ordinary_shear_issue {
+        return (result, Some(reason.into()));
+    }
+    if !forces.qy.is_finite() {
+        return (result, Some("SRC梁検定: せん断力Qyが非有限です".into()));
+    }
+    let weak_shear_issue =
+        (forces.qz != 0.0).then_some("SRC梁検定: 弱軸せん断力Qzは適用範囲外です");
+    if short_seismic {
+        return (
+            result,
+            crate::member_design_check::combine_incomplete_reasons(
+                Some("SRC梁検定: 地震時の設計用せん断力には付1.4-4の材料別長期せん断力と両端曲げ耐力が必要です".into()),
+                weak_shear_issue,
+            ),
+        );
+    }
+    if forces.qy == 0.0 {
+        return (result, weak_shear_issue.map(str::to_owned));
+    }
+    let moment = forces.mz.abs();
+    if moment < s_mo || moment > ma || moment == 0.0 {
+        return (
+            result,
+            crate::member_design_check::combine_incomplete_reasons(
+                Some(
+                    "SRC梁検定: 18条のせん断力の分担に必要な材料別の負担曲げを確定できません"
+                        .into(),
+                ),
+                weak_shear_issue,
+            ),
+        );
+    }
+    let q = forces.qy.abs();
+    let s_q = q * (s_mo / moment);
+    let r_m = moment - s_mo;
+    let r_q = q * (r_m / moment);
+    let s_qa =
+        steel_web_thick * (steel_height - 2.0 * steel_flange_thick) * steel_fs(f_value, ctx.term);
+    let mut ratio = ratio_or_large(s_q, s_qa);
+    let mut detail = format!("sQ={s_q:.1} N, sQA={s_qa:.1} N");
+    if shear_rebar_valid {
+        let fs = concrete_allowable_shear_class(fc_raw, mat.concrete_class, long_term);
+        let pw_ft = ctx.shear_rebar_material.as_ref().map_or(0.0, |rebar| {
+            props.pw.min(0.006) * rebar_allowable_shear(shear_rebar_grade(Some(rebar)), long_term)
         });
-
-    let shear = src_shear_check(
-        forces.qy,
-        m_alpha,
-        q_alpha,
-        sz,
-        props.at,
-        props.j,
-        props.d,
-        props.b,
-        b_prime,
-        props.pw,
-        fs,
-        w_ft,
-        s_fs,
-        steel_web_thick * dw,
-        2.0,
-        super::SrcShearMode::Beam(seismic.as_ref()),
-        ctx.term,
-    );
-
-    let qd_note = if shear.used_qd {
-        "構造規定方式"
-    } else {
-        "弾性分担"
-    };
-    let r_q = shear
-        .r_q
-        .map_or_else(|| "未算定".into(), |q| format!("{q:.1} N"));
-    let r_qa = shear
-        .r_qa
-        .map_or_else(|| "未算定".into(), |qa| format!("{qa:.1} N"));
-    let shear_detail = format!(
-        "sQ={:.1} N, rQ={r_q}, sQA={:.1} N, rQA={r_qa}, α={:.3}, pw={:.5}, \
-         設計用せん断力={qd_note}",
-        shear.s_q, shear.s_qa, shear.alpha, shear.pw
-    );
+        let alpha = shear_alpha(r_m, r_q, props.d, 2.0);
+        let b_ratio = (props.b - steel_width) / props.b;
+        let r_qa = props.b * props.j * (alpha * fs + 0.5 * pw_ft).min(2.0 * b_ratio * fs + pw_ft);
+        ratio = ratio.max(ratio_or_large(r_q, r_qa));
+        detail.push_str(&format!(", rQ={r_q:.1} N, rQA={r_qa:.1} N"));
+    }
+    result.basis = "SRC梁: 強軸曲げ（16条）・せん断（18条）".into();
     result.components.push(CheckComponent {
         kind: CheckKind::Shear,
-        ratio: shear.ratio,
-        detail: shear_detail,
+        ratio,
+        detail,
     });
-
-    result
+    (result, weak_shear_issue.map(str::to_owned))
 }
 
 #[cfg(test)]
@@ -179,8 +177,8 @@ mod tests {
             400.0,
             700.0,
             22.0,
-            vec![6, 2],
-            vec![6, 2],
+            vec![4, 2],
+            vec![4, 2],
             40.0,
             10.0,
             100.0,
@@ -216,16 +214,182 @@ mod tests {
             "ratio={}",
             result.ratio()
         );
-        assert!(result.basis.contains("SRC規準"));
+        assert!(result.basis.contains("SRC規準16条"));
 
-        assert_eq!(result.components.len(), 2);
-        assert!(result
+        assert_eq!(result.components.len(), 1);
+        assert_eq!(result.components[0].kind, crate::CheckKind::Bending);
+    }
+
+    #[test]
+    fn src_beam_does_not_apply_the_tensile_steel_formula_above_balanced_ratio() {
+        let section = make_section(src_beam_rect_shape(
+            400.0,
+            700.0,
+            22.0,
+            vec![6, 2],
+            vec![6, 2],
+            40.0,
+            10.0,
+            100.0,
+            2,
+            500.0,
+            200.0,
+            9.0,
+            14.0,
+        ));
+        let outcome = crate::SrcDesign.check(
+            &MemberForcesAt {
+                mz: 1.0e8,
+                ..zero_forces()
+            },
+            &section,
+            &make_material(24.0, "Fc24"),
+            &ctx_beam(LoadTerm::Long),
+        );
+        assert!(
+            matches!(outcome, crate::CheckOutcome::Skipped { reason } if reason.contains("釣合鉄筋比"))
+        );
+    }
+
+    #[test]
+    fn src_beam_uses_the_allowable_steel_moment_for_the_shear_split() {
+        let sec = make_section(src_beam_rect_shape(
+            400.0,
+            700.0,
+            22.0,
+            vec![4, 2],
+            vec![4, 2],
+            40.0,
+            10.0,
+            100.0,
+            2,
+            500.0,
+            200.0,
+            9.0,
+            14.0,
+        ));
+        let concrete = make_material(24.0, "Fc24");
+        let mut ctx = ctx_beam(LoadTerm::Short);
+        let forces = MemberForcesAt {
+            mz: 450.0e6,
+            qy: 800.0e3,
+            ..zero_forces()
+        };
+        let checked = crate::SrcDesign
+            .check(&forces, &sec, &concrete, &ctx)
+            .unwrap_checked();
+        let shear = checked
             .components
             .iter()
-            .any(|c| c.kind == crate::CheckKind::Bending));
-        assert!(result
-            .components
-            .iter()
-            .any(|c| c.kind == crate::CheckKind::Shear));
+            .find(|row| row.kind == CheckKind::Shear)
+            .unwrap();
+        // ウェブ・フランジの矩形積分によるsMA=385.0535185 kN·m、sQA=576.3572267 kN。
+        assert!(
+            (shear.ratio - 1.187_700_191_327_678).abs() < 1e-9,
+            "{shear:?}"
+        );
+
+        ctx.shear_rebar_material = None;
+        let zero_shear = MemberForcesAt { qy: 0.0, ..forces };
+        assert!(crate::SrcDesign
+            .check(&zero_shear, &sec, &concrete, &ctx)
+            .unwrap_checked()
+            .ok());
+        let deficient: Vec<_> = crate::SrcDesign
+            .check_outcomes(&forces, &sec, &concrete, &ctx, false)
+            .collect();
+        assert!(
+            matches!(deficient.as_slice(), [crate::CheckOutcome::Checked(result), crate::CheckOutcome::Skipped { reason }]
+            if result.components.len() == 1 && result.components[0].kind == CheckKind::Shear
+                && result.components[0].ratio > 1.0 && reason.contains("せん断補強筋の材料が未割当"))
+        );
+    }
+
+    #[test]
+    fn src_beam_does_not_pass_for_nonfinite_bending_or_an_unresolved_shear_split() {
+        let sec = make_section(src_beam_rect_shape(
+            400.0,
+            700.0,
+            22.0,
+            vec![4, 2],
+            vec![4, 2],
+            40.0,
+            10.0,
+            100.0,
+            2,
+            500.0,
+            200.0,
+            9.0,
+            14.0,
+        ));
+        for (forces, reason) in [
+            (
+                MemberForcesAt {
+                    n: 1.0e3,
+                    mz: 1.0e9,
+                    ..zero_forces()
+                },
+                "16条の強軸曲げの適用範囲外",
+            ),
+            (
+                MemberForcesAt {
+                    my: 1.0e6,
+                    mz: 1.0e9,
+                    ..zero_forces()
+                },
+                "16条の強軸曲げの適用範囲外",
+            ),
+            (
+                MemberForcesAt {
+                    n: f64::NAN,
+                    ..zero_forces()
+                },
+                "軸力Nが非有限",
+            ),
+            (
+                MemberForcesAt {
+                    my: f64::INFINITY,
+                    ..zero_forces()
+                },
+                "曲げモーメントMyが非有限",
+            ),
+            (
+                MemberForcesAt {
+                    mz: f64::NAN,
+                    ..zero_forces()
+                },
+                "モーメントMzが非有限",
+            ),
+            (
+                MemberForcesAt {
+                    qy: 1.0e6,
+                    ..zero_forces()
+                },
+                "材料別の負担曲げを確定できません",
+            ),
+        ] {
+            let outcome = crate::SrcDesign.check(
+                &forces,
+                &sec,
+                &make_material(24.0, "Fc24"),
+                &ctx_beam(LoadTerm::Short),
+            );
+            assert!(
+                matches!(outcome, crate::CheckOutcome::Skipped { reason: msg } if msg.contains(reason))
+            );
+            let outcomes: Vec<_> = crate::SrcDesign
+                .check_outcomes(
+                    &forces,
+                    &sec,
+                    &make_material(24.0, "Fc24"),
+                    &ctx_beam(LoadTerm::Short),
+                    false,
+                )
+                .collect();
+            assert!(
+                matches!(outcomes.as_slice(), [crate::CheckOutcome::Skipped { .. }]),
+                "{outcomes:?}"
+            );
+        }
     }
 }

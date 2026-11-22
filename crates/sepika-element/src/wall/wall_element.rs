@@ -653,8 +653,8 @@ impl WallElement {
         sepika_core::rc_wall_capacity::wall_opening_reduction_strength(opening)
     }
 
-    /// 静的一次参照の圧縮正N `[N]`と局所正負のM/(QD)からQu `[N]`を求める。
-    /// RC壁は両側柱が必須。比は有限非負（0を含む）、Nは0〜0.4Fcの圧縮応力度となる値が必要。
+    /// 静的一次参照の圧縮正N `[N]`と局所正負のM/(QD)から両側柱付きRC壁のQu `[N]`を求める。
+    /// 比は有限非負（0を含む）、Nは0〜0.4Fcの圧縮応力度となる値が必要。
     pub fn directional_shear_capacity_at_reference(
         data: &ElementData,
         model: &Model,
@@ -670,7 +670,7 @@ impl WallElement {
             ));
         }
         if !crate::wall::misc_wall::is_rc_wall(data, model) {
-            return Ok([Self::steel_shear_capacity_of(data, model); 2]);
+            return Err(Self::unsupported_steel_wall_nonlinear(data));
         }
         let section = super::shear_section::WallSection::new(data, model)?;
         if section.columns.iter().any(Option::is_none) {
@@ -805,36 +805,11 @@ impl WallElement {
         Ok(inputs)
     }
 
-    /// 鋼板耐震壁の面内せん断終局強度 Qy `[N]`。
-    ///
-    /// 鋼板のせん断降伏で決まるものとし、von Mises の降伏条件による純せん断の
-    /// 降伏せん断応力度 τy = F/√3 を全断面 t·lw に乗じる。
-    ///
-    /// ```text
-    /// Qy = t · lw · F / √3
-    /// ```
-    ///
-    /// F は材料の降伏強度 `Material.fy` を用いる。
-    /// せん断座屈は考慮していない。
-    pub fn steel_shear_capacity_of(data: &ElementData, model: &Model) -> f64 {
-        let Some(geom) = wall_element_geometry(data, model) else {
-            return 0.0;
-        };
-        let Some(sec) = data.section.and_then(|sid| model.sections.get(sid.index())) else {
-            return 0.0;
-        };
-        let t = sec.thickness.unwrap_or(sec.width);
-        let f = model
-            .element_material(data)
-            .and_then(|m| m.fy)
-            .unwrap_or(0.0);
-        if t <= 0.0 || geom.lw <= 0.0 || f <= 0.0 {
-            return 0.0;
-        }
-        t * geom.lw * f / 3.0_f64.sqrt()
+    pub(crate) fn unsupported_steel_wall_nonlinear(data: &ElementData) -> String {
+        format!("鋼板耐震壁 ID {} は非線形解析の対象外です。", data.id.0)
     }
 
-    /// RC壁の耐力式を適用できない側柱・配筋・材料・幾何の不備を返す。
+    /// 鋼板耐震壁の適用外、またはRC壁の耐力式に必要な入力の不備を返す。
     pub fn wall_shear_capacity_issue(
         data: &ElementData,
         model: &Model,
@@ -856,56 +831,15 @@ impl WallElement {
         if !crate::wall::misc_wall::wall_is_seismic(data, model) {
             return None;
         }
-        if crate::wall::misc_wall::is_rc_wall(data, model) {
-            return Self::shear_inputs(data, model, basis)
-                .and_then(|_| {
-                    wall_direction_ratio(data, model, true)?;
-                    wall_rebar_strength(data, model, true, basis)
-                })
-                .err();
+        if !crate::wall::misc_wall::is_rc_wall(data, model) {
+            return Some(Self::unsupported_steel_wall_nonlinear(data));
         }
-        let Some(sec) = data.section.and_then(|sid| model.sections.get(sid.index())) else {
-            return Some(format!(
-                "耐震壁 ID {} に断面が設定されていません。\
-                 断面タブで壁厚・壁筋比を設定してください。\
-                 保有水平耐力計算では耐震壁の終局せん断強度が必要です。",
-                data.id.0
-            ));
-        };
-        let t = sec.thickness.unwrap_or(sec.width);
-        if t <= 0.0 {
-            return Some(format!(
-                "耐震壁 ID {} の断面「{}」の壁厚が 0 以下です。\
-                 断面タブで壁厚を設定してください。\
-                 保有水平耐力計算では耐震壁の終局せん断強度が必要です。",
-                data.id.0, sec.name
-            ));
-        }
-        let Some(mat) = model.element_material(data) else {
-            return Some(format!(
-                "耐震壁 ID {} に材料が設定されていません。\
-                 材料タブで材料を割り当ててください。\
-                 保有水平耐力計算では耐震壁の終局せん断強度が必要です。",
-                data.id.0
-            ));
-        };
-        if !mat.fy.is_some_and(|fy| fy > 0.0) {
-            return Some(format!(
-                "鋼板耐震壁 ID {} の材料「{}」に降伏強度 fy が設定されていません。\
-                 材料タブで fy を設定してください。\
-                 保有水平耐力計算では鋼板のせん断降伏 Qy=t·lw·F/√3 で面内せん断を頭打ちにします。",
-                data.id.0, mat.name
-            ));
-        }
-        if Self::steel_shear_capacity_of(data, model) <= 0.0 {
-            return Some(format!(
-                "鋼板耐震壁 ID {} の終局せん断強度 Qy を算定できません（算定結果が 0 以下）。\
-                 壁の板厚・壁長さの入力を確認してください。\
-                 保有水平耐力計算では Qy が定まらない壁を弾性として扱えません。",
-                data.id.0
-            ));
-        }
-        None
+        Self::shear_inputs(data, model, basis)
+            .and_then(|_| {
+                wall_direction_ratio(data, model, true)?;
+                wall_rebar_strength(data, model, true, basis)
+            })
+            .err()
     }
 
     /// 面内せん断の終局強度 Qu [N] を与えて弾完全塑性化する（保有水平耐力用）。
@@ -2884,11 +2818,13 @@ mod capacity_issue_tests {
                 "actual EI={} Nmm², independent 205000*9*4000³/12=9.84e15 Nmm²",
                 properties.flexural_rigidity_n_mm2
             );
-            assert_eq!(
-                fixture_directional_capacity(&wall, &model, crate::factory::StrengthBasis::Nominal)
-                    .unwrap(),
-                [WallElement::steel_shear_capacity_of(&wall, &model); 2]
-            );
+            assert!(fixture_directional_capacity(
+                &wall,
+                &model,
+                crate::factory::StrengthBasis::Nominal
+            )
+            .unwrap_err()
+            .contains("鋼板耐震壁"));
         }
     }
 

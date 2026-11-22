@@ -60,11 +60,11 @@ fn assert_calculated(app: &mut App, stage: &str) {
     assert!(checks
         .iter()
         .flat_map(|m| &m.positions)
-        .all(|p| { matches!(&p.outcome, CheckOutcome::Checked(check) if check.ok()) }));
+        .any(|p| { matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("地震時の設計用せん断力")) }));
     let csv = crate::summary::build_report_csv(app);
     assert!(
         csv.lines()
-            .any(|line| line.starts_with("0,") && line.contains(",OK,")),
+            .any(|line| line.starts_with("0,") && line.contains("地震時の設計用せん断力")),
         "{csv}"
     );
     eprintln!("{stage}: manual={:?}\n{csv}", manual(app));

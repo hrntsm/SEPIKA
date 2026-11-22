@@ -1,14 +1,13 @@
-//! 鉄骨の断面検定における断面性能（鋼構造設計規準の
-//! 鉄骨の断面検定における断面性能）。
+//! 鉄骨の断面検定に用いる断面性能と横座屈。
 //!
-//! 横座屈を考慮した許容曲げ応力度 fb（鋼構造設計規準 1973）・断面二次半径・
+//! 横座屈を考慮した許容曲げ応力度 fb、
 //! 断面欠損（継手部・スカラップ）を考慮した断面係数 Z'・横座屈長さ lb の
 //! 解決を扱う。
 
-use crate::material_strength::{big_lambda, steel_ft};
+use crate::material_strength::steel_ft;
 use crate::{DesignCtx, LoadTerm};
 use sepika_core::model::Section;
-use sepika_core::section_shape::{face_geometry::SectionGeometry, SectionShape, E_STEEL};
+use sepika_core::section_shape::{face_geometry::SectionGeometry, SectionShape};
 
 use super::section_modulus;
 
@@ -17,84 +16,6 @@ pub(super) fn built_h_strong_axis_moduli(shape: &SectionShape) -> Result<(f64, f
     let [y_lower_mm, y_upper_mm] = SectionGeometry::of(shape)?.projected_range([1.0, 0.0])?;
     let inertia_mm4 = shape.try_calc_iy()?;
     Ok((inertia_mm4 / y_upper_mm, inertia_mm4 / -y_lower_mm))
-}
-
-/// 圧縮フランジとウェブからなるT形断面の断面二次半径 `[mm]` を返す（1973年版の横座屈用）。
-/// b・tf・h・twはmm。対象断面積が微小または非正の場合は0。
-pub fn steel_i_t(b: f64, tf: f64, h: f64, tw: f64) -> f64 {
-    let hw = (h / 6.0 - tf).max(0.0);
-    let i_t = tf * b.powi(3) / 12.0 + hw * tw.powi(3) / 12.0;
-    let a_t = b * tf + hw * tw;
-    if a_t > 1e-12 {
-        (i_t / a_t).sqrt()
-    } else {
-        0.0
-    }
-}
-
-/// 横座屈用の断面二次半径 `[mm]`・圧縮フランジ面積 `[mm²]` をこの順で返す。
-/// H形はshape寸法、非対称組立H形は二次半径の小さいフランジ側を採用する。
-/// それ以外はsecの幅・せいと引数tf・tw `[mm]` を用いる。
-pub(crate) fn steel_lateral_buckling_i_af(sec: &Section, tf: f64, tw: f64) -> (f64, f64) {
-    match &sec.shape {
-        Some(SectionShape::SteelH {
-            height,
-            width,
-            web_thick,
-            flange_thick,
-            ..
-        }) => {
-            let i = steel_i_t(*width, *flange_thick, *height, *web_thick);
-            (i, width * flange_thick)
-        }
-        Some(SectionShape::SteelBuiltH {
-            height,
-            upper_width,
-            upper_thick,
-            lower_width,
-            lower_thick,
-            web_thick,
-        }) => {
-            let i_upper = steel_i_t(*upper_width, *upper_thick, *height, *web_thick);
-            let i_lower = steel_i_t(*lower_width, *lower_thick, *height, *web_thick);
-            if i_upper <= i_lower {
-                (i_upper, upper_width * upper_thick)
-            } else {
-                (i_lower, lower_width * lower_thick)
-            }
-        }
-        _ => {
-            let b = sec.width;
-            let h = sec.depth;
-            (steel_i_t(b, tf, h, tw), b * tf)
-        }
-    }
-}
-
-/// 1973年版のH形鋼強軸の許容曲げ応力度 `[N/mm²]` を返す。
-/// FはN/mm²、lb・i・hはmm、afはmm²、cは確定済みの無次元修正係数。
-/// 長期の上限はF/1.5、短期は長期の1.5倍で上限F。
-pub fn steel_fb_h(f: f64, term: LoadTerm, lb: f64, i: f64, h: f64, af: f64, c: f64) -> f64 {
-    let c = if c > 1e-9 { c } else { 1.0 };
-    let i = i.max(1e-9);
-    let af = af.max(1e-9);
-    let big_l = big_lambda(f, E_STEEL);
-    let big_l2 = (big_l.max(1e-9)).powi(2);
-
-    let fb1 = f * (2.0 / 3.0 - (4.0 / 15.0) * (lb / i).powi(2) / (c * big_l2));
-    let denom2 = lb * h / af;
-    let fb2 = if denom2 > 0.0 {
-        89_000.0 / denom2
-    } else {
-        f64::INFINITY
-    };
-
-    let cap_long = f / 1.5;
-    let fb_long = fb1.max(fb2).min(cap_long).max(0.0);
-    match term {
-        LoadTerm::Long => fb_long,
-        LoadTerm::Short => (fb_long * 1.5).min(f),
-    }
 }
 
 /// 座屈区間の強軸モーメントから横座屈修正係数Cを返す。自動算定の上限は2.3。
@@ -177,7 +98,7 @@ pub fn steel_fb_h_asd2019(
     let me = (c * me_sq.max(0.0).sqrt()).max(1e-9);
 
     let lambda_b = (my / me).max(0.0).sqrt();
-    let e_lambda_b = 1.29;
+    let e_lambda_b = 1.0 / 0.6_f64.sqrt();
     let nu = 1.5 + (2.0 / 3.0) * (lambda_b / e_lambda_b).powi(2);
 
     let fb_long = if lambda_b <= p_lambda_b {
@@ -295,56 +216,8 @@ pub fn resolve_lb(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::material_strength::steel_ft;
     use sepika_core::ids::ElemId;
     use sepika_core::model::SteelDesignAttr;
-
-    #[test]
-    fn test_fb_lb_zero_equals_ft() {
-        let f = 235.0;
-        let fb = steel_fb_h(f, LoadTerm::Long, 0.0, 100.0, 500.0, 4000.0, 1.0);
-        let ft = steel_ft(f, LoadTerm::Long);
-        assert!((fb - ft).abs() < 1e-6, "fb={} ft={}", fb, ft);
-    }
-
-    #[test]
-    fn test_fb_large_lb_fb2_governs() {
-        let f = 235.0;
-        let i = 60.0;
-        let h = 500.0;
-        let af = 4000.0;
-        let lb = 20_000.0;
-        let fb = steel_fb_h(f, LoadTerm::Long, lb, i, h, af, 1.0);
-        let fb2 = 89_000.0 / (lb * h / af);
-        assert!(
-            (fb - fb2).abs() < 1e-6,
-            "fb2 should govern: fb={} fb2={}",
-            fb,
-            fb2
-        );
-    }
-
-    #[test]
-    fn test_i_t_helper() {
-        let i = steel_i_t(200.0, 15.0, 400.0, 10.0);
-        // hw = max(h/6 - tf, 0) = max(400/6 - 15, 0) = 51.6666...
-        let hw: f64 = (400.0 / 6.0 - 15.0_f64).max(0.0);
-        let expected_it = 15.0 * 200.0_f64.powi(3) / 12.0 + hw * 10.0_f64.powi(3) / 12.0;
-        let expected_at = 200.0 * 15.0 + hw * 10.0;
-        let expected = (expected_it / expected_at).sqrt();
-        assert!((i - expected).abs() < 1e-9);
-    }
-
-    /// h/6 ≤ tf（薄せい・厚フランジ）の場合はウェブ寄与分が 0 にガードされ、
-    /// T 形はフランジ矩形単独の断面二次半径 `i = √((tf·b³/12)/(b·tf)) = b/√12`
-    /// に一致する。
-    #[test]
-    fn test_i_t_helper_hw_clamped_to_zero() {
-        // h/6 = 100/6 = 16.67 < tf=20 → hw=0。
-        let i = steel_i_t(200.0, 20.0, 100.0, 10.0);
-        let expected = 200.0 / 12.0_f64.sqrt();
-        assert!((i - expected).abs() < 1e-9, "i={} expected={}", i, expected);
-    }
 
     #[test]
     fn test_asd2019_e_lambda_b_and_short_term_factor() {
@@ -417,7 +290,7 @@ mod tests {
             c,
             p_lambda_b,
         );
-        assert!((fb_inelastic - 94.31787217895743).abs() < 1e-12);
+        assert!((fb_inelastic - 94.37818672317051).abs() < 1e-12);
 
         let fb_cap_long =
             steel_fb_h_asd2019(f, LoadTerm::Long, 0.0, iz, iw, j, e, g, z, c, p_lambda_b);
@@ -588,35 +461,6 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(steel_c_factor(&ctx_neg, true), 1.0);
-    }
-
-    /// C が増加すると fb1 の分母 `C·Λ²` が大きくなり、fb（=fb1 が支配的な
-    /// 場合）が増加することを確認する。
-    /// lb=5200 は fb1 が fb2 より大きく（fb1 が支配）、かつ長期許容引張
-    /// 上限（cap=F/1.5）未満に収まるよう選定した値（fb2, cap によるクランプ
-    /// で C の効果が隠れないようにするため）。
-    #[test]
-    fn test_fb_increases_with_c() {
-        let f = 235.0;
-        let i = 100.0;
-        let h = 500.0;
-        let af = 4000.0;
-        let lb = 5200.0;
-        let fb_c1 = steel_fb_h(f, LoadTerm::Long, lb, i, h, af, 1.0);
-        let fb_c23 = steel_fb_h(f, LoadTerm::Long, lb, i, h, af, 2.3);
-        let cap = f / 1.5;
-        assert!(
-            fb_c1 < cap - 1e-6,
-            "fb1 が cap でクランプされていない前提: fb_c1={} cap={}",
-            fb_c1,
-            cap
-        );
-        assert!(
-            fb_c23 > fb_c1,
-            "C が大きいほど fb は増えるはず: fb(C=1.0)={} fb(C=2.3)={}",
-            fb_c1,
-            fb_c23
-        );
     }
 
     /// βf=βw=αw=0 のとき、通常の H形強軸断面係数 Z=Iy/(H/2) に一致する

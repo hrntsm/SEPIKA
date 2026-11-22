@@ -154,6 +154,12 @@ pub fn nonlinear_time_history_with_force_observer(
     )
     .map_err(SolveError::InvalidInput)?;
     let mut behaviors = build_behaviors(model, &wall_capacities);
+    let solver_backend = crate::common::tangent::tangent_solver_backend(&behaviors);
+    if matches!(solver_backend, SolverBackend::DirectSparseLu) && damping.is_tangent_based() {
+        return Err(SolveError::InvalidInput(
+            "S造仕口パネルの軸力連成を含む非線形時刻歴では瞬間剛性比例減衰を使用できません".into(),
+        ));
+    }
     for b in behaviors.iter_mut() {
         b.set_time_step(dt);
     }
@@ -330,7 +336,7 @@ pub fn nonlinear_time_history_with_force_observer(
     let mut r_red_buf = vec![0.0f64; n_indep];
     let mut du_red_buf = vec![0.0f64; n_indep];
 
-    let mut k_eff_solver: Box<dyn LinearSolver> = make_solver(SolverBackend::DirectSparseCholesky);
+    let mut k_eff_solver: Box<dyn LinearSolver> = make_solver(solver_backend);
     let mut k_t_free_cache = CscCache::new();
     let mut k_t_red_cache = CscCache::new();
     let mut k_eff_cache = WeightedSumGuard::new();
@@ -682,7 +688,8 @@ fn newton_static_converge(
     u_base_red: &[f64],
 ) -> Result<Option<Vec<f64>>, SolveError> {
     let n_indep = reducer.n_indep;
-    let mut solver: Box<dyn LinearSolver> = make_solver(SolverBackend::DirectSparseCholesky);
+    let mut solver: Box<dyn LinearSolver> =
+        make_solver(crate::common::tangent::tangent_solver_backend(behaviors));
     let mut k_free_cache = CscCache::new();
     let mut k_red_cache = CscCache::new();
     let mut du_red_buf = vec![0.0f64; n_indep];

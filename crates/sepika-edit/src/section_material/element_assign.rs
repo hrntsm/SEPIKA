@@ -196,31 +196,6 @@ impl EditCommand for SetDamperProps {
     }
 }
 
-/// H形鋼大梁の床板合成剛性の指定を変更する。
-pub struct SetSlabCompositeConnection {
-    pub elem: ElemId,
-    pub connection: sepika_core::model::SlabCompositeConnection,
-}
-
-impl EditCommand for SetSlabCompositeConnection {
-    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
-        if model.element(self.elem).is_none()
-            || model.slab_composite_connection(self.elem) == self.connection
-        {
-            return Box::new(Noop);
-        }
-        let old = model.set_slab_composite_connection(self.elem, self.connection);
-        Box::new(Self {
-            elem: self.elem,
-            connection: old,
-        })
-    }
-
-    fn label(&self) -> &str {
-        "床板合成剛性の接合条件変更"
-    }
-}
-
 /// RC梁の逆対称基準の明示選択。未指定は採用αyの自動接続を許可しない。
 pub struct SetMemberRcBeamReference {
     pub elem: ElemId,

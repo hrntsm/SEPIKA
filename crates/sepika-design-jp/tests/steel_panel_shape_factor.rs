@@ -13,7 +13,7 @@ fn box_panel_input(bc_mm: f64) -> SPanelInput {
             kind: PanelShapeKind::Box { bc: bc_mm },
             dc: 384.0,
             tp: 16.0,
-            filled: false,
+            filled: true,
         },
         db: 500.0,
         fy: 235.0,
@@ -42,7 +42,7 @@ fn rejects_infinite_shape_factor_with_section_geometry() {
 }
 
 #[test]
-fn finite_box_shape_factor_preserves_yield_capacity_and_ratio() {
+fn finite_cft_box_shape_factor_preserves_yield_capacity_and_ratio() {
     let result = s_panel_zone_check(&box_panel_input(400.0)).unwrap();
 
     // 角形の手計算値は κ=37/33、実効体積=6,144,000 mm³。

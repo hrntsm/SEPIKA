@@ -1737,10 +1737,14 @@ fn sm520_old_335_success_expires_without_save_or_display_reauthentication() {
 
 fn panel_757_calculated() -> App {
     let mut model = crate::sample::portal_frame();
-    let (sin, cos) = 0.37_f64.sin_cos();
+    super::tests::use_standard_two_axis_panel_columns(&mut model, &[NodeId(2), NodeId(3)]);
     for element in &mut model.elements {
         if element.section == Some(sepika_core::ids::SectionId(0)) {
-            element.local_axis.ref_vector = [cos, sin, 0.0];
+            element.local_axis.ref_vector = if element.nodes.contains(&NodeId(2)) {
+                [1.0, 0.0, 0.0]
+            } else {
+                [0.0, 1.0, 0.0]
+            };
         }
     }
     let mut app = App::default();
@@ -1766,6 +1770,7 @@ fn panel_757_calculated() -> App {
 fn assert_panel_758_both_axes(app: &App) {
     let checks = &app.current_design_results().unwrap().joint_checks;
     for node in [NodeId(2), NodeId(3)] {
+        let mut active_directions = 0;
         for axis in ["強軸", "弱軸"] {
             let label = format!("パネルゾーン(S) {axis}");
             let matching: Vec<_> = checks
@@ -1776,13 +1781,15 @@ fn assert_panel_758_both_axes(app: &App) {
             let sepika_design_jp::CheckOutcome::Checked(result) = &matching[0].outcome else {
                 panic!("節点 {} {axis}: {:?}", node.0, matching[0].outcome);
             };
-            assert!(result.ratio().is_finite() && result.ratio() > 0.0);
+            assert!(result.ratio().is_finite());
+            active_directions += usize::from(result.ratio() > 1e-12);
             assert_eq!(result.components.len(), 1);
             assert!(matches!(
                 result.components[0].kind,
                 sepika_design_jp::CheckKind::Shear
             ));
         }
+        assert_eq!(active_directions, 1);
     }
     assert_eq!(checks.len(), 4);
     let csv = crate::summary::build_report_csv(app);
@@ -1914,6 +1921,8 @@ fn panel_758_current_design_save_open_display_and_recheck_preserve_both_principa
     let mut app = panel_757_calculated();
     assert_panel_758_both_axes(&app);
     let original = app.core.scoped.results.as_ref().unwrap().clone();
+    let expected_faces = &original.statics[0].1.steel_panel_column_face_forces;
+    assert!(!expected_faces.is_empty());
     let expected_checks = rmp_serde::to_vec_named(&original.joint_checks).unwrap();
     let expected_csv = crate::summary::build_report_csv(&app);
     let path =
@@ -1924,6 +1933,8 @@ fn panel_758_current_design_save_open_display_and_recheck_preserve_both_principa
         let mut loaded = App::default();
         loaded.open_project_from(path.clone());
         assert!(loaded.core.scoped.last_error.is_none());
+        let saved = &loaded.core.scoped.results.as_ref().unwrap().statics[0].1;
+        assert_eq!(&saved.steel_panel_column_face_forces, expected_faces);
         loaded.select_displayed_result(app.core.scoped.last_static.unwrap());
         assert_panel_758_both_axes(&loaded);
         assert!(!loaded.core.scoped.staleness.results_stale);
@@ -1962,9 +1973,14 @@ fn panel_758_rotated_column_retains_distinct_invalid_plane_reasons_across_curren
     use sepika_core::{dof::Dof6Mask, ids::SectionId, section_shape::SectionShape};
     use sepika_design_jp::CheckOutcome;
     let mut model = crate::sample::portal_frame();
+    super::tests::use_standard_two_axis_panel_columns(&mut model, &[NodeId(2)]);
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
     let (sin, cos) = 0.37_f64.sin_cos();
-    for column in &mut model.elements[..2] {
+    for column in model
+        .elements
+        .iter_mut()
+        .filter(|element| element.section == Some(SectionId(0)))
+    {
         column.local_axis.ref_vector = [cos, sin, 0.0];
     }
     for (id, height) in [(2, 500.0), (3, 600.0)] {

@@ -123,9 +123,6 @@ impl App {
         }
         self.bind_time_history_source(&mut input.source, false);
         self.accept_time_history_reference(&input.source, false);
-        if input.source.cfg.th_nonlinear {
-            self.notice_steel_seismic_walls();
-        }
         if let Some(step) = input.checkpoint_step {
             let result = sepika_job::time_history_restart::compute_checkpoint(
                 self.core.model.clone(),
@@ -178,9 +175,6 @@ impl App {
         } = input;
         self.bind_time_history_source(&mut source, false);
         self.accept_time_history_reference(&source, false);
-        if source.cfg.th_nonlinear {
-            self.notice_steel_seismic_walls();
-        }
         let model = self.core.model.clone();
         let cfg = source.cfg;
         let label = if cfg.th_nonlinear {

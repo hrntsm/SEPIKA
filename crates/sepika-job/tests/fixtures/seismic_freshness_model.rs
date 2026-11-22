@@ -146,9 +146,6 @@ pub fn two_storeys_with_weightless_steel_girders() -> Model {
             plastic_zone: None,
             spring: None,
         });
-        if section == 1 {
-            model.set_slab_composite_connection(elem, SlabCompositeConnection::NonComposite);
-        }
     }
     model.load_cases.push(LoadCase {
         origin: Default::default(),

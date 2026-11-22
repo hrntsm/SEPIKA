@@ -115,6 +115,8 @@ fn issue901_invalid_compression_inputs_cannot_become_passing_zero_slenderness() 
             let mut sec = section();
             let mut ctx = DesignCtx {
                 length: 3000.0,
+                lk_y: Some(3000.0),
+                lk_z: Some(3000.0),
                 ..Default::default()
             };
             match field {
@@ -125,7 +127,7 @@ fn issue901_invalid_compression_inputs_cannot_become_passing_zero_slenderness() 
                 _ => ctx.lk_z = Some(invalid),
             }
             assert!(
-                matches!(SteelDesign.check(&forces(-1.0), &sec, &material(), &ctx), CheckOutcome::Skipped { reason } if reason.contains("有効細長比"))
+                matches!(SteelDesign.check(&forces(-1.0), &sec, &material(), &ctx), CheckOutcome::Skipped { reason } if reason.contains(if field < 3 { "有効細長比" } else { "座屈長さ" }))
             );
         }
     }
@@ -421,15 +423,15 @@ fn ordinary_steel_compression_uses_explicit_lengths_at_the_numerical_cutoff() {
 }
 
 #[test]
-fn girder_and_brace_use_the_eccentric_member_axis_and_keep_direct_axes() {
+fn girder_and_brace_keep_direct_axes_independent_of_eccentricity() {
     use sepika_element::frame::beam::MemberForces;
     for kind in [FrameSectionUse::Girder, FrameSectionUse::Brace] {
         for (direct, expected) in [
-            ((None, None), "強軸 3500 ／ 弱軸 3500"),
-            ((Some(1000.0), None), "強軸 1000 ／ 弱軸 3500"),
-            ((None, Some(8000.0)), "強軸 3500 ／ 弱軸 8000"),
-            ((Some(1000.0), Some(1500.0)), "強軸 1000 ／ 弱軸 1500"),
-            ((Some(1000.0), Some(0.0)), "弱軸の座屈長さの直接指定"),
+            ((None, None), Some("強軸 3000 ／ 弱軸 3000")),
+            ((Some(1000.0), None), Some("強軸 1000 ／ 弱軸 3000")),
+            ((None, Some(8000.0)), Some("強軸 3000 ／ 弱軸 8000")),
+            ((Some(1000.0), Some(1500.0)), Some("強軸 1000 ／ 弱軸 1500")),
+            ((Some(1000.0), Some(0.0)), None),
         ] {
             let mut model = model();
             model.sections[0].frame_use = Some(kind);
@@ -456,12 +458,12 @@ fn girder_and_brace_use_the_eccentric_member_axis_and_keep_direct_axes() {
             let [(_, _, outcome)] = report.member_checks.as_slice() else {
                 panic!("{report:?}");
             };
-            match outcome {
-                CheckOutcome::Checked(result) if direct.1 != Some(0.0) => {
+            match (outcome, expected) {
+                (CheckOutcome::Checked(result), Some(expected)) => {
                     assert!(result.detail.contains(expected), "{result:?}");
                 }
-                CheckOutcome::Skipped { reason } if direct.1 == Some(0.0) => {
-                    assert!(reason.contains(expected), "{reason}");
+                (CheckOutcome::Skipped { reason }, None) => {
+                    assert!(reason.contains("強軸・弱軸の座屈長さ"), "{reason}");
                 }
                 _ => panic!("{outcome:?}"),
             }
@@ -470,7 +472,7 @@ fn girder_and_brace_use_the_eccentric_member_axis_and_keep_direct_axes() {
 }
 
 #[test]
-fn girder_group_uses_whole_length_and_preserves_lateral_length() {
+fn girder_group_keeps_direct_lateral_length() {
     use sepika_element::frame::beam::MemberForces;
     let mut model = model();
     model.steel_design_attrs[0].lk_y_direct = None;
@@ -510,10 +512,6 @@ fn girder_group_uses_whole_length_and_preserves_lateral_length() {
         )
         .unwrap();
         let result = result(report.member_checks[0].2.clone());
-        assert!(
-            result.detail.contains("強軸 5500 ／ 弱軸 5500"),
-            "{result:?}"
-        );
         ratios.push(result.components[0].ratio);
     }
     assert!(ratios[1] > ratios[0], "{ratios:?}");

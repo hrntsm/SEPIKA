@@ -435,7 +435,7 @@ pub struct MemberChecks {
     pub positions: Vec<PositionCheck>,
 }
 
-/// 節点単位の検定（柱梁接合部・パネルゾーン・冷間成形耐力比・耐震壁など）。
+/// 節点単位の検定（柱梁接合部・パネルゾーン・耐震壁など）。
 /// `label` は「接合部(RC)」等の種別表示用。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct JointCheck {
@@ -541,7 +541,7 @@ pub struct ResultsBundle {
     pub panel_moments: Vec<(sepika_core::ids::NodeId, [f64; 2])>,
     /// 部材単位の断面検定結果（部材ごとに検定位置をグループ化）。
     pub member_checks: Vec<MemberChecks>,
-    /// 節点単位の検定結果（柱梁接合部・パネルゾーン・冷間成形耐力比など）。
+    /// 節点単位の検定結果（柱梁接合部・パネルゾーンなど）。
     pub joint_checks: Vec<JointCheck>,
     pub wall_checks: Vec<sepika_design_jp::wall_check::WallCheck>,
     /// 床の中での小梁設計（単純梁・片持ち梁）。実部材化された小梁は全体 FEM で検定する
@@ -2471,7 +2471,7 @@ fn member_material_groups(model: &sepika_core::model::Model) -> (Vec<ElemId>, Ve
     (steel, rc)
 }
 #[cfg(test)]
-mod steel_wall_notice_tests;
+mod steel_wall_tests;
 #[cfg(test)]
 mod tests;
 

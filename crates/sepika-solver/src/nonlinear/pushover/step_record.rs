@@ -297,8 +297,7 @@ mod tests {
             SeismicDir::X,
             &heights,
             DuctilityMethod::default(),
-            crate::nonlinear::pushover::shear_yield::compute_shear_yield_thresholds(&model)
-                .unwrap(),
+            crate::nonlinear::pushover::shear_yield::build_shear_yield_thresholds(&model),
             super::super::loads::PhysicalPushoverLoads::empty(),
         );
         let behaviors: Vec<_> = model
@@ -349,8 +348,7 @@ mod tests {
             SeismicDir::X,
             &heights,
             DuctilityMethod::default(),
-            crate::nonlinear::pushover::shear_yield::compute_shear_yield_thresholds(&model)
-                .unwrap(),
+            crate::nonlinear::pushover::shear_yield::build_shear_yield_thresholds(&model),
             super::super::loads::PhysicalPushoverLoads::empty(),
         );
         for (step, (sign, point)) in [(1.0, false), (-1.0, false), (1.0, true), (-1.0, true)]
@@ -526,7 +524,7 @@ mod tests {
             let responses =
                 super::super::geom::member_recording_responses(&model, &behaviors).unwrap();
             let thresholds = super::super::hinge::compute_hinge_thresholds(&model);
-            let shear = super::super::shear_yield::compute_shear_yield_thresholds(&model).unwrap();
+            let shear = super::super::shear_yield::build_shear_yield_thresholds(&model);
             assert_eq!(thresholds[index].my == 0.0, with_wall);
             assert_eq!(shear[index].y.qy(0.0).is_infinite(), with_wall);
             let mut hinges = vec![];

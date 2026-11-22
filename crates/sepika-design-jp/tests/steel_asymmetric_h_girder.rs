@@ -3,7 +3,7 @@ use sepika_core::model::{FrameSectionUse, Model, PropertyBasis, SteelDesignAttr}
 use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, CheckResult, DesignCheck, DesignCtx,
-    LoadTerm, MemberDesignCheckOptions, MemberForcesAt, MemberKind, SteelDesign, SteelFbBasis,
+    LoadTerm, MemberDesignCheckOptions, MemberForcesAt, MemberKind, SteelDesign,
 };
 use sepika_element::frame::beam::MemberForces;
 
@@ -364,6 +364,7 @@ fn unconfirmed_lateral_buckling_keeps_only_independent_failure() {
 fn statutory_slenderness_failure_retains_unchecked_girder_combination_reason() {
     let model = girder();
     let ctx = DesignCtx {
+        lk_y: Some(3000.0),
         lk_z: Some(30_000.0),
         ..context()
     };
@@ -425,11 +426,6 @@ fn inapplicable_conditions_do_not_return_a_pure_bending_result() {
             &["横座屈長さの直接入力が負または非有限"],
         );
     }
-    let ctx = DesignCtx {
-        steel_fb_basis: SteelFbBasis::Standard1973,
-        ..context()
-    };
-    assert_skipped(check(&model, FORCES, &ctx), &["2019年版を適用する場合"]);
     let mut loss = attributes(None);
     loss.joint_flange_loss = 1.0;
     let ctx = DesignCtx {

@@ -117,6 +117,189 @@ fn l_frame(with_panel: bool) -> Model {
     l_frame_with(with_panel, false)
 }
 
+fn add_upper_panel_column(model: &mut Model) {
+    model
+        .nodes
+        .push(node(3, [0.0, 0.0, 6000.0], Dof6Mask::FIXED));
+    model
+        .elements
+        .push(member(2, 0, 3, 1, RigidZone::default()));
+    let panels = sepika_element::springs::panel_gen::apply_auto_panel_zones(model).unwrap();
+    assert_eq!(panels.len(), 1);
+}
+
+#[test]
+fn static_panel_face_axial_forces_include_column_loads_and_superpose_by_the_same_cut() {
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+    use sepika_solver::statics::linear::{linear_static_once, superpose_static};
+
+    let mut model = l_frame(false);
+    add_upper_panel_column(&mut model);
+    model.load_cases[0].member = vec![MemberLoad::manual(
+        ElemId(1),
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Distributed {
+            a: 2800.0,
+            b: 2900.0,
+            w1: 10.0,
+            w2: 10.0,
+        },
+    )];
+    let loaded = linear_static_once(&model, LoadCaseId(1)).unwrap();
+    let face = loaded
+        .steel_panel_column_face_forces
+        .iter()
+        .find(|face| face.element == ElemId(1))
+        .unwrap();
+    assert_eq!(face.position_mm, 2708.5);
+    let member = loaded
+        .member_forces
+        .iter()
+        .find(|(id, _)| *id == ElemId(1))
+        .unwrap();
+    let node_axial = member.1.at.iter().find(|(xi, _)| *xi == 1.0).unwrap().1[0];
+    let face_axial = face.axial_n.as_ref().unwrap();
+    assert!((node_axial - face_axial - 1000.0).abs() < 1e-8);
+    let combined = superpose_static(&[(&loaded, 0.75), (&loaded, -0.25)]).unwrap();
+    for (case_cut, combined_cut) in loaded
+        .steel_panel_column_face_forces
+        .iter()
+        .zip(combined.steel_panel_column_face_forces)
+    {
+        assert_eq!(
+            (case_cut.element, case_cut.position_mm),
+            (combined_cut.element, combined_cut.position_mm)
+        );
+        assert!(
+            (0.5 * case_cut.axial_n.as_ref().unwrap() - combined_cut.axial_n.unwrap()).abs() < 1e-8
+        );
+    }
+}
+
+#[test]
+fn standard_panel_face_recovery_and_nonlinear_validation_use_the_same_column_requirements() {
+    use sepika_core::model::AnalysisKind;
+    use sepika_element::factory::{ensure_nonlinear_input_with_basis, StrengthBasis};
+    use sepika_solver::statics::linear::linear_static_once;
+
+    for (mode, reason) in [
+        (0, "同一の鉛直材軸"),
+        (1, "パネル主軸が一致しません"),
+        (2, "基準強度Fが一致しません"),
+    ] {
+        let mut model = l_frame(false);
+        add_upper_panel_column(&mut model);
+        match mode {
+            0 => model.nodes[3].coord[0] = 30.0,
+            1 => model.elements[2].local_axis.ref_vector = [0.0, 1.0, 0.0],
+            _ => {
+                let mut material = model.materials[0].clone();
+                material.id = MaterialId(1);
+                material.name = "SN490B".into();
+                model.materials.push(material);
+                let mut section = model.sections[1].clone();
+                section.id = SectionId(2);
+                section.material = Some(MaterialId(1));
+                model.sections.push(section);
+                model.elements[2].section = Some(SectionId(2));
+            }
+        }
+        let response = linear_static_once(&model, LoadCaseId(1)).unwrap();
+        assert!(response.steel_panel_column_face_forces.is_empty());
+        assert_eq!(response.panel_moments.len(), 1);
+        let error = ensure_nonlinear_input_with_basis(
+            &model,
+            AnalysisKind::Incremental,
+            StrengthBasis::MaterialStrength,
+        )
+        .unwrap_err();
+        assert!(error.contains(reason), "{error}");
+    }
+}
+
+#[test]
+fn h_and_round_panel_thickness_overrides_still_work_for_linear_stiffness_only() {
+    use sepika_core::model::AnalysisKind;
+    use sepika_element::factory::{ensure_nonlinear_input_with_basis, StrengthBasis};
+    use sepika_solver::statics::linear::linear_static_once;
+
+    for physical_thickness in [13.0, 12.0] {
+        let mut model = l_frame(false);
+        model.materials[0].fy = Some(235.0);
+        if physical_thickness == 12.0 {
+            let mut column = SectionShape::SteelPipe {
+                outer_dia: 400.0,
+                thick: physical_thickness,
+            }
+            .to_section(SectionId(1), "円形鋼管柱".into());
+            column.frame_use = model.sections[1].frame_use;
+            column.material = model.sections[1].material;
+            model.sections[1] = column;
+        }
+        add_upper_panel_column(&mut model);
+        for selected_thickness in [physical_thickness, 8.0] {
+            model.sections[1].panel_thickness = Some(selected_thickness);
+            let valid = selected_thickness == physical_thickness;
+            let response = linear_static_once(&model, LoadCaseId(1)).unwrap();
+            assert_eq!(response.panel_moments.len(), 1);
+            assert_eq!(
+                response.steel_panel_column_face_forces.len(),
+                if valid { 2 } else { 0 }
+            );
+            let result = ensure_nonlinear_input_with_basis(
+                &model,
+                AnalysisKind::Incremental,
+                StrengthBasis::MaterialStrength,
+            );
+            if valid {
+                assert!(result.is_ok(), "{result:?}");
+            } else {
+                let error = result.unwrap_err();
+                assert!(
+                    error.contains(&format!(
+                        "有効パネル板厚 8 mm が実板厚 {physical_thickness} mm と異なり"
+                    )),
+                    "{error}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn h_strong_panel_accepts_only_one_column_specifying_the_actual_web_thickness() {
+    use sepika_core::model::AnalysisKind;
+    use sepika_element::factory::{ensure_nonlinear_input_with_basis, StrengthBasis};
+    use sepika_solver::statics::linear::linear_static_once;
+
+    let mut model = l_frame(false);
+    model.materials[0].fy = Some(235.0);
+    add_upper_panel_column(&mut model);
+    let expected = linear_static_once(&model, LoadCaseId(1)).unwrap();
+    assert_eq!(expected.steel_panel_column_face_forces.len(), 2);
+    let section = SectionId(2);
+    let mut explicit = model.sections[1].clone();
+    explicit.id = section;
+    explicit.panel_thickness = Some(COL_TW);
+    model.sections.push(explicit);
+
+    for column in [1, 2] {
+        model.elements[column].section = Some(section);
+        let response = linear_static_once(&model, LoadCaseId(1)).unwrap();
+        assert_eq!(
+            response.steel_panel_column_face_forces,
+            expected.steel_panel_column_face_forces
+        );
+        ensure_nonlinear_input_with_basis(
+            &model,
+            AnalysisKind::Incremental,
+            StrengthBasis::MaterialStrength,
+        )
+        .unwrap();
+        model.elements[column].section = Some(SectionId(1));
+    }
+}
+
 /// `rigid_joint` が真なら、パネルを設けずに接合部の有限寸法だけを剛域として
 /// 与える。パネル有りモデルと剛域条件が揃うため、両者の差は
 /// **パネルのせん断変形のみ**に由来する。
@@ -374,10 +557,14 @@ fn panel_759_public_solver_preserves_original_span_loads_reactions_and_shear_wor
 }
 
 #[test]
-fn panel_759_public_pushover_prepares_panels_with_and_without_gravity_member_loads() {
+fn public_pushover_accepts_two_sided_panels_and_rejects_one_sided_panels() {
     use sepika_core::model::{LoadCombination, MemberLoad, MemberLoadKind, Story};
-    for gravity in [false, true] {
-        let mut model = l_frame(true);
+    for (gravity, upper_column) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut model = l_frame(!upper_column);
+        if upper_column {
+            add_upper_panel_column(&mut model);
+            model.nodes[3].restraint.set_free(sepika_core::dof::Dof::Ux);
+        }
         model.materials[0].fy = Some(235.0);
         let mut spring = model.elements[1].clone();
         spring.id = ElemId(model.elements.len() as u32);
@@ -385,7 +572,11 @@ fn panel_759_public_pushover_prepares_panels_with_and_without_gravity_member_loa
         spring.section = None;
         spring.spring = Some([10.0, 10.0, 10.0, 0.0, 0.0, 0.0]);
         model.elements.push(spring);
-        model.stories = [(0.0, vec![NodeId(2)]), (3000.0, vec![NodeId(0), NodeId(1)])]
+        let mut stories = vec![(0.0, vec![NodeId(2)]), (3000.0, vec![NodeId(0), NodeId(1)])];
+        if upper_column {
+            stories.push((6000.0, vec![NodeId(3)]));
+        }
+        model.stories = stories
             .into_iter()
             .enumerate()
             .map(|(i, (fl, nodes))| {
@@ -402,11 +593,23 @@ fn panel_759_public_pushover_prepares_panels_with_and_without_gravity_member_loa
             .collect();
         model.load_cases[0].nodal.clear();
         model.load_cases[0].kind = sepika_core::model::LoadCaseKind::Dead;
-        model.load_cases[0].member = vec![MemberLoad::manual(
-            ElemId(0),
-            [0.0, 0.0, -1.0],
-            MemberLoadKind::Point { a: 50.0, p: 100.0 },
-        )];
+        model.load_cases[0].member = vec![
+            MemberLoad::manual(
+                ElemId(0),
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Point { a: 50.0, p: 100.0 },
+            ),
+            MemberLoad::manual(
+                ElemId(1),
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Distributed {
+                    a: 2800.0,
+                    b: 2900.0,
+                    w1: 10.0,
+                    w2: 10.0,
+                },
+            ),
+        ];
         model.load_cases.push(LoadCase {
             origin: Default::default(),
             id: LoadCaseId(2),
@@ -432,14 +635,17 @@ fn panel_759_public_pushover_prepares_panels_with_and_without_gravity_member_loa
             Default::default(),
             gravity,
             Default::default(),
-        )
-        .unwrap();
-        assert!(!result.steps.is_empty());
-        assert_eq!(result.steps[0].load_factor == 0.0, gravity);
-        assert!(result
-            .steps
-            .iter()
-            .all(|step| step.top_disp.is_finite() && step.base_shear.is_finite()));
+        );
+        if upper_column {
+            let response = result.unwrap();
+            assert!(!response.steps.is_empty(), "{:?}", response.termination);
+        } else {
+            let error = result.unwrap_err();
+            assert!(
+                error.contains("接合部 ID 0") && error.contains("上下柱が1本ずつ"),
+                "{error}"
+            );
+        }
     }
 }
 
@@ -928,13 +1134,9 @@ fn panel_585_explicit_panel_without_column_is_not_a_successful_rigid_panel() {
         .iter()
         .find(|e| e.kind == ElementKind::PanelZone)
         .unwrap();
-    for panel in [
-        sepika_element::springs::panel::PanelZone::new(data, &model),
-        sepika_element::springs::panel::PanelZone::new_nonlinear(data, &model),
-    ] {
-        assert!(panel.resolution_error.is_some());
-        assert_eq!(panel.k_panel, [0.0; 2]);
-    }
+    let panel = sepika_element::springs::panel::PanelZone::new(data, &model);
+    assert!(panel.resolution_error.is_some());
+    assert_eq!(panel.k_panel, [0.0; 2]);
     model.elements.retain(|e| e.kind != ElementKind::PanelZone);
     assert!(
         sepika_core::panel_zone::resolve_panel_joint(&model, NodeId(0), &model.elements)
@@ -1019,17 +1221,14 @@ fn panel_728_public_entry_matrix() {
             .iter()
             .find(|e| e.kind == ElementKind::PanelZone)
             .unwrap();
-        let panels = [
-            sepika_element::springs::panel::PanelZone::new(data, &model),
-            sepika_element::springs::panel::PanelZone::new_nonlinear(data, &model),
-        ];
+        let panel = sepika_element::springs::panel::PanelZone::new(data, &model);
         println!("{label}: auto={:?}; validate={:?}; prepare={:?}; linear={:?}; nonlinear={:?}; panel={:?}",
             generated.as_ref().map(|_| "ok").map_err(|e| e.to_string()),
             validated.as_ref().map(|_| "ok").map_err(|e| e.to_string()),
             prepared.as_ref().map(|_| "ok").map_err(|e| e.to_string()),
             linear.as_ref().map(|_| "ok").map_err(|e| e.to_string()),
             nonlinear.as_ref().map(|_| "ok").map_err(|e| e.to_string()),
-            panels.iter().map(|p| (&p.resolution_error, p.g, p.k_panel)).collect::<Vec<_>>()
+            (&panel.resolution_error, panel.g, panel.k_panel)
         );
         let valid = matches!(
             label,
@@ -1040,17 +1239,19 @@ fn panel_728_public_entry_matrix() {
             assert!(validated.is_ok(), "{label}");
             assert!(prepared.is_ok(), "{label}");
             assert!(linear.is_ok(), "{label}");
-            assert!(nonlinear.is_ok(), "{label}");
-            for panel in panels {
-                assert!(panel.resolution_error.is_none(), "{label}");
-                assert!(panel.g.is_finite() && panel.g > 0.0, "{label}");
-                assert!(
-                    panel.k_panel.iter().all(|k| k.is_finite() && *k > 0.0),
-                    "{label}"
-                );
-                if shear.is_some() {
-                    assert_eq!(panel.g, 80_000.0);
-                }
+            let reason = nonlinear.expect_err("片側柱の非線形仕口パネルは適用外");
+            assert!(
+                reason.contains("接合部 ID 0") && reason.contains("上下柱が1本ずつ"),
+                "{label}: {reason}"
+            );
+            assert!(panel.resolution_error.is_none(), "{label}");
+            assert!(panel.g.is_finite() && panel.g > 0.0, "{label}");
+            assert!(
+                panel.k_panel.iter().all(|k| k.is_finite() && *k > 0.0),
+                "{label}"
+            );
+            if shear.is_some() {
+                assert_eq!(panel.g, 80_000.0);
             }
         } else {
             let automatic = generated.unwrap_err();
@@ -1077,25 +1278,24 @@ fn panel_728_public_entry_matrix() {
                     "{label}: {error:?}"
                 );
             }
-            for mut panel in panels {
-                assert_eq!(
-                    panel.resolution_error.as_deref(),
-                    Some(reason.as_str()),
-                    "{label}"
-                );
-                assert_eq!(panel.k_panel, [0.0; 2], "{label}");
-                use sepika_element::behavior::{Ctx, ElementBehavior, LocalVec};
-                let increment = LocalVec {
-                    data: smallvec::SmallVec::from_elem(0.0, panel.n_dof()),
-                };
-                assert_eq!(
-                    panel
-                        .update_state(&increment, false, &Ctx { model: &model })
-                        .unwrap_err()
-                        .0,
-                    reason
-                );
-            }
+            let mut panel = panel;
+            assert_eq!(
+                panel.resolution_error.as_deref(),
+                Some(reason.as_str()),
+                "{label}"
+            );
+            assert_eq!(panel.k_panel, [0.0; 2], "{label}");
+            use sepika_element::behavior::{Ctx, ElementBehavior, LocalVec};
+            let increment = LocalVec {
+                data: smallvec::SmallVec::from_elem(0.0, panel.n_dof()),
+            };
+            assert_eq!(
+                panel
+                    .update_state(&increment, false, &Ctx { model: &model })
+                    .unwrap_err()
+                    .0,
+                reason
+            );
         }
     }
 }
@@ -1390,138 +1590,51 @@ fn beam_736_preparation_and_nonlinear_entries_return_stiffness_diagnostics() {
 }
 
 #[test]
-fn panel_753_public_nonlinear_time_history_propagates_axial_limit() {
-    use sepika_core::dof::Dof;
+fn public_nonlinear_time_history_accepts_two_sided_panels_and_rejects_one_sided_panels() {
     use sepika_solver::dynamic::damping::{Damping, DampingAccumulation};
     use sepika_solver::dynamic::timehistory::{
         nonlinear_time_history_analysis, GroundMotion, NewmarkCfg, NonlinearThCfg,
     };
-    for (n, accepted, moving, scale, singular) in [
-        (0.0, true, false, 1.0, false),
-        (0.6, true, false, 1.0, false),
-        (0.9999, true, false, 1.0, false),
-        (1.0, false, false, 1.0, false),
-        (1.1, false, false, 1.0, false),
-        (0.6, false, true, 1.0, false),
-        (0.5, true, false, 0.0001, false),
-        (1.0, false, false, 0.0001, false),
-        (1.1, false, false, 0.0001, false),
-        (0.5, true, false, 0.001, false),
-        (0.5, true, false, 0.00001, false),
-        (0.5, false, false, 0.0001, true),
-    ] {
-        let mut model = l_frame(true);
-        if scale != 1.0 {
-            for node in &mut model.nodes {
-                node.coord = node.coord.map(|v| v * scale);
-            }
-            for section in &mut model.sections {
-                if let Some(SectionShape::SteelH {
-                    height,
-                    width,
-                    web_thick,
-                    flange_thick,
-                    ..
-                }) = &mut section.shape
-                {
-                    *height *= scale;
-                    *width *= scale;
-                    *web_thick *= scale;
-                    *flange_thick *= scale;
-                }
-                section.depth *= scale;
-                section.width *= scale;
-                section.area *= scale * scale;
-                section.as_y *= scale * scale;
-                section.as_z *= scale * scale;
-                section.iy *= scale.powi(4);
-                section.iz *= scale.powi(4);
-                section.j *= scale.powi(4);
-            }
-            for member in &mut model.elements {
-                member.rigid_zone.length_i *= scale;
-                member.rigid_zone.length_j *= scale;
-                member.rigid_zone.panel_offset_i *= scale;
-                member.rigid_zone.panel_offset_j *= scale;
-                member.rigid_zone.face_i = member.rigid_zone.face_i.map(|v| v * scale);
-                member.rigid_zone.face_j = member.rigid_zone.face_j.map(|v| v * scale);
-            }
-        }
-        if singular {
-            model.panel_zone = sepika_core::model::PanelZoneMode::None;
-            model
-                .elements
-                .retain(|element| element.kind != ElementKind::PanelZone);
-            model.sections[0].shape = None;
-            model.sections[0].depth = 0.0;
-            model.sections[0].width = 0.0;
+    for (with_panel, upper_column) in [(false, false), (true, false), (true, true)] {
+        let mut model = l_frame(with_panel && !upper_column);
+        if upper_column {
+            add_upper_panel_column(&mut model);
         }
         model.materials[0].fy = Some(235.0);
         model.materials[0].density = 7.85e-9;
         let dof = DofMap::build(&model);
         let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dof);
-        assert_eq!(reducer.n_indep, dof.n_active());
-        let mut displacement = vec![0.0; dof.n_active()];
-        displacement[dof.active(Dof::Uz as usize).unwrap() as usize] =
-            -n * 235.0 * 3000.0 * scale / 205000.0;
-        let mut velocity = vec![0.0; dof.n_active()];
-        if moving {
-            velocity[dof.active(Dof::Uz as usize).unwrap() as usize] = -1_000_000.0;
-        }
+        let initial_state = vec![0.0; dof.n_active()];
         let result = nonlinear_time_history_analysis(
             &model,
             &dof,
             &reducer,
             &GroundMotion {
                 dt: 0.01,
-                accel_x: vec![0.0; if moving { 2 } else { 1 }],
+                accel_x: vec![0.0, 1.0, -1.0],
                 accel_y: None,
                 accel_theta: None,
             },
             &NewmarkCfg::average_accel(),
             &Damping::MassProportional { h: 0.0, omega: 1.0 },
             DampingAccumulation::NonCumulative,
-            &displacement,
-            &velocity,
+            &initial_state,
+            &initial_state,
             NonlinearThCfg {
                 apply_long_term: false,
                 ..Default::default()
             },
         );
-        println!(
-            "panel753 public dynamic: n={n}, moving={moving}, scale={scale}, result={:?}",
-            result.as_ref().map(|_| "ok").map_err(|e| e.to_string())
-        );
-        assert_eq!(result.is_ok(), accepted);
-        if accepted {
-            let response = result.unwrap();
-            assert!(response.nonlinear);
-            assert_eq!(response.time, vec![0.0]);
-            assert!(
-                (response.recording.unwrap().node_disp[0][0][2]
-                    + n * 235.0 * 3000.0 * scale / 205000.0)
-                    .abs()
-                    < 1e-12
-            );
-        } else {
+        if with_panel && !upper_column {
             let error = result.unwrap_err().to_string();
-            if singular {
-                assert!(
-                    error.contains("部材 ID 0") && error.contains("初期断面剛性"),
-                    "{error}"
-                );
-                continue;
-            }
-            if moving {
-                assert!(
-                    error.contains("step 1") && error.contains("時刻 0.01 s"),
-                    "{error}"
-                );
-            }
             assert!(
-                error.contains("接合部 ID 0") && error.contains("軸耐力到達・超過"),
+                error.contains("接合部 ID 0") && error.contains("上下柱が1本ずつ"),
                 "{error}"
             );
+        } else {
+            let response = result.unwrap();
+            assert!(response.nonlinear);
+            assert_eq!(response.time, vec![0.0, 0.01, 0.02]);
         }
     }
 }

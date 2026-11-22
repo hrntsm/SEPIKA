@@ -94,6 +94,8 @@ fn context(qy_rc_n_mm: [f64; 2], qz_rc_n_mm: [f64; 2]) -> DesignCtx {
             clear_length: 4000.0,
             method: QdMethod::Qd1,
         }),
+        lk_y: Some(4000.0),
+        lk_z: Some(4000.0),
         src_column_seismic_bending: Some(SrcColumnSeismicBending {
             qy: axis(STEEL_STRONG_N_MM, qy_rc_n_mm[0], qy_rc_n_mm[1]),
             qz: axis(STEEL_WEAK_N_MM, qz_rc_n_mm[0], qz_rc_n_mm[1]),
@@ -455,12 +457,14 @@ fn qd1_preserves_independent_shear_failure_when_an_evaluation_moment_is_nonfinit
         b,
         rebar,
         steel_width,
+        steel_flange_thick,
         ..
     }) = &mut invalid_qa.shape
     else {
         unreachable!()
     };
     *steel_width = *b;
+    *steel_flange_thick = 14.0;
     rebar.hoop.legs_x = 0;
     let rows: Vec<_> = SrcDesign
         .check_outcomes(&unknown_moment, &invalid_qa, &concrete, &ctx, false)

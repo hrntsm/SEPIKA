@@ -880,8 +880,7 @@ mod tests {
                         SeismicDir::X,
                         &heights,
                         Default::default(),
-                        crate::nonlinear::pushover::shear_yield::compute_shear_yield_thresholds(&m)
-                            .unwrap(),
+                        crate::nonlinear::pushover::shear_yield::build_shear_yield_thresholds(&m),
                         super::super::loads::PhysicalPushoverLoads::empty(),
                     );
                     recorder.reference_external = vec![0.0; map.n_active()];

@@ -87,7 +87,8 @@ pub fn steel_grade_base(name: &str) -> Option<&'static str> {
                 "SN490" => matches!(suffix, "B" | "C"),
                 "SM490" => matches!(suffix, "A" | "B" | "C" | "YA" | "YB"),
                 "SM520" => matches!(suffix, "B" | "C"),
-                "STKN400" | "STKN490" => matches!(suffix, "B" | "W"),
+                "STKN400" => matches!(suffix, "B" | "W"),
+                "STKN490" => suffix == "B",
                 "SNR400" => matches!(suffix, "A" | "B"),
                 "SNR490" => suffix == "B",
                 _ => false,
@@ -183,7 +184,7 @@ pub fn src_h_steel_minimum_thickness_mm(steel: &Material) -> Result<f64, String>
             return Err(format!("内蔵鉄骨「{name}」の JIS の種類記号が不完全です"));
         }
         "STK400" | "STK490" | "STKR400" | "STKR490" | "STKN400" | "STKN400W" | "STKN400B"
-        | "STKN490" | "STKN490W" | "STKN490B" | "BCR235" | "BCR295" | "BCP235" | "BCP325" => {
+        | "STKN490" | "STKN490B" | "BCR235" | "BCR295" | "BCP235" | "BCP325" => {
             return Err(format!(
                 "内蔵鉄骨「{name}」は鋼管用として登録されている材料名で、H 形鋼としての適用根拠が未確定です"
             ));
@@ -671,7 +672,6 @@ mod tests {
             ("STKN400W", 235., 215.),
             ("STKN490", 325., 295.),
             ("STKN490B", 325., 295.),
-            ("STKN490W", 325., 295.),
             ("STKR400", 235., 215.),
             ("STKR490", 325., 295.),
             ("SNR400", 235., 215.),
@@ -735,6 +735,7 @@ mod tests {
             "SM520A",
             "STKN400A",
             "STKN490C",
+            "STKN490W",
             "SNR400C",
             "SNR490A",
             "SS400A",

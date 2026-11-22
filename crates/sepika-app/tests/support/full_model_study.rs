@@ -142,11 +142,41 @@ fn representative_manual_study_retains_three_completed_runs() {
             .iter()
             .find(|m| m.elem == target)
             .unwrap();
-        assert_eq!(target_checks.positions.len(), 3);
-        assert!(target_checks.positions.iter().all(|position| matches!(
-            position.outcome,
-            sepika_design_jp::CheckOutcome::Checked(_)
-        )));
+        let mut positions: Vec<_> = target_checks
+            .positions
+            .iter()
+            .map(|check| check.xi)
+            .collect();
+        positions.dedup();
+        assert_eq!(positions.len(), 3);
+        let target_forces = &checks
+            .bundle
+            .member_forces
+            .iter()
+            .find(|(elem, _)| *elem == target)
+            .unwrap()
+            .1;
+        for position in &target_checks.positions {
+            match &position.outcome {
+                sepika_design_jp::CheckOutcome::Checked(check) => {
+                    assert!(check.ratio().is_finite());
+                }
+                sepika_design_jp::CheckOutcome::Skipped { reason } => {
+                    let (_, forces) = target_forces
+                        .at
+                        .iter()
+                        .find(|(xi, _)| (*xi - position.xi).abs() < 1e-9)
+                        .unwrap();
+                    assert!(
+                        (forces[3] != 0.0 && reason.contains("ねじりモーメントMx"))
+                            || (forces[2] != 0.0 && reason.contains("弱軸せん断力Qz")),
+                        "{}: ξ={} {forces:?}: {reason}",
+                        run.proposal_name,
+                        position.xi
+                    );
+                }
+            }
+        }
         let whole_quantity_error = sepika_design_jp::quantity::try_compute_quantity_takeoff(
             &run.prepared.model,
             &run.prepared.model.quantity_cfg,

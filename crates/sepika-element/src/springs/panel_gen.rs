@@ -1038,12 +1038,10 @@ mod tests {
             .to_string();
         assert!(reason.contains("上位置差=50 mm"));
         assert!(model.validate().unwrap_err().to_string().contains(&reason));
-        for panel in [
-            crate::springs::panel::PanelZone::new(&old, &model),
-            crate::springs::panel::PanelZone::new_nonlinear(&old, &model),
-        ] {
-            assert_eq!(panel.resolution_error, Some(reason.clone()));
-        }
+        assert_eq!(
+            crate::springs::panel::PanelZone::new(&old, &model).resolution_error,
+            Some(reason)
+        );
         assert!(apply_auto_panel_zones(&mut model).unwrap().is_empty());
         assert!(!model
             .elements

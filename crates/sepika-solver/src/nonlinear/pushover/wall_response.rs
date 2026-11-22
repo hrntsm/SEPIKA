@@ -596,7 +596,7 @@ mod tests {
             SeismicDir::X,
             &[3000.0],
             super::super::types::DuctilityMethod::default(),
-            crate::nonlinear::pushover::shear_yield::compute_shear_yield_thresholds(&m).unwrap(),
+            crate::nonlinear::pushover::shear_yield::build_shear_yield_thresholds(&m),
             super::super::loads::PhysicalPushoverLoads::empty(),
         );
         recorder.record(0.0, &m, &map, &b, &u).unwrap();

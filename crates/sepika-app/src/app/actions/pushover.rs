@@ -23,12 +23,10 @@ impl App {
     pub(crate) fn adopted_wall_capacity(
         &self,
         elem: &sepika_core::model::ElementData,
-        model: &sepika_core::model::Model,
         analysis: crate::viewer::ModelingAnalysis,
     ) -> Result<[f64; 2], String> {
         self.adopted_wall_capacity_for(
             elem,
-            model,
             analysis,
             self.core.scoped.pushover_view_dir,
             self.core.scoped.view_vibration_case,
@@ -39,21 +37,10 @@ impl App {
     pub(crate) fn adopted_wall_capacity_for(
         &self,
         elem: &sepika_core::model::ElementData,
-        model: &sepika_core::model::Model,
         analysis: crate::viewer::ModelingAnalysis,
         direction: SeismicDir,
         vibration_case: Option<VibrationCaseId>,
     ) -> Result<[f64; 2], String> {
-        if !sepika_element::wall::misc_wall::is_rc_wall(elem, model) {
-            let qu = sepika_element::wall::wall_element::WallElement::steel_shear_capacity_of(
-                elem, model,
-            );
-            return if qu.is_finite() && qu > 0.0 {
-                Ok([qu; 2])
-            } else {
-                Err("鋼板壁耐力が未解決です".into())
-            };
-        }
         let capacities = match analysis {
             crate::viewer::ModelingAnalysis::Incremental => {
                 let dir = direction;
@@ -159,12 +146,11 @@ impl App {
         }
     }
 
-    /// 増分解析を実行する。鋼板耐震壁の座屈未考慮は注意として通知し、解析を継続する。
+    /// 増分解析を実行する。
     pub fn run_pushover(&mut self) {
         if !self.begin_analysis() {
             return;
         }
-        self.notice_steel_seismic_walls();
         let res =
             sepika_job::compute::compute_pushover(self.core.model.clone(), self.core.analysis_cfg)
                 .map_err(|e| e.to_string());
@@ -178,7 +164,6 @@ impl App {
         if !self.begin_analysis_job() {
             return;
         }
-        self.notice_steel_seismic_walls();
         let model = self.core.model.clone();
         let cfg = self.core.analysis_cfg;
         self.spawn_analysis_job("増分解析", move || {
@@ -192,41 +177,16 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::steel_wall_notice_tests::{steel_wall_model, wall_notices};
-    #[test]
-    fn 増分解析の打切り注意は鋼板壁注意を消さない() {
-        let mut app = App::default();
-        app.load_model(steel_wall_model());
-        app.generate_stories_action();
-        app.core.analysis_cfg.push_steps = 2;
-        app.run_pushover();
-        let mut result = app
-            .core
-            .scoped
-            .results
-            .as_ref()
-            .unwrap()
-            .pushover_x
-            .clone()
-            .unwrap();
-        result.termination =
-            sepika_solver::nonlinear::pushover::PushoverTermination::NonConvergence {
-                phase: "荷重制御".into(),
-                load_factor: 0.5,
-            };
-        app.apply_pushover_result(Ok(result));
-        let notice = app.core.scoped.last_notice.as_ref().unwrap();
-        assert!(notice.contains("せん断座屈"));
-        assert!(notice.contains("目標到達前に打ち切られました"));
-        assert_eq!(wall_notices(&app).len(), 1);
-    }
 
     #[test]
     fn 接線剛性による打切り理由は機構分類と独立に通知と保存結果へ反映する() {
         use sepika_solver::nonlinear::pushover::{MechanismType, PushoverTermination};
 
         let mut app = App::default();
-        app.load_model(steel_wall_model());
+        let mut model =
+            crate::app::tests::with_explicit_pushover_gravity(crate::sample::portal_frame());
+        model.panel_zone = sepika_core::model::PanelZoneMode::None;
+        app.load_model(model);
         app.generate_stories_action();
         app.core.analysis_cfg.push_steps = 2;
         app.run_pushover();

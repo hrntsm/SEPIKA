@@ -54,7 +54,9 @@ pub(crate) fn asymmetric_built_h_cantilever() -> Model {
 fn steel_column_gui_keeps_resolved_lengths_and_invalidates_old_design_contract() {
     let mut app = App::default();
     let mut model = input::portal(1.0);
-    model.steel_design_attrs[1].lk_z_direct = None;
+    model.steel_design_attrs[0].lk_y_direct = Some(3600.0);
+    model.steel_design_attrs[1].lk_y_direct = Some(3600.0);
+    model.steel_design_attrs[1].lk_z_direct = Some(3600.0);
     assert!(app.load_model(model));
     app.run_linear_static(LoadCaseId(0));
     assert!(
@@ -204,10 +206,12 @@ fn assert_steel_column_lengths(app: &mut App, expected: &[(ElemId, &str)]) {
             .unwrap();
         assert_eq!(column.positions.len(), 3);
         for position in &column.positions {
-            let CheckOutcome::Checked(result) = &position.outcome else {
-                panic!("{:?}", position.outcome);
-            };
-            assert!(result.detail.contains(lengths), "{:?}", result.detail);
+            match &position.outcome {
+                CheckOutcome::Checked(result) => {
+                    assert!(result.detail.contains(lengths), "{:?}", result.detail)
+                }
+                CheckOutcome::Skipped { reason } => assert!(reason.contains(lengths), "{reason}"),
+            }
         }
     }
 }

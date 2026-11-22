@@ -184,6 +184,8 @@ fn steel_check_requires_shape_and_action_specific_torsion_rules() {
 
     let long_column = DesignCtx {
         length: 30_000.0,
+        lk_y: Some(30_000.0),
+        lk_z: Some(30_000.0),
         ..ctx
     };
     for (mx_nmm, expected) in [(100e6, COMBINED_REASON), (f64::NAN, "非有限")] {
@@ -207,6 +209,6 @@ fn steel_check_requires_shape_and_action_specific_torsion_rules() {
         [-10_000.0, 0.0, 0.0, 100e6, 0.0, 0.0],
         &invalid_column,
     );
-    assert_skipped(&outcome, "有効細長比の法定上限を判定できません");
+    assert_skipped(&outcome, "圧縮材の強軸・弱軸の座屈長さ");
     assert_skipped(&outcome, COMBINED_REASON);
 }

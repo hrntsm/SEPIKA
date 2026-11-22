@@ -1,5 +1,5 @@
 use super::*;
-use crate::{CheckResult, LoadTerm, SteelFbBasis};
+use crate::{CheckResult, LoadTerm};
 use sepika_core::ids::SectionId;
 use sepika_core::model::PropertyBasis;
 
@@ -20,8 +20,9 @@ fn context(kind: MemberKind) -> DesignCtx {
         kind,
         term: LoadTerm::Long,
         length: 6000.0,
+        lk_y: Some(6000.0),
+        lk_z: Some(6000.0),
         column_lateral_buckling_length: Some(Ok(6000.0)),
-        steel_fb_basis: SteelFbBasis::Asd2019,
         ..Default::default()
     }
 }
@@ -121,10 +122,9 @@ fn asd2019_h_skips_unresolved_j_with_its_reason() {
 
 #[test]
 fn checks_that_do_not_use_j_accept_unresolved_j() {
-    for kind in [MemberKind::Girder, MemberKind::Column, MemberKind::Brace] {
+    {
         let mut section = test_support::h_section(400.0, 200.0, 8.0, 13.0);
-        let mut ctx = context(kind);
-        ctx.steel_fb_basis = SteelFbBasis::Standard1973;
+        let ctx = context(MemberKind::Brace);
         let expected = checked(&section, &ctx);
         for basis in [PropertyBasis::PendingShape, PropertyBasis::Supplied] {
             section.property_basis.j = basis;

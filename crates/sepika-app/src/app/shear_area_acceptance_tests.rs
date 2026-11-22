@@ -50,7 +50,7 @@ fn cantilever(section: Section, load_n: [f64; 6]) -> App {
     app
 }
 
-pub(crate) fn unsupported_box() -> App {
+pub(crate) fn rounded_box_girder() -> App {
     const SUPPLIED_J_MM4: f64 = 400_000_000.0;
     let mut section = SectionShape::SteelBox {
         height: 400.0,
@@ -59,7 +59,7 @@ pub(crate) fn unsupported_box() -> App {
         horizontal_thick: 12.0,
         corner_r: Some(5.0),
     }
-    .input_section(SectionId(0), "BOX適用外".into())
+    .input_section(SectionId(0), "丸角BOX".into())
     .unwrap();
     section.j = SUPPLIED_J_MM4;
     section.property_basis.j = PropertyBasis::Supplied;
@@ -151,30 +151,25 @@ fn constructed_cantilever_keeps_supplied_stiffness_area() {
     assert_eq!(app.core.model.sections[0].as_z, 1600.0);
 }
 
-fn assert_unchecked(app: &App) {
+fn assert_box_shear_incomplete(app: &App) {
     let checks = &app.current_design_results().unwrap().member_checks;
     assert!(!checks.is_empty());
-    assert!(checks.iter().flat_map(|m| &m.positions).all(|p| matches!(
-        &p.outcome, CheckOutcome::Skipped { reason } if reason.contains("適用範囲外")
-    )));
+    assert!(checks.iter().flat_map(|m| &m.positions).all(|p| {
+        matches!(&p.outcome, CheckOutcome::Skipped { reason } if reason.contains("せん断力の断面形状・方向"))
+    }));
     let csv = crate::summary::build_report_csv(app);
-    assert!(
-        csv.contains(",-,検定不能,") && csv.contains("外角半径"),
-        "{csv}"
-    );
-    assert!(!csv.contains(",OK,"), "{csv}");
+    assert!(csv.contains(",-,検定不能,"), "{csv}");
 }
 
 #[test]
-fn unsupported_box_keeps_input_and_skipped_outcomes_through_recheck_save_and_report() {
-    let mut app = unsupported_box();
-    assert_unchecked(&app);
+fn rounded_box_shear_stays_incomplete_through_recheck_save_and_report() {
+    let mut app = rounded_box_girder();
+    assert_box_shear_incomplete(&app);
     let input = rmp_serde::to_vec_named(&app.core.model).unwrap();
     app.run_design_check();
-    assert_unchecked(&app);
+    assert_box_shear_incomplete(&app);
     assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), input);
-    let path =
-        std::env::temp_dir().join(format!("sepika-417-skipped-{}.ovika", std::process::id()));
+    let path = std::env::temp_dir().join(format!("sepika-417-box-{}.ovika", std::process::id()));
     app.save_project_to(path.clone());
     assert!(app.core.scoped.last_error.is_none());
     let mut reopened = App::default();
@@ -184,14 +179,73 @@ fn unsupported_box_keeps_input_and_skipped_outcomes_through_recheck_save_and_rep
         rmp_serde::to_vec_named(&reopened.core.model).unwrap(),
         input
     );
-    assert_unchecked(&reopened);
+    assert_box_shear_incomplete(&reopened);
     reopened.run_design_check();
-    assert_unchecked(&reopened);
+    assert_box_shear_incomplete(&reopened);
     assert_eq!(
         rmp_serde::to_vec_named(&reopened.core.model).unwrap(),
         input
     );
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn h_girder_web_failure_and_incomplete_weak_shear_survive_report_and_save() {
+    let section = SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        flange_thick: 13.0,
+        web_thick: 8.0,
+        root_r: Some(0.0),
+    }
+    .to_section(SectionId(0), "H形鋼大梁".into());
+    let app = cantilever(section, [0.0, -20_000.0, -500_000.0, 0.0, 0.0, 0.0]);
+    let version = sepika_core::result_contract::DESIGN_CONTRACT_VERSION;
+    let analysis = sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION;
+    let (reopened, path) = super::result_contract_tests::restore(
+        &app,
+        Some(analysis),
+        Some(version),
+        "h-web-ng-and-incomplete",
+    );
+    std::fs::remove_file(path).unwrap();
+    for run in [&app, &reopened] {
+        let rows = &run.current_design_results().unwrap().member_checks[0].positions;
+        let (pairs, remainder) = rows.as_chunks::<2>();
+        assert_eq!(pairs.len(), 3, "{rows:?}");
+        assert!(remainder.is_empty());
+        for [failure, incomplete] in pairs {
+            assert_eq!(failure.xi, incomplete.xi);
+            assert!(
+                matches!(&failure.outcome, CheckOutcome::Checked(r) if r.components.iter().any(|c| c.kind == sepika_design_jp::CheckKind::Shear && c.ratio > 1.0))
+            );
+            assert!(
+                matches!(&incomplete.outcome, CheckOutcome::Skipped { reason } if reason.contains("弱軸せん断力Qz"))
+            );
+        }
+        let csv = crate::summary::build_report_csv(run);
+        assert!(
+            csv.lines()
+                .any(|line| line.starts_with("0,") && line.contains(",NG,")),
+            "{csv}"
+        );
+        assert!(
+            csv.lines()
+                .any(|line| line.contains(",検定不能,") && line.contains("弱軸せん断力Qz")),
+            "{csv}"
+        );
+    }
+    #[cfg(feature = "gui")]
+    {
+        let mut reopened = reopened;
+        let rendered = egui::Context::default().run_ui(Default::default(), |ui| {
+            crate::design_view::design_table(ui, &mut reopened)
+        });
+        assert!(rendered
+            .shapes
+            .iter()
+            .any(|shape| design_table_contains(&shape.shape, "弱軸せん断力Qz")));
+    }
 }
 
 #[test]
@@ -289,7 +343,7 @@ fn flat_bar_shear_reason_reaches_report_gui_and_saved_project() {
 
 #[test]
 fn h_column_combination_reason_reaches_design_table_report_and_saved_project() {
-    check_h_column_combination_report(77_000.0, 167e6, 365_000.0, "1454");
+    check_h_column_combination_report(77_000.0, 60e6, 2_000.0, "1454");
     check_h_column_combination_report(-77_000.0, 50e6, 2_000.0, "1483");
 }
 
@@ -406,7 +460,22 @@ fn check_h_column_combination_report(
 #[test]
 fn h_column_combination_report_keeps_confirmed_axial_bending_ng_and_reason() {
     let mut app = App::default();
-    assert!(app.load_model(h_column_input::cantilever(-77_000.0, 500e6, 365_000.0)));
+    let mut model = h_column_input::cantilever(-77_000.0, 500e6, 365_000.0);
+    model
+        .steel_design_attrs
+        .push(sepika_core::model::SteelDesignAttr {
+            elem: ElemId(0),
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: None,
+            lateral_brace_count: None,
+            lk_y_direct: Some(3600.0),
+            lk_z_direct: Some(3000.0),
+            c_direct: None,
+            column_lateral_buckling_end_supports: None,
+        });
+    assert!(app.load_model(model));
     app.run_linear_static(LoadCaseId(0));
     let results = app.current_design_results().unwrap();
     let csv = crate::summary::build_report_csv(&app);
@@ -419,18 +488,23 @@ fn h_column_combination_report_keeps_confirmed_axial_bending_ng_and_reason() {
         };
         assert_eq!(checked.xi, skipped.xi);
         assert!(matches!(&skipped.outcome, CheckOutcome::Skipped { reason }
-            if reason.contains("中間横補剛なしが未確認")));
+            if reason.contains("同一点の組合せ応力度は未算定")));
         assert!(!result.ok(), "{result:?}");
         assert_eq!(result.components.len(), 1);
         assert_eq!(
             result.components[0].kind,
             sepika_design_jp::CheckKind::AxialBending
         );
+        let prefix = format!("0,{:.3},", checked.xi);
         assert!(
             csv.lines()
-                .any(|line| line.starts_with(&format!("0,{:.3},", checked.xi))
-                    && line.contains(",NG,")
-                    && line.contains("同一点の組合せ応力度は未算定")),
+                .any(|line| line.starts_with(&prefix) && line.contains(",NG,")),
+            "{csv}"
+        );
+        assert!(
+            csv.lines().any(|line| line.starts_with(&prefix)
+                && line.contains(",検定不能,")
+                && line.contains("同一点の組合せ応力度は未算定")),
             "{csv}"
         );
     }

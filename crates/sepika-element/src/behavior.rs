@@ -1,5 +1,6 @@
 use sepika_core::dof::{DofMap, DOF_PER_NODE, PANEL_DOF_PER_NODE};
 use sepika_core::model::Model;
+pub use sepika_core::panel_zone::PanelColumnSection;
 use smallvec::SmallVec;
 use std::any::Any;
 
@@ -360,6 +361,28 @@ pub trait ElementBehavior: Send + Sync {
         } else {
             Ok(None)
         }
+    }
+
+    /// パネルの軸力試行に先行する柱の断面位置。
+    fn panel_column_sections(&self) -> Option<[PanelColumnSection; 2]> {
+        None
+    }
+
+    /// 同一試行の上下柱から回収した引張正の平均軸力と、その自由変位微分を受け取る。
+    fn update_panel_state(
+        &mut self,
+        _du: &LocalVec,
+        _axial_n: f64,
+        _axial_gradient: Vec<(usize, f64)>,
+    ) -> Result<(), ElementUpdateError> {
+        Err(ElementUpdateError(
+            "仕口パネルの試行応答は未対応です".into(),
+        ))
+    }
+
+    /// パネルせん断力の、上下柱の応答を経由する接線項を返す。
+    fn panel_coupled_tangent(&self, _dof: &DofMap) -> Vec<sepika_math::sparse::Triplet> {
+        Vec::new()
     }
     /// 節点変位から部材内力分布を復元する（線形解析の内力回収）。
     ///

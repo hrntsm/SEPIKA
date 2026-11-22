@@ -63,7 +63,16 @@ impl PostDesignResult {
             .fold(0.0, f64::max)
     }
     pub fn complete(&self) -> bool {
-        self.reasons.is_empty()&&!self.combinations.is_empty()&&self.combinations.iter().all(|c|c.reasons.is_empty()&&c.deflection_ratio.is_some()&&!c.positions.is_empty()&&c.positions.iter().all(|p|matches!(&p.check,CheckOutcome::Checked(r) if r.components.iter().any(|c|c.kind==CheckKind::AxialBending)&&r.components.iter().any(|c|c.kind==CheckKind::Shear))))
+        self.reasons.is_empty()
+            && !self.combinations.is_empty()
+            && self.combinations.iter().all(|c| {
+                c.reasons.is_empty()
+                    && c.deflection_ratio.is_some()
+                    && !c.positions.is_empty()
+                    && c.positions.iter().all(|p| {
+                        matches!(&p.check, CheckOutcome::Checked(r) if r.components.iter().any(|c| c.kind == CheckKind::AxialBending))
+                    })
+            })
     }
 }
 
@@ -524,7 +533,10 @@ pub fn design_post(model: &Model, sm: &SecondaryMember) -> PostDesignResult {
                     qy: 0.0,
                     qz: 0.0,
                 };
-                match crate::steel::SteelDesign.check_secondary_post(&zero, sec, mat, &ctx) {
+                match crate::steel::SteelDesign
+                    .check_secondary_post(&zero, sec, mat, &ctx)
+                    .0
+                {
                     CheckOutcome::Skipped { reason } => Err(reason),
                     CheckOutcome::Checked(_) => f.and_then(|f| {
                         crate::steel::column_allowables(sec, mat, &ctx, f, None, Some(ctx.length))
@@ -564,28 +576,36 @@ pub fn design_post(model: &Model, sm: &SecondaryMember) -> PostDesignResult {
                     }
                     if let Ok(a) = &allow {
                         let abs: Vec<_> = force_polys.iter().map(|p| signed(p, m)).collect();
-                        let axial = abs[0]
-                            .scale(1.0 / (a.area * if n.value(m) < 0.0 { a.fc } else { a.ft }))
-                            .add(&abs[1].scale(1.0 / (a.z_strong * a.fb_strong)))
-                            .add(&abs[2].scale(1.0 / (a.z_weak * a.fb_weak)));
-                        let sigma = abs[0]
-                            .scale(1.0 / a.area)
-                            .add(&abs[1].scale(a.h_web_factor / a.z_strong))
-                            .add(&abs[2].scale(
-                                if matches!(
-                                    sec.shape,
-                                    Some(sepika_core::section_shape::SectionShape::SteelH { .. })
-                                ) {
-                                    0.0
-                                } else {
-                                    1.0 / a.z_weak
-                                },
-                            ));
-                        let tau = abs[3]
-                            .scale(1.0 / a.shear_areas[0])
-                            .add(&abs[4].scale(1.0 / a.shear_areas[1]));
-                        let vm = squared_norm(&sigma, &tau, 3.0);
-                        for p in [&axial, &vm, &tau] {
+                        let mut checks = if crate::steel::is_symmetric_h_section(sec)
+                            && n.value(m) > 0.0
+                            && abs[2].0.iter().all(|&c| c == 0.0)
+                        {
+                            [
+                                n.scale(1.0 / (a.area * a.ft))
+                                    .add(&abs[1].scale(1.0 / (a.z_strong * a.ft))),
+                                abs[1]
+                                    .scale(1.0 / (a.z_strong * a.fb_strong))
+                                    .add(&n.scale(-1.0 / (a.area * a.fb_strong))),
+                            ]
+                            .into_iter()
+                            .collect::<Vec<_>>()
+                        } else {
+                            vec![abs[0]
+                                .scale(1.0 / (a.area * if n.value(m) < 0.0 { a.fc } else { a.ft }))
+                                .add(&abs[1].scale(1.0 / (a.z_strong * a.fb_strong)))
+                                .add(&abs[2].scale(1.0 / (a.z_weak * a.fb_weak)))]
+                        };
+                        if let Some((_, web_depth_mm, tw)) = crate::steel::symmetric_h_web(sec) {
+                            if force_polys[4].0.iter().all(|&c| c == 0.0) {
+                                let normal = abs[0]
+                                    .scale(1.0 / (a.area * a.ft))
+                                    .add(&abs[1].scale(web_depth_mm / (2.0 * sec.iy * a.ft)))
+                                    .add(&abs[2].scale(tw / (2.0 * sec.iz * a.ft)));
+                                let shear = abs[3].scale(1.0 / (web_depth_mm * tw * a.fs));
+                                checks.push(squared_norm(&normal, &shear, 1.0));
+                            }
+                        }
+                        for p in checks {
                             match finite_roots(&p.derivative(), sw[0], sw[1]) {
                                 Ok(points) => positions.extend(points),
                                 Err(_) => {
@@ -620,8 +640,13 @@ pub fn design_post(model: &Model, sm: &SecondaryMember) -> PostDesignResult {
                                 reason: reason.clone(),
                             }
                         } else {
-                            let mut check = crate::steel::SteelDesign
+                            let (mut check, incomplete) = crate::steel::SteelDesign
                                 .check_secondary_post(&forces, sec, mat, &ctx);
+                            if let Some(reason) = incomplete {
+                                if !c.reasons.contains(&reason) {
+                                    c.reasons.push(reason);
+                                }
+                            }
                             if lk.is_none() || lb.is_none() {
                                 if let CheckOutcome::Checked(r) = &mut check {
                                     r.components.retain(|c| c.kind == CheckKind::Shear);
@@ -690,9 +715,13 @@ mod tests {
         let dead = m.post_design_inputs[0].lateral_loads[0].case;
         m.combinations[0].terms = vec![(dead, 1.0)];
         let r = run(&m);
-        assert!(r.complete(), "{r:?}");
+        assert!(!r.complete(), "{r:?}");
         assert!(r.ratio().is_finite());
         let c = &r.combinations[0];
+        assert!(c
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("せん断力の断面形状・方向")));
         let gravity = c.gravity_reactions.unwrap();
         assert!((gravity[0] - 1070.112).abs() < 1e-6);
         assert_eq!(gravity[1], 0.0);
@@ -757,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn nonfinite_check_extremum_keeps_known_slenderness_failure_and_shear() {
+    fn nonfinite_check_extremum_keeps_known_slenderness_failure() {
         let mut m = fixture::steel_post_model();
         let dead = m.post_design_inputs[0].lateral_loads[0].case;
         m.combinations[0].terms = vec![(dead, 1.0)];
@@ -790,13 +819,10 @@ mod tests {
         let CheckOutcome::Checked(end_check) = &end.check else {
             panic!("{:?}", end.check);
         };
-        let shear = end_check
+        assert!(!end_check
             .components
             .iter()
-            .find(|c| c.kind == CheckKind::Shear)
-            .unwrap()
-            .ratio;
-        assert!((shear - 0.011265941018241138).abs() < 1e-12);
+            .any(|c| c.kind == CheckKind::Shear));
     }
 
     #[test]
@@ -1035,7 +1061,7 @@ mod tests {
         let mut m = fixture::steel_post_model();
         let dead = m.post_design_inputs[0].lateral_loads[0].case;
         m.combinations[0].terms = vec![(dead, 1.0)];
-        for (w, complete) in [(1e153, true), (1e155, false)] {
+        for w in [1e153, 1e155] {
             m.post_design_inputs[0].lateral_loads[0].load = MemberLoadKind::Distributed {
                 a: 0.0,
                 b: 3000.0,
@@ -1044,7 +1070,7 @@ mod tests {
             };
             let r = run(&m);
             let c = &r.combinations[0];
-            assert_eq!(r.complete(), complete, "{:?}", c.reasons);
+            assert!(!r.complete());
             assert!(r.ratio().is_finite());
             let reactions = c.lateral_reactions.unwrap();
             assert!((reactions[0][0] / w - 1500.0).abs() < 1e-8);
@@ -1069,16 +1095,7 @@ mod tests {
                 .iter()
                 .any(|c| c.kind == CheckKind::AxialBending));
             assert!(check.components.iter().all(|c| c.ratio.is_finite()));
-            assert_eq!(
-                check.components.iter().any(|c| c.kind == CheckKind::Shear),
-                complete
-            );
-            if !complete {
-                assert!(c
-                    .reasons
-                    .iter()
-                    .any(|r| r.contains("せん断の検定比の計算で非有限値が発生しました")));
-            }
+            assert!(!check.components.iter().any(|c| c.kind == CheckKind::Shear));
         }
     }
     #[test]
@@ -1087,7 +1104,7 @@ mod tests {
         let before = run(&m);
         m.wall_regions[0].posts[0].gravity_end_shares = Some([0.0, 1.0]);
         let after = run(&m);
-        assert!(after.complete(), "{after:?}");
+        assert!(!after.complete());
         assert!(before.combinations[0]
             .positions
             .iter()
@@ -1145,7 +1162,9 @@ mod tests {
         m.post_design_inputs[0].buckling_lengths_mm = None;
         let missing = run(&m);
         assert!(!missing.complete());
-        assert!(missing.combinations[0].positions.iter().any(|p|matches!(&p.check,CheckOutcome::Checked(r) if r.components.iter().all(|c|c.kind==CheckKind::Shear))));
+        assert!(missing.combinations[0].positions.iter().all(|p| {
+            matches!(&p.check, CheckOutcome::Skipped { reason } if reason.contains("座屈条件"))
+        }));
     }
     #[test]
     fn simultaneous_two_direction_displacement_uses_vector_at_same_position() {
@@ -1212,7 +1231,7 @@ mod tests {
                 w2: w * factor,
             };
             let r = run(&m);
-            assert!(r.complete(), "{r:?}");
+            assert!(!r.complete());
             assert_eq!(r.ratio() <= 1.0, ok, "{}", r.ratio());
         }
         let long = run(&m);
@@ -1250,7 +1269,7 @@ mod tests {
         let c = &baseline.combinations[0];
         assert_eq!(c.deflection_ratio, Some(delta / 3000.0));
         assert!(!c.deflection_limit_exceeded_without_ratio);
-        assert!(baseline.complete());
+        assert!(!baseline.complete());
     }
 
     #[test]
@@ -1325,7 +1344,7 @@ mod tests {
         });
         m.next_secondary_member_id = 2;
         let r = run(&m);
-        assert!(r.complete(), "{r:?}");
+        assert!(!r.complete());
         let c = &r.combinations[0];
         // 鉄骨線重量0.356704 N/mm、架け側の面間自重区間800 mmの半分142.6816 Nを受ける。
         assert!((c.gravity_reactions.unwrap().iter().sum::<f64>() - 1212.7936).abs() < 1e-6);
@@ -1351,7 +1370,7 @@ mod tests {
                 < 1e-8
         );
         let rotated = run(&m);
-        assert!(rotated.complete(), "{rotated:?}");
+        assert!(!rotated.complete());
         assert!(
             (rotated.combinations[0]
                 .gravity_reactions

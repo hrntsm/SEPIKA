@@ -30,8 +30,8 @@ fn checks(model: &Model, mz_nmm: f64) -> Result<Vec<CheckOutcome>, String> {
 #[test]
 fn confirmed_end_supports_use_the_eccentric_physical_length() {
     for (offset_mm, lb_mm, expected, ok) in [
-        (0.0, 3000, 0.973_509_006_066, true),
-        (500.0, 3500, 1.039_363_326_692, false),
+        (0.0, 3000, 0.973_267_775_687, true),
+        (500.0, 3500, 1.039_020_941_735, false),
     ] {
         let mut model = input::column(offset_mm, true);
         model.steel_design_attrs[0].lb_direct = Some((450.0, 350.0, 250.0));
@@ -56,26 +56,15 @@ fn confirmed_end_supports_use_the_eccentric_physical_length() {
 }
 
 #[test]
-fn unconfirmed_or_intermediate_supports_do_not_provide_a_column_buckling_length() {
-    for (confirmed, count, direct, reason) in [
-        (false, None, None, "両実材端での横移動・ねじれの拘束"),
-        (false, Some(0), None, "中間横補剛なしが未確認"),
-        (
-            false,
-            None,
-            Some((1000.0, 1500.0, 1000.0)),
-            "実材端以外の支点",
-        ),
-        (true, Some(1), None, "中間横補剛が入力されています"),
-    ] {
-        let mut model = input::column(500.0, confirmed);
+fn blank_support_confirmation_uses_nodes_even_with_eccentric_ends() {
+    for count in [None, Some(0)] {
+        let mut model = input::column(500.0, false);
         model.steel_design_attrs[0].lateral_brace_count = count;
-        model.steel_design_attrs[0].lb_direct = direct;
         let outcomes = checks(&model, 215e6).unwrap();
         assert_eq!(outcomes.len(), 3);
         for outcome in outcomes {
             assert!(
-                matches!(&outcome, CheckOutcome::Skipped { reason: actual } if actual.contains(reason)),
+                matches!(&outcome, CheckOutcome::Checked(result) if result.ok() && result.detail.contains("lb=3000 mm（節点間距離の既定値）")),
                 "{outcome:?}"
             );
         }
@@ -84,7 +73,8 @@ fn unconfirmed_or_intermediate_supports_do_not_provide_a_column_buckling_length(
 
 #[test]
 fn failure_lower_bound_and_missing_support_are_both_reported() {
-    let model = input::column(500.0, false);
+    let mut model = input::column(500.0, false);
+    model.steel_design_attrs[0].lateral_brace_count = Some(1);
     let outcomes = checks(&model, 300e6).unwrap();
     assert_eq!(outcomes.len(), 6);
     let (pairs, _) = outcomes.as_chunks::<2>();
@@ -96,7 +86,7 @@ fn failure_lower_bound_and_missing_support_are_both_reported() {
         let check = &result.components[0];
         assert_eq!(check.kind, CheckKind::AxialBending);
         assert!(check.detail.contains("軸曲げ比の下限"));
-        assert!(reason.contains("中間横補剛なしが未確認"));
+        assert!(reason.contains("中間横補剛が入力されています"));
     }
     let outcomes = checks(&model, 0.0).unwrap();
     assert_eq!(outcomes.len(), 3);

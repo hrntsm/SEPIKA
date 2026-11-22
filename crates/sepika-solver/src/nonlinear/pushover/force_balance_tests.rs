@@ -132,8 +132,7 @@ fn fixed_loaded_member_keeps_nonzero_total_resistance_with_zero_displacement() {
             SeismicDir::X,
             &[3000.],
             DuctilityMethod::default(),
-            crate::nonlinear::pushover::shear_yield::compute_shear_yield_thresholds(&model)
-                .unwrap(),
+            crate::nonlinear::pushover::shear_yield::build_shear_yield_thresholds(&model),
             super::loads::PhysicalPushoverLoads::empty(),
         );
         recorder.physical_loads = super::loads::PhysicalPushoverLoads::new(
@@ -433,7 +432,7 @@ fn invalid_physical_load_keeps_all_previous_confirmed_records() {
         SeismicDir::X,
         &[3000.],
         DuctilityMethod::default(),
-        crate::nonlinear::pushover::shear_yield::compute_shear_yield_thresholds(&model).unwrap(),
+        crate::nonlinear::pushover::shear_yield::build_shear_yield_thresholds(&model),
         super::loads::PhysicalPushoverLoads::empty(),
     );
     let displacement = vec![0.; map.n_active()];

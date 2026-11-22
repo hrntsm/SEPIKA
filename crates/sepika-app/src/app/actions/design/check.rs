@@ -288,6 +288,17 @@ impl App {
                     term: self.core.design_term,
                     girder_column_face_forces: selected_response
                         .map_or(&[], |response| &response.girder_column_face_forces),
+                    steel_panel_column_face_forces: selected_response
+                        .filter(|response| {
+                            response.panel_moments == results.panel_moments
+                                && (response.member_forces == results.member_forces
+                                    || selected_combo_name.is_some()
+                                        && same_saved_member_forces(
+                                            &response.member_forces,
+                                            &results.member_forces,
+                                        ))
+                        })
+                        .map_or(&[], |response| &response.steel_panel_column_face_forces),
                     wall_index: wall_index.as_ref(),
                     wall_case: &wall_case,
                     load_terms: load_terms.as_deref(),
@@ -298,7 +309,6 @@ impl App {
                     long_member_forces,
                     q_simple_by_elem: Some(&q0_by_elem),
                     girder_group_overrides: Some(&group_overrides),
-                    steel_fb_basis: sepika_design_jp::SteelFbBasis::default(),
                 },
             )
         } else {

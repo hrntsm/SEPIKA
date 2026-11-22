@@ -150,7 +150,12 @@ pub struct StaticOnce {
     /// 対象の大梁がない場合とケース応答を持たない空の組合せでは空。
     #[serde(default)]
     pub girder_column_face_forces: Vec<(ElemId, GirderColumnFaceEnds)>,
+    /// S造仕口パネルの上下フランジ位置で回収した、荷重込みの柱材軸力。
+    pub steel_panel_column_face_forces: Vec<SteelPanelColumnFaceForce>,
 }
+
+mod steel_panel_faces;
+pub use steel_panel_faces::SteelPanelColumnFaceForce;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GirderColumnFaceForces {
@@ -179,6 +184,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
             column_end_axial_forces: Vec::new(),
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            steel_panel_column_face_forces: Vec::new(),
         });
     };
     let mut disp = vec![[0.0; 6]; first.disp.len()];
@@ -250,6 +256,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
         member_forces,
         panel_moments,
         girder_column_face_forces: superpose_girder_column_faces(terms)?,
+        steel_panel_column_face_forces: steel_panel_faces::superpose(terms)?,
         column_end_horizontal_forces: superpose_column_end_forces(
             terms,
             |res| &res.column_end_horizontal_forces,
@@ -813,7 +820,9 @@ fn recover_static(
     let mut panel_moments = Vec::new();
     let adjacency = NodeAdjacency::primary_frame(model);
     let mut girder_column_face_forces = Vec::new();
-    for (elem, &(_, behavior, gdofs)) in model.elements.iter().zip(entries) {
+    let steel_panel_sections = steel_panel_faces::recovery_sections(model, &adjacency);
+    let mut steel_panel_column_face_forces = Vec::new();
+    for (index, (elem, &(_, behavior, gdofs))) in model.elements.iter().zip(entries).enumerate() {
         let u_elem = crate::common::elem_loop::gather_u_elem(gdofs, u_free);
         let loads = physical.member_loads(elem.id);
         if behavior.owns_frame_member_loads() {
@@ -849,6 +858,11 @@ fn recover_static(
                 Some(&response.section),
                 &mut girder_column_face_forces,
             );
+            steel_panel_faces::recover(
+                &steel_panel_sections[index],
+                Some(&response.section),
+                &mut steel_panel_column_face_forces,
+            );
             for (i, node) in elem.nodes.iter().enumerate() {
                 for d in 0..6 {
                     reactions[node.index()][d] += response.nodal_residual.data[i * 6 + d];
@@ -861,6 +875,11 @@ fn recover_static(
                 &adjacency,
                 None,
                 &mut girder_column_face_forces,
+            );
+            steel_panel_faces::recover(
+                &steel_panel_sections[index],
+                None,
+                &mut steel_panel_column_face_forces,
             );
             if let Some(mut forces) = behavior.recover_forces(&u_elem) {
                 superpose_member_loads(model, elem, loads, &mut forces);
@@ -930,6 +949,7 @@ fn recover_static(
             member_forces,
             panel_moments,
             girder_column_face_forces,
+            steel_panel_column_face_forces,
             column_end_horizontal_forces,
             column_end_axial_forces,
         },

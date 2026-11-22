@@ -8,7 +8,7 @@ use sepika_element::factory::StrengthBasis;
 use sepika_element::wall::wall_element::WallElement;
 
 fn fixture() -> Model {
-    let mut model = super::steel_wall_notice_tests::steel_wall_model();
+    let mut model = super::steel_wall_tests::steel_wall_model();
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
     model.materials.truncate(1);
     let concrete = &mut model.materials[0];

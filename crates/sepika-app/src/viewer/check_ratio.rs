@@ -1390,23 +1390,20 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_box_has_no_success_ratio_or_tooltip_value() {
-        let app = crate::app::shear_area_acceptance_tests::unsupported_box();
+    fn rounded_box_tooltip_shows_incomplete_shear_without_a_passing_ratio() {
+        let app = crate::app::shear_area_acceptance_tests::rounded_box_girder();
         let checks = &app.current_design_results().unwrap().member_checks;
         let positions = elem_check_positions(checks, ElemId(0));
         assert!(!positions.is_empty());
         for position in positions {
-            for filter in [
-                CheckRatioFilter::Max,
-                CheckRatioFilter::Kind(CheckKind::Shear),
-            ] {
-                assert_eq!(ratio_for_filter(&position.outcome, filter), None);
-            }
+            assert_eq!(
+                ratio_for_filter(&position.outcome, CheckRatioFilter::Kind(CheckKind::Shear)),
+                None
+            );
         }
         let (kinds, rows) = build_tooltip_rows(positions);
         assert!(kinds.is_empty());
-        assert!(rows.iter().all(|row| row.values.is_empty()
-            && matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("適用範囲外"))));
+        assert!(rows.iter().all(|row| matches!(&row.verdict, RowVerdict::Skipped(reason) if reason.contains("せん断力の断面形状・方向"))));
     }
 
     #[test]

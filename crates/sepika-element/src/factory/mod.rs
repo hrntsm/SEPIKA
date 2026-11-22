@@ -27,10 +27,10 @@ pub(crate) use input_check::member_rebar_material_strength_issue;
 pub use input_check::{
     elastic_stiffness_input_issue, ensure_nonlinear_input, ensure_nonlinear_input_for_kind,
     ensure_nonlinear_input_with_basis, ensure_rc_beam_reference_loads,
-    ensure_wall_side_column_analysis, nodal_mass_frame_input_issue, nonlinear_input_issues,
-    nonlinear_input_issues_for_kind, rc_beam_reference_input_issue,
-    steel_section_primary_material_issue, wall_side_column_input_issue,
-    wall_side_column_input_issue_with_index, wall_side_column_issue_message,
+    ensure_wall_side_column_analysis, nonlinear_input_issues, nonlinear_input_issues_for_kind,
+    rc_beam_reference_input_issue, steel_section_primary_material_issue,
+    wall_side_column_input_issue, wall_side_column_input_issue_with_index,
+    wall_side_column_issue_message,
 };
 pub use regime::{resolve_force_regime, ResolvedRegime};
 pub use sepika_core::model::AnalysisKind;
@@ -222,7 +222,7 @@ impl StrengthBasis {
 /// 保有水平耐力計算は [`StrengthBasis::MaterialStrength`] を渡す。
 /// RC矩形梁の集中ばね入力が不正・不足なら診断文付きでpanicする。
 /// RC耐震壁の `wall_capacity` には事前解決した局所正負の順のQu `[N]` の有限正値を渡す。
-/// RC耐震壁で値が欠落・不正の場合は、壁IDを含む診断文付きでpanicする。
+/// RC耐震壁で値が欠落・不正の場合と、鋼板耐震壁や仕口パネルでは、診断文付きでpanicする。
 /// `model` は `Model::validate_local_frames` 済みを前提とする。
 pub fn build_nonlinear_behavior(
     data: &ElementData,
@@ -318,55 +318,36 @@ pub fn build_nonlinear_behavior(
             model,
         ),
         ElementKind::Wall => {
-            let rc_wall = crate::wall::misc_wall::is_rc_wall(data, model);
-            if rc_wall && !crate::wall::misc_wall::wall_is_seismic(data, model) {
+            use crate::wall::wall_element::WallElement;
+
+            if !crate::wall::misc_wall::wall_is_seismic(data, model) {
                 return build_behavior(data, model);
             }
-            let qu = if rc_wall {
-                let qu = wall_capacity.unwrap_or_else(|| {
-                    panic!("壁 ID {}: runの静的一次参照Quが未解決です", data.id.0)
-                });
-                assert!(
-                    qu.iter().all(|v| v.is_finite() && *v > 0.0),
-                    "壁 ID {}: runのQuは有限正値が必要です",
-                    data.id.0
-                );
-                qu
-            } else {
-                [crate::wall::wall_element::WallElement::steel_shear_capacity_of(data, model); 2]
-            };
-            if !rc_wall && qu.iter().any(|q| *q <= 0.0) {
-                return build_behavior(data, model);
+            if !crate::wall::misc_wall::is_rc_wall(data, model) {
+                panic!("{}", WallElement::unsupported_steel_wall_nonlinear(data));
             }
-            let stiffness_scale = if crate::wall::misc_wall::wall_is_seismic(data, model) {
-                1.0
-            } else {
-                1e-9
-            };
-            match crate::wall::wall_element::WallElement::try_new_scaled(
-                data,
-                model,
-                stiffness_scale,
-            ) {
-                Some(panel) => {
-                    let panel = if stiffness_scale >= 1.0 && rc_wall {
-                        panel
-                            .with_fiber_flexure(data, model, basis, kind)
-                            .unwrap_or_else(|reason| panic!("{reason}"))
-                    } else {
-                        panel
-                    };
-                    let panel = panel
-                        .with_shear_capacity(qu)
-                        .with_shear_hysteresis(resolve_wall_shear_hysteresis(data, model, kind));
-                    Box::new(panel)
-                }
-                None if !rc_wall => build_behavior(data, model),
-                None => panic!("壁要素ID {}を生成できません", data.id.0),
-            }
+            let qu = wall_capacity
+                .unwrap_or_else(|| panic!("壁 ID {}: runの静的一次参照Quが未解決です", data.id.0));
+            assert!(
+                qu.iter().all(|v| v.is_finite() && *v > 0.0),
+                "壁 ID {}: runのQuは有限正値が必要です",
+                data.id.0
+            );
+            let panel = WallElement::try_new_scaled(data, model, 1.0)
+                .unwrap_or_else(|| panic!("壁要素ID {}を生成できません", data.id.0))
+                .with_fiber_flexure(data, model, basis, kind)
+                .unwrap_or_else(|reason| panic!("{reason}"))
+                .with_shear_capacity(qu)
+                .with_shear_hysteresis(resolve_wall_shear_hysteresis(data, model, kind));
+            Box::new(panel)
         }
         ElementKind::PanelZone => {
-            Box::new(crate::springs::panel::PanelZone::new_nonlinear(data, model))
+            use crate::springs::panel::PanelZone;
+
+            if let Some(reason) = PanelZone::nonlinear_issue(data, model) {
+                panic!("{reason}");
+            }
+            Box::new(PanelZone::new_nonlinear(data, model))
         }
         _ => build_behavior(data, model),
     }

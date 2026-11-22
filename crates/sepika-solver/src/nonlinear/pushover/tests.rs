@@ -1142,7 +1142,6 @@ fn test_portal_frame_collapse_load() {
 
 #[test]
 fn test_compute_shear_yield_qy_static_formulas_and_guards() {
-    // 鋼系（fy 設定あり）: Qy = as・fy/√3（RC 形状の有無・方向によらない）。
     let steel = Material {
         strength_factor: None,
         concrete_class: Default::default(),
@@ -1162,17 +1161,12 @@ fn test_compute_shear_yield_qy_static_formulas_and_guards() {
             material: Some(&steel),
             rebar_mat: None,
             shear_mat: None,
-            steel_mat: None,
         },
         None,
         ShearDir::Z,
         3000.0,
     );
-    let expected = 1000.0 * 200.0 / 3.0_f64.sqrt();
-    assert!(
-        (qy - expected).abs() < 1e-6,
-        "qy={qy} should equal as*fy/sqrt(3)={expected}"
-    );
+    assert_eq!(qy, f64::INFINITY);
 
     // RC系（fy 無し・fc 設定あり）かつ断面形状情報がない場合:
     // Qy = as・0.7√fc（慣用値へフォールバック）。
@@ -1195,7 +1189,6 @@ fn test_compute_shear_yield_qy_static_formulas_and_guards() {
             material: Some(&rc),
             rebar_mat: None,
             shear_mat: None,
-            steel_mat: None,
         },
         None,
         ShearDir::Z,
@@ -1214,7 +1207,6 @@ fn test_compute_shear_yield_qy_static_formulas_and_guards() {
                 material: Some(&steel),
                 rebar_mat: None,
                 shear_mat: None,
-                steel_mat: None,
             },
             None,
             ShearDir::Z,
@@ -1229,7 +1221,6 @@ fn test_compute_shear_yield_qy_static_formulas_and_guards() {
                 material: None,
                 rebar_mat: None,
                 shear_mat: None,
-                steel_mat: None,
             },
             None,
             ShearDir::Z,
@@ -1239,285 +1230,26 @@ fn test_compute_shear_yield_qy_static_formulas_and_guards() {
     );
 }
 
-/// SRC 矩形の Qy は「RC 部（荒川式）＋内蔵鉄骨の全塑性せん断 sAw·F/√3」の
-/// 累加式。同一の b・d・配筋の矩形柱との差が鉄骨項の手計算値と一致する。
 #[test]
-fn test_compute_shear_yield_qy_src_is_rc_plus_steel() {
-    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
-
-    let mat = Material {
-        strength_factor: None,
-        concrete_class: Default::default(),
-        id: MaterialId(0),
-        name: "FC24".to_string(),
-        category: MaterialCategory::Concrete,
-        young: 23000.0,
-        poisson: 0.2,
-        density: 0.0,
-        shear: None,
-        fc: Some(24.0),
-        fy: None,
-    };
-    let rebar = RcRectColumnRebar {
-        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
-        x: vec![8],
-        y: vec![4],
-        cover: 40.0,
-        hoop: RectColumnHoop {
-            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
-            pitch: 100.0,
-            legs_x: 2,
-            legs_y: 2,
-        },
-    };
-    let rc_shape = SectionShape::RcColumnRect {
-        b: 600.0,
-        d: 600.0,
-        rebar: rebar.clone(),
-    };
-    let src_shape = SectionShape::SrcColumnRect {
-        b: 600.0,
-        d: 600.0,
+fn src_members_do_not_use_rc_or_steel_fallback_display_thresholds() {
+    let (mut model, rebar, b, d) = rc_column_model_with_rigid_zone(Default::default());
+    model.sections[0].shape = Some(SectionShape::SrcColumnRect {
+        b,
+        d,
         rebar,
         steel_height: 400.0,
         steel_width: 200.0,
         steel_web_thick: 8.0,
-        steel_flange_thick: 13.0,
-    };
-    let rc_sec = rc_shape.to_section(SectionId(0), "rc".into());
-    let src_sec = src_shape.to_section(SectionId(1), "src".into());
-    let rebar_mat = Material {
-        id: MaterialId(1),
-        name: "SD345".to_string(),
-        category: MaterialCategory::Rebar,
-        fy: Some(345.0),
-        fc: None,
-        ..mat.clone()
-    };
-    let shear_mat = Material {
-        id: MaterialId(2),
-        name: "SD295A".to_string(),
-        fy: Some(295.0),
-        ..rebar_mat.clone()
-    };
-    let steel_mat = Material {
-        id: MaterialId(3),
-        name: "SN400B".to_string(),
-        category: MaterialCategory::Steel,
-        fy: Some(235.0),
-        ..rebar_mat.clone()
-    };
-
-    // 強軸（局所 y）: 鉄骨項 = tw·(H−2tf)·F·1.1/√3（SN400B tf/tw≤40 → F=235）。
-    let qy_rc = compute_shear_yield_qy(
-        1.0,
-        SecMaterials {
-            material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
-            shear_mat: Some(&shear_mat),
-            steel_mat: Some(&steel_mat),
-        },
-        Some(&rc_sec),
-        ShearDir::Y,
-        3000.0,
-    );
-    let qy_src = compute_shear_yield_qy(
-        1.0,
-        SecMaterials {
-            material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
-            shear_mat: Some(&shear_mat),
-            steel_mat: Some(&steel_mat),
-        },
-        Some(&src_sec),
-        ShearDir::Y,
-        3000.0,
-    );
-    let steel_y = 8.0 * (400.0 - 2.0 * 13.0) * 235.0 * 1.1 / 3.0_f64.sqrt();
-    assert!(
-        (qy_src - qy_rc - steel_y).abs() < 1e-6,
-        "強軸: qy_src−qy_rc={} 期待 {}",
-        qy_src - qy_rc,
-        steel_y
-    );
-
-    // 弱軸（局所 z）: 鉄骨項 = 2·B·tf·F·1.1/√3。
-    let qy_rc_z = compute_shear_yield_qy(
-        1.0,
-        SecMaterials {
-            material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
-            shear_mat: Some(&shear_mat),
-            steel_mat: Some(&steel_mat),
-        },
-        Some(&rc_sec),
-        ShearDir::Z,
-        3000.0,
-    );
-    let qy_src_z = compute_shear_yield_qy(
-        1.0,
-        SecMaterials {
-            material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
-            shear_mat: Some(&shear_mat),
-            steel_mat: Some(&steel_mat),
-        },
-        Some(&src_sec),
-        ShearDir::Z,
-        3000.0,
-    );
-    let steel_z = 2.0 * 200.0 * 13.0 * 235.0 * 1.1 / 3.0_f64.sqrt();
-    assert!(
-        (qy_src_z - qy_rc_z - steel_z).abs() < 1e-6,
-        "弱軸: qy_src−qy_rc={} 期待 {}",
-        qy_src_z - qy_rc_z,
-        steel_z
-    );
-
-    // fyを先に採用するとSRCの等価面積へ鋼材式を適用し、せん断降伏を検出し損ねるため累加式を使う。
-    let mut mat_with_fy = mat.clone();
-    mat_with_fy.fy = Some(235.0);
-    let qy_with_fy = compute_shear_yield_qy(
-        1.0e6,
-        SecMaterials {
-            material: Some(&mat_with_fy),
-            rebar_mat: Some(&rebar_mat),
-            shear_mat: Some(&shear_mat),
-            steel_mat: Some(&steel_mat),
-        },
-        Some(&src_sec),
-        ShearDir::Y,
-        3000.0,
-    );
-    assert!(
-        (qy_with_fy - qy_src).abs() < 1e-6,
-        "fy 設定時も累加式: qy={} 期待 {}",
-        qy_with_fy,
-        qy_src
-    );
-
-    // 板厚区分: フランジ厚 45mm（>40）の SN400B は弱軸（フランジ）の F が
-    // 215 へ落ち、強軸（ウェブ tw=8 ≤40）は 235 のまま（板厚は板要素ごとに解決）。
-    let thick_flange = SectionShape::SrcColumnRect {
-        b: 600.0,
-        d: 600.0,
-        rebar: match &rc_shape {
-            SectionShape::RcColumnRect { rebar, .. } => rebar.clone(),
-            _ => unreachable!(),
-        },
-        steel_height: 400.0,
-        steel_width: 200.0,
-        steel_web_thick: 8.0,
-        steel_flange_thick: 45.0,
-    };
-    let tf_sec = thick_flange.to_section(SectionId(2), "src-tf45".into());
-    let qy_tf_z = compute_shear_yield_qy(
-        1.0,
-        SecMaterials {
-            material: Some(&mat),
-            rebar_mat: Some(&rebar_mat),
-            shear_mat: Some(&shear_mat),
-            steel_mat: Some(&steel_mat),
-        },
-        Some(&tf_sec),
-        ShearDir::Z,
-        3000.0,
-    );
-    let steel_tf_z = 2.0 * 200.0 * 45.0 * 215.0 * 1.1 / 3.0_f64.sqrt();
-    assert!(
-        (qy_tf_z - qy_rc_z - steel_tf_z).abs() < 1e-6,
-        "厚板フランジの弱軸: qy_src−qy_rc={} 期待 {}",
-        qy_tf_z - qy_rc_z,
-        steel_tf_z
-    );
-}
-
-#[test]
-fn test_compute_shear_yield_qy_real_rebar_beam_uses_both_directions_and_steel_factor() {
-    use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
-
-    let concrete = Material {
-        strength_factor: None,
-        concrete_class: Default::default(),
-        id: MaterialId(0),
-        name: "FC24".to_string(),
-        category: MaterialCategory::Concrete,
-        young: 23000.0,
-        poisson: 0.2,
-        density: 0.0,
-        shear: None,
-        fc: Some(24.0),
-        fy: None,
-    };
-    let rebar = RcBeamRebar {
-        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
-        top: vec![4],
-        bottom: vec![4],
-        cover: 40.0,
-        stirrup: BeamStirrup {
-            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
-            pitch: 100.0,
-            legs: 2,
-        },
-    };
-    let rc_shape = SectionShape::RcBeamRect {
-        b: 600.0,
-        d: 700.0,
-        rebar: rebar.clone(),
-    };
-    let src_shape = SectionShape::SrcBeamRect {
-        b: 600.0,
-        d: 700.0,
-        rebar,
-        steel_height: 450.0,
-        steel_width: 200.0,
-        steel_web_thick: 8.0,
-        steel_flange_thick: 13.0,
-    };
-    let rc_sec = rc_shape.to_section(SectionId(0), "rc-beam".into());
-    let src_sec = src_shape.to_section(SectionId(1), "src-beam".into());
-    let rebar_mat = Material {
-        id: MaterialId(1),
-        name: "SD345".to_string(),
-        category: MaterialCategory::Rebar,
-        fy: Some(345.0),
-        fc: None,
-        ..concrete.clone()
-    };
-    let shear_mat = Material {
-        id: MaterialId(2),
-        name: "SD295A".to_string(),
-        category: MaterialCategory::Rebar,
-        fy: Some(295.0),
-        fc: None,
-        ..rebar_mat.clone()
-    };
-    let steel_mat = Material {
-        id: MaterialId(3),
-        name: "SN400B".to_string(),
-        category: MaterialCategory::Steel,
-        fy: Some(235.0),
-        strength_factor: Some(1.25),
-        fc: None,
-        ..rebar_mat.clone()
-    };
-    let mats = SecMaterials {
-        material: Some(&concrete),
-        rebar_mat: Some(&rebar_mat),
-        shear_mat: Some(&shear_mat),
-        steel_mat: Some(&steel_mat),
-    };
-
-    let qy_rc = compute_shear_yield_qy(1.0, mats, Some(&rc_sec), ShearDir::Y, 3000.0);
-    let qy_src = compute_shear_yield_qy(1.0, mats, Some(&src_sec), ShearDir::Y, 3000.0);
-    let steel_y = 8.0 * (450.0 - 2.0 * 13.0) * 235.0 * 1.25 / 3.0_f64.sqrt();
-    assert!(qy_rc.is_finite() && qy_rc > 0.0);
-    assert!((qy_src - qy_rc - steel_y).abs() < 1e-6);
-
-    let qy_rc_z = compute_shear_yield_qy(1.0, mats, Some(&rc_sec), ShearDir::Z, 3000.0);
-    let qy_src_z = compute_shear_yield_qy(1.0, mats, Some(&src_sec), ShearDir::Z, 3000.0);
-    assert!(qy_rc_z.is_finite() && qy_rc_z > 0.0);
-    assert!((qy_src_z - qy_rc_z).abs() < 1e-6);
+        steel_flange_thick: 12.0,
+    });
+    for material_yield in [None, Some(235.0)] {
+        model.materials[0].fy = material_yield;
+        let shear = build_shear_yield_thresholds(&model);
+        assert!(!shear[0].y.qy(0.0).is_finite());
+        assert!(!shear[0].z.qy(0.0).is_finite());
+        let hinge = compute_hinge_thresholds(&model);
+        assert_eq!((hinge[0].mc, hinge[0].my), (0.0, 0.0));
+    }
 }
 
 #[test]
@@ -1555,7 +1287,6 @@ fn test_compute_shear_yield_qy_real_rebar_beam_uses_unfavorable_top_or_bottom() 
         material: Some(&concrete),
         rebar_mat: Some(&rebar_mat),
         shear_mat: Some(&shear_mat),
-        steel_mat: None,
     };
     let make = |top, bottom| {
         SectionShape::RcBeamRect {
@@ -1668,7 +1399,6 @@ fn test_compute_shear_yield_qy_rc_rect_matches_arakawa_handcalc() {
             material: Some(&mat),
             rebar_mat: Some(&rebar_mat),
             shear_mat: Some(&shear_mat),
-            steel_mat: None,
         },
         Some(&sec),
         ShearDir::Y,
@@ -1700,7 +1430,6 @@ fn test_compute_shear_yield_qy_rc_rect_matches_arakawa_handcalc() {
             material: Some(&mat),
             rebar_mat: Some(&rebar_mat),
             shear_mat: None,
-            steel_mat: None,
         },
         Some(&sec),
         ShearDir::Z,
@@ -1775,7 +1504,6 @@ fn test_section_rebar_materials_are_reflected_in_capacities() {
                 material: Some(&mat),
                 rebar_mat: Some(&sd345),
                 shear_mat: Some(shear_mat),
-                steel_mat: None,
             },
             Some(&sec),
             ShearDir::Y,
@@ -1823,44 +1551,17 @@ fn test_section_rebar_materials_are_reflected_in_capacities() {
     );
 }
 
-/// as_y・as_z を独立に設定した片持ち柱モデル（局所 y・z 方向分離の検証用）。
-fn single_column_model_with_shear_yz(fy: f64, seismic_weight: f64, as_y: f64, as_z: f64) -> Model {
-    let mut model = single_column_model(fy, seismic_weight);
-    model.sections[0].as_y = as_y;
-    model.sections[0].as_z = as_z;
-    model
-}
-
-/// `single_column_model` は節点 (0,0,0)→(0,0,3000)、`local_axis.ref_vector=[1,0,0]`
-/// なので局所座標系は ex=[0,0,1], ey=[1,0,0], ez=[0,1,0]（`LocalFrame::from_nodes`）。
-/// `SeismicDir::X` でプッシュすると力はグローバル X＝局所 y（ey）方向に生じ、
-/// 局所 z（ez＝グローバル Y）方向にはほぼ生じない。
-/// 局所 y のしきい値は断面 as_z、局所 z は断面 as_y から作られる（クロス変換）。
-fn run_pushover_has_shear_yield(as_y: f64, as_z: f64) -> bool {
-    let model = single_column_model_with_shear_yz(235.0, 80_000.0, as_y, as_z);
+#[test]
+fn ordinary_steel_pushover_does_not_use_elastic_areas_as_shear_yield_strengths() {
+    let mut model = single_column_model(235.0, 80_000.0);
+    model.sections[0].as_y = 50.0;
+    model.sections[0].as_z = 50.0;
     let dofmap = DofMap::build(&model);
     let reducer = Reducer::build(&model, &dofmap);
     let result = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 20, 0.0)
         .expect("pushover should run end-to-end");
-    !result.shear_yields.is_empty()
-}
-
-/// 局所 y/z 方向の厳密分離の検証:
-/// 実際に力が生じる方向（局所 y、しきい値は断面 as_z 由来）の Qy を小さくすれば
-/// せん断降伏イベントが記録されるが、力がほぼ生じない方向（局所 z、断面 as_y 由来）
-/// の Qy をどれだけ小さくしても記録されないこと。
-#[test]
-fn test_pushover_shear_yield_direction_independent() {
-    assert!(
-        run_pushover_has_shear_yield(1.0e12, 50.0),
-        "small as_z (feeding the actually-stressed local-y threshold) should trigger a shear \
-             yield event"
-    );
-    assert!(
-        !run_pushover_has_shear_yield(50.0, 1.0e12),
-        "small as_y (feeding the unstressed local-z threshold) should NOT trigger a shear \
-             yield event once Vy/Vz are judged independently against qy_y/qy_z"
-    );
+    assert!(result.qu > 50.0 * 235.0 / 3.0_f64.sqrt());
+    assert!(result.shear_yields.is_empty());
 }
 
 #[test]
@@ -1984,7 +1685,7 @@ fn rc_column_model_with_rigid_zone(
 }
 
 #[test]
-fn test_compute_shear_yield_thresholds_rc_rect_uses_rigid_zone_reduced_clear_span() {
+fn test_build_shear_yield_thresholds_rc_rect_uses_rigid_zone_reduced_clear_span() {
     // 剛域: length_i=400, length_j=200 → h0 = 3000-600 = 2400。
     let rigid_zone = RigidZone {
         length_i: 400.0,
@@ -1992,7 +1693,7 @@ fn test_compute_shear_yield_thresholds_rc_rect_uses_rigid_zone_reduced_clear_spa
         ..Default::default()
     };
     let (model, rebar, b, d) = rc_column_model_with_rigid_zone(rigid_zone);
-    let thresholds = compute_shear_yield_thresholds(&model).unwrap();
+    let thresholds = build_shear_yield_thresholds(&model);
     let th = &thresholds[0];
 
     let expected_clear_span = 2400.0;
@@ -2035,14 +1736,14 @@ fn test_compute_shear_yield_thresholds_rc_rect_uses_rigid_zone_reduced_clear_spa
 }
 
 #[test]
-fn test_compute_shear_yield_thresholds_rc_rect_falls_back_when_rigid_zone_exceeds_length() {
+fn test_build_shear_yield_thresholds_rc_rect_falls_back_when_rigid_zone_exceeds_length() {
     let rigid_zone = RigidZone {
         length_i: 2000.0,
         length_j: 1500.0,
         ..Default::default()
     };
     let (model, rebar, b, d) = rc_column_model_with_rigid_zone(rigid_zone);
-    let thresholds = compute_shear_yield_thresholds(&model).unwrap();
+    let thresholds = build_shear_yield_thresholds(&model);
     let th = &thresholds[0];
 
     let qsu_y_handcalc = rc_qsu_simple(&RcCapacityInput {
@@ -2083,11 +1784,7 @@ fn test_dir_threshold_qy_axial_term_matches_handcalc() {
         sigma_0: 0.0,
     };
     let gross_area = b * d;
-    let th = DirThreshold::RcArakawa {
-        input,
-        gross_area,
-        steel_qy: 0.0,
-    };
+    let th = DirThreshold::RcArakawa { input, gross_area };
 
     let qy_base = th.qy(0.0);
     let qsu_base_handcalc = rc_qsu_simple(&input);
@@ -2225,7 +1922,7 @@ impl ElementBehavior for FixedForceBehavior {
 #[test]
 fn test_track_shear_yield_axial_compression_raises_qy_end_to_end() {
     let (model, _rebar, b, d) = rc_column_model_with_rigid_zone(RigidZone::default());
-    let thresholds = compute_shear_yield_thresholds(&model).unwrap();
+    let thresholds = build_shear_yield_thresholds(&model);
     let (input, gross_area) = match &thresholds[0].z {
         DirThreshold::RcArakawa {
             input, gross_area, ..
@@ -2439,7 +2136,7 @@ fn steel_grade_recognition_agrees_in_factory_hinge_and_shear_consumers() {
                 (hinge.my - expected_moment).abs() < 1e-7,
                 "{name:?} {factor:?}"
             );
-            let shear = &compute_shear_yield_thresholds(&model).unwrap()[0];
+            let shear = &build_shear_yield_thresholds(&model)[0];
             assert!((shear.y.qy(0.0) - expected_fy * 2000.0 / 3.0_f64.sqrt()).abs() < 1e-7);
             assert!((shear.z.qy(0.0) - expected_fy * 1000.0 / 3.0_f64.sqrt()).abs() < 1e-7);
             for (basis, moment) in [
@@ -2547,7 +2244,7 @@ fn rc_rebar_strength_in_pushover_capacity_and_yield_thresholds() {
 
         let my = compute_hinge_thresholds(&model)[0].my;
         assert!((my - expected_my).abs() < 1e-6, "{name} {factor:?}");
-        let shear = &compute_shear_yield_thresholds(&model).unwrap()[0];
+        let shear = &build_shear_yield_thresholds(&model)[0];
         let DirThreshold::RcArakawa { input, .. } = &shear.y else {
             panic!("RC矩形柱のせん断耐力を算定できません");
         };
@@ -2641,7 +2338,7 @@ fn pushover_uses_explicit_high_strength_main_rebar_without_increase() {
         AnalysisKind::Incremental,
     );
     assert!((view.mn_surface.unwrap().n_tens - expected_tension).abs() < 1e-6);
-    let shear = compute_shear_yield_thresholds(&model).unwrap();
+    let shear = build_shear_yield_thresholds(&model);
     let DirThreshold::RcArakawa { input, .. } = &shear[0].y else {
         panic!("RC矩形柱のせん断耐力を算定できません");
     };
@@ -4091,8 +3788,7 @@ fn assert_wall_committed_history(result: &PushoverResult) {
 }
 
 #[test]
-fn sm520_src_shear_thresholds_reject_each_out_of_range_plate_without_fy_or_infinite_threshold_rescue(
-) {
+fn sm520_src_nonlinear_precheck_rejects_each_out_of_range_plate() {
     for name in ["SM520", "SM520B", "SM520C"] {
         for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
             for (tw, tf) in [(100.001, 80.0), (80.0, 100.001)] {
@@ -4114,11 +3810,6 @@ fn sm520_src_shear_thresholds_reject_each_out_of_range_plate_without_fy_or_infin
                 steel.category = MaterialCategory::Steel;
                 steel.fy = fy;
                 model.materials.push(steel);
-                let reason = compute_shear_yield_thresholds(&model).err().unwrap();
-                assert!(
-                    reason.contains("適用範囲") && reason.contains("せん断降伏耐力"),
-                    "{reason}"
-                );
                 assert!(sepika_element::factory::ensure_nonlinear_input(&model)
                     .unwrap_err()
                     .contains("適用範囲"));

@@ -217,7 +217,11 @@ fn post_xyz_display_offsets_preserve_gravity_local_lateral_design_quantity_and_m
     assert_eq!(loads(&actual_members), loads(&expected_members));
     let expected = sepika_design_jp::post::design_post(&baseline, baseline.posts().next().unwrap());
     let result = sepika_design_jp::post::design_post(&shifted, shifted.posts().next().unwrap());
-    assert!(expected.complete(), "{expected:?}");
+    assert!(!expected.complete());
+    assert!(expected.combinations[0]
+        .reasons
+        .iter()
+        .any(|reason| reason.contains("せん断力の断面形状・方向")));
     assert_eq!(result, expected);
     assert!(result.combinations[0]
         .lateral_reactions

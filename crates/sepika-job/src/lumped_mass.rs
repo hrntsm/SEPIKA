@@ -577,6 +577,7 @@ mod tests {
                 .collect(),
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            steel_panel_column_face_forces: Vec::new(),
             column_end_axial_forces: Vec::new(),
             column_end_horizontal_forces: qz
                 .iter()
@@ -610,6 +611,7 @@ mod tests {
                 .collect(),
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            steel_panel_column_face_forces: Vec::new(),
             column_end_axial_forces: Vec::new(),
             column_end_horizontal_forces: qy
                 .iter()

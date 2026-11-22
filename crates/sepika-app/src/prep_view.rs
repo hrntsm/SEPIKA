@@ -866,7 +866,6 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
             Col::text("断面"),
             Col::name("材料"),
             Col::num("スラブ"),
-            Col::text("床板合成の判定"),
             Col::num("壁上下梁"),
             Col::num("元 Iy [cm⁴]"),
             Col::num("実効 Iy [cm⁴]"),
@@ -907,29 +906,10 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
                 crate::table_util::text_cell(ui, &r.material);
             });
             row.col(|ui| {
-                if let Some(factor) = r.slab_factor {
-                    label_factor(ui, factor);
-                } else {
-                    ui.label("未算定");
-                }
+                label_factor(ui, r.slab_factor);
             });
             row.col(|ui| {
-                if let Some(status) = r.steel_slab {
-                    crate::table_util::text_cell(ui, status.label());
-                } else if r.slab_factor.is_none() {
-                    if let Some(reason) = &r.unavailable_reason {
-                        ui.label("未算定").on_hover_text(reason);
-                    }
-                } else {
-                    ui.label("—");
-                }
-            });
-            row.col(|ui| {
-                if let Some(factor) = r.wall_girder_factor {
-                    label_factor(ui, factor);
-                } else {
-                    ui.label("—");
-                }
+                label_factor(ui, r.wall_girder_factor);
             });
             row.col(|ui| {
                 ui.label(format!("{:.0}", r.section_iy * 1e-4));
@@ -953,7 +933,7 @@ fn member_stiffness_section(ui: &mut egui::Ui, prep: &PreparationResult) {
     ui.add_space(4.0);
     ui.colored_label(
         crate::theme::UI_MUTED,
-        "「スラブ」は RC 矩形梁のスラブ協力幅（T 形断面）・H 形鋼梁の合成梁による\
+        "「スラブ」は RC 矩形梁のスラブ協力幅（T 形断面）による\
          強軸曲げの増大率、「壁上下梁」は壁エレメント上下大梁の一律倍率です。\
          「実効 Iy」は等価換算とこれらをすべて適用した強軸曲げ剛性用の値で、\
           フレーム内雑壁（腰壁・垂壁・袖壁）の算入分は含みません。\

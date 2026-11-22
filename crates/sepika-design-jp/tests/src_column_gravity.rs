@@ -50,6 +50,8 @@ fn context(method: QdMethod) -> DesignCtx {
     DesignCtx {
         kind: MemberKind::Column,
         term: LoadTerm::Short,
+        lk_y: Some(6000.0),
+        lk_z: Some(6000.0),
         rebar_material: Some(material("SD345", MaterialCategory::Rebar)),
         shear_rebar_material: Some(material("SD345", MaterialCategory::Rebar)),
         steel_material: Some(material("SN400B", MaterialCategory::Steel)),
@@ -135,19 +137,63 @@ fn column_qd_rejects_missing_position_and_either_nonfinite_gravity_direction() {
 }
 
 #[test]
-fn normal_short_uses_elastic_share_and_long_uses_combined_allowable() {
+fn seismic_compression_failure_is_independent_of_the_short_uniaxial_bending_check() {
+    let sec = section();
+    let mat = material("Fc24", MaterialCategory::Concrete);
+    for (lk_z, my, expected_reason) in [(6_001.0, 0.0, "座屈長さ"), (6_000.0, 2.0e6, "二軸同時")]
+    {
+        let ctx = DesignCtx {
+            lk_z: Some(lk_z),
+            ..context(QdMethod::Qd1)
+        };
+        let demand = MemberForcesAt {
+            n: -5.0e6,
+            mz: 1.0e6,
+            my,
+            ..forces()
+        };
+        let outcomes: Vec<_> = SrcDesign
+            .check_outcomes(&demand, &sec, &mat, &ctx, false)
+            .collect();
+        let [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }] = outcomes.as_slice()
+        else {
+            panic!("{outcomes:?}");
+        };
+        assert!(reason.contains(expected_reason), "{reason}");
+        let [limit] = result.components.as_slice() else {
+            panic!("{result:?}");
+        };
+        assert_eq!(limit.kind, CheckKind::Axial);
+        // SRC断面 500×700 mm、鋼材断面積 9848 mm²、短期圧縮許容応力度 235 N/mm²。
+        assert!((limit.ratio - 5.0e6 / (2.8e6 + 1_542_853.333_333_333_3)).abs() < 1.0e-12);
+        let below = MemberForcesAt {
+            n: -4.0e6,
+            ..demand
+        };
+        let outcomes: Vec<_> = SrcDesign
+            .check_outcomes(&below, &sec, &mat, &ctx, false)
+            .collect();
+        assert!(
+            matches!(outcomes.as_slice(), [CheckOutcome::Skipped { .. }]),
+            "{outcomes:?}"
+        );
+    }
+}
+
+#[test]
+fn normal_short_keeps_axial_bending_and_long_keeps_combined_allowable_shear() {
     let mat = material("Fc24", MaterialCategory::Concrete);
     let sec = section();
     let mut ctx = context(QdMethod::Min);
     ctx.seismic_qd = None;
-    let normal = checked(SrcDesign.check(&forces(), &sec, &mat, &ctx));
-    let shear = normal
-        .components
-        .iter()
-        .find(|c| c.kind == CheckKind::Shear)
-        .unwrap();
-    assert!((shear.ratio - 0.1373893789326067).abs() < 1e-12);
-    assert_eq!(shear.detail.matches("弾性分担").count(), 2);
+    let without_shear = MemberForcesAt {
+        qy: 0.0,
+        qz: 0.0,
+        ..forces()
+    };
+    let normal = checked(SrcDesign.check(&without_shear, &sec, &mat, &ctx));
+    assert_eq!(normal.components.len(), 1);
+    assert_eq!(normal.components[0].kind, CheckKind::AxialBending);
     ctx.term = LoadTerm::Long;
     let long = checked(SrcDesign.check(&forces(), &sec, &mat, &ctx));
     assert!(long.components.iter().all(|c| c.ratio.is_finite()));
@@ -208,6 +254,18 @@ fn public_batch_distinguishes_requested_missing_member_from_normal_short() {
             plastic_zone: None,
             spring: None,
         }],
+        steel_design_attrs: vec![SteelDesignAttr {
+            elem: ElemId(0),
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: None,
+            lateral_brace_count: None,
+            lk_y_direct: Some(6000.0),
+            lk_z_direct: Some(6000.0),
+            c_direct: None,
+            column_lateral_buckling_end_supports: None,
+        }],
         ..Default::default()
     };
     let mf = MemberForces {
@@ -237,7 +295,9 @@ fn public_batch_distinguishes_requested_missing_member_from_normal_short() {
         let checks = run(&current);
         assert_eq!(checks.len(), 1);
         let Some(reason) = expected_reason else {
-            assert!(matches!(&checks[0].2, CheckOutcome::Checked(result) if result.ok()));
+            assert!(
+                matches!(&checks[0].2, CheckOutcome::Skipped { reason } if reason.contains("材料別の負担曲げ"))
+            );
             continue;
         };
         assert!(

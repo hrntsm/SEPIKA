@@ -14,7 +14,7 @@ pub struct SPanelInput {
     /// 局所上下位置を検証する梁対。片側梁は同じ位置を2回渡す。未指定は未算定。
     pub beam_flanges: Option<[BeamFlangePositions; 2]>,
     /// 柱断面から解決したパネル諸元（寸法 `dc`・板厚 `tp`・断面区分）。
-    /// CFT は鋼管部の諸元を用いる。
+    /// S造は実板厚を、CFTは鋼管部の諸元を用いる。
     pub geometry: PanelGeometry,
     /// 梁フランジ板厚中心間距離 db `[mm]`。
     pub db: f64,
@@ -36,8 +36,25 @@ pub struct SPanelInput {
 }
 
 /// 上下フランジ位置が一致する標準形式の検定。
-/// フランジ位置の未検証・不整合・段違い、または非有限な形状係数は理由付きエラー。
+/// S造はH形強軸・正方形等厚角形鋼管・円形鋼管を対象とする。
+/// 正方形等厚は主軸一方向、円形は同じ応力状態の合成モーメントを入力する。
 pub fn s_panel_zone_check(inp: &SPanelInput) -> Result<CheckResult, String> {
+    if !inp.geometry.filled && !supported_steel_panel_yield(inp.geometry) {
+        return Err(
+            "S造の標準形式の降伏耐力はH形強軸・正方形等厚角形鋼管・円形鋼管が対象です".into(),
+        );
+    }
+    check_panel(inp, !inp.geometry.filled)
+}
+
+pub(crate) fn supported_steel_panel_yield(geometry: PanelGeometry) -> bool {
+    matches!(
+        geometry.kind,
+        PanelShapeKind::H { .. } | PanelShapeKind::SquareBox | PanelShapeKind::Pipe
+    )
+}
+
+pub(crate) fn check_panel(inp: &SPanelInput, standard_steel: bool) -> Result<CheckResult, String> {
     let [left, right] = inp
         .beam_flanges
         .ok_or("上下フランジ位置未検証: dbだけでは標準形式を確認できません")?;
@@ -54,7 +71,7 @@ pub fn s_panel_zone_check(inp: &SPanelInput) -> Result<CheckResult, String> {
         return Err("dbとフランジ位置が不整合です".into());
     }
     let kappa = inp.geometry.kappa();
-    if !kappa.is_finite() {
+    if !kappa.is_finite() || (standard_steel && kappa <= 0.0) {
         return Err(format!(
             "仕口パネルの形状係数が非有限です（κ={kappa}、断面諸元={:?}）",
             inp.geometry
@@ -72,10 +89,20 @@ pub fn s_panel_zone_check(inp: &SPanelInput) -> Result<CheckResult, String> {
         return Err("仕口パネルの基準強度 F は有限値 [N/mm²] が必要です".into());
     }
     let n = inp.axial_ratio.abs();
+    if standard_steel && (!n.is_finite() || inp.fy <= 0.0 || !ve.is_finite() || ve <= 0.0) {
+        return Err("仕口パネルの軸力比・基準強度・実効体積が不正です".into());
+    }
     let reduction = if n >= 1.0 { 0.0 } else { (1.0 - n * n).sqrt() };
 
-    let kappa = if kappa.abs() > 1e-9 { kappa } else { 1e-9 };
+    let kappa = if standard_steel || kappa.abs() > 1e-9 {
+        kappa
+    } else {
+        1e-9
+    };
     let p_my = ve / kappa * reduction * inp.fy / 3f64.sqrt();
+    if standard_steel && (!p_my.is_finite() || (n < 1.0 && p_my <= 0.0)) {
+        return Err("仕口パネルの降伏耐力を有限の正値として算定できません".into());
+    }
     let p_m = inp.design_moment.unwrap_or_else(|| {
         inp.beam_moment_left + inp.beam_moment_right
             - (inp.col_shear_upper + inp.col_shear_lower) * inp.db / 2.0
@@ -156,12 +183,13 @@ mod tests {
             inp.geometry = geometry;
             s_panel_zone_check(&inp).unwrap().ratio()
         };
-        let (rs, rc) = (check(steel), check(cft));
-        assert!(rs > 0.0 && rs.is_finite());
-        assert!(
-            (rs - rc).abs() < 1e-12,
-            "CFT も同じ検定比になる: {rs} vs {rc}"
-        );
+        let mut inp = base_panel_h_input(0.0);
+        for kind in [steel.kind, PanelShapeKind::HWeak] {
+            inp.geometry = PanelGeometry { kind, ..steel };
+            assert!(s_panel_zone_check(&inp).unwrap_err().contains("標準形式"));
+        }
+        let ratio = check(cft);
+        assert!(ratio > 0.0 && ratio.is_finite());
     }
 
     /// `design_moment` を与えると、梁端モーメント・柱せん断からの組み立てに代えて

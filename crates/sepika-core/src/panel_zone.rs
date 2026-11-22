@@ -61,7 +61,168 @@ use crate::geom;
 use crate::ids::{ElemId, NodeId};
 use crate::model::{ElementData, FrameSectionUse, Model, PropertyBasis, Section};
 use crate::section_shape::SectionShape;
-use crate::structure_kind::member_structure_kind;
+use crate::structure_kind::{member_structure_kind, StructureKind};
+
+/// 標準形式の仕口パネル上下における、実柱材軸上の断面位置。
+#[derive(Clone, Copy, Debug)]
+pub struct PanelColumnSection {
+    pub element: ElemId,
+    pub element_position: usize,
+    pub position_mm: f64,
+    pub length_mm: f64,
+    pub axis: [f64; 3],
+}
+
+/// 標準形式の採用柱と上下の柱の同軸性・断面・基準強度を確認し、下・上の順に断面位置を返す。
+pub fn steel_panel_column_sections<'a>(
+    model: &Model,
+    node: NodeId,
+    adopted: ElemId,
+    flanges: BeamFlangePositions,
+    members: impl IntoIterator<Item = &'a ElementData>,
+) -> Result<[PanelColumnSection; 2], String> {
+    let columns: Vec<_> = members
+        .into_iter()
+        .filter(|element| {
+            element.nodes.iter().take(2).any(|id| *id == node)
+                && member_orientation(model, element) == Some(MemberOrientation::Column)
+        })
+        .collect();
+    let [first, second] = columns.as_slice() else {
+        return Err("標準形式には上下柱が1本ずつ必要です".into());
+    };
+    let center = model.node(node).ok_or("接合節点がありません")?;
+    let adopted = model.element(adopted).ok_or("採用柱がありません")?;
+    let adopted_section = model
+        .element_section(adopted)
+        .ok_or("採用柱断面がありません")?;
+    let geometry =
+        PanelGeometry::from_column_axes(adopted_section).ok_or("採用柱のパネル断面がありません")?;
+    if !matches!(
+        geometry[0].kind,
+        PanelShapeKind::H { .. } | PanelShapeKind::SquareBox | PanelShapeKind::Pipe
+    ) {
+        return Err("H形強軸・正方形等厚・円形のS造標準形式が必要です".into());
+    }
+    let directions = if matches!(geometry[0].kind, PanelShapeKind::H { .. }) {
+        1
+    } else {
+        2
+    };
+    let area = adopted_section.resolved_area()?;
+    let adopted_axes = panel_column_moment_axes(model, adopted).ok_or("採用柱の主軸が不正です")?;
+    let fy_for = |column: &ElementData| -> Result<f64, String> {
+        let section = model.element_section(column).ok_or("柱断面がありません")?;
+        let material = model.element_material(column);
+        let thicknesses = match section.shape.as_ref() {
+            Some(SectionShape::SteelH {
+                web_thick,
+                flange_thick,
+                ..
+            }) => [*web_thick, *flange_thick],
+            Some(SectionShape::SteelBox {
+                thick,
+                horizontal_thick,
+                ..
+            }) => [*thick, *horizontal_thick],
+            Some(SectionShape::SteelPipe { thick, .. }) => [*thick; 2],
+            _ => return Err("S造標準形式の柱断面が必要です".into()),
+        };
+        if let Some(tp) = section.panel_thickness.filter(|tp| *tp != thicknesses[0]) {
+            return Err(format!(
+                "柱 ID {} の有効パネル板厚 {tp} mm が実板厚 {} mm と異なり、標準形式の軸耐力を確定できません",
+                column.id.0, thicknesses[0]
+            ));
+        }
+        let first = crate::material_grade::resolve_steel_f(material, Some(thicknesses[0]))?;
+        let second = crate::material_grade::resolve_steel_f(material, Some(thicknesses[1]))?;
+        if first != second {
+            return Err("柱断面の抵抗板の基準強度Fが一致しません".into());
+        }
+        Ok(first)
+    };
+    let fy = fy_for(adopted)?;
+    let resolve = |column: &ElementData| -> Result<(bool, PanelColumnSection), String> {
+        let section = model.element_section(column).ok_or("柱断面がありません")?;
+        let column_fy = fy_for(column)?;
+        if member_structure_kind(model, column) != StructureKind::S
+            || section.shape != adopted_section.shape
+            || PanelGeometry::from_column_axes(section)
+                .is_none_or(|other| other[..directions] != geometry[..directions])
+            || section.resolved_area()? != area
+        {
+            return Err("上下柱のパネル断面が同じ標準形式ではありません".into());
+        }
+        if column_fy != fy {
+            return Err("上下柱の基準強度Fが一致しません".into());
+        }
+        if column.end_offsets_mm != [[0.0; 3]; 2] {
+            return Err("上下柱に偏心があり同一の鉛直材軸を確認できません".into());
+        }
+        let axis = member_unit_axis(model, column).ok_or("柱材軸が不正です")?;
+        if axis[0] != 0.0 || axis[1] != 0.0 {
+            return Err("上下柱は同一の鉛直材軸上に必要です".into());
+        }
+        if geometry[0].kind != PanelShapeKind::Pipe {
+            let axes = panel_column_moment_axes(model, column).ok_or("柱の主軸が不正です")?;
+            if geom::vec3::norm(geom::vec3::cross(adopted_axes[0], axes[0])) > PANEL_DIRECTION_TOL {
+                return Err("上下柱のパネル主軸が一致しません".into());
+            }
+        }
+        let i_end = column.nodes[0] == node;
+        let far = model
+            .node(column.nodes[usize::from(i_end)])
+            .ok_or("柱材軸の節点がありません")?;
+        let dz = far.coord[2] - center.coord[2];
+        let is_upper = dz > 0.0;
+        let distance_mm = if is_upper {
+            flanges.upper
+        } else {
+            -flanges.lower
+        };
+        let length_mm = dz.abs();
+        if !(0.0 < distance_mm && distance_mm < length_mm && length_mm.is_finite()) {
+            return Err("上下フランジ面が対応する柱の実材軸区間内にありません".into());
+        }
+        let element_position = if model
+            .elements
+            .get(column.id.index())
+            .is_some_and(|element| std::ptr::eq(element, column))
+        {
+            column.id.index()
+        } else {
+            model
+                .elements
+                .iter()
+                .position(|element| std::ptr::eq(element, column))
+                .ok_or("上下柱の要素位置がありません")?
+        };
+        Ok((
+            is_upper,
+            PanelColumnSection {
+                element: column.id,
+                element_position,
+                position_mm: if i_end {
+                    distance_mm
+                } else {
+                    length_mm - distance_mm
+                },
+                length_mm,
+                axis,
+            },
+        ))
+    };
+    let (first_upper, first) = resolve(first)?;
+    let (second_upper, second) = resolve(second)?;
+    if first_upper == second_upper {
+        return Err("標準形式には上下柱が1本ずつ必要です".into());
+    }
+    Ok(if first_upper {
+        [second, first]
+    } else {
+        [first, second]
+    })
+}
 
 /// 仕口パネルに対する部材の向き。
 ///
@@ -291,7 +452,12 @@ pub(crate) fn validate_explicit_panel_connections(
         else {
             continue;
         };
-        let column = &model.elements[joint.column.index()];
+        let column = model.element(joint.column).ok_or_else(|| {
+            format!(
+                "接合部 ID {} の採用柱 ID {} がありません",
+                node.0, joint.column.0
+            )
+        })?;
         for member in &model.elements {
             if !is_horizontal_or_vertical_member(model, member)
                 || member_orientation(model, member).is_none()
@@ -481,6 +647,117 @@ impl PanelGeometry {
             | PanelShapeKind::Box { .. }
             | PanelShapeKind::Pipe => 2.0 * base,
         }
+    }
+
+    /// 標準形式の全塑性耐力 [N·mm] と、無次元の非負軸力比に対するその勾配を返す。
+    /// 適用範囲外では `None`、軸耐力到達点では耐力0・勾配なし。
+    pub fn steel_plastic_moment(
+        &self,
+        db_mm: f64,
+        fy_n_mm2: f64,
+        column_area_mm2: f64,
+        axial_ratio: f64,
+        product_thickness_mm: f64,
+    ) -> Option<(f64, Option<f64>)> {
+        if self.filled
+            || self.tp != product_thickness_mm
+            || [
+                self.dc,
+                self.tp,
+                db_mm,
+                fy_n_mm2,
+                column_area_mm2,
+                product_thickness_mm,
+            ]
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+            || !(0.0..=1.0).contains(&axial_ratio)
+            || db_mm / self.dc > 1.8
+        {
+            return None;
+        }
+        let (reduction, slope) = match self.kind {
+            PanelShapeKind::H { .. } => {
+                let area_ratio = self.dc * self.tp / column_area_mm2;
+                if !(0.0 < area_ratio && area_ratio < 1.0) {
+                    return None;
+                }
+                let gap = (1.0 - axial_ratio) / area_ratio;
+                if gap >= 1.0 {
+                    (1.0, 0.0)
+                } else {
+                    let reduction = (gap * (2.0 - gap)).sqrt();
+                    (reduction, -(1.0 - gap) / (area_ratio * reduction))
+                }
+            }
+            PanelShapeKind::SquareBox => {
+                if (self.dc + product_thickness_mm) / self.tp > 40.0 {
+                    return None;
+                }
+                if axial_ratio <= 0.5 {
+                    (1.0, 0.0)
+                } else {
+                    let reduction = 2.0 * (axial_ratio * (1.0 - axial_ratio)).sqrt();
+                    (reduction, 2.0 * (1.0 - 2.0 * axial_ratio) / reduction)
+                }
+            }
+            PanelShapeKind::Pipe => {
+                if (self.dc + product_thickness_mm) / self.tp > 50.0 {
+                    return None;
+                }
+                let reduction = ((1.0 - axial_ratio) * (1.0 + axial_ratio)).sqrt();
+                (reduction, -axial_ratio / reduction)
+            }
+            _ => return None,
+        };
+        let base_moment = self.effective_volume(db_mm) * (fy_n_mm2 / 3f64.sqrt());
+        if !base_moment.is_finite() || base_moment <= 0.0 {
+            return None;
+        }
+        if axial_ratio == 1.0 {
+            return Some((0.0, None));
+        }
+        let moment = base_moment * reduction;
+        let slope = base_moment * slope;
+        (moment.is_finite() && moment > 0.0 && slope.is_finite()).then_some((moment, Some(slope)))
+    }
+
+    /// 丸みを持つ正方形等厚鋼管の45度一方向における全塑性耐力 [N·mm] と軸力比勾配。
+    /// 表C5.1の実験範囲内に限る。角半径は外側 [mm]、板厚は実板厚 [mm]。
+    pub fn steel_diagonal_plastic_moment(
+        &self,
+        db_mm: f64,
+        fy_n_mm2: f64,
+        axial_ratio: f64,
+        product_thickness_mm: f64,
+        outer_radius_mm: f64,
+    ) -> Option<(f64, f64)> {
+        let outer_mm = self.dc + product_thickness_mm;
+        if self.filled
+            || self.kind != PanelShapeKind::SquareBox
+            || self.tp != product_thickness_mm
+            || [self.dc, self.tp, db_mm, fy_n_mm2]
+                .iter()
+                .any(|value| !value.is_finite() || *value <= 0.0)
+            || ![
+                (21.0..=40.0).contains(&(outer_mm / self.tp)),
+                (1.2..=1.6).contains(&(db_mm / outer_mm)),
+                (0.0..=0.5).contains(&axial_ratio),
+                (self.tp..outer_mm / 2.0).contains(&outer_radius_mm),
+            ]
+            .into_iter()
+            .all(|condition| condition)
+        {
+            return None;
+        }
+        let radius_mm = outer_radius_mm - self.tp / 2.0;
+        let root_two = std::f64::consts::SQRT_2;
+        let width_mm = root_two * self.dc - 2.0 * radius_mm * (root_two - 1.0);
+        let base_moment = 2.0 * width_mm * db_mm * self.tp * (fy_n_mm2 / 3f64.sqrt());
+        let reduction = ((1.0 - axial_ratio) * (1.0 + axial_ratio)).sqrt();
+        let moment = base_moment * reduction;
+        let slope = -base_moment * axial_ratio / reduction;
+        (moment.is_finite() && moment > 0.0 && slope.is_finite()).then_some((moment, slope))
     }
 }
 
@@ -878,7 +1155,9 @@ fn panel_analysis_joint(
             node.0, joint.column.0
         ))
     };
-    let column = &model.elements[joint.column.index()];
+    let column = model
+        .element(joint.column)
+        .ok_or_else(|| invalid("採用柱がありません".into()))?;
     let section = model.element_section(column).unwrap();
     let material = model.element_material(column).unwrap();
     let geometries = PanelGeometry::from_column_axes(section)
@@ -1341,6 +1620,63 @@ pub fn beam_panel_depth(sec: &Section) -> Result<f64, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn standard_panel_plastic_capacity_follows_reference_shapes_and_limits() {
+        use super::{PanelGeometry, PanelShapeKind};
+        let mut panel = PanelGeometry {
+            kind: PanelShapeKind::SquareBox,
+            dc: 384.0,
+            tp: 16.0,
+            filled: false,
+        };
+        let mp = |panel: PanelGeometry, n| {
+            panel.steel_plastic_moment(583.0, 295.0, 23_700.0, n, panel.tp)
+        };
+        let exact = |actual: f64, reference: f64| {
+            assert!((actual - reference).abs() < 1.0, "{actual} vs {reference}");
+        };
+        exact(mp(panel, 0.186).unwrap().0, 1_220_144_161.3);
+        exact(mp(panel, 0.5).unwrap().0, 1_220_144_161.3);
+        exact(mp(panel, 0.8).unwrap().0, 976_115_329.1);
+        assert_eq!(mp(panel, 1.0), Some((0.0, None)));
+        assert_eq!(mp(panel, 1.01), None);
+        assert!(panel
+            .steel_plastic_moment(700.0, 295.0, 23_700.0, 0.3, 16.0)
+            .is_none());
+        panel.kind = PanelShapeKind::Pipe;
+        exact(mp(panel, 0.6).unwrap().0, 976_115_329.1);
+        panel.kind = PanelShapeKind::H {
+            bc: 200.0,
+            tf: 20.0,
+        };
+        exact(mp(panel, 0.7).unwrap().0, 610_072_080.7);
+        exact(mp(panel, 0.9).unwrap().0, 481_411_176.1);
+        panel.kind = PanelShapeKind::HWeak;
+        assert!(mp(panel, 0.0).is_none());
+    }
+
+    #[test]
+    fn tube_panel_width_thickness_limits_also_apply_at_zero_axial_load() {
+        for (kind, limit) in [
+            (PanelShapeKind::SquareBox, 40.0),
+            (PanelShapeKind::Pipe, 50.0),
+        ] {
+            let mut panel = PanelGeometry {
+                kind,
+                dc: (limit - 1.0) * 16.0,
+                tp: 16.0,
+                filled: false,
+            };
+            assert!(panel
+                .steel_plastic_moment(500.0, 295.0, 23_700.0, 0.0, 16.0)
+                .is_some());
+            panel.dc += 0.1;
+            assert!(panel
+                .steel_plastic_moment(500.0, 295.0, 23_700.0, 0.0, 16.0)
+                .is_none());
+        }
+    }
+
     use super::*;
 
     #[test]

@@ -329,16 +329,6 @@ impl Model {
         self.matches_materialized_secondary(sm, &self.elements)
     }
 
-    /// 要素が二次部材の実部材化先なら true。
-    pub(super) fn element_represents_secondary_member(
-        &self,
-        element: &ElementData,
-        sm: &SecondaryMember,
-    ) -> bool {
-        element.section == sm.section
-            && self.matches_materialized_secondary(sm, std::slice::from_ref(element))
-    }
-
     fn matches_materialized_secondary(
         &self,
         sm: &SecondaryMember,

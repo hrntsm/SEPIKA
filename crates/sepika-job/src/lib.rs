@@ -13,7 +13,6 @@ pub mod compute;
 pub mod design_q0;
 pub mod error;
 pub mod lumped_mass;
-pub mod notices;
 pub mod prepare;
 pub mod sample_wave;
 pub mod settings;

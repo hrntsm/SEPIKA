@@ -1,6 +1,6 @@
 use super::*;
 use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
-use sepika_design_jp::{CheckKind, CheckOutcome, QdMethod};
+use sepika_design_jp::{CheckOutcome, QdMethod};
 
 fn bytes(value: &impl serde::Serialize) -> Vec<u8> {
     rmp_serde::to_vec_named(value).unwrap()
@@ -40,70 +40,49 @@ fn assert_checked(app: &App) {
     );
 }
 
+fn src_pure_bending_app(method: QdMethod) -> App {
+    let mut app = src_beam_app(true, method);
+    app.core.model.load_cases[2].kind = sepika_core::model::LoadCaseKind::Wind;
+    app.core.model.load_cases[2].nodal[0].values = [0.0, 0.0, 0.0, 0.0, -10_000.0, 0.0];
+    app
+}
+
 #[test]
-fn public_src_actions_check_real_ql_and_valid_empty_gravity_without_q0() {
-    for method in [QdMethod::Qd1, QdMethod::Qd2, QdMethod::Min] {
-        for empty in [false, true] {
-            let mut app = src_beam_app(empty, method);
-            let manual = bytes(&app.core.model.load_cases[0].member);
-            app.run_combination(1);
-            assert!(
-                app.core.scoped.last_error.is_none(),
-                "{:?}",
-                app.core.scoped.last_error
-            );
-            let ql_n = app.current_static().unwrap().member_forces[0].1.at[0].1[1];
-            assert!((ql_n - if empty { 0.0 } else { 100_000.0 }).abs() < 1e-6);
-            let terms = sepika_job::design_gravity_terms(
-                &app.core.model,
-                &app.core.model.combinations[0].terms,
-            );
-            assert_eq!(terms, vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)]);
-            let q0 = sepika_job::simple_beam_q0_by_terms(&app.core.model, &terms).unwrap();
-            if empty {
-                assert!(q0.is_empty());
-            } else {
-                assert!((q0[&ElemId(0)] - 75_000.0).abs() < 1e-6);
-            }
-            app.run_combination(0);
-            app.run_design_check();
-            assert_checked(&app);
-            let q_n = app.current_static().unwrap().member_forces[0].1.at[0].1[1];
-            assert!((q_n - if empty { 10_000.0 } else { 110_000.0 }).abs() < 1e-6);
-            assert_eq!(bytes(&app.core.model.load_cases[0].member), manual);
-            assert!(app.core.model.load_cases[0]
-                .member
-                .iter()
-                .all(|load| load.source == sepika_core::model::LoadSource::Manual));
-            assert_eq!(app.core.model.load_cases[3].name, "DL");
-            assert!(!app.core.model.load_cases[3].member.is_empty());
-            if !empty {
-                let CheckOutcome::Checked(check) =
-                    &app.current_design_results().unwrap().member_checks[0].positions[0].outcome
-                else {
-                    panic!("支持端検定");
-                };
-                let shear = check
-                    .components
-                    .iter()
-                    .find(|c| c.kind == CheckKind::Shear)
-                    .unwrap();
-                assert!(
-                    (shear.ratio - 0.34759322126721853).abs() < 1e-12,
-                    "{shear:?}"
-                );
-            }
-            eprintln!(
-                "method={method:?} empty={empty} QL={ql_n} Q={q_n} q0={q0:?}\n{}",
-                crate::summary::build_report_csv(&app)
-            );
-        }
+fn public_src_beam_ordinary_short_bending_does_not_use_the_qd_setting() {
+    let mut baseline = src_pure_bending_app(QdMethod::Qd1);
+    baseline.run_combination(0);
+    baseline.run_design_check();
+    assert_checked(&baseline);
+    let csv = crate::summary::build_report_csv(&baseline);
+    assert!(csv.contains("強軸曲げのみ"));
+    let checks = bytes(&baseline.current_design_results().unwrap().member_checks);
+    for method in [QdMethod::Qd2, QdMethod::Min] {
+        let mut app = src_pure_bending_app(method);
+        app.run_combination(0);
+        app.run_design_check();
+        assert_checked(&app);
+        assert_eq!(
+            bytes(&app.current_design_results().unwrap().member_checks),
+            checks
+        );
     }
 }
 
 #[test]
+fn public_src_beam_does_not_pass_when_a_nonzero_shear_has_no_bending_split() {
+    let mut app = src_beam_app(false, QdMethod::Qd1);
+    app.run_combination(0);
+    app.run_design_check();
+    let bundle = app.current_design_results().expect("現行検定");
+    let positions = &bundle.member_checks[0].positions;
+    assert!(positions.iter().any(|row| {
+        matches!(&row.outcome, CheckOutcome::Skipped { reason } if reason.contains("地震時の設計用せん断力"))
+    }));
+}
+
+#[test]
 fn src_ovika_design_contracts_keep_current_analysis_and_require_explicit_recheck() {
-    let mut original = src_beam_app(false, QdMethod::Qd1);
+    let mut original = src_pure_bending_app(QdMethod::Qd1);
     original.run_combination(0);
     assert_checked(&original);
     let input = bytes(&original.core.model);
@@ -249,6 +228,18 @@ pub(crate) fn src_column_app(method: QdMethod) -> App {
     sec.shear_rebar_material = old.shear_rebar_material;
     sec.frame_use = Some(FrameSectionUse::Column);
     app.core.model.sections[0] = sec;
+    app.core.model.steel_design_attrs = vec![sepika_core::model::SteelDesignAttr {
+        elem: ElemId(0),
+        joint_flange_loss: 0.0,
+        joint_web_loss: 0.0,
+        scallop_web_loss: 0.0,
+        lb_direct: None,
+        lateral_brace_count: None,
+        lk_y_direct: Some(6000.0),
+        lk_z_direct: Some(6000.0),
+        c_direct: None,
+        column_lateral_buckling_end_supports: None,
+    }];
     app.core.model.nodes[1].coord = [0.0, 0.0, 6000.0];
     app.core.model.elements[0].local_axis.ref_vector = [1.0, 0.0, 0.0];
     app.core.model.stories = super::tests::explicit_story_inputs(&[0.0, 6000.0]);
@@ -279,7 +270,7 @@ fn src912_material_edit_preparation_design_save_preserve_beam_and_column_skips()
             let mut app = if column {
                 src_column_app(QdMethod::Qd1)
             } else {
-                src_beam_app(false, QdMethod::Qd1)
+                src_pure_bending_app(QdMethod::Qd1)
             };
             app.run_combination(0);
             assert!(
@@ -408,12 +399,19 @@ fn src_h_steel_product_results_survive_project_save_and_old_contract_requires_re
         let checked_bundle = checked
             .current_design_results()
             .expect("適用できる材種の検定結果");
-        let checked_positions = &checked_bundle.member_checks[0].positions;
+        let positions = &checked_bundle.member_checks[0].positions;
+        let checked_positions: Vec<_> = positions
+            .iter()
+            .filter_map(|position| match &position.outcome {
+                CheckOutcome::Checked(result) => Some(result),
+                CheckOutcome::Skipped { reason } => {
+                    assert!(!column && reason.contains("材料別の負担曲げ"), "{reason}");
+                    None
+                }
+            })
+            .collect();
         assert_eq!(checked_positions.len(), 3);
-        for position in checked_positions {
-            let CheckOutcome::Checked(result) = &position.outcome else {
-                panic!("{:?}", position.outcome);
-            };
+        for result in checked_positions {
             assert!(
                 (result.ratio() - steel_product_reference::expected_ratio(column)).abs() < 1e-10,
                 "{result:?}"
