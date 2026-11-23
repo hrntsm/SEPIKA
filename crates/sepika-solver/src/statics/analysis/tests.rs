@@ -111,6 +111,29 @@ fn make_cantilever_model() -> Model {
     }
 }
 
+fn add_concrete_wall_section(model: &mut Model, thickness: Option<f64>) -> SectionId {
+    let material_id = MaterialId(model.materials.len() as u32);
+    model.materials.push(Material {
+        id: material_id,
+        name: "Fc24".into(),
+        category: MaterialCategory::Concrete,
+        young: 23_000.0,
+        poisson: 0.2,
+        density: 2.4e-9,
+        shear: None,
+        fc: Some(24.0),
+        fy: None,
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+    let id = SectionId(model.sections.len() as u32);
+    let mut section = Section::zero(id, "W".into());
+    section.material = Some(material_id);
+    section.thickness = thickness;
+    model.sections.push(section);
+    id
+}
+
 fn direction_model(loads: Vec<MemberLoad>) -> Model {
     let mut model = make_cantilever_model();
     model.load_cases = vec![LoadCase {
@@ -2279,6 +2302,9 @@ fn test_model_issues_errors_cft_shell_and_wall_references() {
         model.sections[0].shape = Some(cft_shape());
         model.sections[0].frame_use = Some(FrameSectionUse::Column);
         model.materials[0].fc = Some(24.0);
+        if kind == ElementKind::Wall {
+            model.materials[0].category = MaterialCategory::Concrete;
+        }
         if kind == ElementKind::PanelZone {
             model.materials[0].fy = Some(235.0);
             let mut far = model.nodes[0].clone();
@@ -2789,8 +2815,7 @@ fn test_model_issues_errors_on_both_beam_face_slit() {
     use sepika_core::model::{WallPlate, WallPlateShape, WallSlit};
 
     let mut model = make_cantilever_model();
-    model.sections[0].thickness = Some(200.0);
-    model.materials[0].density = 2.4e-9;
+    let wall_section = add_concrete_wall_section(&mut model, Some(200.0));
     let n = model.nodes.len() as u32;
     for (i, c) in [[1000.0, 0.0, 3000.0], [0.0, 0.0, 3000.0]]
         .into_iter()
@@ -2819,11 +2844,13 @@ fn test_model_issues_errors_on_both_beam_face_slit() {
     model.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: vec![0.0, 0.5, 0.0, 0.5],
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
-            section: Some(SectionId(0)),
+            section: Some(wall_section),
             opening_area: 0.0,
             opening_weight: 0.0,
             openings: Vec::new(),
@@ -2868,8 +2895,7 @@ fn test_model_issues_errors_on_both_beam_face_slit_on_element_plate() {
     use sepika_core::model::{WallPlate, WallPlateShape, WallRegion, WallSlit};
 
     let mut model = make_cantilever_model();
-    model.sections[0].thickness = Some(200.0);
-    model.materials[0].density = 2.4e-9;
+    let wall_section = add_concrete_wall_section(&mut model, Some(200.0));
     let n = model.nodes.len() as u32;
     for (i, c) in [[1000.0, 0.0, 3000.0], [0.0, 0.0, 3000.0]]
         .into_iter()
@@ -2898,11 +2924,13 @@ fn test_model_issues_errors_on_both_beam_face_slit_on_element_plate() {
     let plate_id = model.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: vec![0.0, 0.5, 0.0, 0.5],
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
-            section: Some(SectionId(0)),
+            section: Some(wall_section),
             opening_area: 0.0,
             opening_weight: 0.0,
             openings: Vec::new(),
@@ -2949,6 +2977,7 @@ fn test_model_issues_warns_ignored_slit_on_non_quad_plate() {
     use sepika_core::model::{WallPlate, WallPlateShape, WallSlit};
 
     let mut model = make_cantilever_model();
+    let wall_section = add_concrete_wall_section(&mut model, None);
     let n = model.nodes.len() as u32;
     for (i, c) in [
         [1000.0, 0.0, 3000.0],
@@ -2976,11 +3005,13 @@ fn test_model_issues_warns_ignored_slit_on_non_quad_plate() {
             NodeId(n + 1),
         ],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
-            section: Some(SectionId(0)),
+            section: Some(wall_section),
             opening_area: 0.0,
             opening_weight: 0.0,
             openings: Vec::new(),
@@ -3106,6 +3137,8 @@ fn test_model_issues_warns_ignored_slit_without_boundary_nodes() {
         .expect("間柱を辺に持つ 4 辺の壁版割当領域");
     let plate_id = WallPlateId(0);
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: vec![1.0, 0.0, 0.0, 0.0],
         id: plate_id,
@@ -3149,6 +3182,7 @@ fn test_model_issues_reports_unexpanded_walls_and_unresolved_weight_inputs() {
     use sepika_core::model::{WallPlate, WallPlateShape};
 
     let mut model = make_cantilever_model();
+    let wall_section = add_concrete_wall_section(&mut model, None);
     let n = model.nodes.len() as u32;
     for (i, c) in [
         [1000.0, 0.0, 3000.0],
@@ -3176,11 +3210,13 @@ fn test_model_issues_reports_unexpanded_walls_and_unresolved_weight_inputs() {
             NodeId(n + 1),
         ],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
-            section: Some(SectionId(0)),
+            section: Some(wall_section),
             opening_area: 0.0,
             opening_weight: 0.0,
             openings: Vec::new(),
@@ -3191,6 +3227,8 @@ fn test_model_issues_reports_unexpanded_walls_and_unresolved_weight_inputs() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(n), NodeId(n + 1)],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(1),
@@ -3204,6 +3242,8 @@ fn test_model_issues_reports_unexpanded_walls_and_unresolved_weight_inputs() {
         },
     );
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(2),
@@ -3215,7 +3255,7 @@ fn test_model_issues_reports_unexpanded_walls_and_unresolved_weight_inputs() {
             },
             extent: Some([900.0, 900.0]),
         },
-        section: Some(SectionId(0)),
+        section: Some(wall_section),
         opening_area: 0.0,
         opening_weight: 0.0,
         openings: Vec::new(),
@@ -3223,6 +3263,8 @@ fn test_model_issues_reports_unexpanded_walls_and_unresolved_weight_inputs() {
         slit: Default::default(),
     });
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(3),
@@ -3272,18 +3314,19 @@ fn test_model_issues_reports_unexpanded_walls_and_unresolved_weight_inputs() {
     // 引っかからないよう、既存断面を割り当ててから解析前チェックする。
     let fallback_section = model.sections[0].id;
     let mut column_section = model.sections[0].clone();
-    column_section.id = SectionId(1);
+    let column_id = SectionId(model.sections.len() as u32);
+    column_section.id = column_id;
     column_section.frame_use = Some(FrameSectionUse::Column);
     model.sections.push(column_section);
     for e in &mut model.elements {
         if e.section.is_none() {
             e.section = Some(if (1..=4).contains(&e.id.index()) {
-                SectionId(1)
+                column_id
             } else {
                 fallback_section
             });
         } else if e.id != ElemId(0) {
-            e.section = Some(SectionId(1));
+            e.section = Some(column_id);
         }
     }
     let error = precheck_model(&model).unwrap_err().to_string();
@@ -3299,12 +3342,7 @@ fn self_standing_wall_off_the_floor_is_an_error() {
     use sepika_core::model::{RegionAnchor, WallPlate, WallPlateShape};
 
     let mut model = make_cantilever_model();
-    let mut wall_section = model.sections[0].clone();
-    wall_section.id = SectionId(model.sections.len() as u32);
-    wall_section.thickness = Some(200.0);
-    wall_section.shape = None;
-    let sec = wall_section.id;
-    model.sections.push(wall_section);
+    let sec = add_concrete_wall_section(&mut model, Some(200.0));
     let n = model.nodes.len() as u32;
     for (i, x) in [50000.0f64, 54000.0].into_iter().enumerate() {
         model.nodes.push(sepika_core::model::Node {
@@ -3317,6 +3355,8 @@ fn self_standing_wall_off_the_floor_is_an_error() {
         });
     }
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(model.wall_plates.len() as u32),

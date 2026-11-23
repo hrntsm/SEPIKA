@@ -106,6 +106,8 @@ pub struct WallStepResponse {
 pub struct WallRunIdentity {
     pub gravity_terms: Vec<(sepika_core::ids::LoadCaseId, f64)>,
     pub gravity_applied: bool,
+    pub sign: super::PushoverSign,
+    pub src_wall_elements: Vec<ElemId>,
     pub run_id: String,
     pub input_generation: Option<Vec<u8>>,
     pub input_unavailable: Option<WallUnavailableReason>,
@@ -121,6 +123,8 @@ impl WallRunIdentity {
         Self {
             gravity_terms: Vec::new(),
             gravity_applied: false,
+            sign: super::PushoverSign::Positive,
+            src_wall_elements: Vec::new(),
             run_id: format!("{time}-{}", SEQUENCE.fetch_add(1, Ordering::Relaxed)),
             input_generation: None,
             input_unavailable: Some(WallUnavailableReason::InputIdentityNotRecorded),

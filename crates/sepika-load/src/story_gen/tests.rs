@@ -2543,6 +2543,8 @@ fn wall_model() -> Model {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: Some(sepika_core::model::WallDlSupport::HeightMidpoint),
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -2975,6 +2977,16 @@ fn test_density_seismic_weight_includes_attached_wall_plate() {
     model.nodes.push(upper);
     let baseline = generate_stories(&model, None).unwrap();
 
+    let mut concrete = model.materials[0].clone();
+    concrete.id = MaterialId(1);
+    concrete.name = "Fc24".into();
+    concrete.category = MaterialCategory::Concrete;
+    concrete.young = 23_000.0;
+    concrete.poisson = 0.2;
+    concrete.density = 2.4e-9;
+    concrete.fc = Some(24.0);
+    concrete.fy = None;
+    model.materials.push(concrete);
     model.sections.push(Section {
         frame_use: None,
         id: SectionId(1),
@@ -2991,13 +3003,15 @@ fn test_density_seismic_weight_includes_attached_wall_plate() {
         panel_thickness: None,
         thickness: Some(150.0),
         shape: None,
-        material: Some(MaterialId(0)),
+        material: Some(MaterialId(1)),
         rebar_material: None,
         shear_rebar_material: None,
         steel_material: None,
         property_basis: Default::default(),
     });
     let plate = WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
@@ -3166,6 +3180,8 @@ fn single_column_with_attached_wall(transfer: LoadTransfer) -> (Model, f64) {
         });
     }
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),

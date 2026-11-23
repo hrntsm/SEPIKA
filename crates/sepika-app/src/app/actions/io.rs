@@ -17,7 +17,7 @@ pub(crate) fn needs_recording_confirm(results_bytes: usize, has_recording: bool)
 
 impl App {
     /// モデルを差し替え、選択・入力ドラフト・表示参照・再生位置を破棄する。配置・視点は保持する。
-    /// 不正な構造参照・主架構節点数・二次部材の断面用途は差し替え前に拒否し、通知して `false` を返す。
+    /// 構造参照・断面用途などに不備があれば差し替え前に通知し、`false` を返す。
     pub fn load_model(&mut self, model: sepika_core::model::Model) -> bool {
         if let Err(error) = model.validate_reference_ids() {
             self.report_error(format!("読込モデルの検証エラー: {error}"));
@@ -28,6 +28,10 @@ impl App {
             return false;
         }
         if let Err(error) = model.validate_lip_channels() {
+            self.report_error(format!("読込モデルの検証エラー: {error}"));
+            return false;
+        }
+        if let Err(error) = model.validate_wall_primary_materials() {
             self.report_error(format!("読込モデルの検証エラー: {error}"));
             return false;
         }

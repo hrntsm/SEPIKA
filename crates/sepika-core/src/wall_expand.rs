@@ -62,7 +62,8 @@
 //! **壁領域全体を覆う 1 枚の壁版だけが壁エレメントになる。** 具体的には、
 //! `WallPlateShape::Enclosed` の壁版の境界節点集合が、所属する壁領域の境界節点
 //! 集合と一致し、その節点数がちょうど 4 のときだけ `ElementKind::Wall` を生成する
-//! （`section` 割当も要る）。生成後、その要素が実際に耐震壁として成立するか
+//! （`section` の割当が必要で、鋼材を主材料とする壁版は生成の対象外）。
+//! 生成後、その要素が実際に耐震壁として成立するか
 //! （面内せん断を負担する構造壁か、フレーム内雑壁として剛性のみ寄与するか）は、
 //! 既存の `wall_is_seismic`/`wall_is_framed`（`sepika_element::wall::misc_wall`）が
 //! 判定するため、生成側では区別しない。
@@ -82,7 +83,7 @@
 //! `sepika_element` がフレーム内雑壁（袖壁・腰壁・垂壁）として周辺の柱梁の
 //! 断面性能へ算入する。したがって診断で警告を出すことはしない。
 //!
-//! `section` 未割当の壁版だけは生成対象から外れる（自重すら求まらないため。
+//! `section` 未割当の壁版は生成対象から外れる（自重すら求まらないため。
 //! `WallPlate` モジュール doc 参照）。これは解析前チェックが警告する。
 
 use crate::ids::{ElemId, WallPlateId};
@@ -128,6 +129,8 @@ pub struct WallExpansionReport {
     pub skipped_not_covering: usize,
     /// 断面未割当のため生成しなかった壁版数。
     pub skipped_no_section: usize,
+    /// 鋼材を主材料に指定したため生成の対象外となった壁版 ID。
+    pub skipped_steel: Vec<WallPlateId>,
 }
 
 /// 壁展開で 1 件でも要素が生成され得るか（安価な事前判定）。
@@ -191,14 +194,15 @@ pub fn expand_wall_elements_owned(
             let Some(plate) = expanded.wall_plate(plate_id) else {
                 continue;
             };
-            if !matches!(plate.shape, WallPlateShape::Enclosed) {
-                continue;
-            }
             if !expanded.wall_plate_becomes_element(plate) {
-                if expanded.wall_plate_covers_region(plate) {
-                    report.skipped_no_section += 1;
-                } else {
-                    report.skipped_not_covering += 1;
+                if expanded.wall_plate_uses_steel(plate) {
+                    report.skipped_steel.push(plate_id);
+                } else if matches!(plate.shape, WallPlateShape::Enclosed) {
+                    if expanded.wall_plate_covers_region(plate) {
+                        report.skipped_no_section += 1;
+                    } else {
+                        report.skipped_not_covering += 1;
+                    }
                 }
                 continue;
             }
@@ -290,6 +294,8 @@ mod tests {
 
     fn quad_plate(id: u32, section: Option<SectionId>) -> WallPlate {
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: crate::ids::WallPlateId(id),
@@ -422,6 +428,59 @@ mod tests {
         assert_eq!(generated.len(), 1);
     }
 
+    #[test]
+    fn steel_wall_plate_is_invalid_and_does_not_generate_an_element() {
+        use crate::ids::MaterialId;
+        use crate::model::{Material, MaterialCategory};
+
+        let mut model = base_model();
+        let steel = MaterialId(0);
+        model.materials.push(Material {
+            id: steel,
+            name: "SN400".into(),
+            category: MaterialCategory::Steel,
+            young: 205_000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            shear: None,
+            fc: None,
+            fy: Some(235.0),
+            concrete_class: Default::default(),
+            strength_factor: None,
+        });
+        model.sections[0].material = Some(steel);
+        let id = WallPlateId(0);
+        push_quad(&mut model, quad_plate(id.0, Some(SectionId(0))));
+        model.wall_regions.push(WallRegion {
+            id: WallRegionId(0),
+            name: String::new(),
+            boundary: vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
+            wall_plate_ids: vec![id],
+            posts: Vec::new(),
+        });
+        let plate = &model.wall_plates[0];
+        assert!(model.wall_plate_covers_region(plate));
+        assert!(!model.wall_plate_becomes_element(plate));
+        for error in [
+            model.validate().unwrap_err(),
+            model.validate_for_project_load().unwrap_err(),
+        ] {
+            assert!(error.to_string().contains("鋼板壁版 ID 0"), "{error}");
+        }
+
+        let (expanded, index, report) = expand_wall_elements_owned(model);
+        assert_eq!(report.skipped_steel, vec![id]);
+        assert_eq!(report.generated, 0);
+        assert_eq!(report.skipped_no_section, 0);
+        assert_eq!(report.skipped_not_covering, 0);
+        assert!(index.0.is_empty());
+        assert!(expanded
+            .elements
+            .iter()
+            .all(|e| e.kind != ElementKind::Wall));
+        assert!(expanded.wall_attrs.is_empty());
+    }
+
     /// 壁展開モデルへ再度 `expand_wall_elements` を適用しようとすると、
     /// 壁の自重・剛性が二重計上されるため `debug_assert!` で止める
     /// （モジュール doc「二重展開しないこと」参照）。
@@ -497,6 +556,8 @@ mod tests {
     fn test_attached_plate_is_not_generated() {
         let mut m = base_model();
         m.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: crate::ids::WallPlateId(0),

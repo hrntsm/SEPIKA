@@ -62,6 +62,10 @@ pub struct MemberDesignCheckOptions<'a> {
     pub wall_index: Option<&'a sepika_core::wall_expand::WallExpansionIndex>,
     /// 検定する荷重ケース・組合せの既存キー。
     pub wall_case: &'a str,
+    /// 同じ解析条件でSRC建物の保有水平耐力の検討が成立済みの場合にtrue。検討の合否を問わない。
+    pub src_holding_reviewed: bool,
+    /// SRC壁の検定対象組合せに含まれる重力内力。欠落時は必要な検定を未算定にする。
+    pub src_wall_gravity_forces: Option<&'a [(ElemId, MemberForces)]>,
     /// 同じ応力バッチを生成した荷重terms。ケース文字列からは推定しない。
     /// None では大梁の長期たわみは未算定とし、壁は全荷重ケースの未対応部材荷重を検査する。
     pub load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
@@ -984,13 +988,23 @@ pub fn run_member_design_checks(
         false,
     );
 
-    let wall_checks = crate::joint_wiring::collect_wall_design_checks(
+    let gravity_wall = options.src_wall_gravity_forces.map(|forces| {
+        forces
+            .iter()
+            .map(|(id, mf)| (*id, mf.at.as_slice()))
+            .collect::<Vec<_>>()
+    });
+    let wall_checks = crate::joint_wiring::collect_wall_design_checks_for_case(
         model,
         &mf_slices,
-        options.term,
-        options.wall_index,
-        options.wall_case,
-        options.load_terms,
+        crate::joint_wiring::WallDesignInputs {
+            term: options.term,
+            index: options.wall_index,
+            case: options.wall_case,
+            load_terms: options.load_terms,
+            gravity_forces: gravity_wall.as_deref(),
+            src_holding_reviewed: options.src_holding_reviewed,
+        },
     );
     Ok(MemberDesignCheckReport {
         member_checks,

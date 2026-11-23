@@ -381,12 +381,12 @@ fn reference_model() -> Model {
     model.materials.push(Material {
         id: MaterialId(0),
         name: "材料".into(),
-        category: MaterialCategory::Steel,
-        young: 205000.,
-        poisson: 0.3,
-        density: 7.85e-9,
+        category: MaterialCategory::Concrete,
+        young: 23000.,
+        poisson: 0.2,
+        density: 2.4e-9,
         shear: None,
-        fc: None,
+        fc: Some(24.0),
         fy: None,
         concrete_class: Default::default(),
         strength_factor: None,
@@ -423,6 +423,8 @@ fn reference_model() -> Model {
         tip_loads: vec![],
     });
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         id: WallPlateId(0),
         shape: WallPlateShape::Enclosed,
         section: None,

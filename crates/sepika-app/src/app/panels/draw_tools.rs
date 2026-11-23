@@ -149,7 +149,7 @@ impl App {
                         "―",
                     );
                     for sec in &self.core.model.sections {
-                        if sec.thickness.is_some_and(|t| t > 0.0) {
+                        if crate::tables::wall_plates::wall_section_selectable(&self.core.model, sec) {
                             ui.selectable_value(
                                 &mut self.ui.scoped.wall_plate_draft.add_enclosed_section,
                                 Some(sec.id),
@@ -587,7 +587,9 @@ impl App {
                 .wall_plate_draft
                 .add_enclosed_section
                 .and_then(|sid| self.core.model.sections.get(sid.index()))
-                .filter(|sec| sec.thickness.is_some_and(|t| t > 0.0));
+                .filter(|sec| {
+                    crate::tables::wall_plates::wall_section_selectable(&self.core.model, sec)
+                });
             if resolved.is_none() {
                 self.ui.scoped.wall_plate_draft.add_enclosed_section = None;
             }
@@ -603,7 +605,10 @@ impl App {
                         "―",
                     );
                     for sec in &self.core.model.sections {
-                        if sec.thickness.is_some_and(|t| t > 0.0) {
+                        if crate::tables::wall_plates::wall_section_selectable(
+                            &self.core.model,
+                            sec,
+                        ) {
                             ui.selectable_value(
                                 &mut self.ui.scoped.wall_plate_draft.add_enclosed_section,
                                 Some(sec.id),

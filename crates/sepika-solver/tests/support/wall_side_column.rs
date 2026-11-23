@@ -222,6 +222,8 @@ pub fn wall_connection_fixture(kind: ElementKind) -> Model {
     model.wall_assignment_regions.regions[0].assignment =
         sepika_core::model::PlateAssignment::Plate(WallPlateId(0));
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         id: WallPlateId(0),
         shape: WallPlateShape::Enclosed,
         section: Some(SectionId(2)),

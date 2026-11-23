@@ -1,5 +1,5 @@
 //! 同じ確定状態の層切断面力と目的別評価点。
-use super::{PushoverMemberResponse, PushoverResult};
+use super::{PushoverMemberResponse, PushoverResult, PushoverSign};
 use crate::statics::analysis::SeismicDir;
 use sepika_core::ids::ElemId;
 use sepika_core::model::{ElementKind, Model};
@@ -58,9 +58,74 @@ pub struct ConfirmedStepResponse {
     pub run_id: String,
     pub input_generation: Option<Vec<u8>>,
     pub direction: SeismicDir,
+    pub sign: PushoverSign,
     pub step: u32,
     pub members: Vec<PushoverMemberResponse>,
     pub cuts: Vec<StoryCut>,
+    pub src_walls: Vec<SrcWallShearReview>,
+    pub src_frame_faces: Vec<SrcFrameFaceReview>,
+}
+
+/// SRC柱・大梁の物理フェースの確定断面力。元の局所軸、i端・j端順。
+/// 成分は [N, Qy, Qz, Mx, My, Mz]、引張正、単位 [N, Nmm]。
+/// 分布荷重を含む。非零集中荷重が一致する面は応力が不連続のため Err。
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SrcFrameFaceReview {
+    pub elem: ElemId,
+    pub faces: [Result<[f64; 6], String>; 2],
+}
+
+/// SRC耐震壁の同一確定stepで回収した上下の内法断面力と38条のせん断照査 [N]。
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SrcWallShearReview {
+    pub elem: ElemId,
+    pub ends: Option<[sepika_core::src_wall_capacity::SrcWallEndForces; 2]>,
+    pub demand_n: Option<f64>,
+    pub limit_n: Option<f64>,
+    pub unavailable: Option<String>,
+}
+
+impl SrcWallShearReview {
+    /// 正のせん断力が38条耐力に数値許容差内で到達した場合は true。
+    /// 許容差を超える超過、または照査結果が不完全な場合は理由を返す。
+    pub fn reached_limit(&self) -> Result<bool, String> {
+        if let Some(reason) = &self.unavailable {
+            return Err(reason.clone());
+        }
+        let Some(ends) = &self.ends else {
+            return Err("上下端の応力がありません".into());
+        };
+        if ends.iter().any(|end| {
+            [
+                end.axial_n,
+                end.columns_compression_n,
+                end.moment_nmm,
+                end.shear_n,
+            ]
+            .iter()
+            .any(|v| !v.is_finite())
+        }) {
+            return Err("上下端の応力に非有限値があります".into());
+        }
+        let demand_n = ends[0].shear_n.abs().max(ends[1].shear_n.abs());
+        if Some(demand_n) != self.demand_n {
+            return Err("上下端の応力と設計せん断力が一致しません".into());
+        }
+        if demand_n == 0.0 {
+            return Ok(false);
+        }
+        let Some(limit_n) = self.limit_n.filter(|v| v.is_finite() && *v > 0.0) else {
+            return Err("38条の終局せん断耐力がありません".into());
+        };
+        let tolerance_n = crate::common::newton::STATIC_NEWTON.tol * limit_n;
+        let difference_n = demand_n - limit_n;
+        if difference_n > tolerance_n {
+            return Err(format!(
+                "38条の終局せん断耐力を超過しました |Q|={demand_n} N Qu={limit_n} N"
+            ));
+        }
+        Ok(difference_n.abs() <= tolerance_n)
+    }
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -154,8 +219,11 @@ impl StoryCut {
 }
 
 impl PushoverResult {
-    /// RC線材のせん断耐力または適用条件で、指定stepを設計に採用できない理由を返す。
+    /// RC線材・SRC耐震壁のせん断耐力または適用条件で、指定stepを設計に採用できない理由を返す。
     pub fn shear_design_unavailable_at(&self, step: u32) -> Option<String> {
+        if let Some(reason) = self.src_wall_design_unavailable_at(step) {
+            return Some(reason);
+        }
         let reached = self
             .shear_yields
             .iter()
@@ -196,6 +264,53 @@ impl PushoverResult {
                 step,
             )
         })
+    }
+
+    fn src_wall_design_unavailable_at(&self, step: u32) -> Option<String> {
+        let run = self.wall_run.as_ref()?;
+        if run.src_wall_elements.is_empty() {
+            return None;
+        }
+        let history = self.confirmed_history.as_deref().unwrap_or_default();
+        let direction = history.get(step as usize).map(|record| record.direction);
+        for i in 0..=step {
+            let mut reached = None;
+            let record = history.get(i as usize).filter(|record| {
+                record.step == i
+                    && record.run_id == run.run_id
+                    && record.sign == run.sign
+                    && Some(record.direction) == direction
+                    && record.input_generation == run.input_generation
+            });
+            for &elem in &run.src_wall_elements {
+                let review = record.and_then(|record| {
+                    let mut reviews = record.src_walls.iter().filter(|review| review.elem == elem);
+                    reviews.next().filter(|_| reviews.next().is_none())
+                });
+                match review.map_or_else(
+                    || Err("同じ確定stepの38条せん断照査がありません".into()),
+                    SrcWallShearReview::reached_limit,
+                ) {
+                    Err(reason) => {
+                        return Some(format!(
+                            "SRC耐震壁 ID {} step {i}（{reason}）。このstep以降は参考応答です",
+                            elem.0,
+                        ))
+                    }
+                    Ok(true) if i < step => {
+                        reached.get_or_insert(elem);
+                    }
+                    Ok(_) => {}
+                }
+            }
+            if let Some(elem) = reached {
+                return Some(format!(
+                    "SRC耐震壁 ID {} step {i}（38条の終局せん断耐力に到達しました）。このstepより後は参考応答です",
+                    elem.0,
+                ));
+            }
+        }
+        None
     }
 
     /// 明示した採用点を作る。終了理由から法的な評価点を自動推定しない。
@@ -266,7 +381,7 @@ impl PushoverResult {
             Some("confirmed_run_mismatch")
         } else if record.input_generation.as_ref() != Some(&point.input_generation) {
             Some("confirmed_generation_mismatch")
-        } else if record.direction != point.direction {
+        } else if record.direction != point.direction || record.sign != run.sign {
             Some("confirmed_direction_mismatch")
         } else if self
             .capacity_curve
@@ -594,6 +709,8 @@ mod tests {
         let run = super::super::wall_response::WallRunIdentity {
             gravity_terms: Vec::new(),
             gravity_applied: false,
+            sign: PushoverSign::Positive,
+            src_wall_elements: vec![],
             run_id: run_id.into(),
             input_generation: Some(vec![42]),
             input_unavailable: None,
@@ -643,9 +760,12 @@ mod tests {
                     run_id: run_id.into(),
                     input_generation: Some(vec![42]),
                     direction: dir,
+                    sign: PushoverSign::Positive,
                     step: step as u32,
                     members: vec![],
                     cuts,
+                    src_walls: vec![],
+                    src_frame_faces: vec![],
                 });
         }
         po
@@ -658,6 +778,59 @@ mod tests {
     ) -> EvaluationPoint {
         po.evaluation_point(purpose, dir, step, "独立指定".into())
             .unwrap()
+    }
+
+    #[test]
+    fn src_wall_shear_at_limit_is_adoptable_only_at_the_first_arrival_step() {
+        use sepika_core::src_wall_capacity::SrcWallEndForces;
+        let wall = ElemId(14);
+        let limit_n = 1000.0;
+        let tolerance_n = crate::common::newton::STATIC_NEWTON.tol * limit_n;
+        for (difference_n, at_allowed, next_allowed, reason) in [
+            (-2.0 * tolerance_n, true, true, ""),
+            (-0.5 * tolerance_n, true, false, "到達"),
+            (0.0, true, false, "到達"),
+            (0.5 * tolerance_n, true, false, "到達"),
+            (2.0 * tolerance_n, false, false, "超過"),
+        ] {
+            let mut po = result("SRC", SeismicDir::X, vec![vec![cut(0, 150.0, 90.0)]; 3]);
+            po.wall_run.as_mut().unwrap().src_wall_elements = vec![wall];
+            for (record, demand_n) in po.confirmed_history.as_mut().unwrap().iter_mut().zip([
+                0.0,
+                limit_n + difference_n,
+                100.0,
+            ]) {
+                record.src_walls = vec![SrcWallShearReview {
+                    elem: wall,
+                    ends: Some(
+                        [SrcWallEndForces {
+                            shear_n: -demand_n,
+                            ..Default::default()
+                        }; 2],
+                    ),
+                    demand_n: Some(demand_n),
+                    limit_n: (demand_n > 0.0).then_some(limit_n),
+                    unavailable: None,
+                }];
+            }
+            for purpose in [EvaluationPurpose::Ds, EvaluationPurpose::HoldingCapacity] {
+                assert!(po
+                    .evaluation_point(purpose, SeismicDir::X, 0, "照査".into())
+                    .is_ok());
+                for (step, allowed) in [(1, at_allowed), (2, next_allowed)] {
+                    let selected = po.evaluation_point(purpose, SeismicDir::X, step, "照査".into());
+                    if allowed {
+                        assert!(selected.is_ok(), "{selected:?}");
+                    } else {
+                        let message = selected.unwrap_err();
+                        assert!(
+                            message.contains("ID 14 step 1") && message.contains(reason),
+                            "{message}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -1075,13 +1248,10 @@ mod tests {
             finish_intensity: 0.0,
         });
         let totals = [40.0, 5.0, 10.0, 30.0, 5.0, 60.0, 0.0, 0.0, 0.0, 0.0];
-        for (kind, steel) in [
-            (ElementKind::Beam, false),
-            (ElementKind::Fiber, false),
-            (ElementKind::MultiSpring, false),
-            (ElementKind::Beam, true),
-            (ElementKind::Fiber, true),
-            (ElementKind::MultiSpring, true),
+        for kind in [
+            ElementKind::Beam,
+            ElementKind::Fiber,
+            ElementKind::MultiSpring,
         ] {
             let mut m = m.clone();
             for frame in m
@@ -1090,13 +1260,6 @@ mod tests {
                 .filter(|e| e.kind.is_primary_frame_support())
             {
                 frame.kind = kind;
-            }
-            if steel {
-                m.materials[0].category = sepika_core::model::MaterialCategory::Steel;
-                m.materials[0].fy = Some(235.0);
-                m.sections[0].shape = None;
-                m.sections[0].thickness = Some(9.0);
-                m.sections[1].shape = None;
             }
             for dir in [SeismicDir::X, SeismicDir::Y] {
                 let mut m = m.clone();
@@ -1139,9 +1302,9 @@ mod tests {
                     c.reference_n = sign * 150.0;
                     c.tolerance_n = 1e-6;
                     let v = c.evaluate().unwrap();
-                    assert_eq!(v.wall_n, sign * if steel { 70.0 } else { 90.0 });
-                    assert_eq!(v.frame_n, sign * if steel { 80.0 } else { 60.0 });
-                    assert_eq!(v.beta_u, if steel { 70.0 / 150.0 } else { 0.6 });
+                    assert_eq!(v.wall_n, sign * 90.0);
+                    assert_eq!(v.frame_n, sign * 60.0);
+                    assert_eq!(v.beta_u, 0.6);
                     assert_eq!(c.forces.iter().filter(|f| f.elem == ElemId(4)).count(), 1);
                     let mut invalid = m.clone();
                     invalid.sections[1].frame_use = None;

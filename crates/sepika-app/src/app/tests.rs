@@ -611,6 +611,8 @@ fn preparation_rebuild_clears_generated_wall_selection_only() {
     app.core.model.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: Some(SectionId(0)),
@@ -653,7 +655,7 @@ fn preparation_wall_rebuild_preserves_assigned_boundary_and_node_selection() {
         SecondaryMemberKind, SupportMemberId,
     };
 
-    let mut model = super::steel_wall_tests::steel_wall_model();
+    let mut model = super::wall_material_tests::rc_wall_model();
     let plate = model.wall_plates.remove(0);
     model.wall_regions.clear();
     model.wall_assignment_regions = Default::default();
@@ -11758,13 +11760,13 @@ fn rejected_prepared_model_never_leaves_old_auto_seismic_loads_usable() {
 fn wall_opening_edit_undo_and_preparation_refresh_independent_band_weight() {
     use sepika_core::model::{WallDlSupport, WallOpening, WallWeightGenerationMode};
     let mut app = App::default();
-    let mut model = super::steel_wall_tests::steel_wall_model();
+    let mut model = super::wall_material_tests::rc_wall_model();
     model.wall_weight_generation = None;
     model.wall_plates[0].dl_support = Some(WallDlSupport::LowerBeam);
     model.wall_plates[0].openings = vec![WallOpening {
         width: 1000.0,
         height: 1000.0,
-        offset: Some([2000.0, 2400.0]),
+        offset: Some([2000.0, 1600.0]),
     }];
     app.load_model(model);
     app.run_preparation();
@@ -11805,6 +11807,8 @@ fn wall_opening_edit_undo_and_preparation_refresh_independent_band_weight() {
     app.core.scoped.undo.run(
         &mut app.core.model,
         Box::new(sepika_edit::SetWallPlateAttrs {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: p.id,
             dl_support: p.dl_support,
             self_weight_shares: p.self_weight_shares,
@@ -11813,7 +11817,7 @@ fn wall_opening_edit_undo_and_preparation_refresh_independent_band_weight() {
             openings: vec![WallOpening {
                 width: 1000.0,
                 height: 1000.0,
-                offset: Some([2000.0, 100.0]),
+                offset: Some([2800.0, 400.0]),
             }],
             loads: p.loads,
             slit: p.slit,

@@ -412,6 +412,8 @@ mod selection_tests {
             app.core.model.add_enclosed_wall_plate_from_nodes(
                 &boundary,
                 WallPlate {
+                    src_wall_detailing_confirmed: false,
+                    src_steel_plate: None,
                     id: WallPlateId(wall),
                     shape: WallPlateShape::Enclosed,
                     section: Some(SectionId(0)),

@@ -13,7 +13,14 @@ use super::types::{
 use crate::statics::analysis::SeismicDir;
 use sepika_core::dof::DofMap;
 use sepika_core::model::Model;
-use sepika_element::behavior::ElementBehavior;
+use sepika_core::src_wall_capacity::{is_src_wall_candidate, resolve_src_wall, SrcWallCapacity};
+use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
+use sepika_element::wall::src_face::{src_wall_shear_strength, SrcWallFaces};
+
+use super::story_response::{SrcFrameFaceReview, SrcWallShearReview};
+use sepika_core::section_shape::SectionShape;
+
+type SrcWallRecording = (usize, Result<(SrcWallFaces, SrcWallCapacity), String>);
 
 /// 1 ステップを記録した結果のうち、呼び出し側が制御判断に使う値。
 ///
@@ -61,6 +68,7 @@ pub(super) struct StepRecorder<'a> {
     pub(super) constant_external: Vec<f64>,
     pub(super) physical_loads: super::loads::PhysicalPushoverLoads,
     confirmed_history: Vec<super::story_response::ConfirmedStepResponse>,
+    src_wall_recording: Vec<SrcWallRecording>,
 }
 
 /// 解析終了時に [`StepRecorder`] から取り出す蓄積結果。
@@ -86,6 +94,23 @@ impl<'a> StepRecorder<'a> {
         shear_thresholds: Vec<ShearThreshold>,
         physical_loads: super::loads::PhysicalPushoverLoads,
     ) -> Self {
+        let mut run = super::wall_response::WallRunIdentity::new();
+        let src_wall_recording = model
+            .elements
+            .iter()
+            .enumerate()
+            .filter(|(_, wall)| is_src_wall_candidate(model, wall))
+            .map(|(index, wall)| {
+                run.src_wall_elements.push(wall.id);
+                let resolved = (|| {
+                    let faces = SrcWallFaces::new(wall, model)?;
+                    let rule =
+                        resolve_src_wall(model, wall)?.ok_or("SRC耐震壁の断面がありません")?;
+                    Ok((faces, rule))
+                })();
+                (index, resolved)
+            })
+            .collect();
         Self {
             dir,
             heights,
@@ -102,12 +127,13 @@ impl<'a> StepRecorder<'a> {
             shear_diagnostics: Vec::new(),
             member_history_steps: Vec::new(),
             wall_history: Vec::new(),
-            run: super::wall_response::WallRunIdentity::new(),
+            run,
             reference_external: vec![],
             constant_external: vec![],
             physical_loads,
             fixed_dofs: super::physical_response::fixed_dofs(model, dofmap),
             confirmed_history: vec![],
+            src_wall_recording,
         }
     }
 
@@ -238,16 +264,26 @@ impl<'a> StepRecorder<'a> {
                 self.dir,
                 self.step_no,
             ));
+        let src_walls = self
+            .src_wall_recording
+            .iter()
+            .map(|recording| {
+                src_wall_review(model, behaviors, &responses, &physical.source, recording)
+            })
+            .collect();
         self.confirmed_history
             .push(super::story_response::ConfirmedStepResponse {
                 run_id: self.run.run_id.clone(),
                 input_generation: None,
                 direction: self.dir,
+                sign: self.run.sign,
                 step: self.step_no,
                 members: super::member_response::compute_member_response_with_responses(
                     model, dofmap, behaviors, total_disp, self.dir, &responses,
                 ),
                 cuts,
+                src_walls,
+                src_frame_faces: src_frame_face_reviews(model, &responses),
             });
         self.step_no += 1;
 
@@ -263,7 +299,7 @@ impl<'a> StepRecorder<'a> {
     pub(super) fn qu(&self) -> f64 {
         self.capacity_curve
             .iter()
-            .map(|c| c.base_shear)
+            .map(|c| c.base_shear * self.run.sign.factor())
             .fold(0.0_f64, f64::max)
     }
 
@@ -292,11 +328,217 @@ impl<'a> StepRecorder<'a> {
     }
 }
 
+fn src_frame_face_reviews(
+    model: &Model,
+    responses: &[Option<LoadedFrameResponse>],
+) -> Vec<SrcFrameFaceReview> {
+    use sepika_core::model::FrameSectionUse;
+
+    let mut adjacency = None;
+    model
+        .elements
+        .iter()
+        .zip(responses)
+        .filter_map(|(elem, response)| {
+            let section = model.element_section(elem)?;
+            (elem.kind.is_primary_frame_support()
+                && matches!(
+                    (section.frame_use, section.shape.as_ref()),
+                    (
+                        Some(FrameSectionUse::Column),
+                        Some(SectionShape::SrcColumnRect { .. })
+                    ) | (
+                        Some(FrameSectionUse::Girder),
+                        Some(SectionShape::SrcBeamRect { .. })
+                    )
+                ))
+            .then_some((
+                elem,
+                response,
+                section.frame_use == Some(FrameSectionUse::Girder),
+            ))
+        })
+        .map(|(elem, response, girder)| {
+            let at_face = |position_mm, length_mm| {
+                response
+                    .as_ref()
+                    .ok_or("SRC線材の同じ確定状態の荷重込み断面力がありません")?
+                    .section
+                    .at_continuous_section_mm(position_mm, length_mm)
+            };
+            if girder {
+                let adjacency = adjacency.get_or_insert_with(|| {
+                    sepika_core::adjacency::NodeAdjacency::primary_frame(model)
+                });
+                let faces = sepika_core::face_distance::girder_column_faces(model, elem, adjacency)
+                    .unwrap_or_else(|| {
+                        std::array::from_fn(|_| Err("SRC梁の実柱面位置がありません".into()))
+                    })
+                    .map(|face| face.and_then(|face| at_face(face.position_mm, face.length_mm)));
+                return SrcFrameFaceReview {
+                    elem: elem.id,
+                    faces,
+                };
+            }
+            let length_mm = model.member_length(elem);
+            let distances = [elem.rigid_zone.face_i, elem.rigid_zone.face_j];
+            let faces = std::array::from_fn(|end| {
+                let distance_mm = distances[end].ok_or("SRC柱の実フェース位置がありません")?;
+                if !length_mm.is_finite()
+                    || length_mm <= 0.0
+                    || !distance_mm.is_finite()
+                    || !(0.0..length_mm).contains(&distance_mm)
+                    || distances[1 - end]
+                        .is_some_and(|opposite| distance_mm + opposite >= length_mm)
+                {
+                    return Err("SRC柱の実フェース位置が不正です".into());
+                }
+                let position_mm = if end == 0 {
+                    distance_mm
+                } else {
+                    length_mm - distance_mm
+                };
+                at_face(position_mm, length_mm)
+            });
+            SrcFrameFaceReview {
+                elem: elem.id,
+                faces,
+            }
+        })
+        .collect()
+}
+
+fn src_wall_review(
+    model: &Model,
+    behaviors: &[Box<dyn ElementBehavior>],
+    responses: &[Option<LoadedFrameResponse>],
+    case: &sepika_core::model::LoadCase,
+    (index, resolved): &SrcWallRecording,
+) -> SrcWallShearReview {
+    let elem = model.elements[*index].id;
+    let mut review = SrcWallShearReview {
+        elem,
+        ends: None,
+        demand_n: None,
+        limit_n: None,
+        unavailable: None,
+    };
+    let result = (|| {
+        let (faces, rule) = resolved.as_ref().map_err(Clone::clone)?;
+        faces.ensure_loads(std::slice::from_ref(case))?;
+        let ctx = Ctx { model };
+        let wall = behaviors[*index]
+            .state_member_forces(&ctx)
+            .ok_or("壁板の同じ状態の断面力がありません")?;
+        let mut members = vec![(elem, wall)];
+        for (column, positions) in faces.column_cut_positions() {
+            let column_index = model
+                .elements
+                .iter()
+                .position(|e| e.id == column)
+                .ok_or("側柱がありません")?;
+            let response = responses[column_index]
+                .as_ref()
+                .ok_or_else(|| format!("側柱 ID {} の同じ状態の断面力がありません", column.0,))?;
+            members.push((column, response.section.recover(&positions)?));
+        }
+        let batch: Vec<_> = members
+            .iter()
+            .map(|(id, forces)| (*id, forces.at.as_slice()))
+            .collect();
+        let mut ends = faces.recover(&batch)?;
+        if sepika_core::model::wall_element_geometry(&model.elements[*index], model)
+            .is_some_and(|geometry| wall_shear_is_roundoff(&ends, &geometry, case))
+        {
+            for end in &mut ends {
+                end.shear_n = 0.0;
+            }
+        }
+        review.demand_n = Some(ends[0].shear_n.abs().max(ends[1].shear_n.abs()));
+        review.ends = Some(ends);
+        review.limit_n = src_wall_shear_strength(rule, ends)?;
+        Ok::<(), String>(())
+    })();
+    review.unavailable = result.err();
+    review
+}
+
+fn wall_shear_is_roundoff(
+    ends: &[sepika_core::src_wall_capacity::SrcWallEndForces; 2],
+    geometry: &sepika_core::model::WallElementGeometry,
+    case: &sepika_core::model::LoadCase,
+) -> bool {
+    let scale_n = ends.iter().fold(1.0_f64, |scale_n, end| {
+        scale_n
+            .max(end.axial_n.abs())
+            .max(end.columns_compression_n.abs())
+            .max(end.moment_nmm.abs() / geometry.h)
+    });
+    let parallel = |v: &[f64]| v[0] * geometry.ex_bottom[0] + v[1] * geometry.ex_bottom[1];
+    // 面内荷重が相殺しても、壁の各断面に同じ断面力が作用するとは限らない。
+    ends.iter()
+        .all(|end| end.shear_n.abs() <= 64.0 * f64::EPSILON * scale_n)
+        && case
+            .nodal
+            .iter()
+            .all(|load| parallel(&load.values) == 0.0 && load.values[3..] == [0.0; 3])
+        && case.member.iter().all(|load| parallel(&load.dir) == 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use sepika_core::ids::ElemId;
     use sepika_core::model::{MemberLoad, MemberLoadKind};
+
+    #[test]
+    fn cancelling_in_plane_loads_do_not_certify_zero_wall_shear() {
+        use sepika_core::ids::{LoadCaseId, NodeId};
+        use sepika_core::model::{LoadCase, NodalLoad};
+        use sepika_core::src_wall_capacity::SrcWallEndForces;
+
+        let model = super::super::tests::prepared_wall_story_model_with(4000.0, 100_000.0);
+        let wall = model
+            .elements
+            .iter()
+            .find(|e| e.kind == sepika_core::model::ElementKind::Wall)
+            .unwrap();
+        let geometry = sepika_core::model::wall_element_geometry(wall, &model).unwrap();
+        let ends = [SrcWallEndForces {
+            axial_n: 800_000.0,
+            shear_n: 1e-10,
+            ..Default::default()
+        }; 2];
+        let mut case = LoadCase {
+            origin: Default::default(),
+            id: LoadCaseId(0),
+            name: "重力".into(),
+            kind: Default::default(),
+            nodal: vec![NodalLoad::manual(
+                NodeId(0),
+                [0.0, 0.0, -800_000.0, 0.0, 0.0, 0.0],
+            )],
+            member: vec![],
+        };
+        assert!(wall_shear_is_roundoff(&ends, &geometry, &case));
+        for (node, sign) in [geometry.bottom[0], geometry.top[0]]
+            .into_iter()
+            .zip([1.0, -1.0])
+        {
+            case.nodal.push(NodalLoad::manual(
+                node,
+                [
+                    sign * geometry.ex_bottom[0],
+                    sign * geometry.ex_bottom[1],
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
+            ));
+        }
+        assert!(!wall_shear_is_roundoff(&ends, &geometry, &case));
+    }
 
     #[test]
     fn unrecordable_member_step_preserves_preceding_confirmed_history() {

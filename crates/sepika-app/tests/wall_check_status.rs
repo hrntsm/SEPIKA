@@ -33,22 +33,17 @@ fn fixture() -> App {
     rc.rebar_material = Some(MaterialId(2));
     rc.shear_rebar_material = Some(MaterialId(2));
     model.sections.push(rc.clone());
-    let mut steel = rc.clone();
-    steel.id = SectionId(3);
-    steel.shape = None;
-    steel.property_basis.area = sepika_core::model::PropertyBasis::Supplied;
-    steel.property_basis.j = sepika_core::model::PropertyBasis::Supplied;
-    steel.material = Some(MaterialId(0));
-    steel.thickness = Some(6.0);
-    model.sections.push(steel);
+    let mut src = rc.clone();
+    src.id = SectionId(3);
+    src.name = "SRC壁".into();
+    src.steel_material = Some(MaterialId(0));
+    model.sections.push(src);
     rc.id = SectionId(4);
     rc.shear_rebar_material = None;
     model.sections.push(rc);
-    for (id, original) in [(5, 0), (6, 1)] {
-        let mut section = model.sections[original].clone();
-        section.id = SectionId(id);
-        model.sections.push(section);
-    }
+    let mut steel_column = model.sections[0].clone();
+    steel_column.id = SectionId(5);
+    model.sections.push(steel_column);
     for (id, shape) in [
         (
             0,
@@ -95,6 +90,8 @@ fn fixture() -> App {
         section.frame_use = model.sections[id].frame_use;
         model.sections[id] = section;
     }
+    let column_axis = model.elements[0].local_axis;
+    let girder_axis = model.elements[2].local_axis;
     for (index, section) in [2, 3, 4].into_iter().enumerate() {
         let boundary = if index == 0 {
             [NodeId(0), NodeId(1), NodeId(3), NodeId(2)]
@@ -157,6 +154,8 @@ fn fixture() -> App {
         model.add_enclosed_wall_plate_from_nodes(
             &boundary,
             WallPlate {
+                src_wall_detailing_confirmed: false,
+                src_steel_plate: None,
                 id: WallPlateId(0),
                 dl_support: Some(sepika_core::model::WallDlSupport::LowerBeam),
                 self_weight_shares: vec![],
@@ -173,17 +172,8 @@ fn fixture() -> App {
             if element.section.is_none() {
                 let vertical = model.nodes[element.nodes[0].index()].coord[2]
                     != model.nodes[element.nodes[1].index()].coord[2];
-                element.section = Some(SectionId(if index == 1 {
-                    if vertical {
-                        5
-                    } else {
-                        6
-                    }
-                } else if vertical {
-                    0
-                } else {
-                    1
-                }));
+                element.section = Some(SectionId(if vertical { 0 } else { 1 }));
+                element.local_axis = if vertical { column_axis } else { girder_axis };
             }
         }
         model.wall_regions.push(WallRegion {
@@ -263,7 +253,7 @@ fn wall_status_app_csv_save_and_recalculation_keep_keys_and_none() {
         csv.contains("[耐震壁種別集計]\n種別,壁枚数,合格,NG,未検定,対象外\n許容せん断,3,1,0,2,0"),
         "{csv}"
     );
-    assert!(csv.contains("国内許容応力度・終局検定式は未確定"));
+    assert!(csv.contains("SRC内蔵鋼板壁の検定は未実装です"));
     assert!(csv.contains(",\"combo:0:保存G+P+W\",許容せん断,,未検定,MissingInput"));
     let expected_checks = format!("{checks:?}");
     let path = std::env::temp_dir().join(format!(
@@ -512,7 +502,7 @@ fn wall_status_real_egui_design_table_shows_counts_and_reasons() {
         "壁版 1",
         "壁版 2",
         "combo:0:保存G+P+W",
-        "国内許容応力度・終局検定式は未確定",
+        "SRC内蔵鋼板壁の検定は未実装です",
         "横筋材料が未割当",
     ] {
         assert!(text.contains(expected), "{expected}: {text}");

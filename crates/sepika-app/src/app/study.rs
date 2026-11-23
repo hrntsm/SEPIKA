@@ -866,6 +866,7 @@ impl App {
                     .model
                     .validate_reference_ids()
                     .map_err(|e| e.to_string())?;
+                input.model.validate_wall_primary_materials()?;
                 let mut slot = Slot::new(&input);
                 slot.core.scoped.undo.restrict_sections(if p == 0 {
                     Vec::new()
@@ -876,6 +877,22 @@ impl App {
                     name,
                     state: Some(slot),
                 });
+            }
+            study.baseline.model.validate_wall_primary_materials()?;
+            for evidence in &study.quantity_evidence {
+                evidence.model.validate_wall_primary_materials()?;
+            }
+            for run in &study.runs {
+                run.input.model.validate_wall_primary_materials()?;
+                run.prepared.model.validate_wall_primary_materials()?;
+                for result in run
+                    .comparison_checks
+                    .iter()
+                    .chain(&run.input_view_references.evidence)
+                    .chain(&run.result_view_references.evidence)
+                {
+                    result.input.model.validate_wall_primary_materials()?;
+                }
             }
             items.push(Study {
                 purpose: study.purpose,
@@ -1736,6 +1753,31 @@ mod tests {
         assert_eq!(bytes(&app.core.model), main);
         assert!(!app.core.scoped.undo.can_undo());
     }
+    #[test]
+    fn restored_studies_reject_steel_walls_in_proposals_and_run_models() {
+        let mut app = app();
+        let study = app.create_study("検討".into(), vec![ElemId(2)]).unwrap();
+        app.start_study_calculation(study, 0).unwrap();
+        wait(&mut app);
+
+        let mut steel = super::super::wall_material_tests::rc_wall_model();
+        steel.materials[0].category = sepika_core::model::MaterialCategory::Steel;
+        for target in ["proposal", "input", "prepared"] {
+            let mut saved = app.saved_studies();
+            let study = &mut saved.items[study];
+            let invalid = match target {
+                "proposal" => &mut study.proposals[0].1.model,
+                "input" => &mut study.runs[0].input.model,
+                _ => &mut study.runs[0].prepared.model,
+            };
+            *invalid = steel.clone();
+            let mut reopened = App::default();
+            let error = reopened.restore_studies(saved).unwrap_err();
+            assert!(error.contains("鋼板壁版 ID 0"), "{target}: {error}");
+            assert!(reopened.studies.items.is_empty());
+        }
+    }
+
     #[test]
     fn persisted_study_restores_the_run_with_unversioned_preparation_hidden() {
         use sepika_io::ovika::{save_ovika, OvikaExtras};

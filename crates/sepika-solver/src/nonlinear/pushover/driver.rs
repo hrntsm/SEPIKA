@@ -20,7 +20,7 @@ use super::response::{get_roof_dof, story_heights};
 use super::shear_yield::build_shear_yield_thresholds;
 use super::step_record::StepRecorder;
 use super::types::{
-    DuctilityMethod, MemberHistory, PushoverControl, PushoverResult, PushoverTarget,
+    DuctilityMethod, MemberHistory, PushoverControl, PushoverResult, PushoverSign, PushoverTarget,
     PushoverTermination,
 };
 use crate::common::constraint::Reducer;
@@ -115,6 +115,34 @@ pub fn pushover_analysis_recording(
     apply_long_term: bool,
     ductility_method: DuctilityMethod,
 ) -> Result<PushoverResult, String> {
+    pushover_analysis_recording_signed(
+        model,
+        dofmap,
+        reducer,
+        dir,
+        PushoverSign::Positive,
+        max_steps,
+        target,
+        control,
+        apply_long_term,
+        ductility_method,
+    )
+}
+
+/// 符号付き水平加力で増分解析を実行する。変位目標は指定した加力側への値 [mm]。
+#[allow(clippy::too_many_arguments)]
+pub fn pushover_analysis_recording_signed(
+    model: &Model,
+    dofmap: &DofMap,
+    reducer: &Reducer,
+    dir: SeismicDir,
+    sign: PushoverSign,
+    max_steps: usize,
+    target: PushoverTarget,
+    control: PushoverControl,
+    apply_long_term: bool,
+    ductility_method: DuctilityMethod,
+) -> Result<PushoverResult, String> {
     sepika_core::panel_zone::validate_panel_connection_offsets(model)?;
     sepika_element::factory::ensure_wall_side_column_analysis(
         model,
@@ -181,7 +209,7 @@ pub fn pushover_analysis_recording(
     let height_m = building_height_mm(model) / 1000.0;
     let steel_ratio = steel_height_ratio(model);
     let t = sepika_load::ai::approx_t(height_m, steel_ratio);
-    let load_case = build_seismic_load_case_from_model(
+    let mut load_case = build_seismic_load_case_from_model(
         model,
         SeismicCfg {
             dir,
@@ -190,6 +218,9 @@ pub fn pushover_analysis_recording(
         t,
     )
     .map_err(|e| e.to_string())?;
+    for load in &mut load_case.nodal {
+        load.values = load.values.map(|v| v * sign.factor());
+    }
     let physical_loads = PhysicalPushoverLoads::new(model, &gravity_terms, load_case)?;
     let gravity_case = physical_loads.gravity_case();
     let has_gravity = !gravity_case.nodal.is_empty() || !gravity_case.member.is_empty();
@@ -238,6 +269,7 @@ pub fn pushover_analysis_recording(
         build_shear_yield_thresholds(model),
         physical_loads,
     );
+    recorder.run.sign = sign;
     let mut total_disp = vec![0.0; n_active];
     let n_steps = max_steps.clamp(1, 100);
     let dlambda = 1.0 / n_steps as f64;
@@ -346,7 +378,7 @@ pub fn pushover_analysis_recording(
                 last_roof = roof;
                 lambda = current_lambda;
                 step_ok = true;
-                if target.reached(roof, drift_angle_now) {
+                if target.reached(sign.factor() * roof, drift_angle_now) {
                     target_reached = true;
                 }
                 break;
@@ -381,7 +413,7 @@ pub fn pushover_analysis_recording(
             None
         };
     if let Some(roof_active) = disp_control_roof {
-        let initial_disp = total_disp[roof_active];
+        let initial_disp = sign.factor() * total_disp[roof_active];
         if roof_bound.is_finite() && roof_bound > initial_disp {
             let n_disp_steps = match du_uniform {
                 Some(du) if adaptive => (((roof_bound - initial_disp) / du).ceil() as usize)
@@ -391,7 +423,7 @@ pub fn pushover_analysis_recording(
             let du_target = (roof_bound - initial_disp) / n_disp_steps as f64;
 
             for step in 0..n_disp_steps {
-                let roof_target = initial_disp + du_target * (step + 1) as f64;
+                let roof_target = sign.factor() * (initial_disp + du_target * (step + 1) as f64);
                 let mut step_ok = false;
 
                 for attempt in 0..5 {
@@ -502,7 +534,7 @@ pub fn pushover_analysis_recording(
                         let roof = rec.roof;
                         let drift_angle_now = rec.drift_angle;
                         step_ok = true;
-                        if target.reached(roof, drift_angle_now) {
+                        if target.reached(sign.factor() * roof, drift_angle_now) {
                             target_reached = true;
                         }
                         break;

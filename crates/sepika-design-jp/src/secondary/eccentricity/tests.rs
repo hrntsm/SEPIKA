@@ -248,6 +248,8 @@ fn push_self_standing(
     use sepika_core::model::{RegionAnchor, WallPlate, WallPlateShape};
     let id = sepika_core::ids::WallPlateId(model.wall_plates.len() as u32);
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id,
@@ -283,6 +285,8 @@ fn test_append_misc_wall_stiffnesses() {
         Some(wall_sec),
     );
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(model.wall_plates.len() as u32),

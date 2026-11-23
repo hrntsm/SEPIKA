@@ -1358,6 +1358,8 @@ fn test_delete_section_referenced_by_beam() {
     assert_eq!(model.sections.len(), 2, "小梁参照中の断面は削除されない");
 
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
@@ -2881,6 +2883,8 @@ fn model_with_enclosed_wall_plate() -> Model {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -2907,6 +2911,8 @@ fn test_set_wall_plate_attrs_roundtrip() {
     stack.run(
         &mut model,
         Box::new(SetWallPlateAttrs {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: Some(sepika_core::model::WallDlSupport::LowerBeam),
             self_weight_shares: Vec::new(),
             id,
@@ -2955,6 +2961,8 @@ fn test_set_wall_plate_attrs_missing_id_is_noop() {
     stack.run(
         &mut model,
         Box::new(SetWallPlateAttrs {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -3000,6 +3008,69 @@ fn test_set_wall_plate_section_roundtrip_and_rejects_dangling() {
     );
     assert_eq!(model.wall_plates[0].section, None);
     assert!(!stack.can_undo());
+}
+
+#[test]
+fn wall_plate_rejects_steel_as_primary_material_and_keeps_embedded_steel() {
+    let mut model = model_with_enclosed_wall_plate();
+    let mut stack = UndoStack::new();
+    assert!(stack.run(
+        &mut model,
+        Box::new(AddMaterial {
+            name: "鋼材".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            fc: None,
+            fy: Some(235.0),
+            strength_factor: None,
+            concrete_class: Default::default(),
+        })
+    ));
+    let plate = model.wall_plates[0].id;
+    let steel = MaterialId(0);
+    let base = model.sections[0].id;
+    let mut steel_section = model.sections[0].clone();
+    steel_section.id = SectionId(1);
+    steel_section.material = Some(steel);
+    model.sections.push(steel_section);
+    assert!(stack.run(
+        &mut model,
+        Box::new(SetWallPlateSection {
+            id: plate,
+            section: Some(base),
+        })
+    ));
+    assert!(stack.run(
+        &mut model,
+        Box::new(SetSectionMaterial {
+            section: base,
+            role: SectionMaterialRole::Steel,
+            material: Some(steel),
+        })
+    ));
+
+    let before = model.clone();
+    let revision = stack.revision();
+    let edits: [Box<dyn EditCommand>; 2] = [
+        Box::new(SetWallPlateSection {
+            id: plate,
+            section: Some(SectionId(1)),
+        }),
+        Box::new(SetSectionMaterial {
+            section: base,
+            role: SectionMaterialRole::Main,
+            material: Some(steel),
+        }),
+    ];
+    for edit in edits {
+        assert!(!stack.run(&mut model, edit));
+        let error = stack.last_error().unwrap();
+        assert!(error.contains("鋼板壁版 ID 0") && error.contains("重量は荷重として入力"));
+        assert!(model.eq_ignoring_dofmap(&before));
+        assert_eq!(stack.revision(), revision);
+    }
 }
 
 #[test]
@@ -6997,6 +7068,8 @@ fn test_plate_section_commands_reject_cft() {
         tip_loads: Vec::new(),
     });
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
@@ -7388,6 +7461,8 @@ fn test_set_attached_wall_plate_extent_and_anchor_noop() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -7497,6 +7572,8 @@ fn test_wall_plate_region_assignment_roundtrip() {
     let first = model.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
@@ -7592,6 +7669,8 @@ fn test_unset_wall_plate_region_restores_wall_region_membership() {
     let plate_id = model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -7643,6 +7722,8 @@ fn test_delete_wall_plate_cascades_region_ids_and_undoes() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),

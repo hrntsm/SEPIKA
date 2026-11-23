@@ -145,6 +145,8 @@ fn fixture(kind: ElementKind) -> Model {
         region.assignment = PlateAssignment::NoPlate;
     }
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         id: WallPlateId(0),
         shape: WallPlateShape::Enclosed,
         section: Some(SectionId(2)),

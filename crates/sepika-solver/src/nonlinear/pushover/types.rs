@@ -370,3 +370,19 @@ pub struct PushoverStep {
     /// 各階代表節点の [Ux, Uy, θz] [mm, mm, rad]。モデルの階と同順。
     pub floor_disp: Vec<[f64; 3]>,
 }
+/// 水平加力の向き。同じ全体軸の正負は独立した解析runとする。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PushoverSign {
+    #[default]
+    Positive,
+    Negative,
+}
+
+impl PushoverSign {
+    pub(super) fn factor(self) -> f64 {
+        match self {
+            Self::Positive => 1.0,
+            Self::Negative => -1.0,
+        }
+    }
+}

@@ -451,6 +451,9 @@ pub fn slab_load_case_content(
 pub fn physical_self_weight_loads(
     model: &Model,
 ) -> Result<Vec<BeamLoad>, crate::floor::FloorDistributionError> {
+    model
+        .validate_wall_primary_materials()
+        .map_err(crate::floor::FloorDistributionError::SelfWeight)?;
     let mut intensity = HashMap::new();
     for slab in &model.slabs {
         let w = model

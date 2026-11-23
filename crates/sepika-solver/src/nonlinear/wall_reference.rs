@@ -1,4 +1,4 @@
-//! 同じ展開済みrun入力からRC壁の初期Quを解決する静的一次参照。
+//! 同じ展開済みrun入力から耐震壁の初期Quを解決する静的一次参照。
 
 use crate::statics::analysis::{
     build_seismic_load_case_from_model, building_height_mm, steel_height_ratio, Analysis,
@@ -6,7 +6,9 @@ use crate::statics::analysis::{
 };
 use sepika_core::ids::{ElemId, LoadCaseId};
 use sepika_core::model::{ElementKind, LoadCase, LoadCaseKind, Model};
+use sepika_core::src_wall_capacity::{is_src_wall_candidate, resolve_src_wall};
 use sepika_element::factory::StrengthBasis;
+use sepika_element::wall::src_face::{src_wall_shear_strength, SrcWallFaces};
 use sepika_element::wall::static_face::StaticWallFace;
 use sepika_element::wall::wall_element::WallElement;
 
@@ -16,12 +18,7 @@ pub(crate) fn resolve(
     apply_long_term: bool,
     basis: StrengthBasis,
 ) -> Result<Vec<(ElemId, [f64; 2])>, String> {
-    resolve_inputs(model, apply_long_term, basis).map_err(|reason| {
-        format!(
-            "RC壁 {}: {reason}",
-            model.stress_cfg.rc_wall_shear_method.label()
-        )
-    })
+    resolve_inputs(model, apply_long_term, basis)
 }
 
 pub(crate) fn resolve_with_gravity_terms(
@@ -63,21 +60,37 @@ fn resolve_inputs(
         .iter()
         .filter(|w| {
             w.kind == ElementKind::Wall
-                && sepika_element::wall::misc_wall::is_rc_wall(w, model)
-                && sepika_element::wall::misc_wall::wall_is_seismic(w, model)
+                && ((sepika_element::wall::misc_wall::is_rc_wall(w, model)
+                    && sepika_element::wall::misc_wall::wall_is_seismic(w, model))
+                    || is_src_wall_candidate(model, w))
         })
         .collect();
     if walls.is_empty() {
         return Ok(Vec::new());
     }
-    let faces: Vec<_> = walls
+    let wall_kind = if walls.iter().any(|w| is_src_wall_candidate(model, w)) {
+        "耐震壁"
+    } else {
+        "RC壁"
+    };
+    let rc_context = |reason| {
+        format!(
+            "RC壁 {}: {reason}",
+            model.stress_cfg.rc_wall_shear_method.label()
+        )
+    };
+    let rc_faces: Vec<_> = walls
         .iter()
-        .map(|w| StaticWallFace::new(w, model))
+        .map(|wall| {
+            (!is_src_wall_candidate(model, wall))
+                .then(|| StaticWallFace::new(wall, model).map_err(rc_context))
+                .transpose()
+        })
         .collect::<Result<_, _>>()?;
     let mut gravity = LoadCase {
         origin: Default::default(),
         id: LoadCaseId(0),
-        name: "RC壁一次参照G".into(),
+        name: format!("{wall_kind}一次参照G"),
         kind: LoadCaseKind::Dead,
         nodal: Vec::new(),
         member: Vec::new(),
@@ -88,8 +101,9 @@ fn resolve_inputs(
             gravity.member.extend(case.member.clone());
         }
     }
-    for face in &faces {
-        face.ensure_loads(std::slice::from_ref(&gravity), true)?;
+    for face in rc_faces.iter().flatten() {
+        face.ensure_loads(std::slice::from_ref(&gravity), true)
+            .map_err(rc_context)?;
     }
     // Wallへの直接荷重は既存組立の対象外なので、後続run荷重でも読み飛ばしを許さない。
     for w in &walls {
@@ -117,7 +131,7 @@ fn resolve_inputs(
         },
         t,
     )
-    .map_err(|e| format!("RC壁一次参照EX: {e}"))?;
+    .map_err(|e| format!("{wall_kind}一次参照EX: {e}"))?;
     let ey = build_seismic_load_case_from_model(
         model,
         SeismicCfg {
@@ -126,7 +140,7 @@ fn resolve_inputs(
         },
         t,
     )
-    .map_err(|e| format!("RC壁一次参照EY: {e}"))?;
+    .map_err(|e| format!("{wall_kind}一次参照EY: {e}"))?;
     let mut reference_model = model.clone();
     reference_model.combinations.clear();
     reference_model.load_cases = vec![gravity];
@@ -141,6 +155,12 @@ fn resolve_inputs(
                 nodal: Vec::new(),
                 member: Vec::new(),
             };
+            if is_src_wall_candidate(model, w) {
+                case.nodal
+                    .extend(reference_model.load_cases[0].nodal.clone());
+                case.member
+                    .extend(reference_model.load_cases[0].member.clone());
+            }
             for (base, factor) in [(&ex, sign * g.ex_bottom[0]), (&ey, sign * g.ex_bottom[1])] {
                 for load in &base.nodal {
                     let mut load = load.clone();
@@ -151,13 +171,14 @@ fn resolve_inputs(
             reference_model.load_cases.push(case);
         }
     }
-    let analysis = Analysis::prepare(&reference_model).map_err(|e| format!("RC壁一次参照: {e}"))?;
+    let analysis =
+        Analysis::prepare(&reference_model).map_err(|e| format!("{wall_kind}一次参照: {e}"))?;
     let has_gravity = !reference_model.load_cases[0].nodal.is_empty()
         || !reference_model.load_cases[0].member.is_empty();
-    let gravity_result = has_gravity
+    let gravity_result = (has_gravity && rc_faces.iter().any(Option::is_some))
         .then(|| analysis.linear_static(LoadCaseId(0)))
         .transpose()
-        .map_err(|e| format!("RC壁一次参照G: {e}"))?;
+        .map_err(|e| format!("{wall_kind}一次参照G: {e}"))?;
     let gravity_batch: Vec<_> = gravity_result
         .as_ref()
         .map(|r| {
@@ -168,9 +189,48 @@ fn resolve_inputs(
         })
         .unwrap_or_default();
     let mut capacities = Vec::new();
-    for (i, (w, face)) in walls.iter().zip(&faces).enumerate() {
+    for (i, (w, rc_face)) in walls.iter().zip(rc_faces).enumerate() {
+        let Some(face) = rc_face else {
+            let faces = SrcWallFaces::new(w, model)?;
+            let rule = resolve_src_wall(model, w)?
+                .ok_or_else(|| format!("SRC耐震壁 ID {} の静的一次参照断面がありません", w.id.0))?;
+            let mut branches = [None; 2];
+            for case in &reference_model.load_cases[1 + 2 * i..3 + 2 * i] {
+                faces.ensure_loads(std::slice::from_ref(case))?;
+                let result = analysis
+                    .linear_static(case.id)
+                    .map_err(|error| error.to_string())?;
+                let batch: Vec<_> = result
+                    .member_forces
+                    .iter()
+                    .map(|(id, forces)| (*id, forces.at.as_slice()))
+                    .collect();
+                let end = faces.recover(&batch)?;
+                let shear_n = end[0].shear_n;
+                if shear_n == 0.0 || branches[usize::from(shear_n > 0.0)].is_some() {
+                    return Err(format!(
+                        "SRC耐震壁 ID {} の静的一次参照で局所正負の分岐を確認できません",
+                        w.id.0
+                    ));
+                }
+                let limit_n = src_wall_shear_strength(&rule, end)
+                    .map_err(|reason| format!("SRC耐震壁 ID {} の静的一次参照: {reason}", w.id.0))?
+                    .ok_or_else(|| format!("SRC耐震壁 ID {} の静的一次参照Quが不明です", w.id.0))?;
+                branches[usize::from(shear_n > 0.0)] = Some(limit_n);
+            }
+            let [Some(positive), Some(negative)] = branches else {
+                return Err(format!(
+                    "SRC耐震壁 ID {} の静的一次参照Quの正負両分岐が必要です",
+                    w.id.0
+                ));
+            };
+            capacities.push((w.id, [positive, negative]));
+            continue;
+        };
         let ng = if has_gravity {
-            face.recover(&gravity_batch)?.compression_n
+            face.recover(&gravity_batch)
+                .map_err(rc_context)?
+                .compression_n
         } else {
             0.0
         };
@@ -184,7 +244,7 @@ fn resolve_inputs(
                 .iter()
                 .map(|(id, f)| (*id, f.at.as_slice()))
                 .collect();
-            let f = face.recover(&batch)?;
+            let f = face.recover(&batch).map_err(rc_context)?;
             if f.shear_n == 0.0 {
                 return Err(format!(
                     "壁 ID {} 参照分岐 {sign}: Q=0でM/(QD)が未解決です",
@@ -205,7 +265,8 @@ fn resolve_inputs(
             ratios[0].ok_or_else(|| format!("壁 ID {} 正局所分岐が不足しています", w.id.0))?,
             ratios[1].ok_or_else(|| format!("壁 ID {} 負局所分岐が不足しています", w.id.0))?,
         ];
-        let qu = WallElement::directional_shear_capacity_at_reference(w, model, basis, ng, ratios)?;
+        let qu = WallElement::directional_shear_capacity_at_reference(w, model, basis, ng, ratios)
+            .map_err(rc_context)?;
         if qu.iter().any(|v| !v.is_finite() || *v <= 0.0) {
             return Err(format!(
                 "壁 ID {}: 全局所分岐のQuは有限正値が必要です",
@@ -499,9 +560,11 @@ mod tests {
         }
         let mut bad = original.clone();
         bad.elements[1].end_cond = [sepika_core::model::EndCondition::Pinned; 2];
-        assert!(resolve(&bad, true, StrengthBasis::Nominal)
-            .unwrap_err()
-            .contains("側柱 ID 1"));
+        let reason = resolve(&bad, true, StrengthBasis::Nominal).unwrap_err();
+        assert!(
+            reason.contains("側柱 ID 1") && reason.contains("元端条件"),
+            "{reason}"
+        );
         bad = original.clone();
         bad.stories[1].seismic_weight = None;
         assert!(resolve(&bad, true, StrengthBasis::Nominal).is_err());

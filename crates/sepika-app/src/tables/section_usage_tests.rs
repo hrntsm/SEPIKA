@@ -94,6 +94,8 @@ fn section_usage_table_counts_each_reference_and_only_deletes_unused_sections() 
             };
             match usage {
                 "wall_plate" => model.wall_plates.push(WallPlate {
+                    src_wall_detailing_confirmed: false,
+                    src_steel_plate: None,
                     id: WallPlateId(i),
                     shape: WallPlateShape::Enclosed,
                     section: Some(SectionId(0)),

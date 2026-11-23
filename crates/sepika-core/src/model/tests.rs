@@ -1186,6 +1186,8 @@ fn test_validate_enclosed_wall_plate_requires_assignment_region() {
             support_spring: None,
         }],
         wall_plates: vec![WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -1222,6 +1224,8 @@ fn test_validate_duplicate_enclosed_wall_plate_boundary() {
     }
     let boundary = vec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)];
     let empty = WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
@@ -1258,6 +1262,8 @@ fn test_validate_checks_wall_plate_anchor_span_bounds() {
         });
     }
     let mk = |span: [f64; 2]| WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
@@ -1301,6 +1307,8 @@ fn test_validate_self_standing_wall_checks_only_node_refs() {
         });
     }
     let mk = |nodes: [NodeId; 2]| WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
@@ -1372,6 +1380,8 @@ fn test_validate_wall_plate_shared_by_two_wall_regions() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),

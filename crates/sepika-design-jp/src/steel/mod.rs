@@ -240,11 +240,14 @@ pub(crate) fn buckling_lengths_with_defaults(
     strong_mm: Option<f64>,
     weak_mm: Option<f64>,
 ) -> (f64, f64) {
-    let default_mm = node_span_mm * if kind == MemberKind::Column { 1.2 } else { 1.0 };
-    (
-        strong_mm.unwrap_or(default_mm),
-        weak_mm.unwrap_or(default_mm),
-    )
+    if kind == MemberKind::Column {
+        sepika_core::model::column_buckling_lengths_mm(node_span_mm, strong_mm, weak_mm)
+    } else {
+        (
+            strong_mm.unwrap_or(node_span_mm),
+            weak_mm.unwrap_or(node_span_mm),
+        )
+    }
 }
 
 /// 通常S部材・SRC柱の座屈長さ（強軸、弱軸）[mm]。欠落した軸に節点間距離から得る既定値を用いる。

@@ -203,6 +203,32 @@ impl App {
         ),
         String,
     > {
+        use sepika_design_jp::secondary::holding_capacity::FrameType;
+
+        if self.core.design_frame == FrameType::SrcFrame || self.has_src_holding_members() {
+            self.core.scoped.holding_capacity_source = None;
+            self.core.scoped.ds_beta_u_by_story.clear();
+            self.core.scoped.ds_wall_details.clear();
+            self.core.scoped.ds_beta_u_unavailable = false;
+            self.core.scoped.ds_rank_fallback_stories.clear();
+            let results = self.src_holding_results()?;
+            let all_ok = results
+                .iter()
+                .all(|r| r.result.stories.iter().all(|s| s.ok));
+            let mut current = results
+                .into_iter()
+                .find(|r| {
+                    r.source.direction == self.core.scoped.pushover_view_dir
+                        && r.source.src_sign == Some(self.core.scoped.src_holding_sign)
+                })
+                .expect("4加力方向の結果を算定済み");
+            current.source.src_both_directions_ok = Some(all_ok);
+            self.core.scoped.ds_beta_u_by_story =
+                current.source.ds_forces.iter().map(|f| f.beta_u).collect();
+            self.core.scoped.ds_wall_details = current.details;
+            self.core.scoped.holding_capacity_source = Some(current.source);
+            return Ok((current.result, current.ranks));
+        }
         let candidate = self.compute_unconfirmed_holding_capacity()?;
         let mut reasons = self.holding_adoption_unavailable_reasons();
         if let Some(reason) = self.holding_ds_conditions_unavailable_reason() {
@@ -337,14 +363,19 @@ impl App {
             .as_ref()
             .map(|b| &b.holding_evaluations);
         let saved_ds = saved_evaluations.and_then(|entries| {
-            entries
-                .iter()
-                .find(|e| e.point.direction == view_dir && e.point.purpose == EvaluationPurpose::Ds)
+            entries.iter().find(|e| {
+                e.point.direction == view_dir
+                    && e.point.purpose == EvaluationPurpose::Ds
+                    && result_validity::holding_run_sign(&e.run)
+                        == sepika_solver::nonlinear::pushover::PushoverSign::Positive
+            })
         });
         let saved_capacity = saved_evaluations.and_then(|entries| {
             entries.iter().find(|e| {
                 e.point.direction == view_dir
                     && e.point.purpose == EvaluationPurpose::HoldingCapacity
+                    && result_validity::holding_run_sign(&e.run)
+                        == sepika_solver::nonlinear::pushover::PushoverSign::Positive
             })
         });
         let mut dependencies = vec![
@@ -613,11 +644,8 @@ impl App {
                             && sepika_design_jp::MemberKind::of_element(elem, model)
                                 == sepika_design_jp::MemberKind::Brace);
                 let elem_steel = elem_is_steel(elem, model);
-                if elem_steel && matches!(elem.kind, sepika_core::model::ElementKind::Wall) {
-                    return Err(format!(
-                        "壁要素 {:?}: 鋼板壁のランク判定は未対応です",
-                        elem.id
-                    ));
+                if let Some(reason) = sepika_core::model::wall_steel_input_issue(elem, model) {
+                    return Err(reason);
                 }
                 let thickness = sepika_design_jp::material_strength::plate_thickness(sec);
                 let grade = if elem_steel {
@@ -952,6 +980,8 @@ impl App {
             ds_mechanism: mechanism.clone(),
             ds_conditions,
             capacity_conditions,
+            src_both_directions_ok: None,
+            src_sign: None,
         });
         Ok((result, story_ranks))
     }
@@ -1360,10 +1390,10 @@ mod tests {
                 .compute_holding_capacity()
                 .err()
                 .expect("保有水平耐力は未判定");
-            assert!(
-                error.contains("増分解析 Xの入力識別情報がありません"),
-                "{error}"
-            );
+            assert!(error.contains("SRC用の保有水平耐力判定"), "{error}");
+            app.core.design_frame =
+                sepika_design_jp::secondary::holding_capacity::FrameType::SrcFrame;
+            assert!(app.compute_holding_capacity().is_err());
             assert!(app.core.scoped.holding_capacity_source.is_none());
         }
     }
@@ -1435,7 +1465,10 @@ mod tests {
                 });
             }
 
-            let reason = app.compute_holding_capacity().err().expect("Ds は採用保留");
+            let reason = app
+                .compute_unconfirmed_holding_capacity()
+                .err()
+                .expect("Ds は採用保留");
             for expected in [
                 "部材 ElemId(0)・断面 SectionId(0)",
                 "SRC 柱の自動部材種別と自動 Ds は保留",
@@ -1453,6 +1486,11 @@ mod tests {
         let (candidate, ranks) = app.compute_unconfirmed_holding_capacity().unwrap();
         assert_eq!(ranks, vec![MemberRank::FB]);
         assert!(candidate.member_ranks.is_empty());
+        assert!(app
+            .compute_holding_capacity()
+            .err()
+            .expect("他種用Dsでは未判定")
+            .contains("SRC用の保有水平耐力判定"));
     }
 
     #[test]

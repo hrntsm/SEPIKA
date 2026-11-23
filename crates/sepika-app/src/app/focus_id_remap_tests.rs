@@ -359,10 +359,15 @@ fn app_with_abc_and_generated_wall() -> App {
     }
     .to_section(SectionId(2), "C".into());
     app.core.model.sections[2].material = Some(MaterialId(2));
+    app.core.model.materials[2].category = sepika_core::model::MaterialCategory::Concrete;
+    app.core.model.materials[2].fc = Some(24.0);
+    app.core.model.materials[2].fy = None;
     let boundary = (0..4).map(NodeId).collect::<Vec<_>>();
     app.core.model.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: Some(SectionId(2)),

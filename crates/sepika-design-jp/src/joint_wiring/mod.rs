@@ -6,6 +6,7 @@
 mod common;
 mod rc_joint;
 mod src_panel;
+mod src_wall;
 mod steel_panel;
 mod wall;
 
@@ -221,16 +222,37 @@ pub fn collect_wall_design_checks(
     case: &str,
     load_terms: Option<&[(sepika_core::ids::LoadCaseId, f64)]>,
 ) -> Vec<crate::wall_check::WallCheck> {
-    let members = member_infos(model, member_forces);
-    wall::collect_wall_design_checks(
+    collect_wall_design_checks_for_case(
         model,
         member_forces,
-        &members,
-        term,
-        index,
-        case,
-        load_terms,
+        WallDesignInputs {
+            term,
+            index,
+            case,
+            load_terms,
+            gravity_forces: None,
+            src_holding_reviewed: false,
+        },
     )
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct WallDesignInputs<'a> {
+    pub term: LoadTerm,
+    pub index: Option<&'a sepika_core::wall_expand::WallExpansionIndex>,
+    pub case: &'a str,
+    pub load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
+    pub gravity_forces: Option<&'a [(ElemId, ForcesAt<'a>)]>,
+    pub src_holding_reviewed: bool,
+}
+
+pub(crate) fn collect_wall_design_checks_for_case(
+    model: &Model,
+    member_forces: &[(ElemId, ForcesAt<'_>)],
+    inputs: WallDesignInputs<'_>,
+) -> Vec<crate::wall_check::WallCheck> {
+    let members = member_infos(model, member_forces);
+    wall::collect_wall_design_checks(model, member_forces, &members, inputs)
 }
 
 pub(crate) use steel_panel::validate_steel_panel_inputs;

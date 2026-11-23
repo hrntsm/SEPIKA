@@ -57,19 +57,25 @@ pub fn wall_column_fiber_lp(data: &ElementData, model: &Model) -> Option<f64> {
     if !crate::wall::misc_wall::wall_is_seismic(data, model) {
         return None;
     }
-    WallElement::shear_inputs(data, model, crate::factory::StrengthBasis::Nominal).ok()?;
     let geom = wall_element_geometry(data, model)?;
+    let panel_width =
+        if let Some(rule) = sepika_core::src_wall_capacity::resolve_src_wall(model, data).ok()? {
+            rule.clear_length_mm()
+        } else {
+            WallElement::shear_inputs(data, model, crate::factory::StrengthBasis::Nominal).ok()?;
+            geom.lw
+        };
     model.element_material(data)?.fc.filter(|fc| *fc > 0.0)?;
     let sec = data.section.and_then(|sid| model.sections.get(sid.index()));
     let t = match sec.and_then(|s| s.shape.as_ref()) {
         Some(SectionShape::RcWall { thickness, .. }) => *thickness,
         _ => sec.map(|s| s.thickness.unwrap_or(s.width))?,
     };
-    if t <= 0.0 || geom.lw <= 0.0 || geom.h <= 0.0 {
+    if t <= 0.0 || panel_width <= 0.0 || geom.h <= 0.0 {
         return None;
     }
     Some(crate::frame::fiber::clamp_plastic_zone(
-        0.5 * geom.lw,
+        0.5 * panel_width,
         geom.h,
     ))
 }
@@ -252,8 +258,67 @@ fn wall_rebar_strength(
     Ok(value)
 }
 
+fn embedded_plate_yield_strength(
+    data: &ElementData,
+    plate: Option<(f64, &sepika_core::model::Material)>,
+    basis: crate::factory::StrengthBasis,
+) -> Result<Option<f64>, String> {
+    plate
+        .map(|(thickness_mm, steel)| {
+            let f = sepika_core::material_grade::resolve_src_wall_plate_f(steel, thickness_mm)
+                .map_err(|reason| wall_input_error(data, "内蔵鋼板", reason))?;
+            let factored_f = f * basis.steel_factor(Some(steel));
+            (factored_f.is_finite() && factored_f > 0.0)
+                .then_some(factored_f)
+                .ok_or_else(|| {
+                    wall_input_error(data, "内蔵鋼板", "有限正の降伏強度を解決できません")
+                })
+        })
+        .transpose()
+}
+
 impl WallElement {
-    /// 生成。4 節点未満・寸法/断面が不定の場合は None。
+    /// 壁の種類・解析種別に対応する耐力計算入力を確認する。
+    pub fn nonlinear_wall_capacity_issue(
+        data: &ElementData,
+        model: &Model,
+        basis: crate::factory::StrengthBasis,
+        kind: sepika_core::model::AnalysisKind,
+    ) -> Option<String> {
+        if sepika_core::src_wall_capacity::is_src_wall_candidate(model, data) {
+            if kind == sepika_core::model::AnalysisKind::TimeHistory {
+                return Some(format!(
+                    "SRC耐震壁 ID {} の非線形時刻歴解析は未対応です",
+                    data.id.0
+                ));
+            }
+            return super::src_face::SrcWallFaces::new(data, model)
+                .and_then(|_| wall_direction_ratio(data, model, true))
+                .and_then(|_| wall_rebar_strength(data, model, true, basis))
+                .and_then(|_| {
+                    let Some(SectionShape::RcWall { thickness, .. }) =
+                        model.element_section(data).and_then(|s| s.shape.as_ref())
+                    else {
+                        return Err(wall_input_error(data, "断面", "明示RC壁形状が必要です"));
+                    };
+                    let plate = super::shear_section::embedded_plate(data, model, *thickness)?;
+                    embedded_plate_yield_strength(data, plate, basis)
+                })
+                .err();
+        }
+        Self::wall_shear_capacity_issue(data, model, basis).map(|reason| {
+            if super::misc_wall::is_rc_wall(data, model) {
+                format!(
+                    "RC壁 {}: {reason}",
+                    model.stress_cfg.rc_wall_shear_method.label()
+                )
+            } else {
+                reason
+            }
+        })
+    }
+
+    /// 鋼材を主材料とする壁、4 節点未満、寸法・断面が不定の場合は `None`。
     pub fn try_new(data: &ElementData, model: &Model) -> Option<Self> {
         Self::try_new_scaled(data, model, 1.0)
     }
@@ -271,9 +336,9 @@ impl WallElement {
             |nid: NodeId| -> Option<[f64; 3]> { model.nodes.get(nid.index()).map(|n| n.coord) };
         let ex_bot = geom.ex_bottom;
         let ex_top = unit(sub(coord_of(ids_tb)?, coord_of(ids_ta)?))?;
-        let (bc, tc) = (geom.bottom_center, geom.top_center);
+        let (mut bc, mut tc) = (geom.bottom_center, geom.top_center);
         let h = geom.h;
-        let lw = geom.lw;
+        let mut lw = geom.lw;
 
         let sec = data
             .section
@@ -296,7 +361,24 @@ impl WallElement {
         let young = mat.young;
         let r = crate::factory::wall_opening_reduction(data, model).max(1e-6);
 
+        let src = sepika_core::src_wall_capacity::is_src_wall_candidate(model, data)
+            && super::misc_wall::wall_is_seismic(data, model);
+        let section = super::shear_section::WallSection::new(data, model).ok()?;
+        let mut panel_fraction = 0.5;
+        let mut plate = None;
+        if src {
+            let [start_mm, end_mm] = section.clear_width_limits_mm().ok()?;
+            lw = end_mm - start_mm;
+            panel_fraction = (start_mm + end_mm) / (2.0 * geom.lw);
+            let shift_mm = (panel_fraction - 0.5) * geom.lw;
+            for (axis, direction) in ex_bot.into_iter().enumerate() {
+                bc[axis] += shift_mm * direction;
+                tc[axis] += shift_mm * direction;
+            }
+            plate = super::shear_section::embedded_plate(data, model, t).ok()?;
+        }
         let ps = match &sec.shape {
+            Some(SectionShape::RcWall { pwv_ratio, .. }) if src => pwv_ratio.unwrap_or(0.0),
             Some(SectionShape::RcWall { ps, .. }) => (*ps).max(0.0),
             _ => 0.0,
         };
@@ -306,7 +388,7 @@ impl WallElement {
             1.0
         };
 
-        let shear_rigidity = super::shear_section::wall_shear_rigidity(data, model).ok()?;
+        let shear_rigidity = section.properties().ok()?.shear_rigidity_n;
         let area = t * lw;
         let rc_density = mat
             .fc
@@ -329,30 +411,49 @@ impl WallElement {
         } else {
             mat.density
         };
-        let section_mass_properties = sepika_core::model::SectionMassProperties::uniform(
+        let mut section_mass_properties = sepika_core::model::SectionMassProperties::uniform(
             mass_density,
             area,
             lw * t.powi(3) / 12.0,
             t * lw.powi(3) / 12.0,
         );
+        let concrete_g = mat
+            .shear
+            .filter(|shear| shear.is_finite() && *shear > 0.0)
+            .unwrap_or_else(|| young / (2.0 * (1.0 + mat.poisson)));
+        let (mut a, mut iy, mut iz) = (
+            area * rebar_factor,
+            lw * t.powi(3) / 12.0,
+            t * lw.powi(3) / 12.0 * rebar_factor,
+        );
+        let mut j = lw * t.powi(3) / 3.0;
+        let mut as_z = r * area / KAPPA_RC;
+        if let Some((thickness_mm, steel)) = plate {
+            let plate_a = lw * thickness_mm;
+            let plate_iy = lw * thickness_mm.powi(3) / 12.0;
+            let plate_iz = thickness_mm * lw.powi(3) / 12.0;
+            let delta_e = steel.young / young - 1.0;
+            let delta_g = steel.shear_modulus() / concrete_g - 1.0;
+            a += delta_e * plate_a;
+            iy += delta_e * plate_iy;
+            iz += delta_e * plate_iz;
+            j += 4.0 * delta_g * plate_iy;
+            as_z += r * delta_g * plate_a / KAPPA_RC;
+            let delta_density = steel.density - mass_density;
+            section_mass_properties.mass_per_length += delta_density * plate_a;
+            section_mass_properties.rotary_inertia_y_per_length += delta_density * plate_iy;
+            section_mass_properties.rotary_inertia_z_per_length += delta_density * plate_iz;
+        }
         let column = BeamElement {
             id: data.id,
             e: young * stiffness_scale,
-            g: mat
-                .shear
-                .filter(|shear| shear.is_finite() && *shear > 0.0)
-                .unwrap_or_else(|| young / (2.0 * (1.0 + mat.poisson)))
-                * stiffness_scale,
-            a: area * rebar_factor,
-            iy: lw * t.powi(3) / 12.0,
-            iz: t * lw.powi(3) / 12.0 * rebar_factor,
-            j: lw * t.powi(3) / 3.0,
-            as_y: r * shear_rigidity
-                / mat
-                    .shear
-                    .filter(|shear| shear.is_finite() && *shear > 0.0)
-                    .unwrap_or_else(|| young / (2.0 * (1.0 + mat.poisson))),
-            as_z: r * area / KAPPA_RC,
+            g: concrete_g * stiffness_scale,
+            a,
+            iy,
+            iz,
+            j,
+            as_y: r * shear_rigidity / concrete_g,
+            as_z,
             length: h,
             mass_properties: section_mass_properties,
             mass_properties_error: (!rc_mass_properties_valid)
@@ -388,8 +489,8 @@ impl WallElement {
         let mut fill_end = |col_base: usize, ca: NodeId, cb: NodeId, ex: [f64; 3], lw_e: f64| {
             let (sa, sb) = (corner_slot(slot_of(ca)), corner_slot(slot_of(cb)));
             for tdof in 0..3 {
-                a_mat[(col_base + tdof) * 24 + sa + tdof] += 0.5;
-                a_mat[(col_base + tdof) * 24 + sb + tdof] += 0.5;
+                a_mat[(col_base + tdof) * 24 + sa + tdof] += 1.0 - panel_fraction;
+                a_mat[(col_base + tdof) * 24 + sb + tdof] += panel_fraction;
             }
             for i in 0..3 {
                 for j in 0..3 {
@@ -509,7 +610,9 @@ impl WallElement {
         };
         let pwv_ratio = wall_direction_ratio(data, model, true)?;
         let rebar_fy = wall_rebar_strength(data, model, true, basis)?;
-        let lw = 0.5 * (geom.lw_bottom + geom.lw_top);
+        let src = sepika_core::src_wall_capacity::resolve_src_wall(model, data)?;
+        let lw = src.as_ref().map_or(geom.lw, |rule| rule.clear_length_mm());
+        let plate = super::shear_section::embedded_plate(data, model, t)?;
         let h = self.column.length;
         if !t.is_finite() || t <= 0.0 || lw <= 0.0 || h <= 0.0 {
             return Err(wall_input_error(
@@ -519,44 +622,100 @@ impl WallElement {
             ));
         }
 
-        let rebar_factor = 1.0 + (E_STEEL / mat.young - 1.0) * pwv_ratio;
-        self.column.a = t * lw * rebar_factor;
-        self.column.iz = t * lw.powi(3) / 12.0 * rebar_factor;
+        if src.is_none() {
+            let rebar_factor = 1.0 + (E_STEEL / mat.young - 1.0) * pwv_ratio;
+            self.column.a = t * lw * rebar_factor;
+            self.column.iz = t * lw.powi(3) / 12.0 * rebar_factor;
+        }
         self.column.local_stiffness_cache = std::sync::OnceLock::new();
         let nw = 4;
         let nd = 20;
         let concrete_rule = crate::factory::resolve_wall_concrete_hysteresis(data, model, kind);
+        let plate_fy = embedded_plate_yield_strength(data, plate, basis)?;
         let make_section = || {
-            let (mut section, mut mats) = crate::frame::fiber::build_gauss_fibers(
-                t,
-                lw,
-                nw,
-                nd,
-                None,
-                Some(fc),
-                self.column.e,
-                self.column.e,
-                crate::frame::fiber::FiberYield::default(),
-                1.0,
-                1.0,
-                sepika_section::mn_surface::StrengthParams::default(),
-                concrete_rule,
-            )
-            .expect("形状なしの壁ファイバは実配筋を要求しない");
+            let concrete_grid = |width| {
+                crate::frame::fiber::build_gauss_fibers(
+                    width,
+                    lw,
+                    nw,
+                    nd,
+                    None,
+                    Some(fc),
+                    self.column.e,
+                    self.column.e,
+                    crate::frame::fiber::FiberYield::default(),
+                    1.0,
+                    1.0,
+                    sepika_section::mn_surface::StrengthParams::default(),
+                    concrete_rule,
+                )
+                .expect("形状なしの壁ファイバは実配筋を要求しない")
+            };
+            let (mut section, mut mats) = if let Some((plate_t, steel)) = plate {
+                let cover_t = (t - plate_t) / 2.0;
+                let offset_mm = (t + plate_t) / 4.0;
+                let (mut left, mut left_mats) = concrete_grid(cover_t);
+                let (mut right, right_mats) = concrete_grid(cover_t);
+                for f in &mut left.fibers {
+                    f.z -= offset_mm;
+                }
+                for f in &mut right.fibers {
+                    f.z += offset_mm;
+                }
+                left.fibers.extend(right.fibers);
+                left_mats.extend(right_mats);
+                let (steel_grid, steel_mats) = crate::frame::fiber::build_gauss_fibers(
+                    plate_t,
+                    lw,
+                    nw,
+                    nd,
+                    None,
+                    None,
+                    0.0,
+                    steel.young,
+                    crate::frame::fiber::FiberYield {
+                        main: plate_fy,
+                        ..Default::default()
+                    },
+                    1.0,
+                    1.0,
+                    sepika_section::mn_surface::StrengthParams::default(),
+                    concrete_rule,
+                )
+                .expect("矩形の壁内蔵鋼板ファイバ");
+                left.fibers.extend(steel_grid.fibers);
+                left_mats.extend(steel_mats);
+                (left, left_mats)
+            } else {
+                concrete_grid(t)
+            };
+            if src.is_some() {
+                let concrete_factor = 1.0 - pwv_ratio * t / (t - plate.map_or(0.0, |(t, _)| t));
+                for f in section.fibers.iter_mut().filter(|f| f.material == 0) {
+                    f.area *= concrete_factor;
+                }
+            }
             if pwv_ratio > 0.0 {
                 let a_each = pwv_ratio * t * lw / nd as f64;
+                let steel_cover_centers =
+                    plate.map(|(plate_t, _)| [-(t + plate_t) / 4.0, (t + plate_t) / 4.0]);
+                let z = steel_cover_centers
+                    .as_ref()
+                    .map_or(&[0.0][..], |z| z.as_slice());
                 for i in 0..nd {
                     let y = ((i as f64 + 0.5) / nd as f64 - 0.5) * lw;
-                    section.fibers.push(sepika_section::fiber::Fiber {
-                        y,
-                        z: 0.0,
-                        area: a_each,
-                        material: 1,
-                    });
-                    mats.push(crate::frame::fiber::steel_fiber_material(
-                        E_STEEL,
-                        Some(rebar_fy),
-                    ));
+                    for &z_mm in z {
+                        section.fibers.push(sepika_section::fiber::Fiber {
+                            y,
+                            z: z_mm,
+                            area: a_each / z.len() as f64,
+                            material: 1,
+                        });
+                        mats.push(crate::frame::fiber::steel_fiber_material(
+                            E_STEEL,
+                            Some(rebar_fy),
+                        ));
+                    }
                 }
             }
             (section, mats)
@@ -662,6 +821,9 @@ impl WallElement {
         compression_n: f64,
         span_ratios: [f64; 2],
     ) -> Result<[f64; 2], String> {
+        if let Some(issue) = sepika_core::model::wall_steel_input_issue(data, model) {
+            return Err(issue);
+        }
         if model.element_section(data).is_none() || wall_element_geometry(data, model).is_none() {
             return Err(wall_input_error(
                 data,
@@ -670,7 +832,7 @@ impl WallElement {
             ));
         }
         if !crate::wall::misc_wall::is_rc_wall(data, model) {
-            return Err(Self::unsupported_steel_wall_nonlinear(data));
+            return Err(wall_input_error(data, "せん断耐力", "RC系の壁が必要です"));
         }
         let section = super::shear_section::WallSection::new(data, model)?;
         if section.columns.iter().any(Option::is_none) {
@@ -718,7 +880,11 @@ impl WallElement {
         basis: crate::factory::StrengthBasis,
     ) -> Result<[WallShearGeometry; 2], String> {
         let Some(geom) = wall_element_geometry(data, model) else {
-            return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
+            return Err(wall_input_error(
+                data,
+                "せん断耐力",
+                "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）",
+            ));
         };
         let Some(sec) = model.element_section(data) else {
             return Err(wall_input_error(data, "断面", "断面が設定されていません"));
@@ -742,7 +908,11 @@ impl WallElement {
             .ok_or_else(|| wall_input_error(data, "コンクリート材料", "有限正Fcが必要です"))?;
 
         let Ok(section) = super::shear_section::WallSection::new(data, model) else {
-            return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
+            return Err(wall_input_error(
+                data,
+                "せん断耐力",
+                "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）",
+            ));
         };
         let mut at = [0.0; 2];
         let mut depth = [0.0; 2];
@@ -752,21 +922,37 @@ impl WallElement {
                     .element_section(&model.elements[col.element_index])
                     .and_then(|sec| sec.shape.as_ref())
                 else {
-                    return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
+                    return Err(wall_input_error(
+                        data,
+                        "せん断耐力",
+                        "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）",
+                    ));
                 };
                 let Some(area) = side_column_main_area(shape) else {
-                    return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
+                    return Err(wall_input_error(
+                        data,
+                        "せん断耐力",
+                        "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）",
+                    ));
                 };
                 at[side] = area;
                 if at[side] <= 0.0 {
-                    return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
+                    return Err(wall_input_error(
+                        data,
+                        "せん断耐力",
+                        "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）",
+                    ));
                 }
                 depth[side] = col.extent[1] - col.extent[0];
             }
         }
         let d_wall = geom.lw + depth.iter().sum::<f64>() / 2.0;
         let Ok(properties) = section.properties() else {
-            return Err(wall_input_error(data, "せん断耐力", "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）"));
+            return Err(wall_input_error(
+                data,
+                "せん断耐力",
+                "幾何・断面・側柱配筋を解決できません（主筋を明示したRC矩形・円形側柱が必要です。SRC・CFT・鋼材側柱は適用外です）",
+            ));
         };
         let te = (properties.area_mm2 / d_wall).min(1.5 * t);
         let sigma_wh = wall_rebar_strength(data, model, false, basis)?;
@@ -805,11 +991,7 @@ impl WallElement {
         Ok(inputs)
     }
 
-    pub(crate) fn unsupported_steel_wall_nonlinear(data: &ElementData) -> String {
-        format!("鋼板耐震壁 ID {} は非線形解析の対象外です。", data.id.0)
-    }
-
-    /// 鋼板耐震壁の適用外、またはRC壁の耐力式に必要な入力の不備を返す。
+    /// 対応外の壁またはRC壁の耐力式に必要な入力の不備を返す。
     pub fn wall_shear_capacity_issue(
         data: &ElementData,
         model: &Model,
@@ -817,6 +999,9 @@ impl WallElement {
     ) -> Option<String> {
         if !matches!(data.kind, sepika_core::model::ElementKind::Wall) {
             return None;
+        }
+        if let Some(issue) = sepika_core::model::wall_steel_input_issue(data, model) {
+            return Some(issue);
         }
         match wall_element_geometry(data, model) {
             Some(_) => (),
@@ -835,7 +1020,7 @@ impl WallElement {
             return Some(wall_input_error(data, "断面", "断面が設定されていません"));
         }
         if !crate::wall::misc_wall::is_rc_wall(data, model) {
-            return Some(Self::unsupported_steel_wall_nonlinear(data));
+            return Some(wall_input_error(data, "せん断耐力", "RC系の壁が必要です"));
         }
         Self::shear_inputs(data, model, basis)
             .and_then(|_| {
@@ -1523,6 +1708,13 @@ fn fixture_capacity(
 }
 
 #[cfg(test)]
+use super::static_face::fixture as rc_wall_side_column_model;
+
+#[cfg(test)]
+#[path = "../../../sepika-solver/tests/support/src_wall_model.rs"]
+mod src_wall_fixture;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use sepika_core::dof::Dof6Mask;
@@ -1530,6 +1722,59 @@ mod tests {
     use sepika_core::model::MaterialCategory;
     use sepika_core::model::{ElementKind, EndCondition, ForceRegime, LocalAxis, Material, Node};
     use sepika_core::section_shape::SectionShape;
+
+    #[test]
+    fn embedded_plate_fibers_use_grade_and_product_thickness_with_existing_factor() {
+        use crate::factory::StrengthBasis;
+        for (grade, thickness_mm, explicit_fy, expected_f) in [
+            ("SS400", 12.0, Some(999.0), 235.0),
+            ("SS400", 55.0, Some(999.0), 215.0),
+            ("SS400", 55.0, None, 215.0),
+            ("SMA400AW", 40.0, Some(999.0), 235.0),
+            ("SMA400BW", 40.001, None, 215.0),
+            ("SMA490BP", 40.0, Some(999.0), 325.0),
+            ("SMA490CW", 40.001, None, 295.0),
+        ] {
+            let mut input = super::src_wall_fixture::input_model(true);
+            let steel = Material {
+                id: MaterialId(4),
+                name: grade.into(),
+                fy: explicit_fy,
+                strength_factor: Some(1.2),
+                ..input.materials[3].clone()
+            };
+            input.materials.push(steel);
+            let plate = input.wall_plates[0].src_steel_plate.as_mut().unwrap();
+            plate.material = MaterialId(4);
+            plate.thickness_mm = thickness_mm;
+            let (model, _, _) = sepika_core::wall_expand::expand_wall_elements(&input);
+            let data = model.element(ElemId(4)).unwrap();
+            let wall = WallElement::try_new(data, &model)
+                .unwrap()
+                .with_fiber_flexure(
+                    data,
+                    &model,
+                    StrengthBasis::MaterialStrength,
+                    sepika_core::model::AnalysisKind::Incremental,
+                )
+                .unwrap();
+            let fiber = wall.fiber_column.unwrap();
+            for gauss in &fiber.gauss_points {
+                let stresses: Vec<_> = gauss
+                    .section
+                    .fibers
+                    .iter()
+                    .zip(&gauss.mats)
+                    .filter(|(fiber, _)| fiber.material == 2)
+                    .map(|(_, mat)| mat.reference_stress())
+                    .collect();
+                assert!(!stresses.is_empty());
+                assert!(stresses
+                    .iter()
+                    .all(|stress| (*stress - 1.2 * expected_f).abs() < 1e-9));
+            }
+        }
+    }
 
     /// 4000×3000×t150 の壁（X-Z 面内）を持つモデル。
     fn make_wall_model() -> (Model, ElementData) {
@@ -2785,50 +3030,32 @@ mod capacity_issue_tests {
     }
 
     #[test]
-    fn pure_steel_wall_section_is_plate_only_for_all_three_boundary_representations() {
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
-            let (mut model, wall) = model_with(Some(rc_col(true)), 0.0025);
-            model.materials[0].category = MaterialCategory::Steel;
-            model.materials[0].young = 205000.0;
-            model.materials[0].poisson = 0.3;
-            model.materials[0].fy = Some(235.0);
-            model.sections[0].shape = None;
-            model.sections[0].thickness = Some(9.0);
-            model.sections[1].shape = Some(SectionShape::SteelH {
-                height: 600.0,
-                width: 300.0,
-                web_thick: 12.0,
-                flange_thick: 20.0,
-                root_r: Some(0.0),
-            });
-            for member in model
-                .elements
-                .iter_mut()
-                .filter(|e| e.kind != ElementKind::Wall)
-            {
-                member.kind = kind;
-            }
-            let section = crate::wall::shear_section::WallSection::new(&wall, &model).unwrap();
-            assert!(section.columns.iter().all(Option::is_none));
-            let properties = section.properties().unwrap();
-            assert!((properties.area_mm2 - 36_000.0).abs() < 1e-6);
-            assert!(
-                (properties.flexural_rigidity_n_mm2 / 9_840_000_000_000_000.0 - 1.0).abs() < 1e-6,
-                "actual EI={} Nmm², independent 205000*9*4000³/12=9.84e15 Nmm²",
-                properties.flexural_rigidity_n_mm2
-            );
-            assert!(fixture_directional_capacity(
+    fn direct_wall_element_calls_reject_steel_wall() {
+        let (mut model, wall) = model_with(Some(rc_col(true)), 0.0025);
+        model.materials[0].category = MaterialCategory::Steel;
+        model.sections[0].shape = None;
+        model.sections[0].thickness = Some(9.0);
+        let reason = model.validate_wall_primary_materials().unwrap_err();
+        assert!(WallElement::try_new(&wall, &model).is_none());
+        assert_eq!(
+            crate::wall::shear_section::wall_shear_rigidity(&wall, &model),
+            Err(reason.clone())
+        );
+        let basis = crate::factory::StrengthBasis::Nominal;
+        assert_eq!(
+            WallElement::directional_shear_capacity_at_reference(
                 &wall,
                 &model,
-                crate::factory::StrengthBasis::Nominal
-            )
-            .unwrap_err()
-            .contains("鋼板耐震壁"));
-        }
+                basis,
+                0.0,
+                [0.0, 0.0],
+            ),
+            Err(reason.clone())
+        );
+        assert_eq!(
+            WallElement::wall_shear_capacity_issue(&wall, &model, basis),
+            Some(reason)
+        );
     }
 
     #[test]

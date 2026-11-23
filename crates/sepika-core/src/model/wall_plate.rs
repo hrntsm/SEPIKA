@@ -30,6 +30,15 @@
 
 use super::*;
 
+/// 壁板の内法全体を覆い、壁厚中央に配置する鋼板1枚。
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SrcWallSteelPlate {
+    pub thickness_mm: f64,
+    pub material: MaterialId,
+    /// コンクリート・周辺SRC鉄骨との一体性および軸力・曲げ・せん断の伝達を確認済み。
+    pub force_transfer_confirmed: bool,
+}
+
 /// 壁版の形。[`super::SlabShape`] と同型（囲まれた領域 / 主架構・床領域に取り付く領域）。
 ///
 /// 囲まれた壁版の境界は壁版自身に持たず、[`Model::wall_plate_assignment_region`] が
@@ -71,6 +80,11 @@ pub enum WallPlateShape {
 /// （パラペット・腰壁・垂れ壁・自立壁）ごとに 1 つ。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WallPlate {
+    /// 壁筋の周辺定着・径・間隔・複筋配置の確認済み状態。
+    #[serde(default)]
+    pub src_wall_detailing_confirmed: bool,
+    /// SRC耐震壁の内蔵鋼板。通常のRC壁板では `None`。
+    pub src_steel_plate: Option<SrcWallSteelPlate>,
     /// 境界辺順の自重負担率。空は支持先未指定。指定時は非負・有限で総和 1。
     #[serde(default)]
     pub self_weight_shares: Vec<f64>,
@@ -367,6 +381,8 @@ impl Model {
         }
         let plate_id = WallPlateId(self.wall_plates.len() as u32);
         self.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: plate_id,
             shape: WallPlateShape::Enclosed,
             ..plate
@@ -408,6 +424,8 @@ impl Model {
             .map(|region| region.id)?;
         let plate_id = WallPlateId(self.wall_plates.len() as u32);
         self.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: plate_id,
             shape: WallPlateShape::Enclosed,
             ..plate
@@ -452,11 +470,9 @@ impl Model {
     /// 壁版から壁エレメント（`ElementKind::Wall`）が生成されるか。
     ///
     /// 壁領域全体を覆う 4 節点であること（[`Model::wall_plate_covers_region`]）に
-    /// 加えて、**断面が割り当たっていること**を要する。断面が無い壁版は板厚・材料が
-    /// 引けず要素を組み立てられないためである（`sepika_core::wall_expand` は
-    /// `skipped_no_section` として数える）。
+    /// 加えて断面の割当を要する。鋼材を主材料とする壁版は解析要素化しない。
     ///
-    /// `covers_region` との違いはこの 1 点だけだが、両者を取り違えると
+    /// `covers_region` と両者を取り違えると
     /// 「断面未割当の壁版が、要素でもなく壁エレメントにならない壁版でもない」という
     /// どこからも扱われない状態が生まれる。要素が生成されるかを問うときは
     /// 必ず本メソッドを使うこと。
@@ -465,7 +481,9 @@ impl Model {
     /// 3D ビューの壁版描画（要素として描かれる壁版を除くため）・
     /// モデルタブ「壁版」の「解析要素」列が同じ答えを見る。
     pub fn wall_plate_becomes_element(&self, plate: &WallPlate) -> bool {
-        self.wall_plate_covers_region(plate) && plate.section.is_some()
+        self.wall_plate_covers_region(plate)
+            && plate.section.is_some()
+            && !self.wall_plate_uses_steel(plate)
     }
 
     /// 壁版へ割り当てた断面。未割当・ダングリングは `None`。
@@ -833,6 +851,8 @@ mod tests {
     /// 囲まれた壁版の仕様のみを持つ雛形（境界は割当領域が持つ）。
     fn enclosed_plate() -> WallPlate {
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -877,6 +897,8 @@ mod tests {
         assert_eq!(coords[1], [4100.0, 0.0, 0.0]);
 
         let attached = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(1),
@@ -966,6 +988,8 @@ mod tests {
         );
 
         let attached = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(99),
@@ -996,6 +1020,8 @@ mod tests {
     fn test_attached_line_extrudes_upward_not_sideways() {
         let m = model_with_nodes(&[[0.0, 0.0, 3000.0], [4000.0, 0.0, 3000.0]]);
         let p = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -1029,6 +1055,8 @@ mod tests {
     fn attached_area_uses_abs_height_when_extent_sign_reverses() {
         let m = model_with_nodes(&[[0.0, 0.0, 3000.0], [4000.0, 0.0, 3000.0]]);
         let p = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -1061,6 +1089,8 @@ mod tests {
     fn test_attached_floor_region_anchor_uses_its_own_nodes_for_length() {
         let m = model_with_nodes(&[[0.0, 0.0, 3000.0], [2000.0, 0.0, 3000.0]]);
         let p = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -1085,6 +1115,8 @@ mod tests {
     fn test_attached_point_anchor_is_unsupported_for_wall() {
         let m = model_with_nodes(&[[0.0, 0.0, 3000.0]]);
         let p = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -1180,6 +1212,8 @@ mod tests {
             });
         }
         let p = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -1219,6 +1253,8 @@ mod tests {
             })
             .collect();
         let p = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(0),
             shape: WallPlateShape::Attached {
                 anchor: RegionAnchor::FloorRegion {
@@ -1336,6 +1372,8 @@ mod tests {
     #[test]
     fn test_total_opening_area_falls_back_to_opening_area_field() {
         let p = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -1411,6 +1449,8 @@ mod tests {
             });
         }
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -1569,6 +1609,8 @@ mod tests {
     fn coverage_is_none_for_enclosed() {
         let m = model_two_regions();
         let p = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),

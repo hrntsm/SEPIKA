@@ -29,13 +29,15 @@ pub mod story_response;
 mod types;
 pub mod wall_response;
 
-pub use driver::{pushover_analysis, pushover_analysis_recording};
+pub use driver::{
+    pushover_analysis, pushover_analysis_recording, pushover_analysis_recording_signed,
+};
 pub use response::story_reference_node;
 pub use types::{
     CapacityPoint, DuctilityMethod, HingeEvent, HingeLevel, MechanismType, MemberHistory,
     MemberShearDiagnostic, MemberShearYield, MemberStepState, PushoverControl,
-    PushoverMemberResponse, PushoverResult, PushoverStep, PushoverTarget, PushoverTermination,
-    ShearYieldEvent,
+    PushoverMemberResponse, PushoverResult, PushoverSign, PushoverStep, PushoverTarget,
+    PushoverTermination, ShearYieldEvent,
 };
 
 #[cfg(test)]

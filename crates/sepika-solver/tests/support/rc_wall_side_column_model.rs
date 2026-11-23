@@ -201,6 +201,8 @@ pub fn input_model() -> Model {
     model.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: sepika_core::ids::WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: Some(SectionId(2)),

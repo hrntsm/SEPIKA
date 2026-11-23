@@ -21,6 +21,7 @@ pub mod region_gen;
 pub mod region_rebuild;
 pub mod result_contract;
 pub mod section_shape;
+pub mod src_wall_capacity;
 pub mod structure_kind;
 pub mod units;
 pub mod wall_region_rebuild;

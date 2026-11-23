@@ -319,7 +319,7 @@ impl SrcDesign {
         let material_issue = crate::material_strength::main_rebar_category_issue(main_rebar)
             .or_else(|| {
                 let grade = main_rebar?.name.trim();
-                (!matches!(grade, "SD295A" | "SD295B" | "SD345" | "SD390" | "SD490")).then(|| {
+                (!sepika_core::material_grade::is_src_main_rebar_grade(grade)).then(|| {
                     format!("主筋材料「{grade}」はSRC規準の異形主筋に対応する材種ではありません")
                 })
             })
@@ -407,15 +407,11 @@ impl SrcDesign {
         if fc_raw > 60.0 {
             return Err("SRC検定: コンクリートの設計基準強度が60 N/mm²を超えています".into());
         }
-        if ctx.steel_attr.as_ref().is_some_and(|attr| {
-            [
-                attr.joint_flange_loss,
-                attr.joint_web_loss,
-                attr.scallop_web_loss,
-            ]
-            .into_iter()
-            .any(|loss| loss != 0.0)
-        }) {
+        if ctx
+            .steel_attr
+            .as_ref()
+            .is_some_and(sepika_core::model::SteelDesignAttr::has_section_loss)
+        {
             return Err("SRC検定: 欠損を含む内蔵鉄骨の有効断面を評価できません".into());
         }
 
@@ -484,21 +480,14 @@ impl SrcDesign {
             sepika_core::material_grade::resolve_steel_f(Some(steel_mat), Some(flange_thick_mm))?;
         let web_f =
             sepika_core::material_grade::resolve_steel_f(Some(steel_mat), Some(web_thick_mm))?;
-        let flange_limit = src_h_width_thickness_limits(flange_f).map(|row| row.0);
-        let web_limit = src_h_width_thickness_limits(web_f).map(|row| {
-            if matches!(shape, SectionShape::SrcBeamRect { .. }) {
-                row.1
-            } else {
-                row.2
-            }
-        });
-        if flange_limit.is_none_or(|limit| flange_ratio > limit)
-            || web_limit.is_none_or(|limit| web_ratio > limit)
-        {
-            return Err(format!(
-                "{member}検定: 内蔵鉄骨がSRC規準解説表7.1の幅厚比の適用条件を満たしません"
-            ));
-        }
+        sepika_core::material_grade::validate_src_h_width_thickness(
+            flange_ratio,
+            web_ratio,
+            flange_f,
+            web_f,
+            matches!(shape, SectionShape::SrcColumnRect { .. }),
+        )
+        .map_err(|reason| format!("{member}検定: {reason}"))?;
 
         match shape {
             SectionShape::SrcBeamRect {
@@ -597,16 +586,6 @@ impl SrcDesign {
             }
             _ => unreachable!(),
         }
-    }
-}
-
-fn src_h_width_thickness_limits(f_n_mm2: f64) -> Option<(f64, f64, f64)> {
-    match f_n_mm2 {
-        235.0 => Some((23.0, 106.0, 95.0)),
-        275.0 => Some((22.0, 98.0, 87.0)),
-        325.0 => Some((20.0, 90.0, 80.0)),
-        355.0 => Some((19.0, 87.0, 77.0)),
-        _ => None,
     }
 }
 

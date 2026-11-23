@@ -72,6 +72,9 @@ fn check_walls_selected(
         if elem.kind != ElementKind::Wall {
             continue;
         }
+        if sepika_core::src_wall_capacity::is_src_wall_candidate(model, elem) {
+            continue;
+        }
         let Some(sec) = model.element_section(elem) else {
             continue;
         };
@@ -788,12 +791,16 @@ pub(super) fn collect_wall_design_checks(
     model: &Model,
     forces: &[(ElemId, ForcesAt<'_>)],
     members: &[MemberInfo<'_>],
-    term: LoadTerm,
-    index: Option<&sepika_core::wall_expand::WallExpansionIndex>,
-    case: &str,
-    load_terms: Option<&[(sepika_core::ids::LoadCaseId, f64)]>,
+    inputs: super::WallDesignInputs<'_>,
 ) -> Vec<crate::wall_check::WallCheck> {
     use crate::wall_check::{WallCheck, WallCheckKind, WallSkipKind};
+    let super::WallDesignInputs {
+        term,
+        index,
+        case,
+        load_terms,
+        ..
+    } = inputs;
     let mut out = Vec::new();
     let mut candidates: Vec<_> = model
         .elements
@@ -808,6 +815,15 @@ pub(super) fn collect_wall_design_checks(
     }
     for (plate_id, elem) in candidates {
         let plate = plate_id.and_then(|id| model.wall_plate(id));
+        let src_candidate = elem
+            .is_some_and(|e| sepika_core::src_wall_capacity::is_src_wall_candidate(model, e))
+            || plate.is_some_and(|p| p.src_steel_plate.is_some() || p.src_wall_detailing_confirmed);
+        if src_candidate {
+            out.extend(super::src_wall::check_wall(
+                model, plate_id, elem, forces, inputs,
+            ));
+            continue;
+        }
         let input_invalid = elem
             .and_then(|e| model.element_section(e))
             .and_then(|s| s.shape.as_ref())
@@ -838,7 +854,12 @@ pub(super) fn collect_wall_design_checks(
             .or_else(|| plate.and_then(|p| model.wall_plate_section(p)));
         let response =
             elem.and_then(|e| forces.iter().find(|(id, _)| *id == e.id).map(|(_, f)| *f));
-        let issue = if input_invalid {
+        let steel_issue = plate
+            .and_then(|p| model.wall_plate_steel_input_issue(p))
+            .or_else(|| elem.and_then(|e| sepika_core::model::wall_steel_input_issue(e, model)));
+        let issue = if let Some(reason) = steel_issue {
+            Some((WallSkipKind::InvalidInput, reason))
+        } else if input_invalid {
             Some((
                 WallSkipKind::InvalidInput,
                 "壁幾何または板厚が不正です（入力不足を自重のみへ読み替えません）".into(),
@@ -871,13 +892,51 @@ pub(super) fn collect_wall_design_checks(
             let sec = section.unwrap();
             let mat = model.materials.get(sec.material.unwrap().index()).unwrap();
             match sec.shape.as_ref() {
-                _ if mat.category == sepika_core::model::MaterialCategory::Steel => Some((WallSkipKind::NotImplemented, "純鋼板壁の国内許容応力度・終局検定式は未確定です（壁板・接合未検定。RC/SRC式は適用しません）".into())),
-                _ if sec.steel_material.is_some() => Some((WallSkipKind::NotImplemented, "SRC内蔵鋼板壁の検定は未実装です（純鋼板壁・RC壁の式を流用しません）".into())),
-                Some(SectionShape::RcWall { .. }) if mat.category != sepika_core::model::MaterialCategory::Concrete => Some((WallSkipKind::InvalidInput, "RC壁の主材料区分がコンクリートではありません".into())),
-                Some(SectionShape::RcWall { .. }) if mat.fc.is_none() => Some((WallSkipKind::MissingInput, "コンクリート強度 Fc が未入力です".into())),
-                Some(SectionShape::RcWall { .. }) if !mat.fc.is_some_and(|fc| fc.is_finite() && fc > 0.0) => Some((WallSkipKind::InvalidInput, "Fc が有限の正値ではありません".into())),
-                Some(SectionShape::RcWall { .. }) => if response.is_none_or(|f| f.is_empty()) { Some((WallSkipKind::MissingResponse, "壁応答を取得できません（空応答をゼロ応力として扱いません）".into())) } else if response.is_some_and(|f| f.iter().any(|(_, v)| v.iter().any(|x| !x.is_finite()))) { Some((WallSkipKind::InvalidInput, "壁応答に非有限値があります".into())) } else { None },
-                _ => Some((WallSkipKind::NotApplicable, "RC/SRC/純鋼板を区別し、この壁形状・材料への検定式は適用できません".into())),
+                _ if sec.steel_material.is_some() => Some((
+                    WallSkipKind::NotImplemented,
+                    "SRC内蔵鋼板壁の検定は未実装です（RC壁の式は適用しません）".into(),
+                )),
+                Some(SectionShape::RcWall { .. })
+                    if mat.category != sepika_core::model::MaterialCategory::Concrete =>
+                {
+                    Some((
+                        WallSkipKind::InvalidInput,
+                        "RC壁の主材料区分がコンクリートではありません".into(),
+                    ))
+                }
+                Some(SectionShape::RcWall { .. }) if mat.fc.is_none() => Some((
+                    WallSkipKind::MissingInput,
+                    "コンクリート強度 Fc が未入力です".into(),
+                )),
+                Some(SectionShape::RcWall { .. })
+                    if !mat.fc.is_some_and(|fc| fc.is_finite() && fc > 0.0) =>
+                {
+                    Some((
+                        WallSkipKind::InvalidInput,
+                        "Fc が有限の正値ではありません".into(),
+                    ))
+                }
+                Some(SectionShape::RcWall { .. }) => {
+                    if response.is_none_or(|f| f.is_empty()) {
+                        Some((
+                            WallSkipKind::MissingResponse,
+                            "壁応答を取得できません（空応答をゼロ応力として扱いません）".into(),
+                        ))
+                    } else if response
+                        .is_some_and(|f| f.iter().any(|(_, v)| v.iter().any(|x| !x.is_finite())))
+                    {
+                        Some((
+                            WallSkipKind::InvalidInput,
+                            "壁応答に非有限値があります".into(),
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                _ => Some((
+                    WallSkipKind::NotApplicable,
+                    "この壁形状・材料への検定式は適用できません".into(),
+                )),
             }
         };
         let mut computed = Vec::new();

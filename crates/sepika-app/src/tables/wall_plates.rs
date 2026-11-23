@@ -20,10 +20,10 @@
 //! 「適用」で 1 つの `SetWallPlateAttrs` として発行する。
 
 use crate::app::App;
-use sepika_core::ids::{NodeId, SectionId, WallPlateAssignmentRegionId, WallPlateId};
+use sepika_core::ids::{MaterialId, NodeId, SectionId, WallPlateAssignmentRegionId, WallPlateId};
 use sepika_core::model::{
-    AreaLoad, LoadTransfer, MultiOpeningMode, PlateAssignment, RegionAnchor, WallOpening,
-    WallPlate, WallPlateShape,
+    AreaLoad, LoadTransfer, MaterialCategory, MultiOpeningMode, PlateAssignment, RegionAnchor,
+    SrcWallSteelPlate, WallOpening, WallPlate, WallPlateShape,
 };
 use sepika_core::units::{to_display, to_internal};
 use sepika_edit::{
@@ -55,6 +55,12 @@ fn multi_opening_mode_label(mode: MultiOpeningMode) -> &'static str {
 /// 下段の `add_*` は「取り付く壁版を追加」フォームの入力欄。
 #[derive(Clone, Debug, Default)]
 pub struct WallPlateDraft {
+    pub src_saved: Option<(bool, Option<SrcWallSteelPlate>)>,
+    pub src_wall_detailing_confirmed: bool,
+    pub src_steel_enabled: bool,
+    pub src_steel_material: Option<MaterialId>,
+    pub src_steel_thickness_mm: String,
+    pub src_steel_transfer_confirmed: bool,
     pub dl_support: Option<sepika_core::model::WallDlSupport>,
     pub self_weight_shares: Vec<f64>,
     /// 編集対象の壁版。
@@ -305,6 +311,13 @@ fn opening_summary(plate: &WallPlate) -> String {
     }
 }
 
+pub(crate) fn wall_section_selectable(
+    model: &sepika_core::model::Model,
+    section: &sepika_core::model::Section,
+) -> bool {
+    section.thickness.is_some_and(|t| t > 0.0) && !model.wall_section_uses_steel(section)
+}
+
 pub(crate) fn set_wall_plate_section(app: &mut App, id: WallPlateId, section: Option<SectionId>) {
     let becomes_element = |model: &sepika_core::model::Model| {
         model
@@ -471,7 +484,7 @@ fn wall_plates_list(ui: &mut egui::Ui, app: &mut App) {
         .model
         .sections
         .iter()
-        .filter(|sec| sec.thickness.is_some_and(|t| t > 0.0))
+        .filter(|sec| wall_section_selectable(&app.core.model, sec))
         .map(|sec| (sec.id, sec.display_name()))
         .collect();
 
@@ -886,7 +899,16 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
             });
     });
 
-    if app.ui.scoped.wall_plate_draft.target != app.ui.scoped.wall_plate_draft.synced_for {
+    let current_src = app
+        .ui
+        .scoped
+        .wall_plate_draft
+        .target
+        .and_then(|id| app.core.model.wall_plate(id))
+        .map(|plate| (plate.src_wall_detailing_confirmed, plate.src_steel_plate));
+    if app.ui.scoped.wall_plate_draft.target != app.ui.scoped.wall_plate_draft.synced_for
+        || current_src != app.ui.scoped.wall_plate_draft.src_saved
+    {
         if let Some(plate) = app
             .ui
             .scoped
@@ -900,6 +922,17 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
             app.ui.scoped.wall_plate_draft.slit = slit;
             app.ui.scoped.wall_plate_draft.self_weight_shares = plate.self_weight_shares.clone();
             app.ui.scoped.wall_plate_draft.dl_support = plate.dl_support;
+            let draft = &mut app.ui.scoped.wall_plate_draft;
+            draft.src_saved = current_src;
+            draft.src_wall_detailing_confirmed = plate.src_wall_detailing_confirmed;
+            draft.src_steel_enabled = plate.src_steel_plate.is_some();
+            draft.src_steel_material = plate.src_steel_plate.map(|steel| steel.material);
+            draft.src_steel_thickness_mm = plate
+                .src_steel_plate
+                .map_or_else(String::new, |steel| steel.thickness_mm.to_string());
+            draft.src_steel_transfer_confirmed = plate
+                .src_steel_plate
+                .is_some_and(|steel| steel.force_transfer_confirmed);
             app.ui.scoped.wall_plate_draft.openings = format_openings(&plate.openings);
             app.ui.scoped.wall_plate_draft.loads = plate
                 .loads
@@ -920,6 +953,118 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
         .model
         .wall_plate(target)
         .is_some_and(|p| p.is_attached());
+    let src_support = app
+        .core
+        .model
+        .wall_plate_assignment_region(target)
+        .is_some_and(|region| {
+            region.boundary.iter().any(|edge| {
+                let sepika_core::model::SupportMemberId::Primary(id) = edge.support else {
+                    return false;
+                };
+                matches!(
+                    app.core
+                        .model
+                        .element(id)
+                        .and_then(|member| app.core.model.element_section(member))
+                        .and_then(|section| section.shape.as_ref()),
+                    Some(
+                        sepika_core::section_shape::SectionShape::SrcColumnRect { .. }
+                            | sepika_core::section_shape::SectionShape::SrcBeamRect { .. }
+                    )
+                )
+            })
+        });
+    let draft = &mut app.ui.scoped.wall_plate_draft;
+    let show_src = !is_attached
+        && (draft.src_wall_detailing_confirmed || draft.src_steel_enabled || src_support);
+    let parsed_src_steel = if show_src {
+        ui.collapsing("SRC耐震壁", |ui| {
+            if ui
+                .checkbox(&mut draft.src_steel_enabled, "内法全体・壁厚中央に鋼板1枚")
+                .changed()
+            {
+                draft.src_wall_detailing_confirmed = false;
+                draft.src_steel_transfer_confirmed = false;
+            }
+            if draft.src_steel_enabled {
+                let original_material = draft.src_steel_material;
+                egui::ComboBox::from_id_salt("src_wall_steel_material")
+                    .selected_text(
+                        draft
+                            .src_steel_material
+                            .and_then(|id| app.core.model.materials.get(id.index()))
+                            .map_or("未割当", |m| m.name.as_str()),
+                    )
+                    .show_ui(ui, |ui| {
+                        for material in app
+                            .core
+                            .model
+                            .materials
+                            .iter()
+                            .filter(|m| m.category == MaterialCategory::Steel)
+                        {
+                            ui.selectable_value(
+                                &mut draft.src_steel_material,
+                                Some(material.id),
+                                &material.name,
+                            );
+                        }
+                    });
+                let thickness_changed = ui
+                    .horizontal(|ui| {
+                        ui.label("鋼板厚 [mm]");
+                        ui.text_edit_singleline(&mut draft.src_steel_thickness_mm)
+                            .changed()
+                    })
+                    .inner;
+                if draft.src_steel_material != original_material || thickness_changed {
+                    draft.src_steel_transfer_confirmed = false;
+                }
+                if thickness_changed {
+                    draft.src_wall_detailing_confirmed = false;
+                }
+                ui.checkbox(
+                    &mut draft.src_steel_transfer_confirmed,
+                    "コンクリート・周辺SRC鉄骨との一体性と軸力・曲げ・せん断の伝達を確認済み",
+                );
+            }
+            ui.checkbox(
+                &mut draft.src_wall_detailing_confirmed,
+                if draft.src_steel_enabled {
+                    "壁筋の周辺定着・径・間隔と鋼板両側の配筋・かぶりを確認済み"
+                } else {
+                    "壁筋の周辺定着・径・間隔・複筋配置を確認済み"
+                },
+            );
+        });
+        if draft.src_steel_enabled {
+            let thickness = draft
+                .src_steel_thickness_mm
+                .trim()
+                .parse::<f64>()
+                .ok()
+                .filter(|t| t.is_finite() && *t > 0.0);
+            match (thickness, draft.src_steel_material) {
+                (Some(thickness_mm), Some(material)) => Ok(Some(SrcWallSteelPlate {
+                    thickness_mm,
+                    material,
+                    force_transfer_confirmed: draft.src_steel_transfer_confirmed,
+                })),
+                _ => {
+                    ui.colored_label(
+                        crate::theme::ERROR_RED,
+                        "内蔵鋼板の材料と正の板厚を入力してください",
+                    );
+                    Err(())
+                }
+            }
+        } else {
+            Ok(None)
+        }
+    } else {
+        Ok(None)
+    };
 
     if !is_attached {
         use sepika_core::model::WallDlSupport;
@@ -1178,7 +1323,8 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
     let can_apply = parsed_area.is_some()
         && parsed_weight.is_some()
         && parsed_openings.is_ok()
-        && parsed_loads.is_some();
+        && parsed_loads.is_some()
+        && parsed_src_steel.is_ok();
     if ui
         .add_enabled(can_apply, egui::Button::new("✔ 適用"))
         .on_hover_text("選択した壁版に開口・スリットを設定します（undo可）")
@@ -1199,6 +1345,9 @@ fn attrs_form(ui: &mut egui::Ui, app: &mut App) {
             app.core.scoped.undo.run(
                 &mut app.core.model,
                 Box::new(SetWallPlateAttrs {
+                    src_wall_detailing_confirmed: show_src
+                        && app.ui.scoped.wall_plate_draft.src_wall_detailing_confirmed,
+                    src_steel_plate: parsed_src_steel.expect("適用前に入力検証済み"),
                     dl_support: app.ui.scoped.wall_plate_draft.dl_support,
                     self_weight_shares: app.ui.scoped.wall_plate_draft.self_weight_shares.clone(),
                     id: target,
@@ -1236,7 +1385,7 @@ fn add_enclosed_form(ui: &mut egui::Ui, app: &mut App) {
             .wall_plate_draft
             .add_enclosed_section
             .and_then(|sid| app.core.model.sections.get(sid.index()))
-            .filter(|sec| sec.thickness.is_some_and(|t| t > 0.0));
+            .filter(|sec| wall_section_selectable(&app.core.model, sec));
         if resolved.is_none() {
             app.ui.scoped.wall_plate_draft.add_enclosed_section = None;
         }
@@ -1252,7 +1401,7 @@ fn add_enclosed_form(ui: &mut egui::Ui, app: &mut App) {
                     "―",
                 );
                 for sec in &app.core.model.sections {
-                    if sec.thickness.is_some_and(|t| t > 0.0) {
+                    if wall_section_selectable(&app.core.model, sec) {
                         ui.selectable_value(
                             &mut app.ui.scoped.wall_plate_draft.add_enclosed_section,
                             Some(sec.id),
@@ -1483,7 +1632,7 @@ fn add_attached_form(ui: &mut egui::Ui, app: &mut App) {
             .wall_plate_draft
             .add_section
             .and_then(|sid| app.core.model.sections.get(sid.index()))
-            .filter(|sec| sec.thickness.is_some_and(|t| t > 0.0));
+            .filter(|sec| wall_section_selectable(&app.core.model, sec));
         if resolved.is_none() {
             app.ui.scoped.wall_plate_draft.add_section = None;
         }
@@ -1495,7 +1644,7 @@ fn add_attached_form(ui: &mut egui::Ui, app: &mut App) {
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut app.ui.scoped.wall_plate_draft.add_section, None, "―");
                 for sec in &app.core.model.sections {
-                    if sec.thickness.is_some_and(|t| t > 0.0) {
+                    if wall_section_selectable(&app.core.model, sec) {
                         ui.selectable_value(
                             &mut app.ui.scoped.wall_plate_draft.add_section,
                             Some(sec.id),
@@ -1606,6 +1755,8 @@ mod tests {
 
     fn enclosed(id: u32, section: Option<SectionId>) -> WallPlate {
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(id),

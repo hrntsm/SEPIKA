@@ -1918,29 +1918,14 @@ fn status_wall_model() -> (Model, sepika_core::wall_expand::WallExpansionIndex) 
     steel.category = MaterialCategory::Steel;
     steel.name = "SN400B".into();
     model.materials.push(steel);
-    let mut steel_sec = model.sections[0].clone();
-    steel_sec.id = SectionId(3);
-    steel_sec.shape = None;
-    steel_sec.thickness = Some(6.0);
-    steel_sec.material = Some(MaterialId(2));
-    model.sections.push(steel_sec);
+    let mut src = model.sections[0].clone();
+    src.id = SectionId(3);
+    src.steel_material = Some(MaterialId(2));
+    model.sections.push(src);
     let mut missing = model.sections[0].clone();
     missing.id = SectionId(4);
     missing.material = None;
     model.sections.push(missing);
-    for (source, id) in [(1, 5), (2, 6)] {
-        let mut section = model.sections[source].clone();
-        section.id = SectionId(id);
-        section.shape = Some(SectionShape::SteelH {
-            height: 600.0,
-            width: 300.0,
-            web_thick: 10.0,
-            flange_thick: 20.0,
-            root_r: Some(0.0),
-        });
-        section.material = Some(MaterialId(2));
-        model.sections.push(section);
-    }
     let frames = model.elements.clone();
     for (slot, section) in [0, 3, 4].into_iter().enumerate() {
         let offset = slot as u32 * 4;
@@ -1959,9 +1944,6 @@ fn status_wall_model() -> (Model, sepika_core::wall_expand::WallExpansionIndex) 
                     .iter()
                     .map(|node| NodeId(node.0 + offset))
                     .collect();
-                if slot == 1 {
-                    frame.section = source.section.map(|id| SectionId(id.0 + 4));
-                }
                 model.elements.push(frame);
             }
         }
@@ -1974,6 +1956,8 @@ fn status_wall_model() -> (Model, sepika_core::wall_expand::WallExpansionIndex) 
         model.add_enclosed_wall_plate_from_nodes(
             &boundary,
             WallPlate {
+                src_wall_detailing_confirmed: false,
+                src_steel_plate: None,
                 dl_support: None,
                 self_weight_shares: vec![],
                 id: WallPlateId(0),
@@ -2074,12 +2058,7 @@ fn reference_method_identifies_rc_success_and_missing_inputs_but_not_steel_or_sr
 fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
     use crate::wall_check::{WallCheckKind, WallCheckSummary, WallSkipKind};
     use sepika_element::frame::beam::MemberForces;
-    let (mut model, index) = status_wall_model();
-    for section in &mut model.sections {
-        if section.material == Some(MaterialId(2)) {
-            section.thickness = Some(20.0);
-        }
-    }
+    let (model, index) = status_wall_model();
     let forces: Vec<_> = model
         .elements
         .iter()
@@ -2165,6 +2144,8 @@ fn wall_status_candidates_keep_plate_case_kind_and_independent_counts() {
 
 #[path = "../../../sepika-solver/tests/support/rc_wall_side_column_model.rs"]
 mod rc_wall_side_column_model;
+#[path = "../../../sepika-solver/tests/support/src_wall_model.rs"]
+mod src_wall_model;
 
 #[test]
 fn reference_skeleton_report_caps_horizontal_rebar_and_diagnoses_missing_vertical_input() {
@@ -2642,7 +2623,8 @@ fn wall_status_missing_invalid_fc_src_and_shape_applicability_are_distinct() {
     assert!(checks
         .iter()
         .filter(|w| w.elem == Some(rc))
-        .all(|w| w.skip_kind == Some(WallSkipKind::NotImplemented)));
+        .all(|w| w.skip_kind == Some(WallSkipKind::InvalidInput)
+            && matches!(&w.outcome, CheckOutcome::Skipped { reason } if reason.contains("重量は荷重として入力"))));
 }
 
 #[test]
@@ -2691,37 +2673,53 @@ fn panel_504_check_uses_shape_depth_and_reports_unsupported_beams() {
 }
 
 #[test]
-fn sm520_wall_side_column_out_of_range_is_not_dropped_from_allowable_and_reference_outputs() {
+fn invalid_sm520_side_column_is_reported_in_all_src_wall_design_checks() {
+    use crate::wall_check::WallCheckKind::*;
     for name in ["SM520", "SM520B", "SM520C"] {
         for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
-            let mut model = wall_with_columns_model();
-            let mut steel = model.materials[1].clone();
-            steel.id = MaterialId(2);
+            let mut model = src_wall_model::input_model(false);
+            let mut steel = model.materials[3].clone();
+            steel.id = MaterialId(4);
             steel.name = name.into();
-            steel.category = MaterialCategory::Steel;
             steel.fy = fy;
             model.materials.push(steel);
-            let Some(SectionShape::RcColumnRect { b, d, rebar }) = model.sections[1].shape.clone()
+            let Some(SectionShape::SrcColumnRect {
+                steel_web_thick,
+                steel_flange_thick,
+                ..
+            }) = &mut model.sections[0].shape
             else {
                 unreachable!()
             };
-            model.sections[1].shape = Some(SectionShape::SrcColumnRect {
-                b,
-                d,
-                rebar,
-                steel_height: 400.0,
-                steel_width: 200.0,
-                steel_web_thick: 100.001,
-                steel_flange_thick: 80.0,
-            });
-            model.sections[1].steel_material = Some(MaterialId(2));
-            let checks = all_wall_outcomes(&model);
-            let wall: Vec<_> = checks
-                .iter()
-                .filter(|(_, label, _)| label.starts_with("耐震壁"))
-                .collect();
-            assert_eq!(wall.len(), 2);
-            assert!(wall.iter().all(|(_,_,c)| matches!(c, CheckOutcome::Skipped { reason } if reason.contains("適用範囲"))), "{wall:?}");
+            *steel_web_thick = 100.001;
+            *steel_flange_thick = 80.0;
+            model.sections[0].steel_material = Some(MaterialId(4));
+            let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
+            let checks = collect_wall_design_checks(
+                &expanded,
+                &[],
+                LoadTerm::Short,
+                Some(&index),
+                "case:0",
+                None,
+            );
+            assert_eq!(
+                checks.iter().map(|check| check.kind).collect::<Vec<_>>(),
+                [
+                    AllowableShear,
+                    AllowableFlexure,
+                    UltimateShear,
+                    UltimateFlexure,
+                    UltimateFlexure
+                ],
+            );
+            let expected_reason = if name == "SM520" {
+                "種類記号が不完全"
+            } else {
+                "適用範囲"
+            };
+            assert!(checks.iter().all(|check| check.seismic_target
+                && matches!(&check.outcome, CheckOutcome::Skipped { reason } if reason.contains("側柱") && reason.contains(name) && reason.contains(expected_reason))), "{checks:?}");
         }
     }
 }

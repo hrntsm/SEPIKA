@@ -128,6 +128,16 @@ impl App {
 
     /// 増分解析結果（性能曲線・ヒンジ・崩壊機構）の表示。
     pub(crate) fn pushover_results_panel(&mut self, ui: &mut egui::Ui) {
+        if self.has_src_holding_members()
+            || self.core.design_frame
+                == sepika_design_jp::secondary::holding_capacity::FrameType::SrcFrame
+        {
+            ui.label("SRCの増分解析結果と保有水平耐力比較は、設計タブでX±・Y±ごとに表示します。");
+            if ui.button("設計タブへ").clicked() {
+                self.ui.view.active_tab = crate::app::Tab::Design;
+            }
+            return;
+        }
         if self.displayed_pushover().is_none() {
             ui.colored_label(
                 crate::theme::UI_MUTED,

@@ -387,6 +387,8 @@ fn wall_bay_model() -> Model {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(5), NodeId(4)],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: Some(sepika_core::model::WallDlSupport::HeightMidpoint),
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -415,6 +417,8 @@ fn wall_bay_model() -> Model {
     });
     // 面荷重ゼロだけの入力では仕上げ・増打ちの自重算入漏れを検出できない。
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(1),

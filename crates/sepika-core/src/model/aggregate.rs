@@ -584,6 +584,18 @@ impl Model {
             }
         }
         for plate in &self.wall_plates {
+            if let Some(steel) = plate.src_steel_plate {
+                if self
+                    .materials
+                    .get(steel.material.index())
+                    .is_none_or(|m| m.id != steel.material)
+                {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallPlate {} -> Material {}",
+                        plate.id.0, steel.material.0
+                    )));
+                }
+            }
             for nid in wall_plate_node_refs(self, plate) {
                 if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
                     return Err(CoreError::DanglingRef(format!(
@@ -674,6 +686,8 @@ impl Model {
         use crate::error::CoreError;
 
         self.validate_reference_ids()?;
+        self.validate_wall_primary_materials()
+            .map_err(CoreError::InvalidInput)?;
         self.validate_frame_node_counts()?;
         self.validate_secondary_section_usage()?;
         self.validate_rc_section_usage()?;
@@ -1550,6 +1564,11 @@ impl Model {
                 f(mid);
             }
         }
+        for plate in &mut self.wall_plates {
+            if let Some(steel) = &mut plate.src_steel_plate {
+                f(&mut steel.material);
+            }
+        }
     }
 
     /// モデル内の全ての `ElemId` 参照（要素自身の ID・部材荷重・部材別重量・側テーブル属性・
@@ -2372,6 +2391,8 @@ mod node_reference_tests {
             .push(WallRegion::new(WallRegionId(0), vec![NodeId(5)]));
 
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -2384,6 +2405,8 @@ mod node_reference_tests {
             slit: Default::default(),
         });
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(1),
@@ -2423,6 +2446,8 @@ mod node_reference_tests {
         });
 
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(2),

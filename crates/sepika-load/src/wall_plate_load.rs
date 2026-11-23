@@ -305,6 +305,7 @@ pub fn distribute_enclosed_wall_plates_with_basis(
     model: &Model,
     basis: crate::cascade::SelfWeightBasis,
 ) -> Result<EnclosedWallLoads, String> {
+    model.validate_wall_primary_materials()?;
     if basis == crate::cascade::SelfWeightBasis::Design {
         for plate in &model.wall_plates {
             model.validate_wall_design_self_weight(plate)?;
@@ -459,6 +460,7 @@ fn accumulate_wall_and_secondary_with_basis(
     basis: crate::cascade::SelfWeightBasis,
     resolve_to_primary: bool,
 ) -> Result<(), String> {
+    model.validate_wall_primary_materials()?;
     if !wall_plates_without_load_path(model).is_empty() {
         return Err("壁版の自重支持辺が未指定・不正、または支持先へ荷重を伝えられません".into());
     }

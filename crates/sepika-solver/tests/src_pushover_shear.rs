@@ -233,6 +233,82 @@ fn run(
     )
 }
 
+#[test]
+fn src_column_same_step_face_actions_include_distributed_load_and_reject_point_at_face() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination, MemberLoad, MemberLoadKind};
+
+    let mut model = restrained_member(FrameSectionUse::Column, 10.0, 13.0);
+    model.elements[0].rigid_zone.face_i = Some(5.0);
+    model.elements[0].rigid_zone.face_j = Some(7.0);
+    model.nodes[1].restraint.set_free(Dof::Ux);
+    model.nodes[1].restraint.set_free(Dof::Uz);
+    model.stories[1].seismic_weight = Some(5_000.0);
+    let distribute = |dir, w| MemberLoad::full_length_uniform(ELEMENT, dir, LENGTH_MM, w);
+    model.load_cases = vec![
+        LoadCase {
+            origin: Default::default(),
+            id: LoadCaseId(0),
+            name: "自重".into(),
+            kind: LoadCaseKind::Dead,
+            nodal: vec![],
+            member: vec![
+                distribute([0.0, 0.0, -1.0], 20.0),
+                distribute([1.0, 0.0, 0.0], 11.0),
+            ],
+        },
+        LoadCase {
+            origin: Default::default(),
+            id: LoadCaseId(1),
+            name: "架構積載".into(),
+            kind: LoadCaseKind::Live,
+            nodal: vec![],
+            member: vec![],
+        },
+    ];
+    model.combinations = vec![LoadCombination {
+        name: "G+P".into(),
+        terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)],
+    }];
+    model.ultimate_gravity_combination = Some(0);
+    let run = |model: &Model| {
+        let map = DofMap::build(model);
+        let reducer = Reducer::build(model, &map);
+        pushover_analysis_recording(
+            model,
+            &map,
+            &reducer,
+            SeismicDir::X,
+            2,
+            PushoverTarget::from_max_disp(0.0),
+            PushoverControl::LoadOnly,
+            true,
+            Default::default(),
+        )
+        .unwrap()
+        .confirmed_history
+        .unwrap()
+        .remove(0)
+        .src_frame_faces
+        .remove(0)
+    };
+    let recorded = run(&model);
+    assert_eq!(recorded.elem, ELEMENT);
+    let [i, j] = recorded.faces.map(Result::unwrap);
+    assert!((j[0] - i[0] - 760.0).abs() < 1e-7);
+    assert!((j[1] - i[1] - 418.0).abs() < 1e-7);
+    assert!((j[5] - i[5] - i[1] * 38.0 - 7942.0).abs() < 1e-7);
+
+    model.load_cases[0].member.push(MemberLoad::manual(
+        ELEMENT,
+        [1.0, 0.0, 0.0],
+        MemberLoadKind::Point { a: 5.0, p: 50.0 },
+    ));
+    let [i, j] = run(&model).faces;
+    assert!(i.unwrap_err().contains("集中部材荷重"));
+    assert!(j.is_ok());
+}
+
 fn shear_reinforced_members() -> [(&'static str, Model, SeismicDir); 5] {
     let src_beam = restrained_member(FrameSectionUse::Girder, 10.0, 13.0);
     let src_column = restrained_member(FrameSectionUse::Column, 10.0, 13.0);

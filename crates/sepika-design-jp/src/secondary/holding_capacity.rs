@@ -120,6 +120,7 @@ pub enum FrameType {
     RcWall,
     SteelFrame,
     SteelBrace,
+    SrcFrame,
 }
 
 /// 告示1792 の Ds 値。
@@ -143,6 +144,12 @@ pub fn ds_value(frame: FrameType, rank: MemberRank) -> f64 {
         (SteelBrace, FB) => 0.35,
         (SteelBrace, FC) => 0.40,
         (SteelBrace, FD) => 0.50,
+        (SrcFrame, rank) => super::ds_group::ds_src_frame(match rank {
+            FA => super::ds_group::GroupType::A,
+            FB => super::ds_group::GroupType::B,
+            FC => super::ds_group::GroupType::C,
+            FD => super::ds_group::GroupType::D,
+        }),
     }
 }
 

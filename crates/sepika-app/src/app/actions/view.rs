@@ -71,6 +71,14 @@ impl App {
             match *change {
                 sepika_edit::IdChange::MaterialRemoved(id) => {
                     self.ui.scoped.material_id_revision = self.core.scoped.undo.revision();
+                    let draft = &mut self.ui.scoped.wall_plate_draft;
+                    if draft.src_steel_material == Some(id) {
+                        draft.src_steel_transfer_confirmed = false;
+                    }
+                    draft.src_steel_material = draft
+                        .src_steel_material
+                        .filter(|material| *material != id)
+                        .map(|material| MaterialId(material.0 - u32::from(material.0 > id.0)));
                     self.ui.scoped.nav.focus_material = self
                         .ui
                         .scoped
@@ -81,6 +89,10 @@ impl App {
                 }
                 sepika_edit::IdChange::MaterialInserted(id) => {
                     self.ui.scoped.material_id_revision = self.core.scoped.undo.revision();
+                    let draft = &mut self.ui.scoped.wall_plate_draft;
+                    draft.src_steel_material = draft
+                        .src_steel_material
+                        .map(|material| MaterialId(material.0 + u32::from(material.0 >= id.0)));
                     self.ui.scoped.nav.focus_material = self
                         .ui
                         .scoped

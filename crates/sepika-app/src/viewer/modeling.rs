@@ -1906,6 +1906,8 @@ mod tests {
         ]
         .into_iter()
         .map(|(id, section, span)| WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(id),
             shape: WallPlateShape::Attached {
                 anchor: RegionAnchor::Line {

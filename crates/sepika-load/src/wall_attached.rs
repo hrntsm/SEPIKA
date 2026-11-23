@@ -50,6 +50,7 @@ fn push_node_load(loads: &mut Vec<BeamLoad>, node: NodeId, total: f64) {
 /// 「線」アンカーの取り付く壁版（パラペット・腰壁・垂れ壁で梁に取り付くもの）の
 /// 自重を [`BeamLoad`] へ変換する（D16）。
 pub fn attached_wall_beam_loads(model: &Model) -> Result<Vec<BeamLoad>, String> {
+    model.validate_wall_primary_materials()?;
     let mut loads = Vec::new();
     for plate in &model.wall_plates {
         let WallPlateShape::Attached { anchor, .. } = &plate.shape else {
@@ -158,20 +159,10 @@ pub fn accumulate_attached_wall_dl_weight(
     model: &Model,
     node_weight: &mut [f64],
 ) -> Result<(), String> {
+    model.validate_wall_primary_materials()?;
     for plate in model.wall_plates.iter().filter(|p| p.is_attached()) {
         model.validate_wall_design_self_weight(plate)?;
     }
-    accumulate_attached_wall_weight_with(model, node_weight, false);
-    Ok(())
-}
-
-/// 物理質量相当重量をDL支持反力と同じ端点比で集計する補助API。
-/// 地震用階帯・代表節点質量・質量行列の組立には使わない。
-pub fn accumulate_attached_wall_dl_mass_equiv(model: &Model, node_weight: &mut [f64]) {
-    accumulate_attached_wall_weight_with(model, node_weight, true);
-}
-
-fn accumulate_attached_wall_weight_with(model: &Model, node_weight: &mut [f64], physical: bool) {
     for plate in &model.wall_plates {
         let WallPlateShape::Attached { anchor, .. } = &plate.shape else {
             continue;
@@ -182,11 +173,7 @@ fn accumulate_attached_wall_weight_with(model: &Model, node_weight: &mut [f64], 
         let Ok(band) = weight.story_band(weight.z_range_mm[0], weight.z_range_mm[1]) else {
             continue;
         };
-        let total = if physical {
-            band.band.physical_n
-        } else {
-            band.band.design_n
-        };
+        let total = band.band.design_n;
         let nodes = match anchor {
             RegionAnchor::Line { nodes, .. } | RegionAnchor::FloorRegion { nodes, .. } => nodes,
             RegionAnchor::Point(_) => continue,
@@ -205,6 +192,7 @@ fn accumulate_attached_wall_weight_with(model: &Model, node_weight: &mut [f64], 
         add_node_weight(node_weight, nodes[0], total * (1.0 - t));
         add_node_weight(node_weight, nodes[1], total * t);
     }
+    Ok(())
 }
 
 /// 自立壁の自重を配分する。戻り値は床板ごとの追加面荷重強度 (N/mm²)。
@@ -220,6 +208,7 @@ fn accumulate_attached_wall_weight_with(model: &Model, node_weight: &mut [f64], 
 /// どの床領域にも載らない部分を持つ自立壁は、解析前チェックがエラーで止める。
 /// ここでは覆われている部分だけを配る。
 pub fn floor_region_wall_extra_intensity(model: &Model) -> Result<HashMap<SlabId, f64>, String> {
+    model.validate_wall_primary_materials()?;
     for plate in model.wall_plates.iter().filter(|p| p.is_attached()) {
         model.validate_wall_design_self_weight(plate)?;
     }
@@ -332,6 +321,8 @@ mod tests {
 
     fn line_attached_plate(span: [f64; 2], extent: [f64; 2], transfer: LoadTransfer) -> WallPlate {
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
@@ -586,6 +577,8 @@ mod tests {
     /// 自立壁の壁版（節点 0-1 の間、Z=3000）。
     fn self_standing_plate() -> WallPlate {
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),

@@ -354,6 +354,8 @@ pub(crate) fn metric_verdict_text(value: Option<bool>) -> &'static str {
 
 /// 解析・検定結果を CSV テキストにまとめる（レポートタブの出力）。
 pub fn build_report_csv(app: &App) -> String {
+    use sepika_solver::nonlinear::pushover::PushoverSign;
+
     let mut out = String::new();
     let model = &app.core.model;
 
@@ -450,10 +452,48 @@ pub fn build_report_csv(app: &App) -> String {
         }
     }
 
-    let mut holding_reasons = app.holding_adoption_unavailable_reasons();
-    if let Some(reason) = app.holding_ds_conditions_unavailable_reason() {
-        holding_reasons.push(reason);
-    }
+    let use_src_holding = app.has_src_holding_members()
+        || app.core.design_frame
+            == sepika_design_jp::secondary::holding_capacity::FrameType::SrcFrame;
+    let holding_reasons = if use_src_holding {
+        match app.src_holding_results() {
+            Ok(results) => {
+                let ok = results
+                    .iter()
+                    .all(|r| r.result.stories.iter().all(|s| s.ok));
+                out.push_str(&format!("\n[SRC 保有水平耐力]\nX±・Y±全階,{}\n方向,階,Qu[N],Ds,Fes,Qud[N],Qun[N],判定\n", if ok { "OK" } else { "NG" }));
+                for r in results {
+                    let label = crate::app::src_holding::case_label(
+                        r.source.direction,
+                        r.source.src_sign.unwrap(),
+                    );
+                    for s in &r.result.stories {
+                        out.push_str(&format!(
+                            "{label},{},{},{},{},{},{},{}\n",
+                            s.story.0 + 1,
+                            s.qu,
+                            s.ds,
+                            s.fes,
+                            s.qud,
+                            s.qun,
+                            if s.ok { "OK" } else { "NG" }
+                        ));
+                    }
+                    for detail in &r.details {
+                        out.push_str(&format!("{label},{}\n", csv_cell(detail)));
+                    }
+                }
+                Vec::new()
+            }
+            Err(reason) => vec![reason],
+        }
+    } else {
+        let mut reasons = app.holding_adoption_unavailable_reasons();
+        if let Some(reason) = app.holding_ds_conditions_unavailable_reason() {
+            reasons.push(reason);
+        }
+        reasons
+    };
     if !holding_reasons.is_empty() {
         out.push_str(&format!(
             "\n必要保有水平耐力・合否,算定不能,{}\n",
@@ -683,12 +723,18 @@ pub fn build_report_csv(app: &App) -> String {
         out.push_str("\n[耐震壁種別集計]\n種別,壁枚数,合格,NG,未検定,対象外\n");
         for kind in [
             sepika_design_jp::wall_check::WallCheckKind::AllowableShear,
+            sepika_design_jp::wall_check::WallCheckKind::AllowableFlexure,
+            sepika_design_jp::wall_check::WallCheckKind::UltimateShear,
+            sepika_design_jp::wall_check::WallCheckKind::UltimateFlexure,
             sepika_design_jp::wall_check::WallCheckKind::ReferenceSkeleton,
         ] {
             let s = sepika_design_jp::wall_check::WallCheckSummary::for_kind(
                 wall_checks.as_ref(),
                 kind,
             );
+            if s.n_checks == 0 && s.n_outside == 0 {
+                continue;
+            }
             out.push_str(&format!(
                 "{},{},{},{},{},{}\n",
                 kind.label(),
@@ -761,80 +807,40 @@ pub fn build_report_csv(app: &App) -> String {
         }
     }
 
-    if let Some(po) = app.displayed_pushover() {
-        let control = match po.control {
-            sepika_solver::nonlinear::pushover::PushoverControl::Phased => "段階制御",
-            sepika_solver::nonlinear::pushover::PushoverControl::LoadOnly => "荷重増分のみ",
+    if use_src_holding {
+        for (direction, sign) in crate::app::src_holding::SRC_HOLDING_CASES {
+            if let Some((_, po)) = app.src_latest_pushover(direction, sign) {
+                let case = crate::app::src_holding::case_label(direction, sign);
+                push_pushover_report(&mut out, model, po, &format!(" {case}"));
+            }
+        }
+    } else if let Some(po) = app.displayed_pushover() {
+        push_pushover_report(&mut out, model, po, "");
+    }
+    for input in &results.holding_evaluations {
+        let case = if use_src_holding {
+            crate::app::src_holding::case_label(
+                input.point.direction,
+                input
+                    .run
+                    .wall_run
+                    .as_ref()
+                    .map_or(PushoverSign::Positive, |id| id.sign),
+            )
+        } else {
+            format!("{:?}", input.point.direction)
         };
         out.push_str(&format!(
-            "\n[増分解析]\n増分方式,{}\n解析経過の最大ベースシア[kN],{:.2}\nヒンジ数,{}\n",
-            control,
-            force_kn(po.qu),
-            po.hinges.len()
+            "\n[目的別採用run {:?} {case}]\n解析条件,{}\n",
+            input.point.purpose,
+            csv_cell(&pushover_conditions_text(&input.conditions))
         ));
-        let shear_rows = member_shear_rows(po);
-        if !shear_rows.is_empty() {
-            out.push_str("\n[線材のせん断応答]\n項目,値\n");
-            for (label, value) in shear_rows {
-                out.push_str(&format!("{},{}\n", csv_cell(&label), csv_cell(&value)));
-            }
+        if !app.holding_evaluation_is_current(input) {
+            out.push_str("集計不能,目的別採用runの生成入力が現在モデルと不一致\n");
+            continue;
         }
-        out.push_str("\n[壁単体 確定step応答]\n項目,値または未記録理由\n");
-        for (label, value) in wall_response_rows(po) {
-            out.push_str(&format!(
-                "\"{}\",\"{}\"\n",
-                label.replace('"', "\"\""),
-                value.replace('"', "\"\"")
-            ));
-        }
-        for input in &results.holding_evaluations {
-            out.push_str(&format!(
-                "\n[目的別採用run {:?} {:?}]\n解析条件,\"{}\"\n",
-                input.point.purpose,
-                input.point.direction,
-                pushover_conditions_text(&input.conditions)
-            ));
-            if !app.holding_evaluation_is_current(input) {
-                out.push_str("集計不能,目的別採用runの生成入力が現在モデルと不一致\n");
-                continue;
-            }
-            for (label, value) in holding_evaluation_rows(&input.run) {
-                out.push_str(&format!(
-                    "\"{}\",\"{}\"\n",
-                    label.replace('"', "\"\""),
-                    value.replace('"', "\"\"")
-                ));
-            }
-        }
-        let layers = model.layers();
-        let n_stories = layers.len();
-        let story_name = |i: usize| -> String {
-            layers
-                .get(i)
-                .map(|l| l.name.clone())
-                .unwrap_or_else(|| sepika_core::model::default_story_name(i))
-        };
-        out.push_str("step,頂部変位[mm],ベースシア[kN]");
-        for i in 0..n_stories {
-            out.push_str(&format!(
-                ",{0} 層間変位[mm],{0} 層せん断力[kN]",
-                story_name(i)
-            ));
-        }
-        out.push('\n');
-        for p in &po.capacity_curve {
-            out.push_str(&format!(
-                "{},{:.3},{:.2}",
-                p.step,
-                p.roof_disp,
-                force_kn(p.base_shear)
-            ));
-            for i in 0..n_stories {
-                let drift = p.story_drift.get(i).copied().unwrap_or(0.0);
-                let shear = force_kn(p.story_shear.get(i).copied().unwrap_or(0.0));
-                out.push_str(&format!(",{:.3},{:.2}", drift, shear));
-            }
-            out.push('\n');
+        for (label, value) in holding_evaluation_rows(&input.run) {
+            out.push_str(&format!("{},{}\n", csv_cell(&label), csv_cell(&value)));
         }
     }
 
@@ -856,6 +862,59 @@ pub fn build_report_csv(app: &App) -> String {
     }
 
     out
+}
+
+fn push_pushover_report(
+    out: &mut String,
+    model: &Model,
+    po: &sepika_solver::nonlinear::pushover::PushoverResult,
+    case_suffix: &str,
+) {
+    use sepika_solver::nonlinear::pushover::PushoverControl;
+
+    let control = match po.control {
+        PushoverControl::Phased => "段階制御",
+        PushoverControl::LoadOnly => "荷重増分のみ",
+    };
+    out.push_str(&format!(
+        "\n[増分解析{case_suffix}]\n増分方式,{control}\n解析経過の最大ベースシア[kN],{:.2}\nヒンジ数,{}\n",
+        force_kn(po.qu),
+        po.hinges.len()
+    ));
+    let shear_rows = member_shear_rows(po);
+    if !shear_rows.is_empty() {
+        out.push_str(&format!("\n[線材のせん断応答{case_suffix}]\n項目,値\n"));
+        for (label, value) in shear_rows {
+            out.push_str(&format!("{},{}\n", csv_cell(&label), csv_cell(&value)));
+        }
+    }
+    out.push_str(&format!(
+        "\n[壁単体 確定step応答{case_suffix}]\n項目,値または未記録理由\n"
+    ));
+    for (label, value) in wall_response_rows(po) {
+        out.push_str(&format!("{},{}\n", csv_cell(&label), csv_cell(&value)));
+    }
+    let layers = model.layers();
+    out.push_str("step,頂部変位[mm],ベースシア[kN]");
+    for layer in &layers {
+        let name = &layer.name;
+        out.push_str(&format!(",{name} 層間変位[mm],{name} 層せん断力[kN]"));
+    }
+    out.push('\n');
+    for p in &po.capacity_curve {
+        out.push_str(&format!(
+            "{},{:.3},{:.2}",
+            p.step,
+            p.roof_disp,
+            force_kn(p.base_shear)
+        ));
+        for i in 0..layers.len() {
+            let drift = p.story_drift.get(i).copied().unwrap_or(0.0);
+            let shear = force_kn(p.story_shear.get(i).copied().unwrap_or(0.0));
+            out.push_str(&format!(",{drift:.3},{shear:.2}"));
+        }
+        out.push('\n');
+    }
 }
 
 /// 時刻歴応答の層応答分布（層せん断力・層せん断力係数・階加速度・階速度・階変位の
@@ -1343,6 +1402,7 @@ pub fn has_report_content(results: &Option<ResultsBundle>) -> bool {
                 || r.modal.is_some()
                 || r.pushover_x.is_some()
                 || r.pushover_y.is_some()
+                || !r.src_pushover_negative.is_empty()
                 || r.time_history.is_some()
                 || r.lumped.is_some()
         })

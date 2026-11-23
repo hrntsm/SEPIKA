@@ -688,6 +688,8 @@ fn test_wall_quantity_via_wall_plate_is_included() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(3), NodeId(2)],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -738,6 +740,8 @@ fn test_attached_wall_plate_quantity_is_included_as_misc_wall() {
     let sec = shape.to_section(SectionId(2), "W15".to_string());
     model.sections.push(sec);
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(0),
@@ -2397,6 +2401,8 @@ fn directional_wall_quantity_fixture() -> Model {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(3), NodeId(2)],
         sepika_core::model::WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: Some(SectionId(2)),
@@ -3104,6 +3110,8 @@ fn automatic_wall_quantity_requires_the_immediate_floor_input() {
         .to_section(SectionId(2), "W15".into()),
     );
     model.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         id: WallPlateId(0),
         shape: WallPlateShape::Attached {
             anchor: RegionAnchor::FloorRegion {

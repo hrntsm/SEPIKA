@@ -3,13 +3,15 @@
 //! - [`nonlinear_input_issues`] — 部材耐力を算定できない設定不備の列挙
 //! - [`ensure_nonlinear_input`] — 不備があれば是正内容を示すエラーを返す
 
-use sepika_core::model::{ElementData, ElementKind, MaterialCategory, Model};
+use sepika_core::model::{
+    wall_steel_input_issue, ElementData, ElementKind, MaterialCategory, Model,
+};
 use sepika_core::section_shape::SectionShape;
 
 /// エラーメッセージへ列挙する不備の最大件数（超過分は件数のみを示す）。
 const MAX_LISTED: usize = 5;
 
-/// 実解析名・要素質量形式に対する壁側柱接続の適用条件を検証する。
+/// 壁の主材料と、実解析名・要素質量形式に対する壁側柱接続の適用条件を検証する。
 /// `kind=None` は線形構造、`mass=None` は要素質量を使わない解析を表す。
 pub fn ensure_wall_side_column_analysis(
     model: &Model,
@@ -17,6 +19,9 @@ pub fn ensure_wall_side_column_analysis(
     analysis: &str,
     mass: Option<crate::behavior::MassOption>,
 ) -> Result<(), String> {
+    model
+        .validate_wall_primary_materials()
+        .map_err(|reason| format!("{analysis}: {reason}"))?;
     let index = sepika_core::model::WallSideColumnIndex::build(model);
     let label = match kind {
         None => "線形解析",
@@ -98,6 +103,9 @@ pub(super) fn wall_side_column_normal_with_index(
     kind: Option<sepika_core::model::AnalysisKind>,
     index: &sepika_core::model::WallSideColumnIndex,
 ) -> Result<Option<[f64; 3]>, String> {
+    if let Some(reason) = wall_steel_input_issue(data, model) {
+        return Err(reason);
+    }
     let owner_bindings: Vec<_> = index
         .bindings()
         .iter()
@@ -199,7 +207,9 @@ pub fn wall_side_column_issue_message(
         R::FrameMaterialMismatch => "壁と付帯部材の構造種別が不適合です",
         R::DuplicateColumns => "同一側縁に側柱候補が重複しています",
         R::NonParallelWalls => "非平行な壁で共有する側柱の接続は未定式化です",
-        R::InvalidSteelYield => "鋼板の降伏強度が有限正値ではありません",
+        R::UnsupportedSteelWall => {
+            "鋼板壁は解析の対象外です。鋼板の重量は荷重として入力してください"
+        }
     };
     let ids = |entries: &[sepika_core::ids::ElemId]| {
         entries
@@ -263,6 +273,9 @@ fn nonlinear_input_issues_with_basis(
     basis: super::StrengthBasis,
 ) -> Vec<String> {
     let mut issues = Vec::new();
+    if let Err(issue) = model.validate_wall_primary_materials() {
+        issues.push(issue);
+    }
     if let Err(error) = model.validate_member_hysteresis_attr_refs() {
         issues.push(error.to_string());
     }
@@ -301,19 +314,11 @@ fn nonlinear_input_issues_with_basis(
             ElementKind::PanelZone => {
                 crate::springs::panel::PanelZone::nonlinear_issue(elem, model)
             }
-            ElementKind::Wall => crate::wall::wall_element::WallElement::wall_shear_capacity_issue(
-                elem, model, basis,
-            )
-            .map(|reason| {
-                if crate::wall::misc_wall::is_rc_wall(elem, model) {
-                    format!(
-                        "RC壁 {}: {reason}",
-                        model.stress_cfg.rc_wall_shear_method.label()
-                    )
-                } else {
-                    reason
-                }
-            }),
+            ElementKind::Wall => {
+                crate::wall::wall_element::WallElement::nonlinear_wall_capacity_issue(
+                    elem, model, basis, kind,
+                )
+            }
             ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
                 member_rebar_material_strength_issue(elem, model, basis)
                     .or_else(|| {

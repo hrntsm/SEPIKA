@@ -133,6 +133,7 @@ fn generate_stories_impl(
     mode: SelfWeightMode,
     mass_method: MassMethod,
 ) -> Result<StoryGenResult, String> {
+    model.validate_wall_primary_materials()?;
     model
         .validate_wall_attr_refs()
         .map_err(|error| error.to_string())?;

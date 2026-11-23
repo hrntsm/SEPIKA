@@ -3,6 +3,7 @@
 //! `actions` からの構造分割。アルゴリズム変更は行わない。
 
 use super::*;
+use sepika_solver::nonlinear::pushover::{PushoverResult, PushoverSign};
 
 impl App {
     #[cfg(any(feature = "gui", test))]
@@ -170,6 +171,96 @@ impl App {
             JobResult::Pushover(Box::new(Self::run_compute(|| {
                 sepika_job::compute::compute_pushover(model, cfg).map_err(|e| e.to_string())
             })))
+        });
+    }
+
+    pub(crate) fn src_latest_pushover(
+        &self,
+        direction: SeismicDir,
+        sign: PushoverSign,
+    ) -> Option<(AnalysisSettings, &PushoverResult)> {
+        let results = self.core.scoped.results.as_ref()?;
+        let (conditions, run) = match sign {
+            PushoverSign::Positive => {
+                (self.core.analysis_cfg, results.pushover_for_dir(direction)?)
+            }
+            PushoverSign::Negative => {
+                let (_, conditions, run) = results
+                    .src_pushover_negative
+                    .iter()
+                    .find(|(d, _, _)| *d == direction)?;
+                (*conditions, run)
+            }
+        };
+        (result_validity::holding_run_sign(run) == sign).then_some((conditions, run))
+    }
+
+    pub(crate) fn apply_src_pushover_result(
+        &mut self,
+        result: Result<PushoverResult, String>,
+        conditions: AnalysisSettings,
+        input: Vec<u8>,
+    ) {
+        let dir = conditions.push_dir;
+        let key = ResultInputKey::Pushover(dir);
+        let mut run = match result {
+            Ok(run) => run,
+            Err(reason) => {
+                self.report_error(reason);
+                return;
+            }
+        };
+        if self.result_input_with_settings(&key, conditions) != input {
+            self.report_error("SRC増分解析のモデルが実行中に変更されました");
+            return;
+        }
+        let sign = result_validity::holding_run_sign(&run);
+        run.identify_wall_input(input.clone());
+        if run.termination.is_premature() {
+            self.append_analysis_notice(format!(
+                "SRC増分解析 {dir:?} {sign:?}: {}",
+                run.termination.describe()
+            ));
+        }
+        let mut bundle = self.take_results_for_analysis();
+        match sign {
+            PushoverSign::Positive => {
+                bundle.record_scoped_input(key, input, self.result_source_reference());
+                match dir {
+                    SeismicDir::X => bundle.pushover_x = Some(run),
+                    SeismicDir::Y => bundle.pushover_y = Some(run),
+                }
+            }
+            PushoverSign::Negative => {
+                bundle.src_pushover_negative.retain(|(d, _, _)| *d != dir);
+                bundle.src_pushover_negative.push((dir, conditions, run));
+            }
+        }
+        self.core.scoped.results = Some(bundle);
+        self.core.scoped.pushover_view_dir = dir;
+        self.core.scoped.src_holding_sign = sign;
+        self.core.scoped.staleness.mark_fresh();
+        self.core.scoped.last_error = None;
+    }
+
+    pub fn start_src_pushover_job(&mut self, direction: SeismicDir, sign: PushoverSign) {
+        if !self.begin_analysis_job() {
+            return;
+        }
+        let model = self.core.model.clone();
+        let conditions = AnalysisSettings {
+            push_dir: direction,
+            ..self.core.analysis_cfg
+        };
+        let input =
+            self.result_input_with_settings(&ResultInputKey::Pushover(direction), conditions);
+        self.spawn_analysis_job("SRC増分解析", move || JobResult::SrcPushover {
+            result: Box::new(Self::run_compute(|| {
+                sepika_job::compute::compute_pushover_signed(model, conditions, sign)
+                    .map_err(|e| e.to_string())
+            })),
+            conditions,
+            input,
         });
     }
 }

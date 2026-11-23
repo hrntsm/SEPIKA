@@ -13,13 +13,16 @@ use sepika_core::model::{LoadCase, LoadCaseKind, LoadSource, EX_CASE_NAME, EY_CA
 use sepika_design_jp::secondary::story_rigidity::evaluate_story_rigidities;
 use sepika_solver::statics::analysis::Analysis;
 
-/// 壁展開前に壁属性とダンパー特性の参照を検査する。参照先が不正なら入力エラーを返す。
+/// 壁展開前に壁の主材料・壁属性・ダンパー特性の参照を検査する。
 pub(crate) fn expand_walls(
     model: sepika_core::model::Model,
 ) -> JobResult<(
     sepika_core::model::Model,
     sepika_core::wall_expand::WallExpansionIndex,
 )> {
+    model
+        .validate_wall_primary_materials()
+        .map_err(JobError::InvalidInput)?;
     model
         .validate_wall_attr_refs()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
@@ -113,6 +116,9 @@ pub fn compute_eigen(
     model: sepika_core::model::Model,
     n_modes: usize,
 ) -> JobResult<sepika_solver::dynamic::eigen::ModalResult> {
+    model
+        .validate_wall_primary_materials()
+        .map_err(JobError::InvalidInput)?;
     crate::weight_preparation::require_current_generated_mass(&model)?;
     model
         .validate_wall_weight_generation()
@@ -180,6 +186,19 @@ pub fn compute_pushover(
     model: sepika_core::model::Model,
     cfg: AnalysisSettings,
 ) -> JobResult<sepika_solver::nonlinear::pushover::PushoverResult> {
+    compute_pushover_signed(
+        model,
+        cfg,
+        sepika_solver::nonlinear::pushover::PushoverSign::Positive,
+    )
+}
+
+/// 同じ全体軸の正負加力を独立したrunとして実行する。
+pub fn compute_pushover_signed(
+    model: sepika_core::model::Model,
+    cfg: AnalysisSettings,
+    sign: sepika_solver::nonlinear::pushover::PushoverSign,
+) -> JobResult<sepika_solver::nonlinear::pushover::PushoverResult> {
     model
         .validate_member_hysteresis_attr_refs()
         .map_err(|e| JobError::InvalidInput(e.to_string()))?;
@@ -193,11 +212,12 @@ pub fn compute_pushover(
             .push_use_drift_angle
             .then_some(1.0 / cfg.push_drift_denom.max(1.0)),
     };
-    let mut result = sepika_solver::nonlinear::pushover::pushover_analysis_recording(
+    let mut result = sepika_solver::nonlinear::pushover::pushover_analysis_recording_signed(
         &work,
         &dofmap,
         &reducer,
         cfg.push_dir,
+        sign,
         cfg.push_steps,
         target,
         cfg.push_control,
@@ -234,6 +254,9 @@ pub fn compute_time_history(
             .validate_member_hysteresis_attr_refs()
             .map_err(|e| JobError::InvalidInput(e.to_string()))?;
     }
+    model
+        .validate_wall_primary_materials()
+        .map_err(JobError::InvalidInput)?;
     crate::weight_preparation::require_current_generated_mass(&model)?;
     model
         .validate_wall_weight_generation()

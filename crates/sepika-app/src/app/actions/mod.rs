@@ -12,7 +12,7 @@
 
 use super::*;
 
-mod design;
+pub(crate) mod design;
 mod eigen;
 mod io;
 mod linear_static;
@@ -411,6 +411,13 @@ impl App {
                 self.core.scoped.last_error = None;
                 match result {
                     JobResult::Pushover(res) => self.apply_pushover_result(*res),
+                    JobResult::SrcPushover {
+                        result,
+                        conditions,
+                        input,
+                    } => {
+                        self.apply_src_pushover_result(*result, conditions, input);
+                    }
                     JobResult::Modal(res) => self.apply_eigen_result(res),
                     JobResult::LinearCheckpoint(res) => self.apply_linear_checkpoint(*res),
                     JobResult::TimeHistory(res, source) => {

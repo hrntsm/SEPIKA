@@ -225,6 +225,9 @@ pub fn compute_gravity_auto_load_cases(
     model: &Model,
 ) -> Result<AutoLoadComputeResult, crate::error::JobError> {
     model
+        .validate_wall_primary_materials()
+        .map_err(crate::error::JobError::InvalidInput)?;
+    model
         .validate_member_weight_refs()
         .map_err(|error| crate::error::JobError::InvalidInput(error.to_string()))?;
     for plate in &model.wall_plates {
@@ -473,6 +476,12 @@ pub fn compute_seismic_auto_load_cases(
     let mut notices = Vec::new();
     let mut cases = Vec::new();
 
+    if let Err(reason) = model.validate_wall_primary_materials() {
+        return AutoLoadComputeResult {
+            cases,
+            notices: vec![reason],
+        };
+    }
     if model.stories.is_empty() {
         for name in [EX_CASE_NAME, EY_CASE_NAME] {
             notices.push(format!("{name} の Ai 地震力を再生成できません: 階と地震用重量が未定義です。明示準備を実行してください。"));
@@ -1839,6 +1848,8 @@ mod tests {
         let mut model = make_square_slab_model();
         add_wall_self_weight_section(&mut model);
         let plate = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -1914,6 +1925,8 @@ mod tests {
         let mut model = make_square_slab_model();
         add_wall_self_weight_section(&mut model);
         let plate = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -2000,6 +2013,8 @@ mod tests {
             });
         }
         let plate = WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),

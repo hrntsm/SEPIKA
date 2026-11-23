@@ -538,23 +538,22 @@ fn c16_rc_wall_with_steel_column_or_girder_is_material_conflict() {
 }
 
 #[test]
-fn c17_c18_steel_plate_boundaries_never_take_rc_replacement_role() {
+fn steel_wall_is_rejected_without_classifying_side_columns() {
     for kind in [
         ElementKind::Beam,
         ElementKind::Fiber,
         ElementKind::MultiSpring,
     ] {
         let mut model = fixture(kind);
-        for section in &mut model.sections {
-            section.material = Some(MaterialId(1));
-        }
-        model.sections[0].thickness = Some(9.);
-        let result = classify(&model, 3);
-        assert_eq!(
-            result.bindings[0].role,
-            WallSideColumnRole::SteelPlateBoundary
-        );
-        assert!(result.issues.is_empty());
+        model.sections[0].material = Some(MaterialId(1));
+        let index = WallSideColumnIndex::build(&model);
+        let wall = &model.elements[0];
+        assert_eq!(index.wall_bindings(wall.id).count(), 0);
+        let issues = index.wall_replacement_bindings(wall.id).unwrap_err();
+        assert_eq!(issues[0].reason, WallSideColumnReason::UnsupportedSteelWall);
+        assert_eq!(issues[0].walls, vec![wall.id]);
+        assert!(!wall_is_seismic(wall, &model));
+        assert!(model.validate_wall_primary_materials().is_err());
     }
 }
 
@@ -568,27 +567,11 @@ fn c19_embedded_steel_in_concrete_wall_is_not_pure_steel_plate() {
         pwv_ratio: None,
     });
     model.sections[0].steel_material = Some(MaterialId(1));
+    assert!(model.validate_wall_primary_materials().is_ok());
     assert_eq!(
         classify(&model, 3).bindings[0].role,
         WallSideColumnRole::RcSrcReplacement
     );
-}
-
-#[test]
-fn c20_steel_wall_yield_input_error_is_retained_separately_from_role() {
-    for fy in [None, Some(0.), Some(-1.), Some(f64::NAN)] {
-        let mut model = fixture(ElementKind::Beam);
-        for section in &mut model.sections {
-            section.material = Some(MaterialId(1));
-        }
-        model.materials[1].fy = fy;
-        let result = classify(&model, 3);
-        assert_eq!(
-            result.bindings[0].role,
-            WallSideColumnRole::SteelPlateBoundary
-        );
-        assert!(has(&result, WallSideColumnReason::InvalidSteelYield));
-    }
 }
 
 #[test]

@@ -162,6 +162,11 @@ pub fn resolve_wall_shear_hysteresis(
     model: &Model,
     kind: AnalysisKind,
 ) -> HysteresisModel {
+    if kind == AnalysisKind::Incremental
+        && sepika_core::src_wall_capacity::is_src_wall_candidate(model, data)
+    {
+        return HysteresisModel::Takeda;
+    }
     match specified_hysteresis(data, model, kind) {
         Some(
             r @ (HysteresisModel::Retrograde

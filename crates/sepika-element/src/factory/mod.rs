@@ -236,7 +236,7 @@ impl StrengthBasis {
 /// 保有水平耐力計算は [`StrengthBasis::MaterialStrength`] を渡す。
 /// RC矩形梁の集中ばね入力が不正・不足なら診断文付きでpanicする。
 /// RC耐震壁の `wall_capacity` には事前解決した局所正負の順のQu `[N]` の有限正値を渡す。
-/// RC耐震壁で値が欠落・不正の場合と、鋼板耐震壁や仕口パネルでは、診断文付きでpanicする。
+/// RC耐震壁で値が欠落・不正の場合や要素の入力が適用外の場合は、診断文付きでpanicする。
 /// `model` は `Model::validate_local_frames` 済みを前提とする。
 pub fn build_nonlinear_behavior(
     data: &ElementData,
@@ -340,11 +340,11 @@ pub fn build_nonlinear_behavior(
             if !crate::wall::misc_wall::wall_is_seismic(data, model) {
                 return build_behavior(data, model);
             }
-            if !crate::wall::misc_wall::is_rc_wall(data, model) {
-                let reason = WallElement::wall_shear_capacity_issue(data, model, basis)
-                    .unwrap_or_else(|| WallElement::unsupported_steel_wall_nonlinear(data));
-                panic!("{reason}");
-            }
+            assert!(
+                crate::wall::misc_wall::is_rc_wall(data, model),
+                "壁 ID {} のせん断耐力: RC系の壁が必要です",
+                data.id.0
+            );
             let qu = wall_capacity
                 .unwrap_or_else(|| panic!("壁 ID {}: runの静的一次参照Quが未解決です", data.id.0));
             assert!(
@@ -352,6 +352,14 @@ pub fn build_nonlinear_behavior(
                 "壁 ID {}: runのQuは有限正値が必要です",
                 data.id.0
             );
+            if sepika_core::src_wall_capacity::is_src_wall_candidate(model, data) {
+                assert_eq!(
+                    kind,
+                    AnalysisKind::Incremental,
+                    "SRC耐震壁 ID {} の非線形時刻歴解析は未対応です",
+                    data.id.0
+                );
+            }
             let panel = WallElement::try_new_scaled(data, model, 1.0)
                 .unwrap_or_else(|| panic!("壁要素ID {}を生成できません", data.id.0))
                 .with_fiber_flexure(data, model, basis, kind)

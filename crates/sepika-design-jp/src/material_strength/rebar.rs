@@ -37,36 +37,12 @@ pub(crate) fn shear_rebar_category_issue(
 /// `dia` は正の有限な径 `[mm]`。SD345・SD390・SD490 は長期に径28 mm超で低減する。
 /// USD685 は長期 215・短期 685。
 pub fn rebar_allowable_tension(grade: &str, dia: f64, long_term: bool) -> f64 {
-    let g = grade.trim();
-    if g == "USD685" {
-        return if long_term { 215.0 } else { 685.0 };
-    }
+    let (long, short) =
+        sepika_core::material_grade::rebar_tension_limits(grade, dia).unwrap_or((195.0, 295.0));
     if long_term {
-        if g == "SR235" || g == "SR295" {
-            155.0
-        } else if g.starts_with("SD295") {
-            195.0
-        } else if g == "SD345" || g == "SD390" || g == "SD490" {
-            if dia > 28.0 {
-                195.0
-            } else {
-                215.0
-            }
-        } else {
-            195.0
-        }
-    } else if g == "SR235" {
-        235.0
-    } else if g == "SR295" || g.starts_with("SD295") {
-        295.0
-    } else if g == "SD345" {
-        345.0
-    } else if g == "SD390" {
-        390.0
-    } else if g == "SD490" {
-        490.0
+        long
     } else {
-        295.0
+        short
     }
 }
 
