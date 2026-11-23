@@ -290,6 +290,7 @@ impl App {
         })
     }
 
+    #[cfg(any(test, feature = "gui"))]
     pub(crate) fn prepare_src_holding_confirmation(&mut self) -> Result<(), String> {
         let direction = self.core.scoped.pushover_view_dir;
         let sign = self.core.scoped.src_holding_sign;
