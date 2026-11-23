@@ -1,5 +1,4 @@
-//! SRC 造の断面検定（許容応力度検定。SRC 規準 1987 の
-//! SRC 梁・SRC 柱部分に準拠）。
+//! SRC 梁・柱と柱梁接合部の許容応力度検定。
 //!
 //! - `beam`: 鉄骨鉄筋コンクリート造梁の断面検定（累加強度式 MA=sMo+rMA）。
 //! - [`column`][]: 鉄骨鉄筋コンクリート造柱の断面検定（累加強度式・fc′低減）。
@@ -105,104 +104,19 @@ struct SrcShearResult {
     r_q: Option<f64>,
     s_qa: f64,
     r_qa: Option<f64>,
-    alpha: f64,
-    pw: f64,
-    used_qd: bool,
-}
-
-struct SrcSeismicCtx<'a> {
-    ctx: &'a DesignCtx,
-    ql_signed: f64,
-    s_ft_short: f64,
-    r_mu: Option<f64>,
 }
 
 #[derive(Clone, Copy)]
-struct SrcSeismicShearDemand {
+struct SrcShortShearDemand {
     steel_n: f64,
     rc_n: Option<f64>,
 }
 
-/// SRC 梁の地震時短期の設計用せん断力（構造規定方式、SRC 規準 1987）。
-/// 地震時の設計条件がない場合は None を返す。
-///
-/// - `sQD = sQL + (sM1+sM2)/l′`（`sQL = share・|QL|`、`sM1+sM2 = 2・sZ・sft`）
-/// - `rQD1 = rQL + (rMu1+rMu2)/l′`（`rQL = |QL| − sQL`、`rMu1+rMu2 = 2・rMu`）
-/// - `rQD2 = max(0, n・(|Q| − sQD))`
-///   （SRC規準1987 の `rQD2 = n・(QL+QE−sQD)` を、`QL+QE` = 当該組合せの
-///   全せん断力 `|Q|` と読んだもの。`QE` は水平力分のせん断力増分であり、
-///   `QL+QE` はその和として組合せ後の全せん断力に一致するとみなした）
-/// - `rQD = min(rQD1, rQD2)`（[`crate::QdMethod::Qd1`]/[`crate::QdMethod::Qd2`]
-///   選択時はそれぞれ単独。`Qd1` で rQD1 が無効な場合は rQD2 で代替する）
-/// - 戻り値は `(sQD, rQD)`。
-fn src_beam_seismic_qd(
-    seismic: &SrcSeismicCtx,
-    q_signed: f64,
-    share: f64,
-    sz: f64,
-) -> Option<SrcSeismicShearDemand> {
-    let qd = seismic.ctx.seismic_qd.as_ref()?;
-    let ql = seismic.ql_signed.abs();
-    let q = q_signed.abs();
-
-    let s_ql = share * ql;
-    let sum_s_m = 2.0 * sz * seismic.s_ft_short;
-    let s_qd = if qd.clear_length > 0.0 {
-        s_ql + sum_s_m / qd.clear_length
-    } else {
-        s_ql
-    };
-
-    let r_ql = (ql - s_ql).max(0.0);
-    let r_qd2 = (qd.n_factor * (q - s_qd)).max(0.0);
-    let r_qd = if qd.method == crate::QdMethod::Qd2 {
-        Some(r_qd2)
-    } else {
-        seismic.r_mu.map(|r_mu| {
-            let r_qd1 = if qd.clear_length > 0.0 && r_mu > 0.0 {
-                r_ql + 2.0 * r_mu / qd.clear_length
-            } else {
-                f64::INFINITY
-            };
-            qd.method.resolve(r_qd1, r_qd2)
-        })
-    };
-
-    Some(SrcSeismicShearDemand {
-        steel_n: s_qd,
-        rc_n: r_qd,
-    })
-}
-
-/// せん断検定の部材モード（SRC規準 1987 の梁・柱の式の切替）。
-enum SrcShearMode<'a> {
-    /// 梁: 鉄骨・RC の分担検定（長短共通）。
-    /// `rQA1 = b·rj·(rα·fs + 0.5·pw·wft)`、`rQA2 = b·rj·(2(b′/b)·fs + pw·wft)`。
-    Beam(Option<&'a SrcSeismicCtx<'a>>),
-    /// 柱（SRC規準 P.96-97）:
-    /// - 長期は併用式 `QA = (1+β)·b·rj·a′·fs` を全せん断力と比較する
-    ///   （`a′ = rα`（`b′/b ≥ rα/3` のとき）または `3b′/b`、`1 ≤ rα ≤ 2`）。
-    /// - 短期は鉄骨部 `sQA`（強軸 `dw·tw·sfs`／弱軸 `(4/3)·bf·tf·sfs`）と
-    ///   RC 部 `rQAS1 = b·rj·(fs + 0.5·pw·wft)`（**α を含まない**）・
-    ///   `rQAS2 = b·rj·(2(b′/b)·fs + pw·wft)` を分担 `sQD`/`rQD` と比較する。
-    ///
-    /// `beta` は鉄骨ウェブの形式と寸法による係数
-    /// （充腹 `β = n·tw·sd/(b·rj)`、H 形弱軸 `β = 1.33·n·bf·tf/(b·rj)`）。
-    Column {
-        beta: f64,
-        seismic_demand_n: Option<SrcSeismicShearDemand>,
-    },
-}
-
-/// 全せん断力を鉄骨部分・RC 部分に分担させ、それぞれの許容せん断力と比較する
-/// （梁・柱の両方向で共通利用。式の切替は [`SrcShearMode`]）。
 #[allow(clippy::too_many_arguments)]
-fn src_shear_check(
+fn src_column_shear_check(
     q_signed: f64,
     m_for_alpha: f64,
     q_for_alpha: f64,
-    sz: f64,
-    at: f64,
     rj: f64,
     rd: f64,
     b: f64,
@@ -213,10 +127,11 @@ fn src_shear_check(
     s_fs: f64,
     steel_shear_area: f64,
     alpha_max: f64,
-    mode: SrcShearMode<'_>,
+    beta: f64,
+    short_demand_n: Option<SrcShortShearDemand>,
     term: LoadTerm,
-) -> SrcShearResult {
-    let alpha = if term == LoadTerm::Short && matches!(mode, SrcShearMode::Column { .. }) {
+) -> Option<SrcShearResult> {
+    let alpha = if term == LoadTerm::Short {
         1.0
     } else {
         shear_alpha(m_for_alpha, q_for_alpha, rd, alpha_max)
@@ -232,47 +147,26 @@ fn src_shear_check(
         0.0
     };
 
-    if let SrcShearMode::Column { beta, .. } = mode {
-        if term == LoadTerm::Long {
-            let a_prime = if b_ratio >= alpha / 3.0 {
-                alpha
-            } else {
-                3.0 * b_ratio
-            };
-            let qa = (1.0 + beta) * b * rj * a_prime * fs;
-            let ratio = if qa > 1e-9 { q / qa } else { 0.0 };
-            return SrcShearResult {
-                ratio,
-                s_q: 0.0,
-                r_q: Some(q),
-                s_qa: steel_shear_area * s_fs,
-                r_qa: Some(qa),
-                alpha,
-                pw,
-                used_qd: false,
-            };
+    if term == LoadTerm::Long {
+        let a_prime = alpha.min(3.0 * b_ratio);
+        let qa = (1.0 + beta) * b * rj * a_prime * fs;
+        if !q.is_finite() || !qa.is_finite() {
+            return None;
         }
+        let ratio = ratio_or_large(q, qa);
+        return Some(SrcShearResult {
+            ratio,
+            s_q: 0.0,
+            r_q: Some(q),
+            s_qa: steel_shear_area * s_fs,
+            r_qa: Some(qa),
+        });
     }
 
-    let denom = sz + at * rj;
-    let share = if denom > 1e-12 { sz / denom } else { 1.0 };
-
-    let seismic_demand_n = match mode {
-        SrcShearMode::Beam(seismic) => {
-            seismic.and_then(|seismic| src_beam_seismic_qd(seismic, q_signed, share, sz))
-        }
-        SrcShearMode::Column {
-            seismic_demand_n, ..
-        } => seismic_demand_n,
-    };
-    let (s_q, r_q, used_qd) = match seismic_demand_n {
-        Some(demand) => (demand.steel_n, demand.rc_n, true),
-        None => {
-            let s_q = share * q;
-            (s_q, Some((q - s_q).max(0.0)), false)
-        }
-    };
-
+    let SrcShortShearDemand {
+        steel_n: s_q,
+        rc_n: r_q,
+    } = short_demand_n?;
     let s_qa = steel_shear_area * s_fs;
 
     let pw_term = if pw == 0.0 {
@@ -281,10 +175,7 @@ fn src_shear_check(
         w_ft.map(|w_ft| pw * w_ft)
     };
     let r_qa = pw_term.map(|pw_term| {
-        let r_qa1 = match mode {
-            SrcShearMode::Beam(_) => b * rj * (alpha * fs + 0.5 * pw_term),
-            SrcShearMode::Column { .. } => b * rj * (fs + 0.5 * pw_term),
-        };
+        let r_qa1 = b * rj * (fs + 0.5 * pw_term);
         let r_qa2 = b * rj * (2.0 * b_ratio * fs + pw_term);
         r_qa1.min(r_qa2)
     });
@@ -295,16 +186,13 @@ fn src_shear_check(
         .filter(|(_, qa)| *qa > 1e-9)
         .map_or(0.0, |(q, qa)| q / qa);
 
-    SrcShearResult {
+    Some(SrcShearResult {
         ratio: ratio_s.max(ratio_r),
         s_q,
         r_q,
         s_qa,
         r_qa,
-        alpha,
-        pw,
-        used_qd,
-    }
+    })
 }
 
 /// 矩形SRC梁・柱の断面検定（`SectionShape::SrcBeamRect`・`SrcColumnRect` を対象とする）。
@@ -340,20 +228,53 @@ impl SrcDesign {
         ctx: &DesignCtx,
         missing_gravity: bool,
     ) -> impl Iterator<Item = CheckOutcome> {
+        self.check_outcomes_with_shear_context(forces, sec, mat, ctx, missing_gravity, None)
+    }
+
+    /// 時刻歴の地震内力に対する短期検定。設計用せん断力の参照がない場合は、通常短期せん断を適用しない。
+    pub fn check_time_history_outcomes(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        missing_gravity: bool,
+    ) -> impl Iterator<Item = CheckOutcome> {
+        let ordinary_shear_issue = (ctx.term == LoadTerm::Short
+            && !missing_gravity
+            && ctx.seismic_qd.is_none()
+            && (forces.qy != 0.0 || forces.qz != 0.0))
+            .then_some("時刻歴の地震内力から設計用せん断力と材料別の負担曲げを確定できません");
+        self.check_outcomes_with_shear_context(
+            forces,
+            sec,
+            mat,
+            ctx,
+            missing_gravity,
+            ordinary_shear_issue,
+        )
+    }
+
+    fn check_outcomes_with_shear_context(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        missing_gravity: bool,
+        ordinary_shear_issue: Option<&str>,
+    ) -> impl Iterator<Item = CheckOutcome> {
         use crate::member_design_check::{
             combine_incomplete_reasons, concrete_member_torsion_reason, strength_outcomes,
         };
-        let peak_beam = ctx.term == LoadTerm::Short
-            && ctx.kind != MemberKind::Column
-            && matches!(sec.shape, Some(SectionShape::SrcBeamRect { .. }));
-        let (outcome, mut incomplete) =
-            self.check_with_gravity_mode(forces, sec, mat, ctx, missing_gravity, peak_beam);
-        if peak_beam && matches!(outcome, CheckOutcome::Skipped { .. }) {
-            incomplete = combine_incomplete_reasons(
-                incomplete,
-                beam_gravity_reference(forces, ctx, missing_gravity, peak_beam).err(),
-            );
-        }
+        let (outcome, mut incomplete) = self.check_with_shear_context(
+            forces,
+            sec,
+            mat,
+            ctx,
+            missing_gravity,
+            ordinary_shear_issue,
+        );
         if matches!(outcome, CheckOutcome::Skipped { .. })
             && ctx.term == LoadTerm::Short
             && ctx.kind == MemberKind::Column
@@ -382,25 +303,65 @@ impl SrcDesign {
         ctx: &DesignCtx,
         missing_gravity: bool,
     ) -> (CheckOutcome, Option<String>) {
-        self.check_with_gravity_mode(forces, sec, mat, ctx, missing_gravity, false)
+        self.check_with_shear_context(forces, sec, mat, ctx, missing_gravity, None)
     }
 
-    fn check_with_gravity_mode(
+    fn check_with_shear_context(
         &self,
         forces: &MemberForcesAt,
         sec: &Section,
         mat: &Material,
         ctx: &DesignCtx,
         missing_gravity: bool,
-        peak_beam: bool,
+        ordinary_shear_issue: Option<&str>,
     ) -> (CheckOutcome, Option<String>) {
-        let material_issue =
-            crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
-                .map(|reason| format!("SRC検定: 断面「{}」の{reason}", sec.name));
-        let shear_material_issue = crate::material_strength::shear_rebar_category_issue(
-            sec,
-            ctx.shear_rebar_material.as_ref(),
-        );
+        let main_rebar = ctx.rebar_material.as_ref();
+        let material_issue = crate::material_strength::main_rebar_category_issue(main_rebar)
+            .or_else(|| {
+                let grade = main_rebar?.name.trim();
+                (!sepika_core::material_grade::is_src_main_rebar_grade(grade)).then(|| {
+                    format!("主筋材料「{grade}」はSRC規準の異形主筋に対応する材種ではありません")
+                })
+            })
+            .map(|reason| format!("SRC検定: 断面「{}」の{reason}", sec.name));
+        let shear_material = ctx.shear_rebar_material.as_ref();
+        let uses_shear_rebar = ordinary_shear_issue.is_none()
+            && match sec.shape.as_ref() {
+                Some(SectionShape::SrcBeamRect { b, rebar, .. }) => {
+                    forces.qy != 0.0
+                        && rebar.pw(*b) > 0.0
+                        && (ctx.term != LoadTerm::Short
+                            || (!missing_gravity && ctx.seismic_qd.is_none()))
+                }
+                Some(SectionShape::SrcColumnRect { rebar, .. }) if ctx.term == LoadTerm::Short => {
+                    let seismic = missing_gravity || ctx.seismic_qd.is_some();
+                    (rebar.aw_x_mm2() > 0.0 && (seismic || forces.qy != 0.0))
+                        || (rebar.aw_y_mm2() > 0.0 && (seismic || forces.qz != 0.0))
+                }
+                _ => false,
+            };
+        let shear_material_issue = if uses_shear_rebar {
+            crate::material_strength::shear_rebar_category_issue(sec, shear_material)
+                .or_else(|| {
+                    let mat = shear_material?;
+                    sepika_core::material_grade::shear_rebar_fy_issue(mat).or_else(|| {
+                        sepika_core::material_grade::shear_rebar_material_issue(Some(mat))
+                    })
+                })
+                .or_else(|| {
+                    shear_material
+                        .is_none()
+                        .then(|| "SRC検定: せん断補強筋の材料が未割当です".into())
+                })
+                .or_else(|| {
+                    sec.shape
+                        .as_ref()?
+                        .validate_rebar_size_materials(None, shear_material)
+                        .err()
+                })
+        } else {
+            None
+        };
         let main_rebar_valid = material_issue.is_none();
         let shear_rebar_valid = shear_material_issue.is_none();
         let material_issue = crate::member_design_check::combine_incomplete_reasons(
@@ -413,15 +374,15 @@ impl SrcDesign {
             mat,
             ctx,
             missing_gravity,
+            ordinary_shear_issue,
             main_rebar_valid,
             shear_rebar_valid,
-            peak_beam,
         ) {
             Ok((result, incomplete)) => (
                 CheckOutcome::Checked(result),
                 crate::member_design_check::combine_incomplete_reasons(
                     material_issue,
-                    incomplete.as_deref(),
+                    incomplete.as_deref().or(ordinary_shear_issue),
                 ),
             ),
             Err(reason) => (CheckOutcome::Skipped { reason }, material_issue),
@@ -435,24 +396,37 @@ impl SrcDesign {
         mat: &Material,
         ctx: &DesignCtx,
         missing_gravity: bool,
+        ordinary_shear_issue: Option<&str>,
         main_rebar_valid: bool,
         shear_rebar_valid: bool,
-        peak_beam: bool,
     ) -> Result<(crate::CheckResult, Option<String>), String> {
         let fc_raw = mat.fc.unwrap_or(0.0);
-        if fc_raw <= 0.0 {
+        if !fc_raw.is_finite() || fc_raw <= 0.0 {
             return Err("SRC検定: Fc未設定（Material.fc が None/0 です）".to_string());
         }
+        if fc_raw > 60.0 {
+            return Err("SRC検定: コンクリートの設計基準強度が60 N/mm²を超えています".into());
+        }
+        if ctx
+            .steel_attr
+            .as_ref()
+            .is_some_and(sepika_core::model::SteelDesignAttr::has_section_loss)
+        {
+            return Err("SRC検定: 欠損を含む内蔵鉄骨の有効断面を評価できません".into());
+        }
 
-        let (shape, member, web_thick_mm, flange_thick_mm) = match &sec.shape {
-            Some(shape @ SectionShape::SrcBeamRect { steel_web_thick, steel_flange_thick, .. }) => {
-                (shape, "SRC梁", *steel_web_thick, *steel_flange_thick)
+        let (shape, member, height_mm, width_mm, web_thick_mm, flange_thick_mm, main_size) = match &sec.shape {
+            Some(shape @ SectionShape::SrcBeamRect { rebar, steel_height, steel_width, steel_web_thick, steel_flange_thick, .. }) => {
+                (shape, "SRC梁", *steel_height, *steel_width, *steel_web_thick, *steel_flange_thick, rebar.main_dia)
             }
-            Some(shape @ SectionShape::SrcColumnRect { steel_web_thick, steel_flange_thick, .. }) => {
-                (shape, "SRC柱", *steel_web_thick, *steel_flange_thick)
+            Some(shape @ SectionShape::SrcColumnRect { rebar, steel_height, steel_width, steel_web_thick, steel_flange_thick, .. }) => {
+                (shape, "SRC柱", *steel_height, *steel_width, *steel_web_thick, *steel_flange_thick, rebar.main_dia)
             }
             _ => return Err("SRC検定: 断面形状不一致（Section.shape が SrcBeamRect/SrcColumnRect ではありません）".into()),
         };
+        if main_rebar_valid && !(13.0..=41.0).contains(&main_size.designation_or_diameter_mm()) {
+            return Err(format!("{member}検定: 主筋はD13〜D41の異形鉄筋が対象です"));
+        }
 
         if ctx.rebar_material.is_none() {
             return Err(
@@ -460,25 +434,11 @@ impl SrcDesign {
                     .to_string(),
             );
         }
-        if ctx.shear_rebar_material.is_none() {
-            return Err("SRC検定: せん断補強筋の材料が未割当\
-                         （断面タブでせん断補強筋の材料を割り当ててください）"
-                .to_string());
-        }
         if let Err(reason) = shape.validate_rebar_size_materials(
             ctx.rebar_material.as_ref().filter(|_| main_rebar_valid),
-            ctx.shear_rebar_material
-                .as_ref()
-                .filter(|_| shear_rebar_valid),
+            None,
         ) {
             return Err(format!("SRC検定: {reason}"));
-        }
-        if let Some(msg) = sepika_core::material_grade::shear_rebar_material_issue(
-            ctx.shear_rebar_material
-                .as_ref()
-                .filter(|_| shear_rebar_valid),
-        ) {
-            return Err(format!("SRC検定: {msg}"));
         }
         let Some(steel_mat) = ctx.steel_material.as_ref() else {
             return Err("SRC検定: 内蔵鉄骨の材料が未割当\
@@ -514,6 +474,20 @@ impl SrcDesign {
                 sec.name
             )
         })?;
+        let flange_ratio = width_mm / (2.0 * flange_thick_mm);
+        let web_ratio = (height_mm - 2.0 * flange_thick_mm) / web_thick_mm;
+        let flange_f =
+            sepika_core::material_grade::resolve_steel_f(Some(steel_mat), Some(flange_thick_mm))?;
+        let web_f =
+            sepika_core::material_grade::resolve_steel_f(Some(steel_mat), Some(web_thick_mm))?;
+        sepika_core::material_grade::validate_src_h_width_thickness(
+            flange_ratio,
+            web_ratio,
+            flange_f,
+            web_f,
+            matches!(shape, SectionShape::SrcColumnRect { .. }),
+        )
+        .map_err(|reason| format!("{member}検定: {reason}"))?;
 
         match shape {
             SectionShape::SrcBeamRect {
@@ -530,37 +504,28 @@ impl SrcDesign {
                         "SRC検定: 梁用断面を柱部材に割り当てています（用途不一致）".to_string()
                     );
                 }
-                let shear_reference =
-                    beam_gravity_reference(forces, ctx, missing_gravity, peak_beam);
-                if let (false, true, Err(reason)) = (peak_beam, shear_rebar_valid, shear_reference)
-                {
-                    return Err(reason.into());
-                }
                 if rebar.is_unset() {
                     return Err("SRC検定: 配筋が未入力です".to_string());
                 }
                 let tension_is_top = beam_tension_is_top(forces, *d, rebar);
                 let props = beam_axis_props(*b, *d, rebar, tension_is_top);
                 let props_other = beam_axis_props(*b, *d, rebar, !tension_is_top);
-                Ok((
-                    beam::src_beam_check(
-                        forces,
-                        mat,
-                        ctx,
-                        props,
-                        props_other,
-                        rebar.main_dia.designation_or_diameter_mm(),
-                        *steel_height,
-                        *steel_width,
-                        *steel_web_thick,
-                        *steel_flange_thick,
-                        f_value,
-                        fc_raw,
-                        main_rebar_valid,
-                        shear_rebar_valid,
-                        shear_reference,
-                    ),
-                    shear_reference.err().map(str::to_owned),
+                Ok(beam::src_beam_check(
+                    forces,
+                    ctx,
+                    mat,
+                    props,
+                    props_other.dt,
+                    rebar.main_dia.designation_or_diameter_mm(),
+                    *steel_height,
+                    *steel_width,
+                    *steel_web_thick,
+                    *steel_flange_thick,
+                    f_value,
+                    ctx.term == LoadTerm::Short && (missing_gravity || ctx.seismic_qd.is_some()),
+                    ordinary_shear_issue,
+                    main_rebar_valid,
+                    shear_rebar_valid,
                 ))
             }
             SectionShape::SrcColumnRect {
@@ -614,6 +579,7 @@ impl SrcDesign {
                     f_value,
                     fc_raw,
                     missing_gravity,
+                    ordinary_shear_issue,
                     main_rebar_valid,
                     shear_rebar_valid,
                 ))
@@ -621,38 +587,6 @@ impl SrcDesign {
             _ => unreachable!(),
         }
     }
-}
-
-fn beam_gravity_reference(
-    forces: &MemberForcesAt,
-    ctx: &DesignCtx,
-    missing_gravity: bool,
-    peak_beam: bool,
-) -> Result<Option<f64>, &'static str> {
-    if missing_gravity {
-        return Err(if peak_beam {
-            "設計用せん断力に必要な重力参照内力が不足しています（Qy方向）"
-        } else {
-            "設計用せん断力に必要な重力参照内力が不足しています"
-        });
-    }
-    let Some(qd) = ctx.seismic_qd.as_ref() else {
-        return Ok(None);
-    };
-    let ql = if peak_beam {
-        crate::rc::gravity_component(qd, forces.pos, 1)
-    } else {
-        qd.long_at
-            .iter()
-            .find(|(pos, _)| (pos - forces.pos).abs() < 1e-6)
-            .map(|(_, values)| values[1])
-            .filter(|value| value.is_finite())
-    };
-    ql.map(Some).ok_or(if peak_beam {
-        "SRC検定: 設計用せん断力に必要な同位置の重力参照せん断力QLが不足または非有限です（Qy方向）"
-    } else {
-        "SRC検定: 設計用せん断力に必要な同位置の重力参照せん断力QLが不足または非有限です"
-    })
 }
 
 #[cfg(test)]

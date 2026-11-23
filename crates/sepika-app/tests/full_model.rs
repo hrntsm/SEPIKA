@@ -16,7 +16,6 @@
 //! FL と SL を一致させた階入力を解析用 fixture として明示する。実建物の ΔSL を推測した検証とはしない。
 //! 解析用fixtureの矩形RC梁は床上面へ梁上端を揃え、節点材軸から-D/2 mmと明示する。
 //! その他の梁は節点材軸から0 mmと明示する。
-//! 既存解析の比較条件としてH形鋼大梁の床板合成近似を明示し、実建物の接合条件とは区別する。
 //! 標準荷重ケースを持ち、最下レベルの柱脚12箇所をピン支点とする。
 //!
 //! # 検証の三層構造
@@ -411,16 +410,6 @@ fn declare_analysis_beam_placements(model: &mut sepika_core::model::Model) {
     }
 }
 
-fn declare_analysis_slab_composite(model: &mut sepika_core::model::Model) {
-    use sepika_core::model::SlabCompositeConnection;
-    model.slab_composite_attrs = model
-        .elements
-        .iter()
-        .filter(|e| model.is_steel_h_girder(e))
-        .map(|e| (e.id, SlabCompositeConnection::Confirmed))
-        .collect();
-}
-
 fn imported() -> App {
     let mut app = App::default();
     // 解析結果の完全再現性を確保する（スナップショット比較の前提）。
@@ -430,13 +419,21 @@ fn imported() -> App {
     declare_analysis_story_levels(&mut app.core.model);
     declare_analysis_beam_placements(&mut app.core.model);
     declare_analysis_slab_placements(&mut app.core.model);
-    declare_analysis_slab_composite(&mut app.core.model);
     app
 }
 
 /// 取り込み＋準備計算まで済ませた `App`（階・剛域・仕口パネル・地震力が確定した状態）。
 fn prepared() -> App {
+    prepare_imported(imported())
+}
+
+fn prepared_without_panels() -> App {
     let mut app = imported();
+    app.core.model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    prepare_imported(app)
+}
+
+fn prepare_imported(mut app: App) -> App {
     app.run_preparation();
     assert_no_error(&app, "準備計算");
     select_frame_gravity(&mut app.core.model);
@@ -575,11 +572,13 @@ fn four_story_steel_portal() -> sepika_core::model::Model {
 fn prepared_steel_portal(four_story: bool) -> App {
     let mut app = App::default();
     app.core.analysis_cfg.threads = 1;
-    app.load_model(if four_story {
+    let mut model = if four_story {
         four_story_steel_portal()
     } else {
         sepika_app::sample::portal_frame()
-    });
+    };
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    app.load_model(model);
     app.generate_stories_action();
     app.run_preparation();
     assert_no_error(&app, "鋼構造サンプルの準備計算");
@@ -721,7 +720,7 @@ fn assert_t_beam_diagnostic(app: &App) {
 
 #[test]
 fn imported_t_beams_stop_pushover_and_nonlinear_time_history() {
-    let mut app = prepared();
+    let mut app = prepared_without_panels();
     app.run_pushover();
     assert_t_beam_diagnostic(&app);
     assert!(app
@@ -1347,7 +1346,7 @@ fn seismic_static_produces_monotonic_story_displacement() {
     }
 }
 
-/// 全部材の危険断面・全接合部・全スラブが検定対象になり、材軸ねじりが作用する位置は理由付きで未算定。
+/// 全部材の危険断面・全接合部・全スラブに検定結果があり、照査条件を満たさない位置には理由が付く。
 #[test]
 fn design_check_covers_every_member() {
     use sepika_core::structure_kind::{structure_kind_of, StructureKind};
@@ -1384,6 +1383,7 @@ fn design_check_covers_every_member() {
         .count();
     assert_eq!(ordinary_steel_columns, 40);
     let mut steel_column_positions = 0usize;
+    let mut steel_unavailable_shear_positions = 0usize;
     let mut rc_src_positions = 0usize;
     let mut max_rc_src_mx_nmm = 0.0_f64;
     for mc in &results.member_checks {
@@ -1463,6 +1463,31 @@ fn design_check_covers_every_member() {
                 );
                 continue;
             }
+            if is_steel
+                && outcomes.iter().any(|outcome| {
+                    matches!(outcome, CheckOutcome::Skipped { reason }
+                        if reason.contains("作用するせん断力の断面形状・方向")
+                            || reason.contains("弱軸せん断力Qz")
+                            || reason.contains("弱軸せん断と強軸曲げ")
+                            || reason.contains("弱軸せん断・強軸曲げ")
+                            || reason.contains("式(5.24)の同一点"))
+                })
+            {
+                assert!(local_forces[1] != 0.0 || local_forces[2] != 0.0);
+                assert_eq!(
+                    outcomes
+                        .iter()
+                        .filter(|outcome| matches!(outcome, CheckOutcome::Skipped { .. }))
+                        .count(),
+                    1
+                );
+                assert!(outcomes.iter().all(|outcome| match outcome {
+                    CheckOutcome::Checked(result) => result.ratio().is_finite() && !result.ok(),
+                    CheckOutcome::Skipped { .. } => true,
+                }));
+                steel_unavailable_shear_positions += 1;
+                continue;
+            }
             let [CheckOutcome::Checked(r)] = &outcomes[..] else {
                 panic!("部材 {:?} 位置 {xi}: {outcomes:?}", mc.elem);
             };
@@ -1473,8 +1498,9 @@ fn design_check_covers_every_member() {
                 mc.elem
             );
             if is_steel_column {
-                let length_mm = app.core.model.member_length(elem);
-                let expected_length = 1.2 * length_mm;
+                let i = app.core.model.node(elem.nodes[0]).unwrap();
+                let j = app.core.model.node(elem.nodes[1]).unwrap();
+                let expected_length = 1.2 * sepika_core::geom::vec3::dist(i.coord, j.coord);
                 assert!(
                     r.detail
                         .contains(&format!("強軸 {expected_length} ／ 弱軸 {expected_length}")),
@@ -1487,6 +1513,7 @@ fn design_check_covers_every_member() {
         }
     }
     assert_eq!(steel_column_positions, 120, "通常S柱40本・各3位置");
+    assert!(steel_unavailable_shear_positions > 0);
     assert!(
         rc_src_positions > 0,
         "RC/SRC 部材に Mx が 0 の検定位置がない"
@@ -1566,7 +1593,7 @@ fn imported_orthogonal_girders_transfer_horizontal_motion_through_vertical_displ
         let case = LoadCaseId(0);
         let axis = usize::from(along_y);
         let mut load = [0.0; 6];
-        load[axis] = 1000.0;
+        load[axis] = 1_000_000.0;
         model.load_cases = vec![LoadCase {
             id: case,
             name: "独立水平加力".into(),
@@ -1600,26 +1627,61 @@ fn imported_orthogonal_girders_transfer_horizontal_motion_through_vertical_displ
 
 #[test]
 fn story_metrics_compute_eccentricity_with_vertical_restraint() {
+    use sepika_design_jp::secondary::eccentricity::{append_misc_wall_stiffnesses, center_of_mass};
+    use sepika_design_jp::secondary::eccentricity_analysis::{
+        center_of_gravity_from_axial, column_stiffnesses_from_analysis,
+    };
+
     let mut app = prepared();
     for node in &mut app.core.model.nodes {
         node.restraint.set_fixed(sepika_core::dof::Dof::Uz);
     }
     app.run_static_all();
     assert_no_error(&app, "鉛直変位を拘束した対照の静的解析");
-    for (dir, expected) in [
-        (
-            SeismicDir::X,
-            ["6.000e-2", "5.742e-2", "3.025e-2", "1.133e-2"],
-        ),
-        (
-            SeismicDir::Y,
-            ["3.395e-2", "8.323e-3", "2.566e-2", "4.938e-2"],
-        ),
-    ] {
-        let metrics = story_metrics(&app, dir);
-        assert_eq!(metrics.len(), 4);
-        for (m, re) in metrics.iter().zip(expected) {
-            assert_eq!(sig4(*m.re.as_ref().unwrap()), re, "{dir:?} {m:?}");
+    let model = &app.core.model;
+    let ctx =
+        sepika_app::summary::metrics_ctx_from_results(model, app.core.scoped.results.as_ref());
+    let layers = model.layers();
+    assert_eq!(layers.len(), 4);
+    let responses = [ctx.seismic_x.unwrap(), ctx.seismic_y.unwrap()];
+    for response in responses {
+        assert!(response.disp.iter().all(|disp| disp[2] == 0.0));
+    }
+    let directions = [SeismicDir::X, SeismicDir::Y];
+    let metrics = directions.map(|dir| story_metrics(&app, dir));
+    assert!(metrics.iter().all(|items| items.len() == layers.len()));
+    for (layer_index, layer) in layers.iter().enumerate() {
+        let mut stiffnesses =
+            column_stiffnesses_from_analysis(model, layer.top, responses[0], responses[1]).unwrap();
+        append_misc_wall_stiffnesses(model, layer.top, &mut stiffnesses).unwrap();
+        let cg = ctx
+            .long_term
+            .and_then(|result| center_of_gravity_from_axial(model, layer.top, result).unwrap())
+            .unwrap_or_else(|| center_of_mass(model, layer.top).unwrap());
+        let moments = stiffnesses.iter().fold([[0.0; 3]; 2], |mut sums, c| {
+            for (terms, (k, transverse_mm)) in
+                sums.iter_mut().zip([(c.dx, c.pos[1]), (c.dy, c.pos[0])])
+            {
+                terms[0] += k;
+                terms[1] += k * transverse_mm;
+                terms[2] += k * transverse_mm * transverse_mm;
+            }
+            sums
+        });
+        // 各方向の原点まわり二次モーメントを平行軸の定理で剛心まわりに移す。
+        let torsion_nmm: f64 = moments
+            .iter()
+            .map(|[k, first, second]| second - first.powi(2) / k)
+            .sum();
+        for (axis, dir) in directions.into_iter().enumerate() {
+            let m = &metrics[axis][layer_index];
+            let [k, first, _] = moments[axis];
+            let offset_mm = (cg[1 - axis] - first / k).abs();
+            let expected = offset_mm * (k / torsion_nmm).sqrt();
+            assert!(
+                (m.re.as_ref().unwrap() - expected).abs() < 1e-12,
+                "{dir:?} {m:?}, Re={expected}"
+            );
             assert_eq!(m.re_ok, Some(true), "{dir:?} {m:?}");
             assert_eq!(m.fes, Ok(1.0), "{dir:?} {m:?}");
         }
@@ -1726,10 +1788,6 @@ fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    insta::assert_snapshot!(
-        "four_story_steel_portal_response_on_ds_hold",
-        response_scalars
-    );
     let reason = app.compute_holding_capacity().err().unwrap();
     assert!(
         reason.contains("Ds判定保留")
@@ -1797,6 +1855,10 @@ fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
         assert!(check.mu.is_nan() && check.qsu.is_nan() && check.bond_stress.is_none());
         assert!(check.qmu.is_nan() && check.shear_margin.is_nan() && check.bond_margin.is_nan());
     }
+    insta::assert_snapshot!(
+        "four_story_steel_portal_response_on_ds_hold",
+        response_scalars
+    );
 }
 
 /// 鋼構造サンプルの増分解析で性能曲線・層せん断が力学的に整合する。
@@ -1844,16 +1906,6 @@ fn pushover_reaches_ultimate_state() {
         push.steps[0].load_factor
     );
     assert_steel_portal_gravity_and_panel_loads(&app, push);
-    insta::assert_snapshot!(
-        "four_story_steel_portal_pushover",
-        format!(
-            "steps={}\nQu={}\nmechanism={:?}\nhinges={}",
-            push.steps.len(),
-            sig4(push.qu),
-            push.mechanism,
-            push.hinges.len(),
-        )
-    );
 
     let roof: Vec<f64> = push.capacity_curve.iter().map(|c| c.roof_disp).collect();
     assert!(
@@ -1883,6 +1935,16 @@ fn pushover_reaches_ultimate_state() {
         !push.member_response.is_empty(),
         "最終確定ステップの部材別応答が空"
     );
+    insta::assert_snapshot!(
+        "four_story_steel_portal_pushover",
+        format!(
+            "steps={}\nQu={}\nmechanism={:?}\nhinges={}",
+            push.steps.len(),
+            sig4(push.qu),
+            push.mechanism,
+            push.hinges.len(),
+        )
+    );
 }
 
 fn assert_steel_portal_gravity_and_panel_loads(
@@ -1893,11 +1955,14 @@ fn assert_steel_portal_gravity_and_panel_loads(
     use sepika_element::behavior::{Ctx, LocalVec};
     use sepika_element::factory::{build_nonlinear_behavior, StrengthBasis};
     let model = &app.core.model;
+    let mut panel_model = model.clone();
+    panel_model.panel_zone = sepika_core::model::PanelZoneMode::Model;
+    sepika_element::springs::panel_gen::apply_auto_panel_zones(&mut panel_model).unwrap();
     let initial = push.confirmed_history.as_ref().unwrap().first().unwrap();
     let terms = sepika_core::load_combo::ultimate_gravity_terms(model).unwrap();
     for id in [2, 5, 8, 11] {
-        let element = model.element(sepika_core::ids::ElemId(id)).unwrap();
-        let beam = sepika_element::frame::beam::BeamElement::new(element, model);
+        let element = panel_model.element(sepika_core::ids::ElemId(id)).unwrap();
+        let beam = sepika_element::frame::beam::BeamElement::new(element, &panel_model);
         let mut loads = Vec::new();
         let mut w_n_per_mm = 0.0;
         for &(case, factor) in &terms {
@@ -1943,7 +2008,7 @@ fn assert_steel_portal_gravity_and_panel_loads(
         let expected = beam.axis.rotate_to_global(&local).map(|load| -load);
         let mut behavior = build_nonlinear_behavior(
             element,
-            model,
+            &panel_model,
             StrengthBasis::MaterialStrength,
             AnalysisKind::Incremental,
             None,
@@ -1953,7 +2018,14 @@ fn assert_steel_portal_gravity_and_panel_loads(
             data: smallvec::smallvec![0.0; 16],
         };
         behavior
-            .update_state_with_member_loads(&zero, &loads, false, &Ctx { model })
+            .update_state_with_member_loads(
+                &zero,
+                &loads,
+                false,
+                &Ctx {
+                    model: &panel_model,
+                },
+            )
             .unwrap();
         let response = behavior.state_frame_load_response().unwrap().unwrap();
         for (actual, expected) in response.nodal_residual.data[..12].iter().zip(expected) {
@@ -2121,15 +2193,6 @@ fn time_history_nonlinear_runs() {
         th.time.len(),
         th.peak_disp.iter().map(|d| d[0].abs()).fold(0.0, f64::max)
     );
-    insta::assert_snapshot!(
-        "steel_portal_nonlinear_time_history",
-        format!(
-            "frames={}\npeak_ux={}\ndrift_angle={}",
-            th.time.len(),
-            sig4(th.peak_disp.iter().map(|d| d[0].abs()).fold(0.0, f64::max)),
-            sig4(th.story_drift_angle[0]),
-        )
-    );
     assert!(th.nonlinear, "非線形として記録される");
     assert!(
         th.applied_long_term,
@@ -2138,6 +2201,15 @@ fn time_history_nonlinear_runs() {
     assert!(
         th.peak_disp.iter().flatten().all(|v| v.is_finite()),
         "ピーク変位に非有限値がある（発散）"
+    );
+    insta::assert_snapshot!(
+        "steel_portal_nonlinear_time_history",
+        format!(
+            "frames={}\npeak_ux={}\ndrift_angle={}",
+            th.time.len(),
+            sig4(th.peak_disp.iter().map(|d| d[0].abs()).fold(0.0, f64::max)),
+            sig4(th.story_drift_angle[0]),
+        )
     );
 }
 
@@ -2734,6 +2806,7 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
     use sepika_core::{model::FrameSectionUse, section_shape::SectionShape};
     use sepika_design_jp::CheckOutcome;
     let model = &app.core.model;
+    let response = app.current_static().unwrap();
     let staggered = [13, 16, 19, 22, 25, 28, 31, 34, 37, 40, 44, 48];
     let unequal_ms_depth = [14, 17, 20, 23, 26, 29, 32, 35, 38, 41, 45, 49];
     let standard = [
@@ -2757,21 +2830,32 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
         .unwrap()
         .joint_checks
         .iter()
-        .filter(|c| c.label.starts_with("パネルゾーン(S)"))
         .collect();
-    assert_eq!(checks.len(), 42 * 2);
     let mut skipped = Vec::new();
     let mut ms_depth_skipped = Vec::new();
     for id in standard.into_iter().chain(staggered) {
-        let pair: Vec<_> = checks.iter().filter(|c| c.node.0 == id).collect();
-        assert_eq!(pair.len(), 2, "節点{id}");
-        let node = model.node(pair[0].node).unwrap();
+        let pair: Vec<_> = checks
+            .iter()
+            .filter(|c| {
+                c.node.0 == id
+                    && matches!(
+                        c.label.as_str(),
+                        "パネルゾーン(S) 強軸" | "パネルゾーン(S) 弱軸"
+                    )
+            })
+            .collect();
+        let scope = checks
+            .iter()
+            .find(|c| c.node.0 == id && c.label == "仕口パネル（S） 適用範囲");
+        let node = model.node(sepika_core::ids::NodeId(id)).unwrap();
         let mut flange_distances = [Vec::new(), Vec::new()];
+        let mut columns = Vec::new();
         for member in model.elements.iter().filter(|e| e.nodes.contains(&node.id)) {
             let Some(section) = model.element_section(member) else {
                 continue;
             };
             if section.frame_use == Some(FrameSectionUse::Column) {
+                columns.push((member, section));
                 assert_eq!(member.local_axis.ref_vector, [1.0, 0.0, 0.0]);
                 let ends = member
                     .nodes
@@ -2831,15 +2915,56 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
                 .any(|(n, _)| *n == node.id),
             !staggered.contains(&id)
         );
-        let strong = pair
-            .iter()
-            .find(|c| c.label == "パネルゾーン(S) 強軸")
-            .unwrap();
-        let weak = pair
-            .iter()
-            .find(|c| c.label == "パネルゾーン(S) 弱軸")
-            .unwrap();
+        if columns.len() != 2 {
+            assert!(pair.is_empty(), "節点{id}");
+            if staggered.contains(&id) {
+                assert!(checks.iter().any(|check| check.node == node.id
+                    && check.label.starts_with("パネルゾーン(S) 入力診断")
+                    && matches!(&check.outcome, CheckOutcome::Skipped { reason } if reason.contains("段違い"))), "節点{id}の段違い診断");
+            }
+            if response.panel_moments.iter().any(|(joint, moment)| {
+                *joint == node.id && moment.iter().any(|component| *component != 0.0)
+            }) {
+                assert!(
+                    scope.is_some_and(|check| matches!(&check.outcome,
+                    CheckOutcome::Skipped { reason } if reason.contains("上下に柱が1本ずつ"))),
+                    "節点{id}の片側柱診断"
+                );
+            }
+            continue;
+        }
+        assert_eq!(columns[0].1.shape, columns[1].1.shape, "節点{id}");
+        assert_eq!(columns[0].1.area, columns[1].1.area, "節点{id}");
+        assert_eq!(columns[0].1.material, columns[1].1.material, "節点{id}");
+        for (member, _) in columns {
+            let start = model.node(member.nodes[0]).unwrap().coord[2];
+            let end = model.node(member.nodes[1]).unwrap().coord[2];
+            let length = (end - start).abs();
+            for &db in flange_distances.iter().flatten() {
+                let cut_mm = if member.nodes[0] == node.id {
+                    db / 2.0
+                } else {
+                    length - db / 2.0
+                };
+                assert!(
+                    response.steel_panel_column_face_forces.iter().any(|cut| {
+                        cut.element == member.id
+                            && cut.position_mm == cut_mm
+                            && cut.axial_n.as_ref().is_ok_and(|value| value.is_finite())
+                    }),
+                    "節点{id}・柱{}の仕口フランジ面{cut_mm} mm",
+                    member.id.0
+                );
+            }
+        }
+        let two_direction_scope = scope.is_some_and(|scope| {
+            matches!(&scope.outcome, CheckOutcome::Skipped { reason } if reason.contains("二方向同時作用"))
+        });
+        let strong = pair.iter().find(|c| c.label == "パネルゾーン(S) 強軸");
+        let weak = pair.iter().find(|c| c.label == "パネルゾーン(S) 弱軸");
         if unequal_ms_depth.contains(&id) {
+            let weak =
+                weak.unwrap_or_else(|| panic!("節点{id}弱軸の梁フランジ距離診断がありません"));
             assert!(
                 matches!(&weak.outcome, CheckOutcome::Skipped { reason }
                 if reason.contains("解析MS応答の共通db=681 mm") && reason.contains("柱弱軸") && reason.contains("db=484 mm") && reason.contains("不整合")),
@@ -2847,7 +2972,8 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
                 weak.outcome
             );
             ms_depth_skipped.push(id);
-        } else {
+        } else if !two_direction_scope {
+            let weak = weak.unwrap_or_else(|| panic!("節点{id}弱軸の結果がありません"));
             assert!(
                 matches!(weak.outcome, CheckOutcome::Checked(_)),
                 "節点{id}弱軸: {:?}",
@@ -2855,6 +2981,7 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
             );
         }
         if staggered.contains(&id) {
+            let strong = strong.unwrap_or_else(|| panic!("節点{id}強軸の段違い診断がありません"));
             let CheckOutcome::Skipped { reason } = &strong.outcome else {
                 panic!("節点{id}段違いX面");
             };
@@ -2867,21 +2994,29 @@ fn assert_panel_505_fixture_geometry_and_states(app: &App) {
                 "{reason}"
             );
             skipped.push(id);
-        } else {
+        } else if !two_direction_scope {
+            let strong = strong.unwrap_or_else(|| panic!("節点{id}強軸の結果がありません"));
             assert!(
                 matches!(strong.outcome, CheckOutcome::Checked(_)),
                 "節点{id}標準X面"
             );
         }
+        if two_direction_scope {
+            assert!(
+                pair.iter()
+                    .all(|check| matches!(check.outcome, CheckOutcome::Skipped { .. })),
+                "節点{id}"
+            );
+        }
     }
     skipped.sort_unstable();
-    assert_eq!(skipped, staggered);
+    assert_eq!(skipped, [13, 16, 19, 22, 25, 28, 31, 34]);
     ms_depth_skipped.sort_unstable();
-    assert_eq!(ms_depth_skipped, unequal_ms_depth);
+    assert_eq!(ms_depth_skipped, [14, 17, 20, 23, 26, 29, 32, 35]);
 }
 
 #[test]
-fn panel_758_real_fixture_keeps_two_axes_and_distinguishes_staggered_and_ms_depth_mismatch() {
+fn panel_758_real_fixture_recovers_column_faces_and_distinguishes_scope_diagnostics() {
     let mut app = prepared();
     app.run_linear_static(
         app.core
@@ -2907,6 +3042,15 @@ fn panel_758_real_fixture_keeps_two_axes_and_distinguishes_staggered_and_ms_dept
 #[test]
 fn snapshot_key_scalars() {
     let mut app = analyzed();
+    let selected = app.core.scoped.last_static.unwrap();
+    app.select_displayed_result(sepika_app::app::StaticKey::Case(StaticCaseKey::User(
+        dl_case_id(&app),
+    )));
+    app.run_design_check();
+    assert_no_error(&app, "DLの仕口検定");
+    assert_panel_505_fixture_geometry_and_states(&app);
+    let dl_joint_check_count = app.core.scoped.results.as_ref().unwrap().joint_checks.len();
+    app.select_displayed_result(selected);
     // 既存の検定式の数値回帰がMxの丸め残差で左右されるため、この検定への入力だけMxを0にする。
     let results = app.core.scoped.results.as_mut().expect("解析結果");
     let original_member_forces = results.member_forces.clone();
@@ -2923,7 +3067,6 @@ fn snapshot_key_scalars() {
         .expect("解析結果")
         .member_forces = original_member_forces;
     clear_error(&mut app);
-    assert_panel_505_fixture_geometry_and_states(&app);
 
     let mut out = String::new();
     let mut line = |k: &str, v: String| {
@@ -3006,26 +3149,44 @@ fn snapshot_key_scalars() {
         "design.member_checks",
         results.member_checks.len().to_string(),
     );
-    line(
-        "design.joint_checks",
-        results.joint_checks.len().to_string(),
-    );
+    line("design.dl_joint_checks", dl_joint_check_count.to_string());
     line("design.beam_checks", results.beam_checks.len().to_string());
     line("design.slab_checks", results.slab_checks.len().to_string());
-    let (checked_positions, max_ratio) = results
+    let (checked_positions, unchecked_positions, max_ratio) = results
         .member_checks
         .iter()
         .flat_map(|mc| mc.positions.iter().map(|p| (mc.elem, p)))
-        .fold((0, 0.0_f64), |(count, max_ratio), (elem, p)| {
-            let sepika_design_jp::CheckOutcome::Checked(result) = &p.outcome else {
-                panic!("Mx=0の部材 {elem:?} 位置 {}: {:?}", p.xi, p.outcome);
-            };
-            (count + 1, max_ratio.max(result.ratio()))
-        });
+        .fold(
+            (0, 0, 0.0_f64),
+            |(checked, unchecked, max_ratio), (elem, p)| match &p.outcome {
+                sepika_design_jp::CheckOutcome::Checked(result) => {
+                    let ratio = result.ratio();
+                    assert!(
+                        ratio.is_finite() && ratio >= 0.0,
+                        "{elem:?}/{}: {result:?}",
+                        p.xi
+                    );
+                    (checked + 1, unchecked, max_ratio.max(ratio))
+                }
+                sepika_design_jp::CheckOutcome::Skipped { reason } => {
+                    assert!(
+                        reason.contains("せん断"),
+                        "Mx=0の部材 {elem:?} 位置 {}: {reason}",
+                        p.xi
+                    );
+                    (checked, unchecked + 1, max_ratio)
+                }
+            },
+        );
+    assert!(checked_positions > 0 && unchecked_positions > 0);
     line("design.zero_mx_max_ratio", sig4(max_ratio));
     line(
         "design.zero_mx_checked_positions",
         checked_positions.to_string(),
+    );
+    line(
+        "design.zero_mx_unchecked_positions",
+        unchecked_positions.to_string(),
     );
     // 接合条件不足の総合未検定で除外すると、算定済みの曲げ・たわみの数値回帰が空振りする。
     let beam_results: Vec<_> = results
@@ -3078,16 +3239,15 @@ fn snapshot_key_scalars() {
         );
     }
 
-    app.run_pushover();
-    assert_t_beam_diagnostic(&app);
-    assert!(app
+    let mut nonlinear_app = prepared_without_panels();
+    nonlinear_app.run_pushover();
+    assert_t_beam_diagnostic(&nonlinear_app);
+    assert!(nonlinear_app
         .core
         .scoped
         .results
         .as_ref()
-        .unwrap()
-        .pushover_x
-        .is_none());
+        .is_none_or(|r| r.pushover_x.is_none()));
     line("pushover.input", "T形梁の情報不足により停止".into());
     clear_error(&mut app);
     analyze_ultimate_gravity(&mut app);
@@ -3121,11 +3281,17 @@ fn snapshot_key_scalars() {
         line(&format!("th.drift_angle[{i}]"), sig4(*a));
     }
 
-    app.core.analysis_cfg.th_nonlinear = true;
-    app.run_time_history_sample();
-    assert_t_beam_diagnostic(&app);
+    clear_error(&mut nonlinear_app);
+    nonlinear_app.core.analysis_cfg.th_dir = ThDir::X;
+    nonlinear_app.core.analysis_cfg.th_nonlinear = false;
+    nonlinear_app.run_time_history_sample();
+    assert_no_error(&nonlinear_app, "T形梁モデルの線形時刻歴");
+    nonlinear_app.core.analysis_cfg.th_nonlinear = true;
+    nonlinear_app.run_time_history_sample();
+    assert_t_beam_diagnostic(&nonlinear_app);
     assert!(
-        !app.core
+        !nonlinear_app
+            .core
             .scoped
             .results
             .as_ref()
@@ -3282,6 +3448,7 @@ fn rc_reference_rejects_only_member_loads_applied_in_the_current_analysis() {
 fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() {
     use sepika_core::model::StoryLevelKind;
     let mut model = four_story_steel_portal();
+    model.panel_zone = sepika_core::model::PanelZoneMode::None;
     let elevations = [-9000.0, -6000.0, -3000.0, 6000.0, 12000.0];
     for (story, fl) in model.stories.iter_mut().zip(elevations) {
         story.elevation = Some(fl);
@@ -3425,14 +3592,20 @@ fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() 
     app.run_pushover();
     assert_no_error(&app, "GL跨ぎ混合構造の増分解析");
     app.run_seismic(SeismicDir::Y);
-    select_holding_points(&mut app);
 
     assert!((required_story_shear(&app)[0] - 215_250.0).abs() < 1e-7);
-    assert!(app
-        .compute_holding_capacity()
-        .err()
+    let push = app
+        .core
+        .scoped
+        .results
+        .as_ref()
         .unwrap()
-        .contains("Ds判定保留"));
+        .pushover_x
+        .as_ref()
+        .unwrap();
+    let last_step = push.capacity_curve.last().unwrap().step;
+    let reason = push.shear_design_unavailable_at(last_step).unwrap();
+    assert!(reason.contains("RC線材せん断適用範囲外"), "{reason}");
 
     assert!(app.core.scoped.undo.run(
         &mut app.core.model,

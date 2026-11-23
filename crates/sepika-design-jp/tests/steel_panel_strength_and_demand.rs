@@ -12,7 +12,7 @@ fn box_panel() -> SPanelInput {
             }; 2],
         ),
         geometry: PanelGeometry {
-            kind: PanelShapeKind::Box { bc: 400.0 },
+            kind: PanelShapeKind::SquareBox,
             dc: 384.0,
             tp: 16.0,
             filled: false,
@@ -30,9 +30,9 @@ fn box_panel() -> SPanelInput {
 
 #[test]
 fn finite_direct_moment_uses_box_panel_capacity_even_with_unused_nonfinite_end_forces() {
-    // 式(5.1)と現行の角形用形状係数 κ = 37/33 から独立に算出。
-    let expected_capacity_nmm = 743_482_341.027_1;
-    let expected_ratio = 0.998_006_218_916_978;
+    // 式(5.1)と標準形式の正方形等厚鋼管の形状係数 κ = 9/8 から独立に算出。
+    let expected_capacity_nmm = 740_979_033.481_555;
+    let expected_ratio = 1.001_377_861_548_454_3;
 
     let result = s_panel_zone_check(&box_panel()).unwrap();
     let ratio = result.ratio();
@@ -42,7 +42,7 @@ fn finite_direct_moment_uses_box_panel_capacity_even_with_unused_nonfinite_end_f
         "{capacity_nmm}"
     );
     assert!((ratio - expected_ratio).abs() < 1e-12, "{ratio}");
-    assert!(result.ok());
+    assert!(!result.ok());
 }
 
 #[test]

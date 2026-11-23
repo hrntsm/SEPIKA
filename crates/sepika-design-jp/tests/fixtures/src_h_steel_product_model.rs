@@ -2,7 +2,8 @@ use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, StoryId};
 use sepika_core::model::{
     ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LoadCase, LoadCaseKind,
-    LoadCombination, LocalAxis, Material, MaterialCategory, Model, NodalLoad, Node, Story,
+    LoadCombination, LocalAxis, Material, MaterialCategory, Model, NodalLoad, Node,
+    SteelDesignAttr, Story,
 };
 use sepika_core::section_shape::{
     BeamStirrup, RcBeamRebar, RcRectColumnRebar, RebarSize, RectColumnHoop, SectionShape,
@@ -176,6 +177,21 @@ pub fn model(column: bool, steel_grade: &str, tension_n: f64, moment_nmm: f64) -
             Story::new(StoryId(0), "1F".into(), Some(0.0), Some(0.0)),
             Story::new(StoryId(1), "2F".into(), Some(6_000.0), Some(0.0)),
         ],
+        steel_design_attrs: column
+            .then_some(SteelDesignAttr {
+                elem: ElemId(0),
+                joint_flange_loss: 0.0,
+                joint_web_loss: 0.0,
+                scallop_web_loss: 0.0,
+                lb_direct: None,
+                lateral_brace_count: None,
+                lk_y_direct: Some(6000.0),
+                lk_z_direct: Some(6000.0),
+                c_direct: None,
+                column_lateral_buckling_end_supports: None,
+            })
+            .into_iter()
+            .collect(),
         ..Default::default()
     }
 }

@@ -1,4 +1,5 @@
 use crate::app::App;
+mod src_holding;
 use sepika_core::units::to_display::{
     area_load_kn_per_m2, force_kn, moment_kn_m, moment_kn_m_per_m,
 };
@@ -635,7 +636,14 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                 FrameType::SteelBrace,
                 "Sブレース",
             );
+            ui.selectable_value(&mut app.core.design_frame, FrameType::SrcFrame, "SRC造");
         });
+        if app.core.design_frame
+            == sepika_design_jp::secondary::holding_capacity::FrameType::SrcFrame
+        {
+            src_holding::inputs(ui, app);
+            return;
+        }
         holding_rank_mode_input(ui, app);
         ui.horizontal(|ui| {
             use sepika_design_jp::secondary::holding_capacity::MemberRank;
@@ -673,9 +681,20 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
         }
         Ok((result, story_ranks)) => {
             if let Some(source) = &app.core.scoped.holding_capacity_source {
+                if let Some(all_ok) = source.src_both_directions_ok {
+                    ui.strong(if all_ok {
+                        "X±・Y± 全階の保有水平耐力比較 OK"
+                    } else {
+                        "X±・Y± の保有水平耐力比較 NG"
+                    });
+                }
+                let direction = source.src_sign.map_or_else(
+                    || format!("{:?}", source.direction),
+                    |sign| crate::app::src_holding::case_label(source.direction, sign),
+                );
                 ui.label(format!(
-                    "採用方向: {:?}、Ds部材応答の採用ステップ: {}、保有耐力比較・変形の採用ステップ: {}",
-                    source.direction,
+                    "採用方向: {}、Ds部材応答の採用ステップ: {}、保有耐力比較・変形の採用ステップ: {}",
+                    direction,
                     source.ds_point.step,
                     source.capacity_point.step
                 ));
@@ -703,7 +722,15 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     Col::num("Fes"),
                     Col::num("Qun[kN]"),
                     Col::label("判定"),
-                    Col::label("採用ランク"),
+                    Col::label(
+                        if app.core.design_frame
+                            == sepika_design_jp::secondary::holding_capacity::FrameType::SrcFrame
+                        {
+                            "柱種別の最低"
+                        } else {
+                            "採用ランク"
+                        },
+                    ),
                 ],
                 result.stories.len(),
                 |row| {
@@ -792,7 +819,10 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                     ),
                 );
             }
-            if !app.core.scoped.ds_wall_details.is_empty() {
+            if !app.core.scoped.ds_wall_details.is_empty()
+                && app.core.design_frame
+                    != sepika_design_jp::secondary::holding_capacity::FrameType::SrcFrame
+            {
                 ui.label("RC耐力壁: τu/Fc = |Q_Ds| / (t × l_cc × Fc)、s = min(内法長さ, 内法高さ)。側柱は Ac ≥ st/2、最小径 ≥ √(st/3) かつ ≥ 2t を両側で満たすと適格です。");
                 ui.hyperlink_to(
                     "採用根拠: 2015年版の公開引用（報告書 本文44頁）",
@@ -1219,11 +1249,12 @@ pub(crate) fn holding_evaluation_inputs(ui: &mut egui::Ui, app: &mut crate::app:
         return;
     };
     let mut adopt = None;
-    for input in bundle
-        .holding_evaluations
-        .iter()
-        .filter(|e| e.point.direction == dir)
-    {
+    for input in bundle.holding_evaluations.iter().filter(|e| {
+        e.point.direction == dir
+            && e.run.wall_run.as_ref().is_none_or(|id| {
+                id.sign == sepika_solver::nonlinear::pushover::PushoverSign::Positive
+            })
+    }) {
         ui.label(format!(
             "保存採用 {:?}: run {} step {} / {}",
             input.point.purpose, input.point.run_id, input.point.step, input.point.selection_reason
@@ -1241,6 +1272,13 @@ pub(crate) fn holding_evaluation_inputs(ui: &mut egui::Ui, app: &mut crate::app:
     let Some(po) = po else {
         return;
     };
+    if let Some(reason) = po
+        .capacity_curve
+        .last()
+        .and_then(|last| po.shear_design_unavailable_at(last.step))
+    {
+        ui.colored_label(crate::theme::SECONDARY_AMBER, reason);
+    }
     ui.label("目的別に確定stepと選定理由を指定してください。法的な停止点は自動選択しません。");
     for (purpose, label) in [
         (EvaluationPurpose::Ds, "Ds判定"),
@@ -1343,9 +1381,15 @@ pub(crate) fn wall_checks_ui(
     ui.label("NGと未検定は同じ検定行に併存する場合があります。");
     for kind in [
         sepika_design_jp::wall_check::WallCheckKind::AllowableShear,
+        sepika_design_jp::wall_check::WallCheckKind::AllowableFlexure,
+        sepika_design_jp::wall_check::WallCheckKind::UltimateShear,
+        sepika_design_jp::wall_check::WallCheckKind::UltimateFlexure,
         sepika_design_jp::wall_check::WallCheckKind::ReferenceSkeleton,
     ] {
         let s = sepika_design_jp::wall_check::WallCheckSummary::for_kind(checks, kind);
+        if s.n_checks == 0 && s.n_outside == 0 {
+            continue;
+        }
         ui.label(format!(
             "{}：合格 {}・NG {}・未検定 {}・対象外 {}",
             kind.label(),

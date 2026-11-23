@@ -56,6 +56,8 @@ fn check(
             kind,
             term: LoadTerm::Short,
             length,
+            lk_y: Some(length),
+            lk_z: Some(length),
             ..Default::default()
         },
     )
@@ -155,65 +157,21 @@ fn statutory_slenderness_failure_takes_precedence_for_flat_bar_in_compression() 
 }
 
 #[test]
-fn other_section_shapes_and_name_only_sections_keep_existing_shear_area_selection() {
-    let cases = [
-        (
-            SectionShape::SteelRoundBar { dia: 40.0 },
-            [360.0 * std::f64::consts::PI; 2],
-        ),
-        (
-            SectionShape::SteelChannel {
-                height: 150.0,
-                width: 75.0,
-                web_thick: 6.0,
-                flange_thick: 9.0,
-            },
-            [900.0, 1350.0],
-        ),
-        (
-            SectionShape::SteelTee {
-                height: 150.0,
-                width: 75.0,
-                web_thick: 6.0,
-                flange_thick: 9.0,
-            },
-            [900.0, 675.0],
-        ),
-        (
-            SectionShape::SteelAngle {
-                leg_a: 100.0,
-                leg_b: 75.0,
-                thick: 10.0,
-            },
-            [1000.0, 750.0],
-        ),
-    ];
-    let mut sections: Vec<_> = cases
-        .into_iter()
-        .map(|(shape, areas)| (section(shape), areas))
-        .collect();
+fn unverified_shape_does_not_get_a_shear_ratio_from_stiffness_areas() {
     let mut name_only = section(FLAT_BAR);
     name_only.shape = None;
     name_only.property_basis.as_y = PropertyBasis::Supplied;
     name_only.property_basis.as_z = PropertyBasis::Supplied;
     name_only.as_y = 4000.0;
     name_only.as_z = 6000.0;
-    sections.push((name_only.clone(), [6000.0, 4000.0]));
-    name_only.as_y = -1.0;
-    name_only.as_z = 0.0;
-    sections.push((name_only, [1000.0, 1000.0]));
-    for (section, [ay_mm2, az_mm2]) in sections {
-        for (f, area_mm2) in [
-            (forces(SHEAR_N, 0.0), ay_mm2),
-            (forces(0.0, SHEAR_N), az_mm2),
-        ] {
+    for section in [
+        section(SectionShape::SteelRoundBar { dia: 40.0 }),
+        name_only,
+    ] {
+        for f in [forces(SHEAR_N, 0.0), forces(0.0, SHEAR_N)] {
             for kind in [MemberKind::Girder, MemberKind::Column] {
-                let result = checked(check(&section, &f, kind, 0.0));
-                let expected = SHEAR_N / area_mm2 / FS_MPA;
                 assert!(
-                    (result.ratio() - expected).abs() < 1e-12,
-                    "{:?} {result:?}",
-                    section.shape
+                    matches!(check(&section, &f, kind, 0.0), CheckOutcome::Skipped { reason } if reason.contains("せん断力の断面形状・方向"))
                 );
             }
         }

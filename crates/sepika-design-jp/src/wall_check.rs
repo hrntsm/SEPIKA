@@ -5,12 +5,18 @@ use sepika_core::ids::{ElemId, NodeId, WallPlateId};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum WallCheckKind {
     AllowableShear,
+    AllowableFlexure,
+    UltimateShear,
+    UltimateFlexure,
     ReferenceSkeleton,
 }
 impl WallCheckKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::AllowableShear => "許容せん断",
+            Self::AllowableFlexure => "許容曲げ",
+            Self::UltimateShear => "終局せん断",
+            Self::UltimateFlexure => "終局曲げ",
             Self::ReferenceSkeleton => "せん断参考骨格",
         }
     }

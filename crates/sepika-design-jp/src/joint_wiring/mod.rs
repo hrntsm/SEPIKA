@@ -1,12 +1,12 @@
-//! 節点単位の断面検定（柱梁接合部・パネルゾーン・冷間成形耐力比・耐震壁）の
+//! 節点単位の断面検定（柱梁接合部・パネルゾーン・耐震壁）の
 //! 入力組み立て（令82条・各構造規準の断面検定）。
 //!
 //! `Model` と部材内力から入力を組み立てて一括実行する。
 
-mod cold_formed;
 mod common;
 mod rc_joint;
 mod src_panel;
+mod src_wall;
 mod steel_panel;
 mod wall;
 
@@ -23,49 +23,38 @@ use crate::{CheckOutcome, LoadTerm, MemberKind};
 use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::{ElementKind, FrameSectionUse, Model};
+use sepika_solver::statics::linear::SteelPanelColumnFaceForce;
 use std::collections::HashMap;
 
 /// モデルと部材内力から節点単位の検定を一括実行する。
 ///
 /// 戻り値: `(節点, 種別ラベル, 検定結果/検定不能)` のリスト。
 /// SRC接合部では、解析から求めた実柱面の評価点を部材内力に含める。
-///
-/// 冷間成形角形鋼管の存在軸力に `NL + 1.5・NE` の割増を効かせたい場合は
-/// [`collect_joint_checks_with_long`] を使う（本関数は割増なし＝当該ケースの
-/// 軸力そのまま）。
 pub fn collect_joint_checks(
     model: &Model,
     member_forces: &[(ElemId, ForcesAt<'_>)],
     term: LoadTerm,
 ) -> Vec<(NodeId, String, CheckOutcome)> {
-    collect_joint_checks_with_long(model, member_forces, None, &[], term)
+    collect_joint_checks_with_panel_moments(model, member_forces, &[], term)
 }
 
-/// [`collect_joint_checks`] の長期内力付き版。
-///
-/// `long_member_forces` に長期（G+P）組合せの部材内力を渡すと、冷間成形
-/// 角形鋼管の柱梁耐力比チェックの存在軸力を `N = NL + 1.5・NE`
-/// （NE = 当該ケースの軸力 − NL）で算定する。None の場合は当該ケースの
-/// 軸力をそのまま用いる。地震時組合せの結果を渡すことを想定する。
-///
 /// `panel_moments` には、仕口パネルをモデル化した接合部で解析が出力した
 /// せん断モーメント `{MSX, MSY}` [N·mm] を節点ごとに渡す。該当する節点の
 /// S/CFT 造仕口パネル検定は、柱2主軸へ仕事共役な逆変換で復元する。
 /// 応答がない節点では鉛直柱の材端力を符号付きで集約する。非鉛直柱の材端力組立は未算定。
 /// 標準形式と方向別のフランジ高さ・dbが不整合な軸は理由付き未算定。
-pub fn collect_joint_checks_with_long(
+pub fn collect_joint_checks_with_panel_moments(
     model: &Model,
     member_forces: &[(ElemId, ForcesAt<'_>)],
-    long_member_forces: Option<&[(ElemId, ForcesAt<'_>)]>,
     panel_moments: &[(NodeId, [f64; 2])],
     term: LoadTerm,
 ) -> Vec<(NodeId, String, CheckOutcome)> {
     collect_joint_checks_impl(
         model,
         member_forces,
-        long_member_forces,
         panel_moments,
         GirderFaceForces::EvaluationPoints(member_forces),
+        None,
         term,
         true,
     )
@@ -74,9 +63,9 @@ pub fn collect_joint_checks_with_long(
 pub(crate) fn collect_joint_checks_impl(
     model: &Model,
     member_forces: &[(ElemId, ForcesAt<'_>)],
-    long_member_forces: Option<&[(ElemId, ForcesAt<'_>)]>,
     panel_moments: &[(NodeId, [f64; 2])],
     src_face_forces: GirderFaceForces<'_>,
+    steel_panel_face_forces: Option<&[SteelPanelColumnFaceForce]>,
     term: LoadTerm,
     include_walls: bool,
 ) -> Vec<(NodeId, String, CheckOutcome)> {
@@ -160,10 +149,17 @@ pub(crate) fn collect_joint_checks_impl(
             .find(|(n, _)| *n == nid)
             .map(|(_, m)| *m);
 
-        steel_panel::check_s_panel(model, &cols, &beams, nid, panel_moment, &mut out);
+        steel_panel::check_s_panel(
+            model,
+            &cols,
+            &beams,
+            nid,
+            panel_moment,
+            steel_panel_face_forces,
+            &mut out,
+        );
         if !cols.is_empty() && !beams.is_empty() {
             rc_joint::check_rc_joint(&cols, &beams, nid, &mut out);
-            cold_formed::check_cold_formed(&cols, &beams, nid, long_member_forces, &mut out);
         }
         rc_joint::check_rc_joint_ultimate(model, nid, &mut out);
     }
@@ -209,7 +205,6 @@ fn member_infos<'a>(
             shear_mat,
             steel_mat,
             forces,
-            kind: sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category)),
             member_kind,
             length,
         });
@@ -227,16 +222,37 @@ pub fn collect_wall_design_checks(
     case: &str,
     load_terms: Option<&[(sepika_core::ids::LoadCaseId, f64)]>,
 ) -> Vec<crate::wall_check::WallCheck> {
-    let members = member_infos(model, member_forces);
-    wall::collect_wall_design_checks(
+    collect_wall_design_checks_for_case(
         model,
         member_forces,
-        &members,
-        term,
-        index,
-        case,
-        load_terms,
+        WallDesignInputs {
+            term,
+            index,
+            case,
+            load_terms,
+            gravity_forces: None,
+            src_holding_reviewed: false,
+        },
     )
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct WallDesignInputs<'a> {
+    pub term: LoadTerm,
+    pub index: Option<&'a sepika_core::wall_expand::WallExpansionIndex>,
+    pub case: &'a str,
+    pub load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
+    pub gravity_forces: Option<&'a [(ElemId, ForcesAt<'a>)]>,
+    pub src_holding_reviewed: bool,
+}
+
+pub(crate) fn collect_wall_design_checks_for_case(
+    model: &Model,
+    member_forces: &[(ElemId, ForcesAt<'_>)],
+    inputs: WallDesignInputs<'_>,
+) -> Vec<crate::wall_check::WallCheck> {
+    let members = member_infos(model, member_forces);
+    wall::collect_wall_design_checks(model, member_forces, &members, inputs)
 }
 
 pub(crate) use steel_panel::validate_steel_panel_inputs;

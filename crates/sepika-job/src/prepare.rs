@@ -34,6 +34,7 @@ pub struct PrepareReport {
 pub fn apply_rigid_zones_and_panels(
     model: &mut Model,
 ) -> Result<Vec<sepika_element::springs::panel_gen::GeneratedPanel>, String> {
+    model.validate_wall_primary_materials()?;
     validate_panel_generation_references(model)?;
     let rule = sepika_element::frame::beam::RigidZoneRule {
         consider_walls: model.stress_cfg.rigid_zone_consider_walls,
@@ -82,6 +83,9 @@ pub fn prepare_model(
     design_period: Option<f64>,
     initialize_stories: bool,
 ) -> Result<PrepareReport, JobError> {
+    model
+        .validate_wall_primary_materials()
+        .map_err(JobError::InvalidInput)?;
     validate_panel_generation_references(model).map_err(JobError::InvalidInput)?;
     model
         .validate_member_load_directions()
@@ -243,16 +247,22 @@ fn prepare_work_model(
             .iter()
             .filter(|elem| elem.kind == sepika_core::model::ElementKind::Wall)
             .flat_map(|elem| {
+                use sepika_core::model::AnalysisKind;
                 use sepika_element::factory::StrengthBasis;
                 use sepika_element::wall::wall_element::WallElement;
 
-                let incremental = WallElement::wall_shear_capacity_issue(
+                let incremental = WallElement::nonlinear_wall_capacity_issue(
                     elem,
                     &expanded,
                     StrengthBasis::MaterialStrength,
+                    AnalysisKind::Incremental,
                 );
-                let time_history =
-                    WallElement::wall_shear_capacity_issue(elem, &expanded, StrengthBasis::Nominal);
+                let time_history = WallElement::nonlinear_wall_capacity_issue(
+                    elem,
+                    &expanded,
+                    StrengthBasis::Nominal,
+                    AnalysisKind::TimeHistory,
+                );
                 if incremental == time_history {
                     [
                         incremental.map(|reason| format!("非線形解析不可: {reason}")),
@@ -1140,6 +1150,8 @@ mod tests {
         with_wall.add_enclosed_wall_plate_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(5), NodeId(4)],
             WallPlate {
+                src_wall_detailing_confirmed: false,
+                src_steel_plate: None,
                 dl_support: None,
                 self_weight_shares: Vec::new(),
                 id: WallPlateId(0),

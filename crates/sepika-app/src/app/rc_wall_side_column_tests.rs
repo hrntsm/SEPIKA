@@ -119,7 +119,7 @@ fn rejected_wall_time_history_keeps_adopted_pushover_capacity_and_input_across_s
         .find(|e| e.kind == sepika_core::model::ElementKind::Wall)
         .unwrap();
     assert!(app
-        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
+        .adopted_wall_capacity(wall, ModelingAnalysis::TimeHistory)
         .is_err());
     let key = ResultInputKey::Pushover(SeismicDir::X);
     let mut capacities = vec![];
@@ -134,12 +134,12 @@ fn rejected_wall_time_history_keeps_adopted_pushover_capacity_and_input_across_s
             app.core.scoped.last_error
         );
         capacities.push(
-            app.adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+            app.adopted_wall_capacity(wall, ModelingAnalysis::Incremental)
                 .unwrap(),
         );
         reject_wall_time_history_without_mutating_recorded_runs(&mut app);
         assert!(app
-            .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
+            .adopted_wall_capacity(wall, ModelingAnalysis::TimeHistory)
             .is_err());
         assert!(app.require_result_input(key.clone()).is_ok());
         assert_eq!(ledger(&app), static_ledger);
@@ -165,12 +165,12 @@ fn rejected_wall_time_history_keeps_adopted_pushover_capacity_and_input_across_s
     );
     assert_eq!(
         loaded
-            .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+            .adopted_wall_capacity(wall, ModelingAnalysis::Incremental)
             .unwrap(),
         capacities[1]
     );
     assert!(loaded
-        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::TimeHistory)
+        .adopted_wall_capacity(wall, ModelingAnalysis::TimeHistory)
         .is_err());
     assert!(loaded
         .core
@@ -183,7 +183,7 @@ fn rejected_wall_time_history_keeps_adopted_pushover_capacity_and_input_across_s
     loaded.core.model.materials[2].fy = Some(390.0);
     assert!(loaded.require_result_input(key).is_err());
     assert!(loaded
-        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+        .adopted_wall_capacity(wall, ModelingAnalysis::Incremental)
         .is_err());
     assert_eq!(
         loaded.displayed_pushover().unwrap().wall_capacities[0].1,
@@ -327,7 +327,7 @@ fn incremental_modeling_reads_adopted_run_numbers_and_rejects_missing_invalid_or
         .find(|e| e.kind == sepika_core::model::ElementKind::Wall)
         .unwrap();
     assert!(app
-        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+        .adopted_wall_capacity(wall, ModelingAnalysis::Incremental)
         .is_err());
     app.run_pushover();
     assert!(
@@ -338,7 +338,7 @@ fn incremental_modeling_reads_adopted_run_numbers_and_rejects_missing_invalid_or
     let before = ledger(&app);
     let expected = app.displayed_pushover().unwrap().wall_capacities[0].1;
     assert_eq!(
-        app.adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+        app.adopted_wall_capacity(wall, ModelingAnalysis::Incremental)
             .unwrap(),
         expected
     );
@@ -347,19 +347,19 @@ fn incremental_modeling_reads_adopted_run_numbers_and_rejects_missing_invalid_or
     let po = bundle.pushover_x.as_mut().unwrap();
     po.wall_capacities.clear();
     assert!(app
-        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+        .adopted_wall_capacity(wall, ModelingAnalysis::Incremental)
         .unwrap_err()
         .contains("未解決"));
     let bundle = app.core.scoped.results.as_mut().unwrap();
     let po = bundle.pushover_x.as_mut().unwrap();
     po.wall_capacities.push((wall.id, [f64::NAN, expected[1]]));
     assert!(app
-        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+        .adopted_wall_capacity(wall, ModelingAnalysis::Incremental)
         .unwrap_err()
         .contains("不正"));
     app.core.model.materials[2].fy = Some(345.0);
     assert!(app
-        .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+        .adopted_wall_capacity(wall, ModelingAnalysis::Incremental)
         .is_err());
 }
 
@@ -593,7 +593,7 @@ fn wall_method_modeling_uses_selected_run_and_no_display_recalculation() {
     for method in [ArakawaMean, ArakawaMin] {
         app.set_rc_wall_shear_method(method);
         assert!(app
-            .adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+            .adopted_wall_capacity(wall, ModelingAnalysis::Incremental)
             .is_err());
         app.run_pushover();
         assert!(
@@ -604,7 +604,7 @@ fn wall_method_modeling_uses_selected_run_and_no_display_recalculation() {
         let before = ledger(&app);
         let qu = app.displayed_pushover().unwrap().wall_capacities[0].1;
         assert_eq!(
-            app.adopted_wall_capacity(wall, &expanded, ModelingAnalysis::Incremental)
+            app.adopted_wall_capacity(wall, ModelingAnalysis::Incremental)
                 .unwrap(),
             qu
         );

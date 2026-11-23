@@ -39,6 +39,7 @@ fn src_column() -> Model {
         steel_material: Some(MaterialId(2)),
         ..shape.to_section(section.id, "SRC柱".into())
     };
+    model.steel_design_attrs = vec![cft::direct_lengths(COLUMN, Some(3000.0), Some(3000.0))];
     model.validate().unwrap();
     model
 }
@@ -69,7 +70,14 @@ fn torsion_is_reported_only_at_the_affected_design_positions() {
         let negative_zero = (0.0, [0.0, 0.0, 0.0, -0.0, 0.0, 0.0]);
         let pure_mx_nmm = 100.0e6;
         let pure = (0.5, [0.0, 0.0, 0.0, pure_mx_nmm, 0.0, 0.0]);
-        let mut combined = (1.0, [-100_000.0, 1000.0, 1000.0, -1.0e6, 1.0e6, 1.0e6]);
+        let mut combined = (1.0, [-100_000.0, 1000.0, 1000.0, -1.0e6, 0.0, 1.0e6]);
+        if matches!(
+            model.sections[0].shape,
+            Some(SectionShape::SrcColumnRect { .. })
+        ) {
+            combined.1[1] = 0.0;
+            combined.1[2] = 0.0;
+        }
         let rows = run(&model, vec![negative_zero, pure, combined]);
         assert_eq!(rows.len(), 3, "{rows:?}");
         assert_eq!((rows[0].0, rows[0].1), (COLUMN, 0.0));

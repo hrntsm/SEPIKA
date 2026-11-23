@@ -254,7 +254,9 @@ fn usual_rc_fiber_and_ms_factories_keep_top_bottom_bending_under_end_swap_and_qu
                     let states = member.fiber_section_states().unwrap();
                     assert_eq!(states.len(), 2);
                     let snapshot = member.snapshot_state();
-                    let state = snapshot.downcast_ref::<FiberBeamSnapshot>().unwrap();
+                    let state = crate::frame::shear::axial_bending_snapshot(snapshot.as_ref())
+                        .downcast_ref::<FiberBeamSnapshot>()
+                        .unwrap();
                     let axis = crate::transform::LocalFrame::from_nodes(
                         model.nodes[0].coord,
                         model.nodes[1].coord,

@@ -790,6 +790,7 @@ pub fn try_compute_quantity_takeoff(
     model
         .validate_frame_node_counts()
         .map_err(|e| e.to_string())?;
+    model.validate_wall_primary_materials()?;
     model.validate_wall_attr_refs().map_err(|e| e.to_string())?;
     model
         .validate_rc_section_usage()
@@ -1789,6 +1790,25 @@ fn wall_quantity(ctx: &Ctx, elem: &ElementData) -> Option<MemberQuantity> {
     };
 
     item.wall_plate = model.generated_wall_origins.get(&elem.id).copied();
+    if sepika_core::src_wall_capacity::is_src_wall_candidate(model, elem) {
+        item.structure = StructureKind::Src;
+        if let Some(plate) = item.wall_plate.and_then(|id| model.wall_plate(id)) {
+            if let (Some(steel), Ok(weight)) = (plate.src_steel_plate, model.wall_weight(plate)) {
+                let height_mm = weight.z_range_mm[1] - weight.z_range_mm[0];
+                item.steel = Some(SteelItem {
+                    section_name: format!(
+                        "SRC壁内蔵鋼板 {} t{}",
+                        model.materials[steel.material.index()].name,
+                        steel.thickness_mm
+                    ),
+                    length_m: height_mm / 1_000.0,
+                    weight_t: weight.net_area_mm2
+                        * steel.thickness_mm
+                        * STEEL_UNIT_WEIGHT_T_PER_MM3,
+                });
+            }
+        }
+    }
     let dia_mm = ctx.cfg.assumed_wall_bar_dia;
     let anchorage_factor = ctx.cfg.anchorage_dia_factor;
     for (usage, ratio, span_mm, other_mm) in [

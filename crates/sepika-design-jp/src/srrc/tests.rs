@@ -1,10 +1,9 @@
 use super::*;
 use crate::rc::{concrete_allowable_shear, rebar_allowable_shear};
-use crate::steel::{steel_f_value_prefix, steel_fs, steel_ft};
+use crate::steel::{steel_f_value_prefix, steel_ft};
 use crate::{LoadTerm, SeismicQd};
 use sepika_core::ids::{MaterialId, SectionId};
 use sepika_core::model::MaterialCategory;
-use sepika_core::rc_capacity::{rc_mu_simple, RcCapacityInput};
 use sepika_core::section_shape::{
     BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
 };
@@ -237,141 +236,10 @@ pub(crate) fn ctx_column(term: LoadTerm) -> DesignCtx {
     ctx_materials(DesignCtx {
         term,
         kind: MemberKind::Column,
+        lk_y: Some(3000.0),
+        lk_z: Some(3000.0),
         ..Default::default()
     })
-}
-
-#[test]
-fn test_src_beam_shear_split_handcalc() {
-    let shape = src_beam_rect_shape(
-        400.0,
-        700.0,
-        22.0,
-        vec![6, 2],
-        vec![6, 2],
-        40.0,
-        10.0,
-        100.0,
-        2,
-        500.0,
-        200.0,
-        9.0,
-        14.0,
-    );
-    let rebar = match &shape {
-        SectionShape::SrcBeamRect { rebar, .. } => rebar.clone(),
-        _ => unreachable!(),
-    };
-    let props = beam_axis_props(400.0, 700.0, &rebar, false);
-    let (_sa, sz, _) = steel_h_props(500.0, 200.0, 9.0, 14.0);
-
-    let q = 200_000.0;
-    let expected_s_q = sz / (sz + props.at * props.j) * q;
-
-    let fs = concrete_allowable_shear(24.0, true);
-    let w_ft = rebar_allowable_shear("SD345", true);
-    let f_value = steel_f_value_prefix("SN400B", 14.0).unwrap();
-    let s_fs = steel_fs(f_value, LoadTerm::Long);
-
-    let ctx = ctx_beam(LoadTerm::Long);
-    let seismic = SrcSeismicCtx {
-        ctx: &ctx,
-        ql_signed: 0.0,
-        s_ft_short: 0.0,
-        r_mu: Some(0.0),
-    };
-    let shear = src_shear_check(
-        q,
-        0.0,
-        q,
-        sz,
-        props.at,
-        props.j,
-        props.d,
-        props.b,
-        200.0,
-        props.pw,
-        fs,
-        Some(w_ft),
-        s_fs,
-        9.0 * (500.0 - 2.0 * 14.0),
-        2.0,
-        SrcShearMode::Beam(Some(&seismic)),
-        ctx.term,
-    );
-    assert!(!shear.used_qd);
-    assert!((shear.s_q - expected_s_q).abs() / expected_s_q < 1e-9);
-    assert!((shear.s_q + shear.r_q.unwrap() - q).abs() < 1e-6);
-}
-
-/// SRC の pw 上限は SRC 規準1987 準拠で長短期とも 0.6%
-/// （「pw が 0.6% を超える場合は 0.6% として算定する」）。
-#[test]
-fn test_src_shear_pw_capped_at_0_6_percent_both_terms() {
-    let shape = src_beam_rect_shape(
-        400.0,
-        700.0,
-        22.0,
-        vec![6, 2],
-        vec![6, 2],
-        40.0,
-        13.0,
-        30.0,
-        4,
-        500.0,
-        200.0,
-        9.0,
-        14.0,
-    );
-    let rebar = match &shape {
-        SectionShape::SrcBeamRect { rebar, .. } => rebar.clone(),
-        _ => unreachable!(),
-    };
-    let props = beam_axis_props(400.0, 700.0, &rebar, false);
-    assert!(props.pw > 0.006, "テストの前提として pw > 0.6% が必要");
-
-    let f_value = steel_f_value_prefix("SN400B", 14.0).unwrap();
-    for long_term in [true, false] {
-        let fs = concrete_allowable_shear(24.0, long_term);
-        let w_ft = rebar_allowable_shear("SD345", long_term);
-        let term = if long_term {
-            LoadTerm::Long
-        } else {
-            LoadTerm::Short
-        };
-        let s_fs = steel_fs(f_value, term);
-        let ctx = ctx_beam(term);
-        let seismic = SrcSeismicCtx {
-            ctx: &ctx,
-            ql_signed: 0.0,
-            s_ft_short: 0.0,
-            r_mu: Some(0.0),
-        };
-        let shear = src_shear_check(
-            100_000.0,
-            0.0,
-            100_000.0,
-            0.0, // 鉄骨寄与を 0 として RC 側の pw の効果だけを見る
-            props.at,
-            props.j,
-            props.d,
-            props.b,
-            200.0,
-            props.pw,
-            fs,
-            Some(w_ft),
-            s_fs,
-            0.0,
-            2.0,
-            SrcShearMode::Beam(Some(&seismic)),
-            ctx.term,
-        );
-        assert!(
-            (shear.pw - 0.006).abs() < 1e-12,
-            "long_term={long_term}: pw={} は 0.6% に頭打ちされるはず",
-            shear.pw
-        );
-    }
 }
 
 /// SRC 柱の短期 RC 部許容せん断力 rQAS1 は α を含まない
@@ -390,12 +258,10 @@ fn test_src_column_short_rc_allowable_has_no_alpha() {
     let w_ft = rebar_allowable_shear("SD345", false);
     // m_for_alpha=0 → α は上限側（=2）に張り付く条件。α が式に入っていれば
     // rQA1 が 2 倍近く動くが、柱の短期 rQAS1 は α 非依存であること。
-    let shear = src_shear_check(
+    let shear = src_column_shear_check(
         100_000.0,
         0.0,
         100_000.0,
-        0.0, // 鉄骨寄与 0 で RC 側のみを見る
-        props.at,
         props.j,
         props.d,
         props.b,
@@ -406,12 +272,14 @@ fn test_src_column_short_rc_allowable_has_no_alpha() {
         0.0,
         0.0,
         2.0,
-        SrcShearMode::Column {
-            beta: 0.0,
-            seismic_demand_n: None,
-        },
+        0.0,
+        Some(SrcShortShearDemand {
+            steel_n: 0.0,
+            rc_n: Some(100_000.0),
+        }),
         LoadTerm::Short,
-    );
+    )
+    .unwrap();
     let pw = props.pw.min(0.006);
     let expected_rqa1 = props.b * props.j * (fs + 0.5 * pw * w_ft);
     let expected_rqa2 = props.b * props.j * (2.0 * (390.0 / props.b) * fs + pw * w_ft);
@@ -425,7 +293,7 @@ fn test_src_column_short_rc_allowable_has_no_alpha() {
 }
 
 /// SRC 柱の長期は併用式 QA = (1+β)・b・rj・a′・fs を全せん断力と比較する
-/// （SRC規準 P.96-97。a′ = rα（b′/b ≥ rα/3 のとき）または 3b′/b）。
+/// （SRC規準18条。a′ = rα（b′/b ≥ rα/3 のとき）または 3b′/b）。
 #[test]
 fn test_src_column_long_combined_formula() {
     let shape = src_rect_shape(
@@ -441,12 +309,10 @@ fn test_src_column_long_combined_formula() {
     let q = 150_000.0;
     // m=0 → α=2（上限）。b′/b=0.5 < α/3=2/3 なので a′=3b′/b=1.5 が採用される。
     let b_prime = 0.5 * props.b;
-    let shear = src_shear_check(
+    let shear = src_column_shear_check(
         q,
         0.0,
         q,
-        1.0e6,
-        props.at,
         props.j,
         props.d,
         props.b,
@@ -457,12 +323,11 @@ fn test_src_column_long_combined_formula() {
         100.0,
         1000.0,
         2.0,
-        SrcShearMode::Column {
-            beta,
-            seismic_demand_n: None,
-        },
+        beta,
+        None,
         LoadTerm::Long,
-    );
+    )
+    .unwrap();
     let a_prime = 1.5;
     let qa = (1.0 + beta) * props.b * props.j * a_prime * fs;
     assert!(
@@ -472,7 +337,32 @@ fn test_src_column_long_combined_formula() {
         qa
     );
     assert!((shear.ratio - q / qa).abs() < 1e-9, "ratio={}", shear.ratio);
-    assert!(!shear.used_qd);
+}
+
+#[test]
+fn src_column_long_strong_shear_uses_the_web_clear_depth_and_material_young_ratio() {
+    let section = make_section(src_column_shape());
+    let material = Material {
+        young: 20_500.0,
+        ..make_material(24.0, "Fc24")
+    };
+    let context = ctx_column(LoadTerm::Long);
+    let forces = MemberForcesAt {
+        qy: 100_000.0,
+        ..zero_forces()
+    };
+
+    let CheckOutcome::Checked(result) = SrcDesign.check(&forces, &section, &material, &context)
+    else {
+        panic!("SRC柱の長期せん断検定を算定できません");
+    };
+    let shear = result
+        .components
+        .iter()
+        .find(|component| component.kind == crate::CheckKind::Shear)
+        .unwrap();
+    // ウェブ内法272 mm、Es/Ec=10の式(18.14)による強軸許容せん断力は284536.845 N。
+    assert!((shear.ratio - 100_000.0 / 284_536.845).abs() < 1e-12);
 }
 
 #[test]
@@ -487,6 +377,88 @@ fn test_src_fc_missing_skip() {
         CheckOutcome::Skipped { reason } => assert!(reason.contains("Fc")),
         CheckOutcome::Checked(_) => panic!("Fc 未設定は検定不能(Skipped)のはず"),
     }
+}
+
+#[test]
+fn src_column_uses_the_short_column_formula_only_with_verified_lengths() {
+    let section = make_section(src_column_shape());
+    let material = make_material(24.0, "Fc24");
+    let forces = MemberForcesAt {
+        n: -100_000.0,
+        mz: 1.0e7,
+        ..zero_forces()
+    };
+    let mut context = ctx_column(LoadTerm::Long);
+    context.length = 3000.0;
+    context.lk_z = Some(6000.0);
+    for (length_mm, applies) in [
+        (None, true),
+        (Some(0.0), false),
+        (Some(6000.0), true),
+        (Some(6000.01), false),
+    ] {
+        context.lk_y = length_mm;
+        let outcome = SrcDesign.check(&forces, &section, &material, &context);
+        if applies {
+            assert!(outcome
+                .unwrap_checked()
+                .components
+                .iter()
+                .any(|c| c.kind == crate::CheckKind::AxialBending));
+        } else {
+            assert!(matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("12倍")));
+        }
+    }
+}
+
+#[test]
+fn src_strength_checks_do_not_extrapolate_beyond_the_concrete_strength_table() {
+    let section = make_section(src_column_shape());
+    let outcome = SrcDesign.check(
+        &zero_forces(),
+        &section,
+        &make_material(60.001, "Fc60超"),
+        &ctx_column(LoadTerm::Long),
+    );
+    assert!(matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("60 N/mm²")));
+}
+
+#[test]
+fn src_main_rebar_does_not_use_unknown_or_non_table_strengths() {
+    let section = make_section(src_column_shape());
+    let material = make_material(24.0, "Fc24");
+    let mut context = ctx_column(LoadTerm::Long);
+    for grade in ["USD685", "未登録材種", "SR295"] {
+        context.rebar_material = Some(make_rebar_material(grade, 685.0));
+        let outcome = SrcDesign.check(&zero_forces(), &section, &material, &context);
+        assert!(
+            matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(grade) && reason.contains("異形主筋"))
+        );
+    }
+}
+
+#[test]
+fn src_column_web_above_width_to_thickness_limit_is_outside_check_scope() {
+    let mut shape = src_column_shape();
+    let SectionShape::SrcColumnRect {
+        steel_web_thick, ..
+    } = &mut shape
+    else {
+        unreachable!();
+    };
+    *steel_web_thick = 2.75;
+    let section = make_section(shape);
+    let mut context = ctx_column(LoadTerm::Long);
+    context.steel_material = Some(make_steel_material("SS400"));
+    let outcome = SrcDesign.check(
+        &zero_forces(),
+        &section,
+        &make_material(24.0, "Fc24"),
+        &context,
+    );
+    assert!(
+        matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("解説表7.1") && reason.contains("幅厚比"))
+    );
 }
 
 #[test]
@@ -523,44 +495,37 @@ fn test_src_shape_mismatch_skip() {
     }
 }
 
-/// せん断補強筋に未対応グレード（KH785）を割り当てた SRC 部材は、普通強度として
-/// 検定せずに理由付きで検定不能とする。
 #[test]
-fn test_src_unsupported_shear_rebar_grade_skip() {
+fn src_long_column_checks_do_not_use_unsupported_hoop_strength() {
     let sec = make_section(src_column_shape());
     let mat = make_material(24.0, "SD345");
     let ctx = DesignCtx {
         shear_rebar_material: Some(make_rebar_material("KH785", 785.0)),
         ..ctx_column(LoadTerm::Long)
     };
-    let design = SrcDesign;
-    let outcome = design.check(&zero_forces(), &sec, &mat, &ctx);
-    match outcome {
-        CheckOutcome::Skipped { reason } => {
-            assert!(reason.contains("KH785"), "{reason}");
-            assert!(
-                reason.contains("SR235・SR295・SD295・SD345・SD390・SD490"),
-                "{reason}"
-            );
-        }
-        CheckOutcome::Checked(_) => panic!("未対応グレードは検定不能(Skipped)のはず"),
-    }
+    assert!(SrcDesign
+        .check(&zero_forces(), &sec, &mat, &ctx)
+        .unwrap_checked()
+        .ok());
 }
 
-/// 対応グレード（SR235）でもせん断補強筋の fy が未設定なら検定不能とする。
-/// fy を設定すれば検定する。
 #[test]
-fn test_src_supported_shear_rebar_fy_missing_skip() {
+fn src_short_column_shear_checks_require_hoop_strength() {
     let sec = make_section(src_column_shape());
     let mat = make_material(24.0, "SD345");
     let mut shear_mat = make_rebar_material("SR235", 235.0);
     shear_mat.fy = None;
     let ctx = DesignCtx {
         shear_rebar_material: Some(shear_mat),
-        ..ctx_column(LoadTerm::Long)
+        ..ctx_column(LoadTerm::Short)
+    };
+    let forces = MemberForcesAt {
+        mz: 250.0e6,
+        qy: 500.0e3,
+        ..zero_forces()
     };
     let design = SrcDesign;
-    match design.check(&zero_forces(), &sec, &mat, &ctx) {
+    match design.check(&forces, &sec, &mat, &ctx) {
         CheckOutcome::Skipped { reason } => {
             assert!(
                 reason.contains("SR235") && reason.contains("fy"),
@@ -572,212 +537,12 @@ fn test_src_supported_shear_rebar_fy_missing_skip() {
 
     let ctx = DesignCtx {
         shear_rebar_material: Some(make_rebar_material("SR235", 235.0)),
-        ..ctx_column(LoadTerm::Long)
+        ..ctx_column(LoadTerm::Short)
     };
-    match design.check(&zero_forces(), &sec, &mat, &ctx) {
+    match design.check(&forces, &sec, &mat, &ctx) {
         CheckOutcome::Checked(_) => {}
         CheckOutcome::Skipped { reason } => panic!("fy 設定時は検定するはず: {reason}"),
     }
-}
-
-/// rQD2 = max(0, n・(|Q|−sQD)) が支配するケース（rMu=0 で rQD1 を無効化し
-/// QdMethod::Qd2 で明示的に検証する）。
-#[test]
-fn test_src_beam_seismic_qd2_handcalc() {
-    use crate::QdMethod;
-    let shape = src_beam_rect_shape(
-        400.0,
-        700.0,
-        22.0,
-        vec![6, 2],
-        vec![6, 2],
-        40.0,
-        10.0,
-        100.0,
-        2,
-        500.0,
-        200.0,
-        9.0,
-        14.0,
-    );
-    let rebar = match &shape {
-        SectionShape::SrcBeamRect { rebar, .. } => rebar.clone(),
-        _ => unreachable!(),
-    };
-    let props = beam_axis_props(400.0, 700.0, &rebar, false);
-    let (_sa, sz, _) = steel_h_props(500.0, 200.0, 9.0, 14.0);
-    let f_value = steel_f_value_prefix("SN400B", 14.0).unwrap();
-    let s_ft_short = steel_ft(f_value, LoadTerm::Short);
-    let s_fs = steel_fs(f_value, LoadTerm::Short);
-    let fs = concrete_allowable_shear(24.0, false);
-    let w_ft = rebar_allowable_shear("SD345", false);
-
-    let ql = 50_000.0;
-    let q = 200_000.0;
-    let n_factor = 1.5;
-    let clear_length = 4000.0;
-
-    let ctx = DesignCtx {
-        seismic_qd: Some(SeismicQd {
-            long_at: vec![(0.0, [0.0, ql, 0.0, 0.0, 0.0, 0.0])],
-            n_factor,
-            n_mechanism: 1.0,
-            q_simple: None,
-            clear_length,
-            method: QdMethod::Qd2,
-        }),
-        ..Default::default()
-    };
-    let seismic = SrcSeismicCtx {
-        ctx: &ctx,
-        ql_signed: ql,
-        s_ft_short,
-        r_mu: Some(0.0),
-    };
-
-    let shear = src_shear_check(
-        q,
-        0.0,
-        q,
-        sz,
-        props.at,
-        props.j,
-        props.d,
-        props.b,
-        200.0,
-        props.pw,
-        fs,
-        Some(w_ft),
-        s_fs,
-        9.0 * (500.0 - 2.0 * 14.0),
-        2.0,
-        SrcShearMode::Beam(Some(&seismic)),
-        ctx.term,
-    );
-
-    let denom = sz + props.at * props.j;
-    let share = sz / denom;
-    let s_ql = share * ql;
-    let sum_s_m = 2.0 * sz * s_ft_short;
-    let s_qd_expected = s_ql + sum_s_m / clear_length;
-    let r_qd2_expected = (n_factor * (q - s_qd_expected)).max(0.0);
-
-    assert!(shear.used_qd);
-    assert!(
-        (shear.s_q - s_qd_expected).abs() / s_qd_expected < 1e-9,
-        "sQD={}, expected={}",
-        shear.s_q,
-        s_qd_expected
-    );
-    assert!(
-        (shear.r_q.unwrap() - r_qd2_expected).abs() / r_qd2_expected.max(1.0) < 1e-9,
-        "rQD={}, expected(rQD2)={}",
-        shear.r_q.unwrap(),
-        r_qd2_expected
-    );
-}
-
-/// rQD1 = rQL + (rMu1+rMu2)/l′ が支配するケース（QdMethod::Qd1 で
-/// 明示的に検証する）。
-#[test]
-fn test_src_beam_seismic_qd1_handcalc() {
-    use crate::QdMethod;
-    let shape = src_beam_rect_shape(
-        400.0,
-        700.0,
-        22.0,
-        vec![6, 2],
-        vec![6, 2],
-        40.0,
-        10.0,
-        100.0,
-        2,
-        500.0,
-        200.0,
-        9.0,
-        14.0,
-    );
-    let rebar = match &shape {
-        SectionShape::SrcBeamRect { rebar, .. } => rebar.clone(),
-        _ => unreachable!(),
-    };
-    let props = beam_axis_props(400.0, 700.0, &rebar, false);
-    let (_sa, sz, _) = steel_h_props(500.0, 200.0, 9.0, 14.0);
-    let f_value = steel_f_value_prefix("SN400B", 14.0).unwrap();
-    let s_ft_short = steel_ft(f_value, LoadTerm::Short);
-    let s_fs = steel_fs(f_value, LoadTerm::Short);
-    let fs = concrete_allowable_shear(24.0, false);
-    let w_ft = rebar_allowable_shear("SD345", false);
-
-    let ql = 50_000.0;
-    let q = 200_000.0;
-    let n_factor = 1.5;
-    let clear_length = 4000.0;
-    let r_mu = rc_mu_simple(&RcCapacityInput {
-        b: props.b,
-        d: props.d_full,
-        at: props.at,
-        d_eff: props.d,
-        sigma_y: 345.0,
-        fc: 24.0,
-        pw: props.pw,
-        sigma_wy: 0.0,
-        clear_span: 0.0,
-        sigma_0: 0.0,
-    });
-    assert!(r_mu > 0.0, "テストの前提として rMu>0 が必要");
-
-    let ctx = DesignCtx {
-        seismic_qd: Some(SeismicQd {
-            long_at: vec![(0.0, [0.0, ql, 0.0, 0.0, 0.0, 0.0])],
-            n_factor,
-            n_mechanism: 1.0,
-            q_simple: None,
-            clear_length,
-            method: QdMethod::Qd1,
-        }),
-        ..Default::default()
-    };
-    let seismic = SrcSeismicCtx {
-        ctx: &ctx,
-        ql_signed: ql,
-        s_ft_short,
-        r_mu: Some(r_mu),
-    };
-
-    let shear = src_shear_check(
-        q,
-        0.0,
-        q,
-        sz,
-        props.at,
-        props.j,
-        props.d,
-        props.b,
-        200.0,
-        props.pw,
-        fs,
-        Some(w_ft),
-        s_fs,
-        9.0 * (500.0 - 2.0 * 14.0),
-        2.0,
-        SrcShearMode::Beam(Some(&seismic)),
-        ctx.term,
-    );
-
-    let denom = sz + props.at * props.j;
-    let share = sz / denom;
-    let s_ql = share * ql;
-    let r_ql = (ql - s_ql).max(0.0);
-    let r_qd1_expected = r_ql + 2.0 * r_mu / clear_length;
-
-    assert!(shear.used_qd);
-    assert!(
-        (shear.r_q.unwrap() - r_qd1_expected).abs() / r_qd1_expected < 1e-9,
-        "rQD={}, expected(rQD1)={}",
-        shear.r_q.unwrap(),
-        r_qd1_expected
-    );
 }
 
 /// 実配筋 SRC 梁で許容応力度検定が動き、鉄骨 sMo に RC 部分 rMA が累加される
@@ -866,56 +631,6 @@ fn test_src_column_rect_check_accumulates_steel_and_rc() {
     assert!(
         ma_z >= s_mo * 0.99,
         "RC 部分の累加で MA_z >= sMo のはず: ma_z={ma_z}, sMo={s_mo}"
-    );
-}
-
-/// 実配筋 SRC 梁で地震時短期の構造規定方式（終局曲げ rMu を含む）が動き、
-/// 設計用せん断力が弾性分担ではなく構造規定方式で算定される。
-#[test]
-fn test_src_beam_rect_seismic_qd_uses_ultimate_moment() {
-    use crate::QdMethod;
-    let shape = src_beam_rect_shape(
-        400.0,
-        700.0,
-        22.0,
-        vec![3],
-        vec![3],
-        40.0,
-        10.0,
-        100.0,
-        2,
-        500.0,
-        200.0,
-        9.0,
-        14.0,
-    );
-    let sec = make_section(shape);
-    let mat = make_material(24.0, "SD345");
-    let ctx = DesignCtx {
-        seismic_qd: Some(SeismicQd {
-            long_at: vec![(0.0, [0.0, 50_000.0, 0.0, 0.0, 0.0, 0.0])],
-            n_factor: 1.5,
-            n_mechanism: 1.0,
-            q_simple: None,
-            clear_length: 4000.0,
-            method: QdMethod::Qd1,
-        }),
-        ..ctx_beam(LoadTerm::Short)
-    };
-    let forces = MemberForcesAt {
-        qy: 200_000.0,
-        ..zero_forces()
-    };
-    let r = SrcDesign.check(&forces, &sec, &mat, &ctx).unwrap_checked();
-    let shear = r
-        .components
-        .iter()
-        .find(|c| c.kind == crate::CheckKind::Shear)
-        .expect("せん断成分があるはず");
-    assert!(
-        shear.detail.contains("構造規定方式"),
-        "終局 rMu を含む構造規定方式が使われるはず: {}",
-        shear.detail
     );
 }
 
@@ -1051,333 +766,44 @@ fn gravity_contract_beam_section() -> Section {
     ))
 }
 
-fn gravity_contract_qd(method: crate::QdMethod, ql_n: f64) -> SeismicQd {
-    SeismicQd {
-        long_at: vec![(0.0, [0.0, ql_n, 0.0, 0.0, 0.0, 0.0])],
-        n_factor: 1.5,
-        n_mechanism: 1.0,
-        q_simple: None,
-        clear_length: 6000.0,
-        method,
-    }
-}
-
 #[test]
-fn src_beam_qd_uses_ql_independently_of_q0_for_every_method() {
+fn src_beam_short_bending_failure_is_independent_of_the_seismic_qd_context() {
     let section = gravity_contract_beam_section();
     let material = make_material(24.0, "Fc24");
     let forces = MemberForcesAt {
-        qy: 110_000.0,
-        mz: 210_000_000.0,
+        mz: 1_000_000_000.0,
         ..zero_forces()
     };
+    let mut context = ctx_beam(LoadTerm::Short);
+    let baseline = SrcDesign
+        .check(&forces, &section, &material, &context)
+        .unwrap_checked();
+    assert_eq!(baseline.components.len(), 1);
+    assert_eq!(baseline.components[0].kind, crate::CheckKind::Bending);
+    assert!(!baseline.ok());
+
     for method in [
         crate::QdMethod::Qd1,
         crate::QdMethod::Qd2,
         crate::QdMethod::Min,
     ] {
-        let mut ctx = ctx_beam(LoadTerm::Short);
-        ctx.seismic_qd = Some(gravity_contract_qd(method, 100_000.0));
-        let baseline = SrcDesign
-            .check(&forces, &section, &material, &ctx)
-            .unwrap_checked();
-        let shear = baseline
-            .components
-            .iter()
-            .find(|c| c.kind == crate::CheckKind::Shear)
-            .unwrap();
-        assert!((shear.ratio - 0.347593221267).abs() < 1e-10);
-        assert!(shear.detail.contains("構造規定方式"));
-        assert!(shear.detail.contains("sQ=200337.9 N"));
-        let expected_rc = if method == crate::QdMethod::Qd1 {
-            "rQ=103435.2 N"
-        } else {
-            "rQ=0.0 N"
+        context.seismic_qd = Some(SeismicQd {
+            long_at: Vec::new(),
+            n_factor: 1.5,
+            n_mechanism: 1.0,
+            q_simple: None,
+            clear_length: 6000.0,
+            method,
+        });
+        let outcomes: Vec<_> = SrcDesign
+            .check_outcomes(&forces, &section, &material, &context, true)
+            .collect();
+        let [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }] = outcomes.as_slice()
+        else {
+            panic!("曲げの不適合と地震時せん断力の診断が必要です: {outcomes:?}");
         };
-        assert!(shear.detail.contains(expected_rc), "{}", shear.detail);
-        for q0 in [
-            None,
-            Some(0.0),
-            Some(75_000.0),
-            Some(150_000.0),
-            Some(f64::NAN),
-        ] {
-            ctx.seismic_qd.as_mut().unwrap().q_simple = q0;
-            let result = SrcDesign
-                .check(&forces, &section, &material, &ctx)
-                .unwrap_checked();
-            assert_eq!(result.components, baseline.components);
-        }
-        ctx.seismic_qd.as_mut().unwrap().long_at[0].1[1] = -100_000.0;
-        assert_eq!(
-            SrcDesign
-                .check(&forces, &section, &material, &ctx)
-                .unwrap_checked()
-                .components,
-            baseline.components
-        );
-        ctx.seismic_qd.as_mut().unwrap().long_at[0].1[1] = 0.0;
-        let zero = SrcDesign
-            .check(&forces, &section, &material, &ctx)
-            .unwrap_checked();
-        let shear = zero
-            .components
-            .iter()
-            .find(|c| c.kind == crate::CheckKind::Shear)
-            .unwrap();
-        assert!(shear.detail.contains("sQ=128351.2 N"));
-        assert!(shear.detail.contains("構造規定方式"));
-        let expected_rc = if method == crate::QdMethod::Qd1 {
-            "rQ=75421.9 N"
-        } else {
-            "rQ=0.0 N"
-        };
-        assert!(shear.detail.contains(expected_rc));
-    }
-}
-
-#[test]
-fn src_beam_qd_requires_finite_ql_at_the_evaluation_position() {
-    let section = gravity_contract_beam_section();
-    let material = make_material(24.0, "Fc24");
-    for method in [
-        crate::QdMethod::Qd1,
-        crate::QdMethod::Qd2,
-        crate::QdMethod::Min,
-    ] {
-        let mut ctx = ctx_beam(LoadTerm::Short);
-        ctx.seismic_qd = Some(gravity_contract_qd(method, 100_000.0));
-        for long_at in [
-            vec![],
-            vec![(0.5, [0.0; 6])],
-            vec![(1.1e-6, [0.0; 6])],
-            vec![(f64::NAN, [0.0; 6])],
-            vec![(0.0, [0.0, f64::NAN, 0.0, 0.0, 0.0, 0.0])],
-            vec![(0.0, [0.0, f64::INFINITY, 0.0, 0.0, 0.0, 0.0])],
-            vec![(0.0, [0.0, f64::NEG_INFINITY, 0.0, 0.0, 0.0, 0.0])],
-        ] {
-            ctx.seismic_qd.as_mut().unwrap().long_at = long_at;
-            assert!(
-                matches!(SrcDesign.check(&zero_forces(), &section, &material, &ctx), CheckOutcome::Skipped { reason } if reason.contains("QL"))
-            );
-        }
-        ctx.seismic_qd.as_mut().unwrap().long_at = vec![(
-            0.5e-6,
-            [f64::NAN, 0.0, f64::NAN, f64::NAN, f64::NAN, f64::NAN],
-        )];
-        assert!(matches!(
-            SrcDesign.check(&zero_forces(), &section, &material, &ctx),
-            CheckOutcome::Checked(_)
-        ));
-        for pos in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let forces = MemberForcesAt {
-                pos,
-                ..zero_forces()
-            };
-            assert!(
-                matches!(SrcDesign.check(&forces, &section, &material, &ctx), CheckOutcome::Skipped { reason } if reason.contains("QL"))
-            );
-        }
-    }
-    for term in [LoadTerm::Long, LoadTerm::Short] {
-        assert!(matches!(
-            SrcDesign.check(&zero_forces(), &section, &material, &ctx_beam(term)),
-            CheckOutcome::Checked(_)
-        ));
-    }
-}
-
-#[test]
-fn src_beam_public_runner_rejects_requested_gravity_gaps_without_reviving_results() {
-    use crate::member_design_check::{run_member_design_checks, MemberDesignCheckOptions};
-    use sepika_core::ids::{ElemId, NodeId};
-    use sepika_core::model::{
-        ElementData, ElementKind, EndCondition, ForceRegime, FrameSectionUse, LocalAxis, Model,
-        Node,
-    };
-    use sepika_element::frame::beam::MemberForces;
-    use std::collections::HashMap;
-
-    let mut section = gravity_contract_beam_section();
-    section.material = Some(MaterialId(0));
-    section.rebar_material = Some(MaterialId(1));
-    section.shear_rebar_material = Some(MaterialId(1));
-    section.steel_material = Some(MaterialId(2));
-    section.frame_use = Some(FrameSectionUse::Girder);
-    let model = Model {
-        nodes: [0.0, 6000.0]
-            .into_iter()
-            .enumerate()
-            .map(|(i, x)| Node {
-                id: NodeId(i as u32),
-                coord: [x, 0.0, 0.0],
-                restraint: Default::default(),
-                mass: None,
-                story: None,
-                support_spring: None,
-            })
-            .collect(),
-        sections: vec![section],
-        materials: vec![
-            make_material(24.0, "Fc24"),
-            make_rebar_material("SD345", 345.0),
-            make_steel_material("SN400B"),
-        ],
-        elements: vec![ElementData {
-            id: ElemId(0),
-            kind: ElementKind::Beam,
-            nodes: [NodeId(0), NodeId(1)].into_iter().collect(),
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [0.0, 0.0, 1.0],
-            },
-            end_cond: [EndCondition::Fixed; 2],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
-            plastic_zone: None,
-            spring: None,
-        }],
-        ..Default::default()
-    };
-    let positions = [0.0, 0.05, 0.5, 5600.0 / 6000.0, 1.0];
-    let short = vec![(
-        ElemId(0),
-        MemberForces {
-            at: positions
-                .into_iter()
-                .map(|p| (p, [0.0, 110_000.0, 0.0, 0.0, 0.0, 210_000_000.0]))
-                .collect(),
-        },
-    )];
-    let complete = vec![(
-        ElemId(0),
-        MemberForces {
-            at: positions
-                .into_iter()
-                .map(|p| (p, [0.0, 100_000.0, 0.0, 0.0, 0.0, 150_000_000.0]))
-                .collect(),
-        },
-    )];
-    let empty = vec![];
-    let absent = vec![(ElemId(99), complete[0].1.clone())];
-    let q0 = HashMap::from([(ElemId(0), 75_000.0)]);
-    for method in [
-        crate::QdMethod::Qd1,
-        crate::QdMethod::Qd2,
-        crate::QdMethod::Min,
-    ] {
-        for (long, checked) in [
-            (&complete, true),
-            (&empty, false),
-            (&complete, true),
-            (&absent, false),
-        ] {
-            let report = run_member_design_checks(
-                &model,
-                &short,
-                &[],
-                &MemberDesignCheckOptions {
-                    term: LoadTerm::Short,
-                    qd_method: method,
-                    long_member_forces: Some(long),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-            assert_eq!(report.member_checks.len(), 3);
-            for (_, _, outcome) in &report.member_checks {
-                if checked {
-                    assert!(matches!(outcome, CheckOutcome::Checked(_)), "{outcome:?}");
-                } else {
-                    assert!(
-                        matches!(outcome,CheckOutcome::Skipped { reason } if reason.contains("重力参照"))
-                    );
-                }
-            }
-        }
-        let without_q0 = run_member_design_checks(
-            &model,
-            &short,
-            &[],
-            &MemberDesignCheckOptions {
-                term: LoadTerm::Short,
-                qd_method: method,
-                long_member_forces: Some(&complete),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        let with_q0 = run_member_design_checks(
-            &model,
-            &short,
-            &[],
-            &MemberDesignCheckOptions {
-                term: LoadTerm::Short,
-                qd_method: method,
-                long_member_forces: Some(&complete),
-                q_simple_by_elem: Some(&q0),
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        for (without, with) in without_q0.member_checks.iter().zip(&with_q0.member_checks) {
-            let (CheckOutcome::Checked(a), CheckOutcome::Checked(b)) = (&without.2, &with.2) else {
-                panic!("正常参照は検定可能");
-            };
-            assert_eq!(a.components, b.components);
-        }
-        let mut faced = model.clone();
-        faced.elements[0].rigid_zone.face_i = Some(300.0);
-        faced.elements[0].rigid_zone.face_j = Some(400.0);
-        let mut partial = complete.clone();
-        partial[0].1.at.retain(|(p, _)| *p != 0.05);
-        for (long, missing_face) in [
-            (&complete, false),
-            (&partial, true),
-            (&complete, false),
-            (&partial, true),
-        ] {
-            let report = run_member_design_checks(
-                &faced,
-                &short,
-                &[],
-                &MemberDesignCheckOptions {
-                    term: LoadTerm::Short,
-                    qd_method: method,
-                    long_member_forces: Some(long),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-            assert_eq!(
-                report
-                    .member_checks
-                    .iter()
-                    .map(|(_, p, _)| *p)
-                    .collect::<Vec<_>>(),
-                vec![0.05, 0.5, 5600.0 / 6000.0]
-            );
-            for (_, pos, outcome) in &report.member_checks {
-                if missing_face && *pos == 0.05 {
-                    assert!(
-                        matches!(outcome,CheckOutcome::Skipped { reason } if reason.contains("QL"))
-                    );
-                } else {
-                    let CheckOutcome::Checked(result) = outcome else {
-                        panic!("{outcome:?}");
-                    };
-                    if *pos == 0.05 {
-                        let shear = result
-                            .components
-                            .iter()
-                            .find(|c| c.kind == crate::CheckKind::Shear)
-                            .unwrap();
-                        assert!((shear.ratio - 0.377005608081).abs() < 1e-10);
-                    }
-                }
-            }
-        }
+        assert_eq!(result.components, baseline.components);
+        assert!(reason.contains("付1.4-4"), "{reason}");
     }
 }
 
@@ -1534,22 +960,8 @@ fn src912_known_grade_actual_thickness_boundaries_have_independent_capacities() 
     for (name, web, flange, beam_ma_nmm, column_nt_n) in [
         ("SN400B", 40.0, 12.0, 323022641.93063253, 3281179.9263202487),
         ("SN400B", 8.0, 40.0, 467529635.70841026, 3080646.5929869157),
-        (
-            "SN400B",
-            40.001,
-            12.0,
-            299165706.38503253,
-            3016700.4863202483,
-        ),
-        ("SN400B", 8.0, 40.001, 431378103.0066007, 2833234.966320249),
-        ("SN400B", 100.0, 12.0, 489643129.0417437, 6250246.592986915),
-        ("SN400B", 8.0, 100.0, 715377457.9306325, 6135579.926320249),
         ("SM520B", 40.0, 12.0, 466183303.26396585, 4868379.926320249),
         ("SM520B", 8.0, 40.0, 684481102.3750769, 4565446.592986915),
-        ("SM520B", 40.001, 12.0, 442328139.6308992, 4603930.566320248),
-        ("SM520B", 8.0, 40.001, 648333501.8086914, 4318065.686320248),
-        ("SM520B", 75.0, 12.0, 615453813.486188, 7542913.259653582),
-        ("SM520B", 8.0, 75.0, 954610791.2639657, 7319579.926320249),
         ("SM520B", 75.001, 12.0, 598360479.0826325, 7322994.72632025),
         ("SM520B", 8.0, 75.001, 927395068.9897438, 7106329.792986916),
         ("SM520B", 100.0, 12.0, 718328924.5972992, 9359579.926320247),
@@ -1579,6 +991,28 @@ fn src912_known_grade_actual_thickness_boundaries_have_independent_capacities() 
             assert!(!result.ok());
         }
     }
+    for (name, thickness) in [
+        ("SN400B", 40.001),
+        ("SN400B", 100.0),
+        ("SM520B", 40.001),
+        ("SM520B", 75.0),
+    ] {
+        for column in [false, true] {
+            let mut ctx = if column {
+                ctx_column(LoadTerm::Long)
+            } else {
+                ctx_beam(LoadTerm::Long)
+            };
+            ctx.steel_material = Some(make_steel_material(name));
+            for (web, flange) in [(thickness, 12.0), (8.0, thickness)] {
+                let sec = strength912_section(column, web, flange);
+                assert!(
+                    matches!(SrcDesign.check(&zero_forces(), &sec, &concrete, &ctx),
+                        CheckOutcome::Skipped { reason } if reason.contains("幅厚比の適用条件"))
+                );
+            }
+        }
+    }
     for name in ["SN400B", "SM520B"] {
         for column in [false, true] {
             let mut ctx = if column {
@@ -1602,49 +1036,7 @@ fn src912_known_grade_actual_thickness_boundaries_have_independent_capacities() 
 }
 
 #[test]
-fn concrete_shear_922_src_beam_uses_reduced_long_and_short_allowables() {
-    let section = make_section(src_beam_rect_shape(
-        400.0,
-        700.0,
-        20.0,
-        vec![4],
-        vec![4],
-        40.0,
-        10.0,
-        100.0,
-        0,
-        500.0,
-        200.0,
-        50.0,
-        14.0,
-    ));
-    let mat = make_material(24.0, "Fc24");
-    let forces = MemberForcesAt {
-        qy: 882583.6882258701,
-        ..zero_forces()
-    };
-    for (term, expected_ratio, expected_ok) in [
-        (LoadTerm::Long, 1.005, false),
-        (LoadTerm::Short, 0.67, true),
-    ] {
-        let result = SrcDesign
-            .check(&forces, &section, &mat, &ctx_beam(term))
-            .unwrap_checked();
-        let shear = result
-            .components
-            .iter()
-            .find(|c| c.kind == crate::CheckKind::Shear)
-            .unwrap();
-        assert!(
-            (shear.ratio - expected_ratio).abs() < 1e-12,
-            "{term:?}: {shear:?}"
-        );
-        assert_eq!(result.ok(), expected_ok);
-    }
-}
-
-#[test]
-fn concrete_shear_922_src_column_uses_reduced_long_and_short_allowables() {
+fn src_column_long_term_result_keeps_concrete_shear_allowable() {
     let section = make_section(src_column_rect_shape(
         500.0,
         500.0,
@@ -1658,30 +1050,28 @@ fn concrete_shear_922_src_column_uses_reduced_long_and_short_allowables() {
         0,
         300.0,
         200.0,
-        50.0,
+        40.0,
         14.0,
     ));
-    let mat = make_material(24.0, "Fc24");
+    let material = Material {
+        young: 205_000.0 / 15.0,
+        ..make_material(24.0, "Fc24")
+    };
     let forces = MemberForcesAt {
         qy: 537471.99,
         ..zero_forces()
     };
-    for (term, expected_ratio, expected_ok) in [
-        (LoadTerm::Long, 1.005, false),
-        (LoadTerm::Short, 0.6827523092941661, true),
-    ] {
-        let result = SrcDesign
-            .check(&forces, &section, &mat, &ctx_column(term))
-            .unwrap_checked();
-        let shear = result
-            .components
-            .iter()
-            .find(|c| c.kind == crate::CheckKind::Shear)
-            .unwrap();
-        assert!(
-            (shear.ratio - expected_ratio).abs() < 1e-12,
-            "{term:?}: {shear:?}"
-        );
-        assert_eq!(result.ok(), expected_ok);
-    }
+    let result = SrcDesign
+        .check(&forces, &section, &material, &ctx_column(LoadTerm::Long))
+        .unwrap_checked();
+    let shear = result
+        .components
+        .iter()
+        .find(|c| c.kind == crate::CheckKind::Shear)
+        .unwrap();
+    assert!(
+        (shear.ratio - 537471.99 / 467389.8).abs() < 1e-12,
+        "{shear:?}"
+    );
+    assert!(!result.ok());
 }

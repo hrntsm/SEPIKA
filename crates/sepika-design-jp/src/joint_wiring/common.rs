@@ -3,7 +3,6 @@
 use crate::MemberKind;
 use sepika_core::ids::NodeId;
 use sepika_core::model::{ElementData, Material, Section};
-use sepika_core::structure_kind::StructureKind;
 
 /// 1 部材分の内力（評価位置と `[N,Qy,Qz,Mx,My,Mz]`）。
 pub type ForcesAt<'a> = &'a [(f64, [f64; 6])];
@@ -20,8 +19,6 @@ pub(super) struct MemberInfo<'a> {
     /// 断面が持つ内蔵鉄骨の材料（SRC のみ。鋼種名・F 値の解決に用いる）。
     pub(super) steel_mat: Option<&'a Material>,
     pub(super) forces: ForcesAt<'a>,
-    /// 部材の構造種別（断面と材料から解決済み。`sepika_core::structure_kind`）。
-    pub(super) kind: StructureKind,
     pub(super) member_kind: MemberKind,
     pub(super) length: f64,
 }

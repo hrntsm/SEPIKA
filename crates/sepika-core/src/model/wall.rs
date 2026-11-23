@@ -250,6 +250,17 @@ pub struct SteelDesignAttr {
 }
 
 impl SteelDesignAttr {
+    /// 継手またはスカラップによる断面欠損が入力されていれば真。
+    pub fn has_section_loss(&self) -> bool {
+        [
+            self.joint_flange_loss,
+            self.joint_web_loss,
+            self.scallop_web_loss,
+        ]
+        .into_iter()
+        .any(|loss| loss != 0.0)
+    }
+
     /// 欠損率が全て 0・横座屈長さ関連の指定が全て `None` か（＝側テーブルから
     /// 削除してよいか）。[`MemberDetailAttr::is_empty`](super::MemberDetailAttr::is_empty)
     /// の流儀に合わせる。
@@ -264,6 +275,19 @@ impl SteelDesignAttr {
             && self.lk_z_direct.is_none()
             && self.c_direct.is_none()
     }
+}
+
+/// 柱の座屈長さ `[mm]` を強軸、弱軸の順で返す。未指定軸には節点間距離の1.2倍を用いる。
+pub fn column_buckling_lengths_mm(
+    node_span_mm: f64,
+    strong_mm: Option<f64>,
+    weak_mm: Option<f64>,
+) -> (f64, f64) {
+    let default_mm = 1.2 * node_span_mm;
+    (
+        strong_mm.unwrap_or(default_mm),
+        weak_mm.unwrap_or(default_mm),
+    )
 }
 
 /// 制振ダンパーの種別（各制振部材の力学モデル）。

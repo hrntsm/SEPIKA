@@ -33,7 +33,11 @@ fn calculated() -> App {
         .post
         .as_ref()
         .unwrap();
-    assert!(post.complete(), "{post:?}");
+    assert!(!post.complete(), "{post:?}");
+    assert!(post.combinations[0]
+        .reasons
+        .iter()
+        .any(|r| r.contains("せん断力の断面形状・方向")));
     app
 }
 
@@ -101,7 +105,7 @@ fn post_inputs_results_roundtrip_and_design_edit_invalidates() {
     loaded.core.scoped.staleness.mark_edited();
     assert!(loaded.current_design_results().is_none());
     loaded.run_design_check();
-    assert!(loaded.current_design_results().unwrap().beam_checks[0]
+    assert!(!loaded.current_design_results().unwrap().beam_checks[0]
         .2
         .post
         .as_ref()
@@ -289,7 +293,7 @@ fn production_post_input_and_design_button_pointer_events() {
         if t.galley.job.text.contains("鉛直端部反力") || t.galley.job.text.contains("同位置合成最大"))));
 
     let model = &mut app.core.model;
-    model.combinations[0].name = "せん断を算定できない組合せ".into();
+    model.combinations[0].name = "等厚角形鋼管の組合せ".into();
     model.combinations[0].terms = vec![(dead, 1.0)];
     model.materials[0].young = 2.05e155;
     model.post_design_inputs[0].lateral_loads[0].load =
@@ -303,8 +307,7 @@ fn production_post_input_and_design_button_pointer_events() {
     app.run_design_check();
     draw(&ctx, &mut app, false, vec![]);
     let out = draw(&ctx, &mut app, false, vec![]);
-    pos(&out, "せん断を算定できない組合せ");
-    pos(&out, "せん断の検定比の計算で非有限値が発生しました");
+    pos(&out, "等厚角形鋼管の組合せ");
     pos(&out, "鉛直端部反力");
     pos(&out, "同位置合成最大");
 

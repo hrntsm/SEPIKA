@@ -399,6 +399,9 @@ fn prepare(model: Model, cfg: AnalysisSettings) -> JobResult<Model> {
             "途中状態の保存・再開は線形時刻歴だけに対応しています。",
         ));
     }
+    model
+        .validate_wall_primary_materials()
+        .map_err(JobError::InvalidInput)?;
     crate::weight_preparation::require_current_generated_mass(&model)?;
     model
         .validate_wall_weight_generation()

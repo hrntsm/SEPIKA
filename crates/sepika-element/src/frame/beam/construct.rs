@@ -34,7 +34,7 @@ impl BeamElement {
 
     /// 採用 G [N/mm²]・可撓部剛性の不正や、床板の協力・合成剛性の未確定は部材ID付きエラー。
     pub fn try_new(data: &sepika_core::model::ElementData, model: &Model) -> Result<Self, String> {
-        let beam = Self::resolve_properties(data, model, true)?;
+        let beam = Self::resolve_properties(data, model)?;
         if matches!(
             data.kind,
             sepika_core::model::ElementKind::Beam
@@ -49,7 +49,6 @@ impl BeamElement {
     pub(crate) fn resolve_properties(
         data: &sepika_core::model::ElementData,
         model: &Model,
-        include_steel_slab: bool,
     ) -> Result<Self, String> {
         if model.primary_frame_axis_ends(data)?.is_some() && model.element_material(data).is_none()
         {
@@ -136,7 +135,7 @@ impl BeamElement {
 
         let lp = ((p1[0] - p0[0]).powi(2) + (p1[1] - p0[1]).powi(2)).sqrt();
         let is_horizontal = lp > 1e-9 && (p1[2] - p0[2]).abs() <= 0.05 * lp;
-        let factors = breakdown_with(model, data, &sec, e, is_horizontal, include_steel_slab)?;
+        let factors = breakdown_with(model, data, &sec, is_horizontal)?;
         let iz = iz * factors.slab;
 
         let wall_girder_factor = factors.wall_girder;

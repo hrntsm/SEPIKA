@@ -1,5 +1,4 @@
-//! 鋼構造の許容応力度と断面検定（許容応力度検定。
-//! 根拠規準は鋼構造設計規準 1973・構造規定）。
+//! 鋼構造の許容応力度と断面検定。
 //! 形状は `Section.shape` 優先、なければ `Section.name` から推定し、合わなければ `Other` とする。
 
 use crate::{
@@ -15,9 +14,6 @@ pub use crate::material_strength::{
 
 mod beam;
 mod brace;
-/// 鉄骨造柱の座屈長さ係数 K（水平移動非拘束）。
-pub mod buckling;
-pub mod cold_formed;
 mod column;
 pub(crate) use column::column_allowables;
 pub mod lateral_bracing;
@@ -29,7 +25,7 @@ mod shear_contract_tests;
 #[cfg(test)]
 mod torsion_contract_tests;
 
-pub use section::{resolve_lb, steel_fb_h, steel_fb_h_asd2019, steel_h_z_with_loss, steel_i_t};
+pub use section::{resolve_lb, steel_fb_h_asd2019, steel_h_z_with_loss};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ShapeCategory {
@@ -117,10 +113,37 @@ pub fn is_symmetric_h_section(sec: &Section) -> bool {
             .is_some_and(SectionShape::is_asymmetric_built_h)
 }
 
-pub(crate) const UNCONFIRMED_COLUMN_END_SUPPORTS: &str =
-    "両実材端での横移動・ねじれの拘束と中間横補剛なしが未確認です。実材端以外の支点や中間横補剛がある区間では横座屈長さは未算定です。始端・中央・終端のlb直接入力と等間隔横補剛本数からは一般H形鋼柱のlbを算定しません";
+/// 形状を持つ対称H形鋼の（全せい、ウェブ内法せい、ウェブ厚）[mm]。
+pub(crate) fn symmetric_h_web(sec: &Section) -> Option<(f64, f64, f64)> {
+    match sec.shape {
+        Some(SectionShape::SteelH {
+            height,
+            flange_thick,
+            web_thick,
+            ..
+        })
+        | Some(SectionShape::SteelBuiltH {
+            height,
+            upper_thick: flange_thick,
+            web_thick,
+            ..
+        }) if is_symmetric_h_section(sec) => Some((height, height - 2.0 * flange_thick, web_thick)),
+        _ => None,
+    }
+}
 
-/// 一般H形鋼柱の確認済みの横座屈長さ [mm]。現行条件と一致する確認がなければ理由を返す。
+fn strong_axis_h_tension(forces: &MemberForcesAt, sec: &Section) -> bool {
+    symmetric_h_web(sec).is_some() && forces.n > 0.0 && forces.my == 0.0
+}
+
+fn strong_axis_tension_bending_ratio(sigma_t: f64, sigma_b: f64, ft: f64, fb: f64) -> f64 {
+    ((sigma_t + sigma_b) / safe_denom(ft)).max((sigma_b - sigma_t).max(0.0) / safe_denom(fb))
+}
+
+pub(crate) const INVALID_NODE_SPAN_FOR_LATERAL_BUCKLING: &str =
+    "横座屈長さの既定値には有限な正の節点間距離が必要です";
+
+/// 一般H形鋼柱の横座屈長さ [mm]。支点確認が未入力の場合は節点間距離を用いる。
 pub fn column_lateral_buckling_length(
     model: &sepika_core::model::Model,
     elem: &sepika_core::model::ElementData,
@@ -134,9 +157,12 @@ pub fn column_lateral_buckling_length(
             "中間横補剛が入力されています。補剛位置と拘束を確認した区間の横座屈長さは未算定です",
         );
     }
-    let confirmed = attr
-        .and_then(|a| a.column_lateral_buckling_end_supports.as_ref())
-        .ok_or(UNCONFIRMED_COLUMN_END_SUPPORTS)?;
+    let Some(confirmed) = attr.and_then(|a| a.column_lateral_buckling_end_supports.as_ref()) else {
+        let span_mm = frame_node_span_mm(model, elem);
+        return (span_mm.is_finite() && span_mm > 0.0)
+            .then_some(span_mm)
+            .ok_or(INVALID_NODE_SPAN_FOR_LATERAL_BUCKLING);
+    };
     let current = model
         .column_end_supports(elem)
         .ok_or("実材軸長を有限な正値で取得できないため、横座屈長さは未算定です")?;
@@ -146,40 +172,174 @@ pub fn column_lateral_buckling_length(
     Ok(current.length_mm())
 }
 
-/// せん断有効断面積 `(Ay, Az)` [mm²]（強軸 Qy・弱軸 Qz。梁・柱で共用の単一定義）。
-/// Box の寸法と外角半径は検定入口で適用可能と確認済みであること。
-fn shear_area_2d(shape: ShapeCategory, sec: &Section, tf: f64, tw: f64) -> (f64, f64) {
-    let h = sec.depth;
-    let b = sec.width;
-    match shape {
-        ShapeCategory::H => {
-            let ay = (tw * (h - 2.0 * tf).max(0.0)).max(0.0);
-            let az = (2.0 * b * tf / 1.5).max(0.0);
-            (ay, az)
-        }
-        ShapeCategory::Box => {
-            let t = tw;
-            let r = match &sec.shape {
-                Some(SectionShape::SteelBox { corner_r, .. }) => {
-                    corner_r.expect("角形鋼管のせん断検定入口で外角半径を確認済み")
-                }
-                _ => 0.0,
+fn shear_component(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    ctx: &DesignCtx,
+    fs_mpa: f64,
+) -> Option<CheckComponent> {
+    let (tau_mpa, basis) = match symmetric_h_web(sec) {
+        Some((height, web_depth, web_thick))
+            if (forces.qy != 0.0 || forces.qz == 0.0) && !has_section_loss(ctx) =>
+        {
+            let web_depth_mm = if ctx.kind == MemberKind::Girder {
+                height
+            } else {
+                web_depth
             };
-            let end = if r == 0.0 { t } else { r };
-            (2.0 * t * (h - 2.0 * end), 2.0 * t * (b - 2.0 * end))
+            let web_area_mm2 = web_depth_mm * web_thick;
+            if !web_area_mm2.is_finite() || web_area_mm2 <= 0.0 || web_depth_mm <= 0.0 {
+                return None;
+            }
+            (forces.qy.abs() / web_area_mm2, "H形鋼のウェブ面内せん断")
         }
-        ShapeCategory::Pipe => {
-            let t = tw;
-            let d = sec.depth;
-            let a = (std::f64::consts::PI * t * (d - t) / 2.0).max(0.0);
-            (a, a)
+        _ if matches!(sec.shape, Some(SectionShape::SteelPipe { .. }))
+            && sec.area.is_finite()
+            && sec.area > 0.0 =>
+        {
+            (
+                forces.qy.hypot(forces.qz) / (sec.area / 2.0),
+                "円形鋼管の最大せん断",
+            )
         }
-        ShapeCategory::Other => {
-            let ay = if sec.as_z > 0.0 { sec.as_z } else { sec.area };
-            let az = if sec.as_y > 0.0 { sec.as_y } else { sec.area };
-            (ay, az)
+        _ => return None,
+    };
+    Some(CheckComponent {
+        kind: CheckKind::Shear,
+        ratio: tau_mpa / fs_mpa,
+        detail: format!(
+            "{basis}: τ={tau_mpa:.4} N/mm², fs={fs_mpa:.4} N/mm², せん断比={:.4}",
+            tau_mpa / fs_mpa
+        ),
+    })
+}
+
+fn independent_h_web_shear_failure(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    mat: &Material,
+    ctx: &DesignCtx,
+) -> Option<CheckComponent> {
+    if !matches!(ctx.kind, MemberKind::Girder | MemberKind::Column)
+        || symmetric_h_web(sec).is_none()
+        || forces.mx != 0.0
+        || ![forces.n, forces.qy, forces.qz]
+            .iter()
+            .all(|v| v.is_finite())
+    {
+        return None;
+    }
+    let f = crate::material_strength::section_steel_f(sec, Some(mat)).ok()?;
+    shear_component(forces, sec, ctx, steel_fs(f, ctx.term))
+        .filter(|component| component.ratio.is_finite() && component.ratio > 1.0)
+}
+
+pub(crate) fn buckling_lengths_with_defaults(
+    kind: MemberKind,
+    node_span_mm: f64,
+    strong_mm: Option<f64>,
+    weak_mm: Option<f64>,
+) -> (f64, f64) {
+    if kind == MemberKind::Column {
+        sepika_core::model::column_buckling_lengths_mm(node_span_mm, strong_mm, weak_mm)
+    } else {
+        (
+            strong_mm.unwrap_or(node_span_mm),
+            weak_mm.unwrap_or(node_span_mm),
+        )
+    }
+}
+
+/// 通常S部材・SRC柱の座屈長さ（強軸、弱軸）[mm]。欠落した軸に節点間距離から得る既定値を用いる。
+pub fn frame_buckling_lengths(
+    model: &sepika_core::model::Model,
+    elem: &sepika_core::model::ElementData,
+    kind: MemberKind,
+    attr: Option<&sepika_core::model::SteelDesignAttr>,
+) -> (f64, f64) {
+    let (strong_mm, weak_mm) = attr
+        .map(|a| (a.lk_y_direct, a.lk_z_direct))
+        .unwrap_or_default();
+    buckling_lengths_with_defaults(kind, frame_node_span_mm(model, elem), strong_mm, weak_mm)
+}
+
+/// 部材両端の節点座標間の距離 [mm]。両端の参照を解決できない場合は0。
+pub fn frame_node_span_mm(
+    model: &sepika_core::model::Model,
+    elem: &sepika_core::model::ElementData,
+) -> f64 {
+    match elem.nodes.as_slice() {
+        [i, j] => model.node(*i).zip(model.node(*j)).map_or(0.0, |(a, b)| {
+            sepika_core::geom::vec3::dist(a.coord, b.coord)
+        }),
+        _ => 0.0,
+    }
+}
+
+fn check_same_point_shear(
+    result: &mut CheckResult,
+    forces: &MemberForcesAt,
+    sec: &Section,
+    ctx: &DesignCtx,
+    f: f64,
+) -> Option<&'static str> {
+    if ctx.kind == MemberKind::Brace || (forces.qy == 0.0 && forces.qz == 0.0) {
+        return None;
+    }
+    if forces.qz != 0.0 && symmetric_h_web(sec).is_some() {
+        return Some("H形鋼に作用する弱軸せん断力Qzの照査条件を確定できません");
+    }
+    let Some(shear) = result
+        .components
+        .iter_mut()
+        .find(|c| c.kind == CheckKind::Shear)
+    else {
+        return Some("作用するせん断力の断面形状・方向に対応する照査条件を確定できません");
+    };
+    if !shear.ratio.is_finite() {
+        return Some("せん断力の照査比を有限値で算定できません");
+    }
+    if forces.n == 0.0 && forces.my == 0.0 && forces.mz == 0.0 {
+        return None;
+    }
+    let stresses = if let Some(SectionShape::SteelPipe { .. }) = sec.shape {
+        (forces.my == 0.0 && forces.mz == 0.0 && !has_section_loss(ctx)).then(|| {
+            (
+                forces.n.abs() / sec.area,
+                forces.qy.hypot(forces.qz) / (sec.area / 2.0),
+            )
+        })
+    } else if let Some((_, web_depth_mm, tw)) = symmetric_h_web(sec) {
+        (!has_section_loss(ctx)
+            && [web_depth_mm, tw, sec.area, sec.iy, sec.iz]
+                .iter()
+                .all(|v| v.is_finite() && *v > 0.0))
+        .then(|| {
+            (
+                forces.n.abs() / sec.area
+                    + forces.mz.abs() / sec.iy * (web_depth_mm / 2.0)
+                    + forces.my.abs() / sec.iz * (tw / 2.0),
+                forces.qy.abs() / (web_depth_mm * tw),
+            )
+        })
+    } else {
+        None
+    };
+    if let Some((sigma, tau)) = stresses.filter(|(sigma, tau)| {
+        sigma.is_finite() && tau.is_finite() && sec.area.is_finite() && sec.area > 0.0
+    }) {
+        let ft = crate::material_strength::steel_ft(f, ctx.term);
+        let fs = crate::material_strength::steel_fs(f, ctx.term);
+        let ratio = (sigma / ft).hypot(tau / fs);
+        if ratio.is_finite() {
+            shear.ratio = shear.ratio.max(ratio);
+            shear.detail.push_str(&format!(
+                "。式(5.24): 同一点 σ={sigma:.4} N/mm², τ={tau:.4} N/mm², 組合せ応力度比={ratio:.4}"
+            ));
+            return None;
         }
     }
+    Some("式(5.24)の同一点の垂直応力度とせん断応力度を確定できません")
 }
 
 /// 分母が極小の場合に安全側デフォルトへ逃がすヘルパー。
@@ -260,6 +420,7 @@ fn check_compression_slenderness(
     sec: &Section,
     ctx: &DesignCtx,
     torsion_reason: Option<&str>,
+    secondary_post: bool,
 ) -> Result<Option<f64>, CheckOutcome> {
     if forces.n.is_finite() && forces.n >= 0.0 {
         return Ok(None);
@@ -269,10 +430,25 @@ fn check_compression_slenderness(
             reason: "圧縮山形鋼は幾何軸と主軸が異なり、主軸に対応する有効座屈長さが未確認のため、有効細長比の法定上限を含む鋼部材検定は未算定です".into(),
         });
     }
-    let lengths_mm = [
-        ctx.lk_y.unwrap_or(ctx.length),
-        ctx.lk_z.unwrap_or(ctx.length),
-    ];
+    let lengths_mm = if secondary_post || ctx.length == 0.0 {
+        [
+            ctx.lk_y.unwrap_or(ctx.length),
+            ctx.lk_z.unwrap_or(ctx.length),
+        ]
+    } else {
+        let (strong_mm, weak_mm) = buckling_lengths_with_defaults(
+            ctx.kind,
+            ctx.node_span_mm.unwrap_or(ctx.length),
+            ctx.lk_y,
+            ctx.lk_z,
+        );
+        if !(strong_mm > 0.0 && weak_mm > 0.0 && strong_mm.is_finite() && weak_mm.is_finite()) {
+            return Err(CheckOutcome::Skipped {
+                reason: "圧縮材の強軸・弱軸の座屈長さには有限な正値が必要です".into(),
+            });
+        }
+        [strong_mm, weak_mm]
+    };
     if !forces.n.is_finite()
         || [sec.area, sec.iy, sec.iz]
             .iter()
@@ -341,18 +517,19 @@ impl DesignCheck for SteelDesign {
         ctx: &DesignCtx,
     ) -> CheckOutcome {
         let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx);
-        let mut outcomes = crate::member_design_check::strength_outcomes(outcome, incomplete);
+        let mut outcomes =
+            crate::member_design_check::strength_outcomes(outcome, incomplete.as_deref());
         let mut first = outcomes.next().expect("強度検定結果は少なくとも1件");
         if let (CheckOutcome::Checked(result), Some(incomplete)) = (&mut first, incomplete) {
             result.basis.push('。');
-            result.basis.push_str(incomplete);
+            result.basis.push_str(&incomplete);
         }
         first
     }
 }
 
 impl SteelDesign {
-    /// 一般H形鋼柱の横座屈長さが未確定のとき、未算定理由と独立した不適合を別の行で返す。
+    /// 条件を確定できない位置では、未評価理由と独立した不適合を別の行で返す。
     pub fn check_outcomes(
         &self,
         forces: &MemberForcesAt,
@@ -361,7 +538,7 @@ impl SteelDesign {
         ctx: &DesignCtx,
     ) -> impl Iterator<Item = CheckOutcome> {
         let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx);
-        crate::member_design_check::strength_outcomes(outcome, incomplete)
+        crate::member_design_check::strength_outcomes(outcome, incomplete.as_deref())
     }
 
     pub(crate) fn check_with_incomplete(
@@ -370,16 +547,10 @@ impl SteelDesign {
         sec: &Section,
         mat: &Material,
         ctx: &DesignCtx,
-    ) -> (CheckOutcome, Option<&'static str>) {
-        let lateral_buckling = column::ColumnLateralBuckling::resolve(ctx, sec, forces);
-        let incomplete = match lateral_buckling {
-            column::ColumnLateralBuckling::Unconfirmed(reason) => Some(reason),
-            _ => None,
-        };
-        (
-            self.check_section(forces, sec, mat, ctx, false, lateral_buckling),
-            incomplete,
-        )
+    ) -> (CheckOutcome, Option<String>) {
+        let mut incomplete = None;
+        let outcome = self.check_section(forces, sec, mat, ctx, false, &mut incomplete);
+        (outcome, incomplete)
     }
 
     /// 上下非対称組立H形鋼柱の圧縮・強軸曲げに対し、上下縁の支配比と併記する未算定理由を返す。
@@ -434,15 +605,10 @@ impl SteelDesign {
         sec: &Section,
         mat: &Material,
         ctx: &DesignCtx,
-    ) -> CheckOutcome {
-        self.check_section(
-            forces,
-            sec,
-            mat,
-            ctx,
-            true,
-            column::ColumnLateralBuckling::OutsideScope,
-        )
+    ) -> (CheckOutcome, Option<String>) {
+        let mut incomplete = None;
+        let outcome = self.check_section(forces, sec, mat, ctx, true, &mut incomplete);
+        (outcome, incomplete)
     }
 
     fn check_section(
@@ -452,8 +618,16 @@ impl SteelDesign {
         mat: &Material,
         ctx: &DesignCtx,
         secondary_post: bool,
-        lateral_buckling: column::ColumnLateralBuckling,
+        incomplete: &mut Option<String>,
     ) -> CheckOutcome {
+        let lateral_buckling = if secondary_post {
+            column::ColumnLateralBuckling::OutsideScope
+        } else {
+            column::ColumnLateralBuckling::resolve(ctx, sec, forces)
+        };
+        if let column::ColumnLateralBuckling::Unconfirmed(reason) = lateral_buckling {
+            *incomplete = Some(reason.to_owned());
+        }
         let torsion_reason = steel_torsion_reason(forces, sec);
         let primary_column_or_girder =
             !secondary_post && matches!(ctx.kind, MemberKind::Column | MemberKind::Girder);
@@ -488,58 +662,91 @@ impl SteelDesign {
             .filter(|_| ctx.kind == MemberKind::Column && forces.n <= 0.0 && forces.mz != 0.0);
         let asymmetric_girder =
             asymmetric_built_h.filter(|_| ctx.kind == MemberKind::Girder && forces.mz != 0.0);
-        let lambda = match check_compression_slenderness(forces, sec, ctx, torsion_reason) {
-            Ok(Some(lambda)) if !secondary_post => lambda,
-            Ok(_) => crate::effective_slenderness(
-                sec.iy,
-                sec.iz,
-                nonzero(sec.area),
-                ctx.length,
-                ctx.lk_y,
-                ctx.lk_z,
-            ),
-            Err(mut outcome) => {
-                if let (Some(torsion_reason), CheckOutcome::Skipped { reason }) =
-                    (torsion_reason, &mut outcome)
-                {
-                    reason.push('。');
-                    reason.push_str(torsion_reason);
-                }
-                for shear_reason in h_combined_reason
-                    .filter(|_| forces.n <= 0.0)
-                    .into_iter()
-                    .chain(built_h_shear_reasons.into_iter().flatten())
-                {
-                    let detail = match &mut outcome {
-                        CheckOutcome::Checked(result) => &mut result.basis,
-                        CheckOutcome::Skipped { reason } => reason,
-                    };
-                    detail.push('。');
-                    detail.push_str(shear_reason);
-                }
-                if let (Some(_), CheckOutcome::Checked(result)) = (asymmetric_shape, &mut outcome) {
-                    for reason in column::asymmetric_built_h_section_reason(forces, sec, ctx)
-                        .into_iter()
-                        .chain(column::asymmetric_built_h_combination_reasons(forces, ctx))
+        let lambda =
+            match check_compression_slenderness(forces, sec, ctx, torsion_reason, secondary_post) {
+                Ok(Some(lambda)) if !secondary_post => lambda,
+                Ok(_) => crate::effective_slenderness(
+                    sec.iy,
+                    sec.iz,
+                    nonzero(sec.area),
+                    ctx.length,
+                    ctx.lk_y,
+                    ctx.lk_z,
+                ),
+                Err(mut outcome) => {
+                    if let (Some(torsion_reason), CheckOutcome::Skipped { reason }) =
+                        (torsion_reason, &mut outcome)
                     {
-                        result.basis.push('。');
-                        result.basis.push_str(reason);
+                        reason.push('。');
+                        reason.push_str(torsion_reason);
                     }
-                }
-                if let (Some(_), None, CheckOutcome::Checked(result)) =
-                    (asymmetric_girder, torsion_reason, &mut outcome)
-                {
-                    for reason in beam::asymmetric_built_h_combination_reasons(forces) {
-                        result.basis.push('。');
-                        result.basis.push_str(reason);
+                    for shear_reason in h_combined_reason
+                        .filter(|_| forces.n <= 0.0)
+                        .into_iter()
+                        .chain(built_h_shear_reasons.into_iter().flatten())
+                    {
+                        match &mut outcome {
+                            CheckOutcome::Checked(_) => {
+                                *incomplete =
+                                    crate::member_design_check::combine_incomplete_reasons(
+                                        incomplete.take(),
+                                        Some(shear_reason),
+                                    );
+                            }
+                            CheckOutcome::Skipped { reason } => {
+                                reason.push('。');
+                                reason.push_str(shear_reason);
+                            }
+                        }
                     }
+                    if let (Some(_), CheckOutcome::Checked(result)) =
+                        (asymmetric_shape, &mut outcome)
+                    {
+                        for reason in column::asymmetric_built_h_section_reason(forces, sec, ctx)
+                            .into_iter()
+                            .chain(column::asymmetric_built_h_combination_reasons(forces, ctx))
+                        {
+                            result.basis.push('。');
+                            result.basis.push_str(reason);
+                        }
+                    }
+                    if let (Some(_), None, CheckOutcome::Checked(result)) =
+                        (asymmetric_girder, torsion_reason, &mut outcome)
+                    {
+                        for reason in beam::asymmetric_built_h_combination_reasons(forces) {
+                            result.basis.push('。');
+                            result.basis.push_str(reason);
+                        }
+                    }
+                    if let Some(component) = independent_h_web_shear_failure(forces, sec, mat, ctx)
+                    {
+                        match &mut outcome {
+                            CheckOutcome::Checked(result) => result.components.push(component),
+                            CheckOutcome::Skipped { reason } => {
+                                *incomplete =
+                                    crate::member_design_check::combine_incomplete_reasons(
+                                        incomplete.take(),
+                                        Some(reason),
+                                    );
+                                outcome = CheckOutcome::Checked(CheckResult {
+                                    basis: "鋼構造許容応力度設計規準 H形鋼のウェブせん断".into(),
+                                    detail: String::new(),
+                                    components: vec![component],
+                                });
+                            }
+                        }
+                    }
+                    return outcome;
                 }
-                return outcome;
-            }
-        };
+            };
         if let Some(reason) = torsion_reason {
             return CheckOutcome::Skipped {
                 reason: reason.into(),
+            };
+        }
+        if matches!(sec.shape, Some(SectionShape::SteelLipChannel { .. })) {
+            return CheckOutcome::Skipped {
+                reason: lip_channel::unsupported_reason(forces, sec, ctx),
             };
         }
         if matches!(ctx.kind, MemberKind::Girder | MemberKind::Column)
@@ -550,7 +757,7 @@ impl SteelDesign {
                 reason: "平鋼のせん断応力度の評価方法と適用する許容値の組合せが未確定のため、鋼部材検定は未算定です".into(),
             };
         }
-        if h_combined_reason.is_some() && forces.n > 0.0 {
+        if h_combined_reason.is_some() && forces.n > 0.0 && symmetric_h_web(sec).is_none() {
             return CheckOutcome::Skipped {
                 reason: built_h_unavailable_reasons(),
             };
@@ -568,71 +775,9 @@ impl SteelDesign {
                     .into(),
             };
         }
-        if matches!(sec.shape, Some(SectionShape::SteelLipChannel { .. })) {
-            return CheckOutcome::Skipped {
-                reason: lip_channel::unsupported_reason(forces, sec, ctx),
-            };
-        }
-        if matches!(ctx.kind, MemberKind::Girder | MemberKind::Column) {
-            if sec.shape.is_none() && shape_of(sec).0 == ShapeCategory::Box {
-                return CheckOutcome::Skipped {
-                    reason: format!(
-                        "鋼せん断検定: 断面 {} の角形鋼管寸法と外角半径が未確定です。断面形状を入力してください",
-                        sec.name
-                    ),
-                };
-            }
-            if let Some(shape @ SectionShape::SteelBox { corner_r, .. }) = sec.shape.as_ref() {
-                if let Err(error) = shape.validate_surface_radius() {
-                    return CheckOutcome::Skipped {
-                        reason: format!(
-                            "鋼せん断検定: 断面 {} の角形鋼管外角半径または適用寸法が不正です。{error}",
-                            sec.name
-                        ),
-                    };
-                }
-                let Some(radius) = corner_r else {
-                    return CheckOutcome::Skipped {
-                        reason: format!(
-                            "鋼せん断検定: 断面 {} の角形鋼管外角半径が未知です。半径を入力してください（0は溶接箱）",
-                            sec.name
-                        ),
-                    };
-                };
-                let (_, _, thick) = shape_of(sec);
-                let end = if *radius == 0.0 { thick } else { *radius };
-                if ![sec.depth, sec.width, thick]
-                    .iter()
-                    .all(|v| v.is_finite() && *v > 0.0)
-                    || (*radius > 0.0 && *radius < thick)
-                    || sec.depth - 2.0 * end <= 0.0
-                    || sec.width - 2.0 * end <= 0.0
-                    || [
-                        2.0 * thick * (sec.depth - 2.0 * end),
-                        2.0 * thick * (sec.width - 2.0 * end),
-                    ]
-                    .iter()
-                    .any(|area_mm2| !area_mm2.is_finite() || *area_mm2 <= 0.0)
-                {
-                    return CheckOutcome::Skipped {
-                        reason: format!(
-                            "鋼せん断検定: 断面 {} の外角半径または寸法が適用範囲外です。溶接箱は外角半径0、角形鋼管は外角半径が板厚以上、両方向の直線長が正で面積が有限正である必要があります",
-                            sec.name
-                        ),
-                    };
-                }
-                let (ay, az) = shear_area_2d(ShapeCategory::Box, sec, thick, thick);
-                if ![forces.qy / ay, forces.qz / az]
-                    .iter()
-                    .all(|stress_mpa| stress_mpa.is_finite())
-                {
-                    return CheckOutcome::Skipped {
-                        reason: format!(
-                            "鋼せん断検定: 断面 {} のせん断応力度が非有限です。せん断力・断面寸法の桁と単位を確認してください",
-                            sec.name
-                        ),
-                    };
-                }
+        if let Some(shape @ SectionShape::SteelBox { .. }) = &sec.shape {
+            if let Err(reason) = shape.validate_surface_radius() {
+                return CheckOutcome::Skipped { reason };
             }
         }
         let f = match crate::material_strength::section_steel_f(sec, Some(mat)) {
@@ -650,6 +795,14 @@ impl SteelDesign {
             }
         };
         let term = ctx.term;
+        if ctx.kind != MemberKind::Brace
+            && strong_axis_h_tension(forces, sec)
+            && has_section_loss(ctx)
+        {
+            return CheckOutcome::Skipped {
+                reason: "断面欠損がある引張材の有効断面積と断面係数を確定できません".into(),
+            };
+        }
 
         if let Some(shape) = asymmetric_girder {
             return beam::check_asymmetric_built_h(
@@ -663,7 +816,7 @@ impl SteelDesign {
             );
         }
         if let Some(shape) = asymmetric_shape {
-            return column::check_asymmetric_built_h(
+            let outcome = column::check_asymmetric_built_h(
                 forces,
                 sec,
                 shape,
@@ -676,16 +829,39 @@ impl SteelDesign {
                     built_h_weak_shear_reason,
                 ],
             );
+            if matches!(outcome, CheckOutcome::Checked(_)) {
+                for reason in h_combined_reason
+                    .into_iter()
+                    .chain(built_h_shear_reasons.into_iter().flatten())
+                {
+                    *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                        incomplete.take(),
+                        Some(reason),
+                    );
+                }
+            }
+            return outcome;
         }
         if built_h_shear_unavailable && h_combined_reason.is_none() {
             let reason = built_h_unavailable_reasons();
             return match independent_axial_failure(forces, sec, ctx, f) {
-                Some(component) => CheckOutcome::Checked(CheckResult {
-                    basis: format!("軸応力度が材料の許容上限を超えるため不適合。{reason}"),
-                    detail: String::new(),
-                    components: vec![component],
-                }),
+                Some(component) => {
+                    *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                        incomplete.take(),
+                        Some(&reason),
+                    );
+                    CheckOutcome::Checked(CheckResult {
+                        basis: "軸応力度が材料の許容上限を超えるため不適合".into(),
+                        detail: String::new(),
+                        components: vec![component],
+                    })
+                }
                 None => CheckOutcome::Skipped { reason },
+            };
+        }
+        if !forces.qy.is_finite() || !forces.qz.is_finite() {
+            return CheckOutcome::Skipped {
+                reason: "せん断力が非有限です".into(),
             };
         }
         let combined_and_shear = built_h_shear_unavailable.then(built_h_unavailable_reasons);
@@ -703,28 +879,45 @@ impl SteelDesign {
                 lateral_buckling.length_mm(ctx.length),
             )
             .map(|allowables| {
-                column::check_column(
-                    forces,
-                    sec,
-                    ctx,
-                    allowables,
-                    lambda,
-                    h_combined_reason,
-                    &lateral_buckling,
-                )
+                column::check_column(forces, sec, ctx, allowables, lambda, &lateral_buckling)
             }),
             MemberKind::Brace => Ok(CheckOutcome::Checked(brace::check_brace(
                 forces, sec, mat, ctx, f, term, lambda,
             ))),
         };
         match cr {
+            Ok(CheckOutcome::Checked(mut result)) => {
+                let shear_reason = check_same_point_shear(&mut result, forces, sec, ctx, f);
+                if let Some(reason) = h_combined_reason.or(shear_reason) {
+                    result
+                        .components
+                        .retain(|component| component.ratio.is_finite());
+                    *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                        incomplete.take(),
+                        Some(reason),
+                    );
+                }
+                CheckOutcome::Checked(result)
+            }
             Ok(outcome) => outcome,
-            Err(reason) => CheckOutcome::Skipped {
-                reason: match h_combined_reason {
+            Err(reason) => {
+                let reason = match h_combined_reason {
                     Some(combined) => format!("鋼横座屈検定: {reason}。{combined}"),
                     None => format!("鋼横座屈検定: {reason}"),
-                },
-            },
+                };
+                let Some(component) = independent_h_web_shear_failure(forces, sec, mat, ctx) else {
+                    return CheckOutcome::Skipped { reason };
+                };
+                *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                    incomplete.take(),
+                    Some(&reason),
+                );
+                CheckOutcome::Checked(CheckResult {
+                    basis: "強軸ウェブせん断が許容値を超えるため不適合".into(),
+                    detail: String::new(),
+                    components: vec![component],
+                })
+            }
         }
     }
 }
@@ -793,344 +986,12 @@ fn h_column_weak_shear_combination_reason(
         && forces.mz != 0.0
         && shape_of(sec).0 == ShapeCategory::H)
     .then_some(if forces.n > 0.0 {
-        "H形鋼柱に弱軸せん断・強軸曲げ・引張軸力が同時に作用しています。弱軸せん断に対するフランジ内の設計用公称応力度の分布を規準から確定できず、同一点の組合せ応力度を求められないため、鋼部材検定は未算定です"
+        "H形鋼柱に弱軸せん断・強軸曲げ・引張軸力が同時に作用しています。弱軸せん断に対するフランジ内の設計用公称応力度の分布を規準から確定できず、同一点の組合せ応力度は未算定です"
     } else {
         "圧縮軸力または軸力なしのH形鋼柱に弱軸せん断と強軸曲げが同時に作用しています。弱軸せん断に対するフランジ内の設計用公称応力度の分布を規準から確定できず、同一点の組合せ応力度は未算定です"
     })
 }
 
-#[cfg(test)]
-mod surface_radius_tests {
-    use super::*;
-    use crate::LoadTerm;
-    use sepika_core::ids::SectionId;
-
-    fn supplied_box_section(radius: Option<f64>, name: &str) -> Section {
-        Section {
-            area: 400.0 * 300.0 - 376.0 * 276.0,
-            iy: (300.0 * 400.0_f64.powi(3) - 276.0 * 376.0_f64.powi(3)) / 12.0,
-            iz: (400.0 * 300.0_f64.powi(3) - 376.0 * 276.0_f64.powi(3)) / 12.0,
-            depth: 400.0,
-            width: 300.0,
-            shape: Some(SectionShape::SteelBox {
-                height: 400.0,
-                width: 300.0,
-                thick: 12.0,
-                horizontal_thick: 12.0,
-                corner_r: radius,
-            }),
-            ..Section::zero(SectionId(0), name.into())
-        }
-    }
-
-    #[test]
-    fn box_shear_requires_known_radius_for_girders_and_columns() {
-        let forces = MemberForcesAt {
-            pos: 0.5,
-            n: 0.0,
-            qy: 150_000.0,
-            qz: 0.0,
-            mx: 0.0,
-            my: 0.0,
-            mz: 0.0,
-        };
-        let material = test_support::mat("SN400");
-        for kind in [MemberKind::Girder, MemberKind::Column] {
-            let ctx = DesignCtx {
-                kind,
-                term: LoadTerm::Long,
-                length: 0.0,
-                ..Default::default()
-            };
-            for (radius, area_mm2) in [
-                (0.0, 9024.0),
-                (12.0, 9024.0),
-                (30.0, 8160.0),
-                (60.0, 6720.0),
-                (149.0, 2448.0),
-            ] {
-                let section = supplied_box_section(Some(radius), "BOX半径検証");
-                let outcome = SteelDesign.check(&forces, &section, &material, &ctx);
-                let expected = forces.qy / area_mm2 / steel_fs(235.0, LoadTerm::Long);
-                assert!((outcome.unwrap_checked().ratio() / expected - 1.0).abs() < 1e-10);
-            }
-            let section = supplied_box_section(None, "BOX未知半径");
-            assert!(
-                matches!(SteelDesign.check(&forces, &section, &material, &ctx),
-                CheckOutcome::Skipped { reason } if reason.contains("外角半径が未知"))
-            );
-        }
-    }
-
-    #[test]
-    fn box_shear_rejects_invalid_radius_for_girders_and_columns() {
-        let forces = MemberForcesAt {
-            pos: 0.5,
-            n: 0.0,
-            qy: 150_000.0,
-            qz: 150_000.0,
-            mx: 0.0,
-            my: 0.0,
-            mz: 0.0,
-        };
-        let material = test_support::mat("SN400");
-        for kind in [MemberKind::Girder, MemberKind::Column] {
-            let ctx = DesignCtx {
-                kind,
-                ..Default::default()
-            };
-            for r in [
-                -1.0,
-                f64::NAN,
-                f64::INFINITY,
-                f64::NEG_INFINITY,
-                0.001,
-                11.999,
-                150.0,
-                150.1,
-                300.0,
-            ] {
-                let section = supplied_box_section(Some(r), "BOX不正半径検証");
-                match SteelDesign.check(&forces, &section, &material, &ctx) {
-                    CheckOutcome::Skipped { reason } => {
-                        assert!(reason.contains("BOX不正半径検証"));
-                        assert!(reason.contains("外角半径"));
-                        assert!(reason.contains("不正") || reason.contains("適用範囲外"));
-                    }
-                    CheckOutcome::Checked(_) => panic!("不正半径で検定済みを返してはならない: {r}"),
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn box_shear_rejects_unknown_geometry_and_invalid_section_dimensions() {
-        let material = test_support::mat("SN400");
-        let forces = MemberForcesAt {
-            pos: 0.5,
-            n: 0.0,
-            qy: 1.0,
-            qz: 0.0,
-            mx: 0.0,
-            my: 0.0,
-            mz: 0.0,
-        };
-        for kind in [MemberKind::Girder, MemberKind::Column] {
-            let ctx = DesignCtx {
-                kind,
-                ..Default::default()
-            };
-            let mut section = supplied_box_section(Some(0.0), "BOX寸法検証");
-            section.shape = None;
-            assert!(
-                matches!(SteelDesign.check(&forces, &section, &material, &ctx),
-                CheckOutcome::Skipped { reason } if reason.contains("未確定"))
-            );
-            for invalid in [0.0, -1.0, 24.0, f64::NAN, f64::INFINITY, f64::MAX] {
-                let mut section = supplied_box_section(Some(0.0), "BOX寸法検証");
-                section.width = invalid;
-                assert!(
-                    matches!(SteelDesign.check(&forces, &section, &material, &ctx),
-                    CheckOutcome::Skipped { reason } if reason.contains("寸法"))
-                );
-            }
-            for invalid in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-                let mut section = supplied_box_section(Some(0.0), "BOX不正板厚");
-                section.shape = Some(SectionShape::SteelBox {
-                    height: 400.0,
-                    width: 300.0,
-                    thick: invalid,
-                    horizontal_thick: invalid,
-                    corner_r: Some(0.0),
-                });
-                assert!(
-                    matches!(SteelDesign.check(&forces, &section, &material, &ctx),
-                    CheckOutcome::Skipped { reason } if reason.contains("寸法"))
-                );
-            }
-            let mut section = supplied_box_section(Some(0.0), "BOX面積下限");
-            section.depth = 4e-199;
-            section.width = 3e-199;
-            section.shape = Some(SectionShape::SteelBox {
-                height: section.depth,
-                width: section.width,
-                thick: 1e-200,
-                horizontal_thick: 1e-200,
-                corner_r: Some(0.0),
-            });
-            assert!(
-                matches!(SteelDesign.check(&forces, &section, &material, &ctx),
-                CheckOutcome::Skipped { reason } if reason.contains("面積が有限正"))
-            );
-        }
-    }
-
-    #[test]
-    fn box_shear_keeps_small_positive_areas_and_rejects_nonfinite_stress() {
-        let mut material = test_support::mat("相似比較用鋼材");
-        material.fy = Some(235.0);
-        for kind in [MemberKind::Girder, MemberKind::Column] {
-            let ctx = DesignCtx {
-                kind,
-                term: LoadTerm::Long,
-                length: 0.0,
-                ..Default::default()
-            };
-            for scale in [1e-8_f64, 1.0, 1e8] {
-                let section = SectionShape::SteelBox {
-                    height: 400.0 * scale,
-                    width: 300.0 * scale,
-                    thick: 12.0 * scale,
-                    horizontal_thick: 12.0 * scale,
-                    corner_r: Some(30.0 * scale),
-                }
-                .to_section(SectionId(0), "相似Boxせん断".into());
-                let mut forces = MemberForcesAt {
-                    pos: 0.5,
-                    n: 0.0,
-                    qy: 100_000.0,
-                    qz: 0.0,
-                    mx: 0.0,
-                    my: 0.0,
-                    mz: 0.0,
-                };
-                let result = SteelDesign
-                    .check(&forces, &section, &material, &ctx)
-                    .unwrap_checked();
-                let expected =
-                    100_000.0 / (8160.0 * scale.powi(2)) / steel_fs(235.0, LoadTerm::Long);
-                assert!(
-                    (result.ratio() / expected - 1.0).abs() < 1e-10,
-                    "{kind:?} scale={scale}: {} / {expected}",
-                    result.ratio()
-                );
-                if scale == 1e-8 {
-                    for invalid in [f64::MAX, f64::INFINITY, f64::NAN] {
-                        for direction in [0, 1] {
-                            forces.qy = if direction == 0 { invalid } else { 0.0 };
-                            forces.qz = if direction == 1 { invalid } else { 0.0 };
-                            assert!(
-                                matches!(SteelDesign.check(&forces, &section, &material, &ctx),
-                                CheckOutcome::Skipped { reason } if reason.contains("せん断応力度が非有限"))
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn independent_directional_areas_preserve_purpose_axes_scaling_and_rotation() {
-        for root_r in [0.0, 13.0] {
-            let section = SectionShape::SteelH {
-                height: 400.0,
-                width: 200.0,
-                web_thick: 8.0,
-                flange_thick: 13.0,
-                root_r: Some(root_r),
-            }
-            .to_section(SectionId(0), "H".into());
-            assert_eq!((section.as_y, section.as_z), (5200.0, 3200.0));
-            let (ay, az) = shear_area_2d(ShapeCategory::H, &section, 13.0, 8.0);
-            assert_eq!(ay, 2992.0);
-            assert!((az / 3466.6666666666665 - 1.0).abs() < 1e-10);
-            assert!((100_000.0 / ay / 100.0 - 0.3342245989304813).abs() < 1e-10);
-            assert_eq!(100_000.0 / section.as_z / 100.0, 0.3125);
-            for scale in [0.1_f64, 10.0] {
-                let scaled = SectionShape::SteelH {
-                    height: 400.0 * scale,
-                    width: 200.0 * scale,
-                    web_thick: 8.0 * scale,
-                    flange_thick: 13.0 * scale,
-                    root_r: Some(root_r * scale),
-                }
-                .to_section(SectionId(0), "相似H".into());
-                let (scaled_ay, scaled_az) =
-                    shear_area_2d(ShapeCategory::H, &scaled, 13.0 * scale, 8.0 * scale);
-                for (actual, expected) in [
-                    (scaled_ay, ay),
-                    (scaled_az, az),
-                    (scaled.as_y, 5200.0),
-                    (scaled.as_z, 3200.0),
-                ] {
-                    assert!((actual / (expected * scale.powi(2)) - 1.0).abs() < 1e-10);
-                }
-            }
-        }
-        for (radius, expected) in [
-            (0.0, (9024.0, 6624.0)),
-            (12.0, (9024.0, 6624.0)),
-            (30.0, (8160.0, 5760.0)),
-        ] {
-            for scale in [0.1_f64, 1.0, 10.0] {
-                for rotated in [false, true] {
-                    let (height, width) = if rotated {
-                        (300.0, 400.0)
-                    } else {
-                        (400.0, 300.0)
-                    };
-                    let section = SectionShape::SteelBox {
-                        height: height * scale,
-                        width: width * scale,
-                        thick: 12.0 * scale,
-                        horizontal_thick: 12.0 * scale,
-                        corner_r: Some(radius * scale),
-                    }
-                    .to_section(SectionId(0), "BOX".into());
-                    let (ay, az) =
-                        shear_area_2d(ShapeCategory::Box, &section, 12.0 * scale, 12.0 * scale);
-                    let expected = if rotated {
-                        (expected.1, expected.0)
-                    } else {
-                        expected
-                    };
-                    assert!((ay / (expected.0 * scale.powi(2)) - 1.0).abs() < 1e-10);
-                    assert!((az / (expected.1 * scale.powi(2)) - 1.0).abs() < 1e-10);
-                    let stiffness = if rotated {
-                        (9024.0, 6624.0)
-                    } else {
-                        (6624.0, 9024.0)
-                    };
-                    assert!((section.as_y / (stiffness.0 * scale.powi(2)) - 1.0).abs() < 1e-10);
-                    assert!((section.as_z / (stiffness.1 * scale.powi(2)) - 1.0).abs() < 1e-10);
-                }
-            }
-        }
-        let mut section = Section::zero(SectionId(0), "任意断面".into());
-        section.as_y = 123.0;
-        section.as_z = 456.0;
-        assert_eq!(
-            shear_area_2d(ShapeCategory::Other, &section, 0.0, 0.0),
-            (456.0, 123.0)
-        );
-    }
-
-    #[test]
-    fn axial_only_brace_does_not_require_surface_radius() {
-        let section = supplied_box_section(None, "BOXブレース");
-        let forces = MemberForcesAt {
-            pos: 0.5,
-            n: 100_000.0,
-            qy: 0.0,
-            qz: 0.0,
-            mx: 0.0,
-            my: 0.0,
-            mz: 0.0,
-        };
-        let ctx = DesignCtx {
-            kind: MemberKind::Brace,
-            ..Default::default()
-        };
-        assert!(matches!(
-            SteelDesign.check(&forces, &section, &test_support::mat("SN400"), &ctx),
-            CheckOutcome::Checked(_)
-        ));
-    }
-}
-
-/// テスト共通ヘルパー（`mat`/`rect_section`/`h_section`）。各サブモジュールの
-/// テストから `super::super::test_support::*` として共有する。
 #[cfg(test)]
 pub(crate) mod test_support {
     use sepika_core::ids::{MaterialId, SectionId};

@@ -246,7 +246,7 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
 }
 
 #[test]
-fn wall_connection_gate_preserves_ordinary_and_pure_steel_options() {
+fn wall_connection_gate_accepts_ordinary_frames_and_rejects_steel_walls() {
     use sepika_element::factory::ensure_wall_side_column_analysis;
     for representation in [
         ElementKind::Beam,
@@ -278,21 +278,35 @@ fn wall_connection_gate_preserves_ordinary_and_pure_steel_options() {
         steel.sections[2].shape = None;
         steel.sections[2].material = Some(MaterialId(2));
         steel.sections[2].thickness = Some(6.0);
-        for model in [ordinary, steel] {
-            for kind in [
-                None,
-                Some(AnalysisKind::Incremental),
-                Some(AnalysisKind::TimeHistory),
-            ] {
-                assert!(ensure_wall_side_column_analysis(
-                    &model,
-                    kind,
-                    "実解析",
-                    Some(MassOption::Consistent)
-                )
-                .is_ok());
-            }
+        for kind in [
+            None,
+            Some(AnalysisKind::Incremental),
+            Some(AnalysisKind::TimeHistory),
+        ] {
+            assert!(ensure_wall_side_column_analysis(
+                &ordinary,
+                kind,
+                "実解析",
+                Some(MassOption::Consistent)
+            )
+            .is_ok());
+            let reason = ensure_wall_side_column_analysis(
+                &steel,
+                kind,
+                "実解析",
+                Some(MassOption::Consistent),
+            )
+            .unwrap_err();
+            assert!(reason.contains("鋼板壁版 ID 0"), "{reason}");
         }
+        let dofmap = DofMap::build(&steel);
+        let error = assemble_global_m(&steel, &dofmap, MassOption::Consistent)
+            .err()
+            .unwrap();
+        assert!(matches!(
+            error,
+            SolveError::InvalidInput(ref reason) if reason.contains("鋼板壁版 ID 0")
+        ));
     }
 }
 

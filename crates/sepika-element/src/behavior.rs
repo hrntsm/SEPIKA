@@ -1,5 +1,6 @@
 use sepika_core::dof::{DofMap, DOF_PER_NODE, PANEL_DOF_PER_NODE};
 use sepika_core::model::Model;
+pub use sepika_core::panel_zone::PanelColumnSection;
 use smallvec::SmallVec;
 use std::any::Any;
 
@@ -67,6 +68,29 @@ pub struct LoadedFrameResponse {
     pub flex_face_force_local: [f64; 12],
     /// 元節点間の全長座標による荷重込み断面力。
     pub section: crate::frame::member_load::LoadedFrameSection,
+}
+
+/// 可撓端のせん断力 [N]、同じ加力方向の初降伏耐力 [N] と到達状況。
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MemberShearEnd {
+    pub shear_n: [f64; 2],
+    pub limit_n: f64,
+    pub utilization: f64,
+    pub reached: bool,
+    pub exactly_at_limit: bool,
+    /// 独立した方向は局所 y=0、z=1。連成した方向は None。
+    pub governing_axis: Option<usize>,
+}
+
+/// i端・j端の順。適用範囲外を理由付きで返す。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MemberShearStatus {
+    pub is_rc: bool,
+    pub ends: [Option<Result<MemberShearEnd, String>>; 2],
+    /// 端部の一部の方向について、確認済みの降伏判定と併記する診断。
+    pub end_issues: [Option<String>; 2],
+    /// 可撓区間の内点を端部の判定で評価できない理由。
+    pub span_issue: Option<String>,
 }
 
 pub struct Ctx<'a> {
@@ -361,6 +385,38 @@ pub trait ElementBehavior: Send + Sync {
             Ok(None)
         }
     }
+
+    /// 同一試行状態の線材せん断応答。増分解析で復元力を評価する要素だけが返す。
+    fn member_shear_status(&self) -> Option<&MemberShearStatus> {
+        None
+    }
+
+    /// 部材耐力の軸力や曲げ依存により非対称な接線を生じ得る。
+    fn member_shear_uses_nonsymmetric_tangent(&self) -> bool {
+        false
+    }
+
+    /// パネルの軸力試行に先行する柱の断面位置。
+    fn panel_column_sections(&self) -> Option<[PanelColumnSection; 2]> {
+        None
+    }
+
+    /// 同一試行の上下柱から回収した引張正の平均軸力と、その自由変位微分を受け取る。
+    fn update_panel_state(
+        &mut self,
+        _du: &LocalVec,
+        _axial_n: f64,
+        _axial_gradient: Vec<(usize, f64)>,
+    ) -> Result<(), ElementUpdateError> {
+        Err(ElementUpdateError(
+            "仕口パネルの試行応答は未対応です".into(),
+        ))
+    }
+
+    /// パネルせん断力の、上下柱の応答を経由する接線項を返す。
+    fn panel_coupled_tangent(&self, _dof: &DofMap) -> Vec<sepika_math::sparse::Triplet> {
+        Vec::new()
+    }
     /// 節点変位から部材内力分布を復元する（線形解析の内力回収）。
     ///
     /// 引数は要素の全体系節点変位で、剛性と内力が線形関係にある要素だけが実装できる。
@@ -434,6 +490,8 @@ macro_rules! forward_element_behavior {
         owns_frame_member_loads: $m_owns_frame_member_loads:ident,
         frame_load_response: $m_frame_load_response:ident,
         state_frame_load_response: $m_state_frame_load_response:ident,
+        member_shear_status: $m_member_shear_status:ident,
+        member_shear_uses_nonsymmetric_tangent: $m_member_shear_uses_nonsymmetric_tangent:ident,
         recover_forces: $m_recover_forces:ident,
         state_member_forces: $m_state_member_forces:ident,
         snapshot_state: $m_snapshot_state:ident,
@@ -548,6 +606,16 @@ macro_rules! forward_element_behavior {
             $crate::forward_element_behavior!(@opt $m_state_frame_load_response
                 fn state_frame_load_response(&self) -> Result<Option<$crate::behavior::LoadedFrameResponse>, String> {
                     self.$inner.state_frame_load_response()
+                }
+            );
+            $crate::forward_element_behavior!(@opt $m_member_shear_status
+                fn member_shear_status(&self) -> Option<&$crate::behavior::MemberShearStatus> {
+                    self.$inner.member_shear_status()
+                }
+            );
+            $crate::forward_element_behavior!(@opt $m_member_shear_uses_nonsymmetric_tangent
+                fn member_shear_uses_nonsymmetric_tangent(&self) -> bool {
+                    self.$inner.member_shear_uses_nonsymmetric_tangent()
                 }
             );
             $crate::forward_element_behavior!(@opt $m_recover_forces

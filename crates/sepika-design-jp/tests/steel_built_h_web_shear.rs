@@ -61,6 +61,8 @@ fn check(
             kind,
             term,
             length,
+            lk_y: Some(length),
+            lk_z: Some(length),
             ..Default::default()
         },
     )
@@ -134,11 +136,18 @@ fn column_and_girder_design_read_strong_shear_from_solved_member_forces() {
             },
         )
         .unwrap();
-        assert_eq!(results.member_checks.len(), 3, "{frame_use:?}");
+        assert_eq!(
+            results.member_checks.len(),
+            if frame_use == FrameSectionUse::Column {
+                5
+            } else {
+                3
+            },
+            "{frame_use:?}"
+        );
         for (_, pos, outcome) in results.member_checks {
-            if frame_use == FrameSectionUse::Column && pos < 1.0 {
-                let result = checked(outcome);
-                assert!(result.basis.contains(UNCHECKED), "{result:?}");
+            if let CheckOutcome::Checked(result) = outcome {
+                assert!(frame_use == FrameSectionUse::Column && pos < 1.0);
                 assert_eq!(result.components.len(), 1);
                 assert_eq!(result.components[0].kind, CheckKind::Bending);
                 // 固定端 Mz=1212 kN·m と上縁の独立断面係数 634601.730518 mm³。
@@ -205,7 +214,7 @@ fn applicability_does_not_depend_on_thin_flange_side_or_shear_sign_and_magnitude
 }
 
 #[test]
-fn zero_strong_shear_and_equal_flange_thickness_keep_existing_results() {
+fn pure_axial_and_symmetric_web_shear_keep_their_applicable_checks() {
     let unequal = section(12.0, 20.0);
     let equal = section(12.0, 12.0);
     let symmetric = built_h(180.0, 12.0, 180.0, 12.0);
@@ -222,18 +231,23 @@ fn zero_strong_shear_and_equal_flange_thickness_keep_existing_results() {
             ),
             (
                 &symmetric,
-                MemberForcesAt {
-                    qy: 0.0,
-                    qz: 100_000.0,
-                    ..FORCE
+                FORCE,
+                match kind {
+                    MemberKind::Column => 0.989_911_337_508_242,
+                    MemberKind::Girder => 0.930_516_657_257_747_5,
+                    MemberKind::Brace => unreachable!(),
                 },
-                0.255_917_672_513_132,
             ),
-            (&equal, FORCE, 0.989_911_337_508_242),
         ] {
             let result = checked(check(section, kind, forces, LoadTerm::Short, 3_000.0));
             assert!((result.ratio() - expected).abs() < 1e-12, "{result:?}");
         }
+        assert!(
+            matches!(check(&symmetric, kind, WEAK_FORCE, LoadTerm::Short, 3000.0), CheckOutcome::Skipped { reason } if reason.contains("弱軸せん断力Qz"))
+        );
+        assert!(
+            matches!(check(&equal, kind, FORCE, LoadTerm::Short, 3000.0), CheckOutcome::Skipped { reason } if reason.contains("せん断力の断面形状・方向"))
+        );
     }
 }
 

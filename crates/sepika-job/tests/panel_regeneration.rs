@@ -306,6 +306,8 @@ fn frame_with_panel_before_supports(wall: bool) -> Model {
     model.sections.push(section);
     if wall {
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: Some(SectionId(3)),

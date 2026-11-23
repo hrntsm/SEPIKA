@@ -1,4 +1,4 @@
-//! 鉄骨ブレースの断面検定（鋼構造設計規準の
+//! 鉄骨ブレースの断面検定（鋼構造許容応力度設計規準の
 //! 鉄骨ブレースの許容応力度検定）。
 
 use crate::material_strength::{steel_fc, steel_ft};
@@ -7,7 +7,7 @@ use sepika_core::model::{Material, Section};
 
 use super::{nonzero, safe_denom};
 
-/// 鉄骨ブレースの断面検定（鋼構造設計規準）。
+/// 鉄骨ブレースの断面検定（鋼構造許容応力度設計規準）。
 ///
 /// 軸力のみ（曲げ・せん断は考慮しない）: 引張 `σt/ft`、圧縮 `σc/fc`（座屈考慮）。
 pub(crate) fn check_brace(
@@ -39,7 +39,7 @@ pub(crate) fn check_brace(
         let ratio = sigma_c / safe_denom(fc_val);
         CheckResult {
             basis: format!(
-                "鋼構造設計規準 {} ブレース: 圧縮 σc/fc(座屈考慮){}",
+                "鋼構造許容応力度設計規準 {} ブレース: 圧縮 σc/fc(座屈考慮){}",
                 term_label, buckling_note
             ),
             detail: String::new(),
@@ -57,7 +57,10 @@ pub(crate) fn check_brace(
         let ft_val = steel_ft(f, term);
         let ratio = sigma_t / safe_denom(ft_val);
         CheckResult {
-            basis: format!("鋼構造設計規準 {} ブレース: 引張 σt/ft", term_label),
+            basis: format!(
+                "鋼構造許容応力度設計規準 {} ブレース: 引張 σt/ft",
+                term_label
+            ),
             detail: String::new(),
             components: vec![CheckComponent {
                 kind: CheckKind::Axial,
@@ -121,6 +124,8 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Brace,
             length: 6000.0,
+            lk_y: Some(6000.0),
+            lk_z: Some(6000.0),
             ..Default::default()
         };
         let result = SteelDesign
@@ -152,6 +157,8 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Brace,
             length: 1000.0,
+            lk_y: Some(1000.0),
+            lk_z: Some(1000.0),
             ..Default::default()
         };
         let result = SteelDesign

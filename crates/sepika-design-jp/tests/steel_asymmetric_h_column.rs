@@ -3,7 +3,7 @@ use sepika_core::model::{FrameSectionUse, Model, PropertyBasis, SteelDesignAttr}
 use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, CheckResult, DesignCheck, DesignCtx,
-    LoadTerm, MemberDesignCheckOptions, MemberForcesAt, MemberKind, SteelDesign, SteelFbBasis,
+    LoadTerm, MemberDesignCheckOptions, MemberForcesAt, MemberKind, SteelDesign,
 };
 use sepika_solver::statics::linear::linear_static_once;
 
@@ -295,14 +295,6 @@ fn zero_axial_force_skips_when_applicable_edge_stresses_cannot_be_confirmed() {
             "断面欠損",
         ),
         (
-            PURE_BENDING,
-            DesignCtx {
-                steel_fb_basis: SteelFbBasis::Standard1973,
-                ..short_column_context()
-            },
-            "2019年版",
-        ),
-        (
             MemberForcesAt {
                 mx: 1.0,
                 ..PURE_BENDING
@@ -475,6 +467,8 @@ fn compression_and_strong_axis_bending_skip_when_a_compressed_flange_is_slender(
         &forces,
         &DesignCtx {
             length: 40_000.0,
+            lk_y: Some(40_000.0),
+            lk_z: Some(40_000.0),
             ..ctx
         },
     ));
@@ -614,21 +608,6 @@ fn compression_and_strong_axis_bending_use_each_plate_thickness_for_the_limit() 
 }
 
 #[test]
-fn compression_and_strong_axis_bending_report_unavailable_plate_limit_basis() {
-    let model = asymmetric_column(MZ);
-    let ctx = DesignCtx {
-        steel_fb_basis: SteelFbBasis::Standard1973,
-        ..short_column_context()
-    };
-    let outcome = check(&model, &FORCES, &ctx);
-    assert!(
-        matches!(&outcome, CheckOutcome::Skipped { reason }
-            if reason.contains("局部座屈") && reason.contains("2019年版")),
-        "{outcome:?}"
-    );
-}
-
-#[test]
 fn local_moment_from_rotated_model_selects_the_expected_flange_and_retains_only_failure() {
     for (global_moment, expected_mz, expected_ratio, side) in [
         ([0.0, MZ, 0.0], MZ, 1.116543960824228, "上"),
@@ -636,6 +615,11 @@ fn local_moment_from_rotated_model_selects_the_expected_flange_and_retains_only_
         ([150e6, 0.0, 0.0], -150e6, 0.0, "下"),
     ] {
         let mut model = asymmetric_column(MZ);
+        let mut attr = column_flange_loss();
+        attr.joint_flange_loss = 0.0;
+        attr.lk_y_direct = Some(3600.0);
+        attr.lk_z_direct = Some(3000.0);
+        model.steel_design_attrs.push(attr);
         // 鉛直材の局所せいを全体XまたはYに向ける。
         if global_moment[0] != 0.0 {
             model.elements[0].local_axis.ref_vector = [0.0, 1.0, 0.0];
@@ -689,7 +673,7 @@ fn local_moment_from_rotated_model_selects_the_expected_flange_and_retains_only_
             assert!(component.detail.contains("軸曲げ比の下限"), "{component:?}");
         }
         if expected_mz == MZ {
-            model.steel_design_attrs.push(column_flange_loss());
+            model.steel_design_attrs[0].joint_flange_loss = 5.0;
             let with_loss = check_model(&model);
             assert_eq!(with_loss.len(), 3);
             for (_, _, outcome) in with_loss {
@@ -752,6 +736,8 @@ fn unsupported_simultaneous_forces_never_turn_the_independent_bound_into_a_pass(
         },
         &DesignCtx {
             length: 20_000.0,
+            lk_y: Some(20_000.0),
+            lk_z: Some(20_000.0),
             ..ctx
         },
     ));
@@ -766,6 +752,8 @@ fn slenderness_failure_preserves_loss_and_stability_reasons() {
     let model = asymmetric_column(MZ);
     let ctx = DesignCtx {
         length: 20_000.0,
+        lk_y: Some(20_000.0),
+        lk_z: Some(20_000.0),
         steel_attr: Some(column_flange_loss()),
         ..short_column_context()
     };
@@ -890,7 +878,7 @@ fn section_only_boundary_requires_zero_buckling_lengths_and_keeps_other_axial_re
             !result.basis.contains("上下非対称組立H形鋼柱"),
             "{result:?}"
         );
-        assert_eq!(result.components.len(), 2);
+        assert_eq!(result.components.len(), 1);
     }
 
     let mut symmetric = model;

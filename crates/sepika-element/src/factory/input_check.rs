@@ -3,13 +3,15 @@
 //! - [`nonlinear_input_issues`] — 部材耐力を算定できない設定不備の列挙
 //! - [`ensure_nonlinear_input`] — 不備があれば是正内容を示すエラーを返す
 
-use sepika_core::model::{ElementData, ElementKind, MaterialCategory, Model};
+use sepika_core::model::{
+    wall_steel_input_issue, ElementData, ElementKind, MaterialCategory, Model,
+};
 use sepika_core::section_shape::SectionShape;
 
 /// エラーメッセージへ列挙する不備の最大件数（超過分は件数のみを示す）。
 const MAX_LISTED: usize = 5;
 
-/// 実解析名・要素質量形式に対する壁側柱接続の適用条件を検証する。
+/// 壁の主材料と、実解析名・要素質量形式に対する壁側柱接続の適用条件を検証する。
 /// `kind=None` は線形構造、`mass=None` は要素質量を使わない解析を表す。
 pub fn ensure_wall_side_column_analysis(
     model: &Model,
@@ -17,6 +19,9 @@ pub fn ensure_wall_side_column_analysis(
     analysis: &str,
     mass: Option<crate::behavior::MassOption>,
 ) -> Result<(), String> {
+    model
+        .validate_wall_primary_materials()
+        .map_err(|reason| format!("{analysis}: {reason}"))?;
     let index = sepika_core::model::WallSideColumnIndex::build(model);
     let label = match kind {
         None => "線形解析",
@@ -98,6 +103,9 @@ pub(super) fn wall_side_column_normal_with_index(
     kind: Option<sepika_core::model::AnalysisKind>,
     index: &sepika_core::model::WallSideColumnIndex,
 ) -> Result<Option<[f64; 3]>, String> {
+    if let Some(reason) = wall_steel_input_issue(data, model) {
+        return Err(reason);
+    }
     let owner_bindings: Vec<_> = index
         .bindings()
         .iter()
@@ -199,7 +207,9 @@ pub fn wall_side_column_issue_message(
         R::FrameMaterialMismatch => "壁と付帯部材の構造種別が不適合です",
         R::DuplicateColumns => "同一側縁に側柱候補が重複しています",
         R::NonParallelWalls => "非平行な壁で共有する側柱の接続は未定式化です",
-        R::InvalidSteelYield => "鋼板の降伏強度が有限正値ではありません",
+        R::UnsupportedSteelWall => {
+            "鋼板壁は解析の対象外です。鋼板の重量は荷重として入力してください"
+        }
     };
     let ids = |entries: &[sepika_core::ids::ElemId]| {
         entries
@@ -241,7 +251,7 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 ///
 /// 壁上下の剛梁は主筋材料の区分と、弾性剛性・形状・質量に必要な入力を検査する。
 ///
-/// 仕口パネルは採用柱の解決に失敗した場合も診断する。
+/// 仕口パネルは非線形解析の対象外として診断する。
 /// 弾性としてモデル化することが仕様である要素（`Shell` / `NodalSpring`、
 /// および特性を専用の属性で持つ `Damper`）は対象外。
 /// ブレースは弾性トラスに必要な幾何・断面・材料だけを診断する。
@@ -263,6 +273,9 @@ fn nonlinear_input_issues_with_basis(
     basis: super::StrengthBasis,
 ) -> Vec<String> {
     let mut issues = Vec::new();
+    if let Err(issue) = model.validate_wall_primary_materials() {
+        issues.push(issue);
+    }
     if let Err(error) = model.validate_member_hysteresis_attr_refs() {
         issues.push(error.to_string());
     }
@@ -298,20 +311,14 @@ fn nonlinear_input_issues_with_basis(
         }
         let issue = match elem.kind {
             ElementKind::Brace { .. } => elastic_stiffness_input_issue(elem, model),
-            ElementKind::PanelZone => elem.nodes.first().and_then(|node| {
-                sepika_core::panel_zone::resolve_explicit_panel_joint(model, *node, &model.elements)
-                    .err()
-                    .map(|reason| reason.to_string())
-            }),
-            ElementKind::Wall => crate::wall::wall_element::WallElement::wall_shear_capacity_issue(
-                elem, model, basis,
-            )
-            .map(|reason| {
-                format!(
-                    "RC壁 {}: {reason}",
-                    model.stress_cfg.rc_wall_shear_method.label()
+            ElementKind::PanelZone => {
+                crate::springs::panel::PanelZone::nonlinear_issue(elem, model)
+            }
+            ElementKind::Wall => {
+                crate::wall::wall_element::WallElement::nonlinear_wall_capacity_issue(
+                    elem, model, basis, kind,
                 )
-            }),
+            }
             ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
                 member_rebar_material_strength_issue(elem, model, basis)
                     .or_else(|| {
@@ -927,19 +934,6 @@ pub fn ensure_rc_beam_reference_loads(
 /// 線材の鋼断面と主材料の区分の不一致、E・採用 G、弾性梁の剛性・端部縮約の不備を部材 ID 付きで返す。
 /// SRC/CFT の構築不備と他の入力不備は既存の断面・材料診断で扱う。
 pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Option<String> {
-    check_elastic_stiffness(data, model, true)
-}
-
-/// 節点集中質量だけの組立前に線材の入力を検査する。H形鋼大梁の床板接合指定は不要。
-pub fn nodal_mass_frame_input_issue(data: &ElementData, model: &Model) -> Option<String> {
-    check_elastic_stiffness(data, model, false)
-}
-
-fn check_elastic_stiffness(
-    data: &ElementData,
-    model: &Model,
-    include_steel_slab: bool,
-) -> Option<String> {
     if let Some(reason) = steel_section_primary_material_issue(data, model) {
         return Some(reason);
     }
@@ -952,7 +946,7 @@ fn check_elastic_stiffness(
 
     let section = model.element_section(data)?;
     let material = model.element_material(data)?;
-    match crate::frame::beam::BeamElement::resolve_properties(data, model, include_steel_slab) {
+    match crate::frame::beam::BeamElement::resolve_properties(data, model) {
         Ok(beam) => elastic_young_issue(data, beam.e).or_else(|| {
             matches!(
                 data.kind,
@@ -977,9 +971,6 @@ fn check_elastic_stiffness(
             }
             if let Some(reason) = elastic_young_issue(data, material.young) {
                 return Some(reason);
-            }
-            if model.is_steel_h_girder(data) {
-                return Some(error);
             }
             let g = material.shear_modulus();
             (matches!(

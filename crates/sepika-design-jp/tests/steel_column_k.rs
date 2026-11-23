@@ -5,9 +5,30 @@ use sepika_design_jp::{
 mod input;
 
 #[test]
-fn ideal_pin_portal_default_is_unsafe_relative_to_independent_length() {
+fn column_default_length_comes_from_the_nodes_even_with_material_end_offsets() {
+    let mut model = input::portal(1.0);
+    model.elements[0].end_offsets_mm[1][2] = 500.0;
+    let element = &model.elements[0];
+    let default = sepika_design_jp::steel::frame_buckling_lengths(
+        &model,
+        element,
+        sepika_design_jp::MemberKind::Column,
+        None,
+    );
+    assert_eq!(default, (3600.0, 3600.0));
+    let direct = sepika_design_jp::steel::frame_buckling_lengths(
+        &model,
+        element,
+        sepika_design_jp::MemberKind::Column,
+        Some(&model.steel_design_attrs[0]),
+    );
+    assert_eq!(direct, (3600.0, 3000.0));
+}
+
+#[test]
+fn ideal_pin_portal_exposes_the_limit_of_the_default_length() {
     for (direct, adopted_mm, load_scale, ratio, ok) in [
-        (None, "3600", 1.0, 0.934028167715, true),
+        (None, "3600", 1.0, 0.9340281677153761, true),
         (
             Some(6983.630277482522),
             "6983.630277482522",

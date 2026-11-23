@@ -264,6 +264,8 @@ fn opening_edit_crack_invalidates_saved_reference_and_recalculation_keeps_reason
     let mut app = crack_ready();
     let plate = &app.core.model.wall_plates[0];
     let edit = sepika_edit::SetWallPlateAttrs {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         id: plate.id,
         dl_support: plate.dl_support,
         self_weight_shares: plate.self_weight_shares.clone(),

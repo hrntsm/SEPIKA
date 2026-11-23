@@ -1158,324 +1158,17 @@ fn steel_h_girder_with_slab() -> (Model, ElementData) {
 }
 
 #[test]
-fn test_beam_new_composite_steel_beam_averages_stiffness() {
-    use sepika_core::model::SlabCompositeConnection;
+fn steel_girder_uses_its_section_stiffness_with_or_without_an_adjacent_concrete_slab() {
     let (mut model, elem) = steel_h_girder_with_slab();
-    model.set_slab_composite_connection(elem.id, SlabCompositeConnection::Confirmed);
-    let beam = BeamElement::try_new(&elem, &model).unwrap();
-    // H外矩形から左右の欠損を控除し、鋼・床板それぞれの図心間距離から換算した値。
-    assert!((beam.iz - 432_020_276.398_484).abs() < 1e-5);
-    assert!((beam.iy - model.sections[0].iz).abs() < 1e-9);
-
-    let mut unresolved = model.clone();
-    unresolved.sections[1].material = None;
-    let reason = stiffness_breakdown(&unresolved, &elem).unwrap_err();
-    assert!(reason.contains("主材料を解決できません"));
-    assert_eq!(
-        BeamElement::try_new(&elem, &unresolved).err().unwrap(),
-        reason
-    );
-
-    let mut invalid = model.clone();
-    invalid.materials[1].fc = Some(0.0);
-    let reason = stiffness_breakdown(&invalid, &elem).unwrap_err();
-    assert!(reason.contains("材種または材料入力が不正"));
-    assert_eq!(BeamElement::try_new(&elem, &invalid).err().unwrap(), reason);
-
-    model.floor_regions[0].slab_ids.clear();
-    model.floor_assignment_regions.regions[0].assignment =
-        sepika_core::model::PlateAssignment::NoPlate;
-    model.slabs.clear();
-    let beam0 = BeamElement::try_new(&elem, &model).unwrap();
-    assert!((beam0.iz - 229_648_682.666_666_66).abs() < 1e-6);
-}
-
-#[test]
-fn all_linear_girder_element_kinds_require_the_same_composite_connection() {
-    use sepika_core::model::SlabCompositeConnection;
-    let (mut model, elem) = steel_h_girder_with_slab();
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
-        let mut girder = elem.clone();
-        girder.kind = kind;
-        model.elements[girder.id.index()] = girder.clone();
-        model.set_slab_composite_connection(girder.id, SlabCompositeConnection::Unconfirmed);
-        let reason = stiffness_breakdown(&model, &girder).unwrap_err();
-        assert!(reason.contains("RC床板との接合条件が未確認"));
-        assert_eq!(
-            crate::factory::elastic_stiffness_input_issue(&girder, &model),
-            Some(reason)
-        );
-        model.set_slab_composite_connection(girder.id, SlabCompositeConnection::Confirmed);
-        assert!(crate::factory::elastic_stiffness_input_issue(&girder, &model).is_none());
-        let beam = BeamElement::try_new(&girder, &model).unwrap();
-        assert!((beam.iz - 432_020_276.398_484).abs() < 1e-5);
-    }
-}
-
-#[test]
-fn steel_girder_checks_each_support_of_a_shared_attached_slab() {
-    use sepika_core::model::{LoadTransfer, RegionAnchor, SlabCompositeConnection, SlabShape};
-    let (mut model, elem) = steel_h_girder_with_slab();
+    let with_slab = BeamElement::try_new(&elem, &model).unwrap();
     model.floor_regions.clear();
     model.floor_assignment_regions.regions.clear();
-    model.nodes.push(Node {
-        id: NodeId(4),
-        coord: [3000.0, 0.0, 3000.0],
-        ..model.nodes[0].clone()
-    });
-    let left = ElementData {
-        nodes: [NodeId(0), NodeId(4)].into_iter().collect(),
-        ..elem.clone()
-    };
-    let right = ElementData {
-        id: ElemId(1),
-        nodes: [NodeId(4), NodeId(1)].into_iter().collect(),
-        ..elem.clone()
-    };
-    let unrelated = ElementData {
-        id: ElemId(2),
-        nodes: [NodeId(3), NodeId(2)].into_iter().collect(),
-        ..elem
-    };
-    model.elements = vec![left, right, unrelated];
-    model.slabs[0].shape = SlabShape::Attached {
-        anchor: RegionAnchor::Line {
-            nodes: [NodeId(0), NodeId(1)],
-            span: [0.0, 1.0],
-            transfer: LoadTransfer::Anchor,
-        },
-        extent: [2000.0, 2000.0],
-    };
-    for girder in &model.elements[..2] {
-        let reason = stiffness_breakdown(&model, girder).unwrap_err();
-        assert!(reason.contains("床板 0: 取り付く床板は現行近似の対象外"));
-    }
-    assert_eq!(
-        stiffness_breakdown(&model, &model.elements[2])
-            .unwrap()
-            .steel_slab,
-        Some(SteelSlabStiffness::NoSlab)
-    );
-
-    model.set_slab_composite_connection(ElemId(1), SlabCompositeConnection::NonComposite);
-    assert_eq!(
-        stiffness_breakdown(&model, &model.elements[1])
-            .unwrap()
-            .steel_slab,
-        Some(SteelSlabStiffness::NonComposite)
-    );
-    model.sections[1].material = Some(sepika_core::ids::MaterialId(0));
-    for girder in &model.elements[..2] {
-        let got = stiffness_breakdown(&model, girder).unwrap();
-        assert_eq!(got.slab, 1.0);
-        assert_eq!(got.steel_slab, Some(SteelSlabStiffness::SteelSlab));
-    }
-}
-
-#[test]
-fn fractional_mm_floor_uses_the_same_composite_stiffness_when_fully_covered() {
-    use sepika_core::model::{PlateAssignment, SlabCompositeConnection};
-    let (mut model, girder) = steel_h_girder_with_slab();
-    model.nodes[1].coord[0] = 6000.1;
-    model.nodes[2].coord = [6000.1, 2500.1, 3000.0];
-    model.nodes[3].coord[1] = 2500.1;
-    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::Confirmed);
-
-    let whole = stiffness_breakdown(&model, &girder).unwrap();
-    assert_eq!(whole.steel_slab, Some(SteelSlabStiffness::Confirmed));
-    assert!(whole.slab > 1.0);
-
-    let plate = model.slabs.remove(0).plate;
-    model.elements.truncate(1);
-    model.floor_assignment_regions.regions.clear();
-    for (id, x) in [(NodeId(4), 6000.1), (NodeId(5), 0.0)] {
-        model.nodes.push(Node {
-            id,
-            coord: [x, 1200.025, 3000.0],
-            ..model.nodes[0].clone()
-        });
-    }
-    let near = model
-        .add_enclosed_slab_from_nodes(&[NodeId(0), NodeId(1), NodeId(4), NodeId(5)], plate.clone());
-    let far =
-        model.add_enclosed_slab_from_nodes(&[NodeId(5), NodeId(4), NodeId(2), NodeId(3)], plate);
-    model.floor_regions[0].slab_ids = vec![near, far];
-    assert_eq!(stiffness_breakdown(&model, &girder).unwrap(), whole);
-
-    model
-        .floor_assignment_regions
-        .regions
-        .retain(|region| region.assignment != PlateAssignment::Plate(far));
-    model.floor_regions[0].slab_ids = vec![near];
-    model.slabs.pop();
-    model.nodes[4].coord[1] = 2499.987;
-    model.nodes[5].coord[1] = 2499.987;
-    let reason = stiffness_breakdown(&model, &girder).unwrap_err();
-    assert!(reason.contains("支持が連続する床板割当で全幅を確定できません"));
-}
-
-#[test]
-fn a_sloping_girder_with_a_concrete_slab_requires_explicit_noncomposite() {
-    use sepika_core::model::SlabCompositeConnection;
-    let (mut model, girder) = steel_h_girder_with_slab();
-    model.nodes[1].coord[2] += 400.0;
-    for connection in [
-        SlabCompositeConnection::Unconfirmed,
-        SlabCompositeConnection::Confirmed,
-    ] {
-        model.set_slab_composite_connection(girder.id, connection);
-        let reason = stiffness_breakdown(&model, &girder).unwrap_err();
-        assert!(reason.contains("梁両端の高低差または水平投影長が現行近似の適用範囲外"));
-    }
-    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::NonComposite);
-    let got = stiffness_breakdown(&model, &girder).unwrap();
-    assert_eq!(got.slab, 1.0);
-    assert_eq!(got.steel_slab, Some(SteelSlabStiffness::NonComposite));
-
-    model.floor_regions[0].slab_ids.clear();
-    model.floor_assignment_regions.regions[0].assignment =
-        sepika_core::model::PlateAssignment::NoPlate;
     model.slabs.clear();
-    let got = stiffness_breakdown(&model, &girder).unwrap();
-    assert_eq!(got.slab, 1.0);
-    assert_eq!(got.steel_slab, Some(SteelSlabStiffness::NoSlab));
-}
+    let without_slab = BeamElement::try_new(&elem, &model).unwrap();
 
-#[test]
-fn partial_rc_support_on_a_girder_within_the_slope_limit_is_unavailable() {
-    use sepika_core::model::{SlabCompositeConnection, SupportMemberId};
-    let (mut model, girder) = steel_h_girder_with_slab();
-    model.nodes[1].coord[2] += 100.0;
-    model.nodes[2].coord[2] += 100.0;
-    let plate = model.slabs.remove(0).plate;
-    model.elements.truncate(1);
-    model.floor_assignment_regions.regions.clear();
-    for (id, y) in [(4, 0.0), (5, 2500.0)] {
-        model.nodes.push(Node {
-            id: NodeId(id),
-            coord: [3000.0, y, 3050.0],
-            ..model.nodes[0].clone()
-        });
-    }
-    model.add_enclosed_slab_from_nodes(&[NodeId(4), NodeId(0), NodeId(3), NodeId(5)], plate);
-    model.floor_assignment_regions.regions[0].boundary[0] = sepika_core::model::SupportBoundary {
-        support: SupportMemberId::Primary(girder.id),
-        span: [0.5, 0.0],
-    };
-    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::Confirmed);
-    let reason = stiffness_breakdown(&model, &girder).unwrap_err();
-    assert!(reason.contains("支持が連続する床板割当で全幅を確定できません"));
-
-    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::NonComposite);
-    let got = stiffness_breakdown(&model, &girder).unwrap();
-    assert_eq!(got.slab, 1.0);
-    assert_eq!(got.steel_slab, Some(SteelSlabStiffness::NonComposite));
-}
-
-#[test]
-fn concrete_beyond_an_explicitly_empty_assignment_does_not_connect_to_the_girder() {
-    use sepika_core::model::{PlateAssignment, SlabCompositeConnection};
-    let (mut model, elem) = steel_h_girder_with_slab();
-    let plate = model.slabs.remove(0).plate;
-    model.elements.truncate(1);
-    model.floor_assignment_regions.regions.clear();
-    for (id, x) in [(NodeId(4), 0.0), (NodeId(5), 6000.0)] {
-        model.nodes.push(Node {
-            id,
-            coord: [x, 1000.0, 3000.0],
-            ..model.nodes[0].clone()
-        });
-    }
-    let far = model
-        .add_enclosed_slab_from_nodes(&[NodeId(4), NodeId(5), NodeId(2), NodeId(3)], plate.clone());
-    let near =
-        model.add_enclosed_slab_from_nodes(&[NodeId(0), NodeId(1), NodeId(5), NodeId(4)], plate);
-    model
-        .floor_assignment_regions
-        .regions
-        .iter_mut()
-        .find(|r| r.assignment == PlateAssignment::Plate(near))
-        .unwrap()
-        .assignment = PlateAssignment::NoPlate;
-    model.slabs.pop();
-    model.floor_regions[0].slab_ids = vec![far];
-    for connection in [
-        SlabCompositeConnection::Unconfirmed,
-        SlabCompositeConnection::Confirmed,
-    ] {
-        model.set_slab_composite_connection(elem.id, connection);
-        let got = stiffness_breakdown(&model, &elem).unwrap();
-        assert_eq!(got.slab, 1.0);
-        assert_eq!(got.steel_slab, Some(SteelSlabStiffness::NoSlab));
-    }
-}
-
-#[test]
-fn composite_width_cannot_span_a_gap_in_the_floor_region() {
-    use sepika_core::model::{PlateAssignment, SlabCompositeConnection};
-    let (mut model, girder) = steel_h_girder_with_slab();
-    let plate = model.slabs.remove(0).plate;
-    model.elements.truncate(1);
-    model.floor_assignment_regions.regions.clear();
-    for (id, x, y) in [
-        (4, 0.0, 600.0),
-        (5, 6000.0, 600.0),
-        (6, 0.0, 1400.0),
-        (7, 6000.0, 1400.0),
-    ] {
-        model.nodes.push(Node {
-            id: NodeId(id),
-            coord: [x, y, 3000.0],
-            ..model.nodes[0].clone()
-        });
-    }
-    let near = model
-        .add_enclosed_slab_from_nodes(&[NodeId(0), NodeId(1), NodeId(5), NodeId(4)], plate.clone());
-    let far = model
-        .add_enclosed_slab_from_nodes(&[NodeId(6), NodeId(7), NodeId(2), NodeId(3)], plate.clone());
-    let middle =
-        model.add_enclosed_slab_from_nodes(&[NodeId(4), NodeId(5), NodeId(7), NodeId(6)], plate);
-    let gap = model
-        .floor_assignment_regions
-        .regions
-        .iter()
-        .position(|r| r.assignment == PlateAssignment::Plate(middle))
-        .unwrap();
-    model.floor_regions[0].slab_ids = vec![near, far];
-    let middle_slab = model.slabs.pop().unwrap();
-    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::Confirmed);
-    for rise_per_width in [0.0, 0.1] {
-        for node in &mut model.nodes {
-            node.coord[2] = 3000.0 + node.coord[1] * rise_per_width;
-        }
-        for assignment in [PlateAssignment::NoPlate, PlateAssignment::Unset] {
-            model.floor_assignment_regions.regions[gap].assignment = assignment;
-            let reason = stiffness_breakdown(&model, &girder).unwrap_err();
-            assert!(reason.contains("版なしまたは未設定があり、現行近似の協力幅を確定できません"));
-        }
-    }
-    model.slabs.push(middle_slab);
-    model.floor_assignment_regions.regions[gap].assignment = PlateAssignment::Plate(middle);
-    let steel_section = sepika_core::ids::SectionId(2);
-    model.sections.push(Section {
-        id: steel_section,
-        material: Some(sepika_core::ids::MaterialId(0)),
-        ..model.sections[1].clone()
-    });
-    model.slabs[far.index()].plate.section = Some(steel_section);
-    model.floor_regions[0].slab_ids = vec![near];
-    let reason = stiffness_breakdown(&model, &girder).unwrap_err();
-    assert!(reason.contains("RC床板と鋼床板が混在"));
-
-    model.set_slab_composite_connection(girder.id, SlabCompositeConnection::NonComposite);
-    assert_eq!(
-        stiffness_breakdown(&model, &girder).unwrap().steel_slab,
-        Some(SteelSlabStiffness::NonComposite)
-    );
+    assert_eq!(with_slab.iz, 229_648_682.666_666_66);
+    assert_eq!(with_slab.iz, without_slab.iz);
+    assert_eq!(with_slab.iy, without_slab.iy);
 }
 
 #[test]
@@ -2457,6 +2150,8 @@ fn test_beam_new_misc_wall_wing_augments_column_inplane_stiffness() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         sepika_core::model::WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
@@ -2627,6 +2322,8 @@ fn test_beam_new_misc_wall_strip_augments_girder_iy_without_100x() {
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         sepika_core::model::WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
@@ -2842,6 +2539,8 @@ fn test_column_face_slit_drops_wing_wall_but_keeps_girder_strip() {
         model.add_enclosed_wall_plate_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             sepika_core::model::WallPlate {
+                src_wall_detailing_confirmed: false,
+                src_steel_plate: None,
                 dl_support: None,
                 self_weight_shares: Vec::new(),
                 id: sepika_core::ids::WallPlateId(0),
@@ -3958,6 +3657,8 @@ fn portal_with_wing_wall(col_depth: f64, beam_depth: f64, wall_thickness: f64) -
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(4), NodeId(5), NodeId(1)],
         sepika_core::model::WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),

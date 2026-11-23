@@ -1,6 +1,6 @@
 use approx::assert_relative_eq;
 use sepika_core::dof::{Dof, Dof6Mask};
-use sepika_core::ids::{ElemId, NodeId, SectionId, StoryId};
+use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId, StoryId};
 use sepika_core::model::{
     Constraint, ElementKind, EndCondition, FrameSectionUse, LoadCaseKind, MaterialCategory,
     MemberLoad, MemberLoadKind, NodalLoad, Story, WallAttr, WallOpening, WallPlate, WallPlateShape,
@@ -728,6 +728,15 @@ fn orthogonal_walls_on_free_vertical_joints_also_require_an_evaluation() {
     section.name = "壁断面".into();
     section.frame_use = None;
     section.thickness = Some(150.0);
+    let mut concrete = model.materials[0].clone();
+    concrete.id = MaterialId(1);
+    concrete.name = "Fc24".into();
+    concrete.category = MaterialCategory::Concrete;
+    concrete.young = 23000.0;
+    concrete.poisson = 0.2;
+    concrete.fc = Some(24.0);
+    section.material = Some(concrete.id);
+    model.materials.push(concrete);
     model.sections.push(section);
     for (id, nodes) in [
         (ElemId(3), [NodeId(0), NodeId(2), NodeId(3), NodeId(1)]),
@@ -831,6 +840,8 @@ fn rotated_column_with_an_isotropic_section_needs_evaluation_when_a_wing_wall_ch
     model.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
@@ -924,6 +935,8 @@ fn d_value_entry_points_hold_when_an_unexpanded_wall_plane_is_diagonal() {
     let plate_id = model.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: sepika_core::ids::WallPlateId(0),
@@ -1130,6 +1143,8 @@ fn coupled_rigidity_reports_the_layer_and_failed_identification_condition() {
     let mut invalid_wall = unrestrained_base.clone();
     invalid_wall.stress_cfg.misc_wall_n = Some(2.0);
     invalid_wall.wall_plates.push(WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: sepika_core::ids::WallPlateId(0),

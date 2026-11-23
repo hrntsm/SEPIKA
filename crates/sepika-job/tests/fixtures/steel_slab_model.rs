@@ -12,7 +12,6 @@ pub fn one_cubic_metre(attached: bool) -> sepika_core::model::Model {
     for (index, element) in model.elements.iter_mut().enumerate() {
         element.id = ElemId(index as u32);
     }
-    model.slab_composite_attrs.clear();
     model.materials[0].density = 0.0;
     model.materials[1].category = MaterialCategory::Steel;
     model.materials[1].density = 7.85e-9;

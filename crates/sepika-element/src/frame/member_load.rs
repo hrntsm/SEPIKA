@@ -7,9 +7,11 @@ use sepika_core::geom::vec3;
 use sepika_core::model::{MemberLoad, MemberLoadKind};
 
 mod shear_envelope;
+mod shear_span;
 pub use shear_envelope::{
     frame_shear_envelope, FrameShearEnvelope, FrameShearFace, FrameShearPeak, SectionSide,
 };
+pub(super) use shear_span::ShearSpan;
 
 #[derive(Clone, Copy, Debug)]
 enum Comp {

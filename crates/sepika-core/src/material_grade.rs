@@ -87,7 +87,8 @@ pub fn steel_grade_base(name: &str) -> Option<&'static str> {
                 "SN490" => matches!(suffix, "B" | "C"),
                 "SM490" => matches!(suffix, "A" | "B" | "C" | "YA" | "YB"),
                 "SM520" => matches!(suffix, "B" | "C"),
-                "STKN400" | "STKN490" => matches!(suffix, "B" | "W"),
+                "STKN400" => matches!(suffix, "B" | "W"),
+                "STKN490" => suffix == "B",
                 "SNR400" => matches!(suffix, "A" | "B"),
                 "SNR490" => suffix == "B",
                 _ => false,
@@ -165,6 +166,63 @@ pub fn resolve_steel_f(mat: Option<&Material>, thickness_mm: Option<f64>) -> Res
     })
 }
 
+/// SRC耐震壁の内蔵鋼板の製品実板厚 `[mm]` に対する基準強度 F `[N/mm²]`。
+/// 材料・製品または板厚が適用範囲外の場合は理由を返す。
+pub fn resolve_src_wall_plate_f(mat: &Material, thickness_mm: f64) -> Result<f64, String> {
+    if mat.category != MaterialCategory::Steel {
+        return Err(format!("材料「{}」は鋼材ではありません", mat.name));
+    }
+    if !thickness_mm.is_finite() || thickness_mm <= 0.0 {
+        return Err("内蔵鋼板の実板厚には正の有限値 [mm] が必要です".into());
+    }
+    let name = mat.name.trim();
+    let grade = steel_grade_base(name);
+    if is_tube_steel_grade(name)
+        || matches!(grade, Some("SNR400" | "SNR490" | "SSC400" | "SWH400"))
+        || matches!(name, "SCW410-CF" | "SCW480-CF" | "SCW490-CF" | "SCW520-CF")
+    {
+        return Err(format!(
+            "材料「{name}」は鋼管・棒鋼・形鋼用の材種で、内蔵鋼板に適用できません"
+        ));
+    }
+    if src_steel_has_weld_restriction(name) {
+        return Err(format!("内蔵鋼板「{name}」は溶接を使用する部分に適用できません。現在の入力から溶接を使用しないことを確認できません"));
+    }
+    if name == "SM490Y" {
+        return Err("内蔵鋼板「SM490Y」の JIS の種類記号が不完全です".into());
+    }
+    if let Some((suffix, table_grade)) = [("SMA400", "SM400"), ("SMA490", "SM490")]
+        .into_iter()
+        .find_map(|(base, table_grade)| {
+            let suffix = name.strip_prefix(base)?;
+            matches!(
+                suffix,
+                "" | "A" | "B" | "C" | "AW" | "BW" | "CW" | "AP" | "BP" | "CP"
+            )
+            .then_some((suffix, table_grade))
+        })
+    {
+        if matches!(suffix, "A" | "B" | "C") {
+            return Err(format!("内蔵鋼板「{name}」の JIS の種類記号が不完全です"));
+        }
+        if thickness_mm > 100.0 {
+            return Err(format!("内蔵鋼板「{name}」の実板厚 {thickness_mm} mm は基準強度 F の適用範囲（0 < t ≤ 100 mm）外です"));
+        }
+        return steel_f_value(table_grade, thickness_mm).ok_or_else(|| {
+            format!("内蔵鋼板「{name}」の実板厚 {thickness_mm} mm に対する基準強度 F が未定義です")
+        });
+    }
+    if matches!(grade, Some("SN400" | "SN490" | "SM400" | "SM490" | "SM520")) {
+        let minimum_mm = src_h_steel_minimum_thickness_mm(mat)?;
+        if thickness_mm < minimum_mm {
+            return Err(format!(
+                "内蔵鋼板「{name}」の実板厚は {minimum_mm} mm 以上が必要です"
+            ));
+        }
+    }
+    resolve_steel_f(Some(mat), Some(thickness_mm))
+}
+
 /// SRC 内蔵 H 形鋼に適用できる材種の最小板厚 \[mm\]。分類・材種が不適合なら理由を返す。
 pub fn src_h_steel_minimum_thickness_mm(steel: &Material) -> Result<f64, String> {
     if steel.category != MaterialCategory::Steel {
@@ -176,14 +234,13 @@ pub fn src_h_steel_minimum_thickness_mm(steel: &Material) -> Result<f64, String>
         "SN400C" | "SN490C" => 16.0,
         "SS400" | "SM400A" | "SM400B" | "SM400C" | "SM490A" | "SM490B" | "SM490C" | "SM490YA"
         | "SM490YB" | "SM520B" | "SM520C" => 0.0,
-        "SS490" => {
-            return Err("内蔵鉄骨「SS490」は溶接を使用する部分に適用できません。断面入力から溶接を使用する部分か確認できません".into());
+        _ if src_steel_has_weld_restriction(name) => {
+            return Err(format!("内蔵鉄骨「{name}」は溶接を使用する部分に適用できません。断面入力から溶接を使用する部分か確認できません"));
         }
         "SM400" | "SM490" | "SM520" | "SN400" | "SN490" => {
             return Err(format!("内蔵鉄骨「{name}」の JIS の種類記号が不完全です"));
         }
-        "STK400" | "STK490" | "STKR400" | "STKR490" | "STKN400" | "STKN400W" | "STKN400B"
-        | "STKN490" | "STKN490W" | "STKN490B" | "BCR235" | "BCR295" | "BCP235" | "BCP325" => {
+        _ if is_tube_steel_grade(name) => {
             return Err(format!(
                 "内蔵鉄骨「{name}」は鋼管用として登録されている材料名で、H 形鋼としての適用根拠が未確定です"
             ));
@@ -195,6 +252,56 @@ pub fn src_h_steel_minimum_thickness_mm(steel: &Material) -> Result<f64, String>
         }
     };
     Ok(minimum_mm)
+}
+
+/// SRC規準で溶接を使用する部分への適用が制限される既知の鋼種。
+pub fn src_steel_has_weld_restriction(name: &str) -> bool {
+    matches!(name.trim(), "SS490" | "SS540")
+}
+
+/// 既知の鋼管専用材種なら真。未知名は鋼管専用とみなさない。
+pub fn is_tube_steel_grade(name: &str) -> bool {
+    matches!(
+        steel_grade_base(name),
+        Some(
+            "STK400"
+                | "STK490"
+                | "STKR400"
+                | "STKR490"
+                | "STKN400"
+                | "STKN490"
+                | "BCR235"
+                | "BCR295"
+                | "BCP235"
+                | "BCP325"
+        )
+    )
+}
+
+/// SRC部材の内蔵H形鋼のフランジ・ウェブの幅厚比を、板ごとのF `[N/mm²]` で照合する。
+pub fn validate_src_h_width_thickness(
+    flange_ratio: f64,
+    web_ratio: f64,
+    flange_f: f64,
+    web_f: f64,
+    is_column: bool,
+) -> Result<(), &'static str> {
+    let limits = |f: f64| match f {
+        235.0 => Some((23.0, 106.0, 95.0)),
+        275.0 => Some((22.0, 98.0, 87.0)),
+        325.0 => Some((20.0, 90.0, 80.0)),
+        355.0 => Some((19.0, 87.0, 77.0)),
+        _ => None,
+    };
+    let flange_limit = limits(flange_f).map(|row| row.0);
+    let web_limit = limits(web_f).map(|(_, beam, column)| if is_column { column } else { beam });
+    if flange_limit.is_some_and(|limit| flange_ratio > 0.0 && flange_ratio <= limit)
+        && web_limit.is_some_and(|limit| web_ratio > 0.0 && web_ratio <= limit)
+    {
+        Ok(())
+    } else {
+        Err("内蔵鉄骨がSRC規準解説表7.1の幅厚比の適用条件を満たしません")
+    }
 }
 
 /// ウェブとフランジの実板厚 \[mm\] のいずれかが材種の下限を下回れば理由を返す。
@@ -274,6 +381,29 @@ pub fn material_strength_factor_rebar(mat: &crate::model::Material) -> f64 {
 
 fn main_rebar_grade(mat: &crate::model::Material) -> Option<&str> {
     (mat.category == crate::model::MaterialCategory::Rebar).then(|| mat.name.trim())
+}
+
+/// 対応材種の主筋許容引張・圧縮応力度 `[N/mm²]` を長期、短期の順で返す。径は呼び名または `[mm]`。
+pub fn rebar_tension_limits(grade: &str, diameter: f64) -> Option<(f64, f64)> {
+    let high_grade_long = if diameter > 28.0 { 195.0 } else { 215.0 };
+    match grade.trim() {
+        "SR235" => Some((155.0, 235.0)),
+        "SR295" => Some((155.0, 295.0)),
+        "SD295" | "SD295A" | "SD295B" => Some((195.0, 295.0)),
+        "SD345" => Some((high_grade_long, 345.0)),
+        "SD390" => Some((high_grade_long, 390.0)),
+        "SD490" => Some((high_grade_long, 490.0)),
+        "USD685" => Some((215.0, 685.0)),
+        _ => None,
+    }
+}
+
+/// SRC梁・柱の検定で対応する異形主筋の材種。
+pub fn is_src_main_rebar_grade(grade: &str) -> bool {
+    matches!(
+        grade.trim(),
+        "SD295A" | "SD295B" | "SD345" | "SD390" | "SD490"
+    )
 }
 
 fn ordinary_jis_rebar_fy(grade: &str) -> Option<f64> {
@@ -671,7 +801,6 @@ mod tests {
             ("STKN400W", 235., 215.),
             ("STKN490", 325., 295.),
             ("STKN490B", 325., 295.),
-            ("STKN490W", 325., 295.),
             ("STKR400", 235., 215.),
             ("STKR490", 325., 295.),
             ("SNR400", 235., 215.),
@@ -735,6 +864,7 @@ mod tests {
             "SM520A",
             "STKN400A",
             "STKN490C",
+            "STKN490W",
             "SNR400C",
             "SNR490A",
             "SS400A",
@@ -1057,6 +1187,25 @@ mod steel_f_resolution_tests {
                     resolve_steel_f(Some(&material), Some(thickness)),
                     Ok(expected)
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn src_wall_plate_sma_uses_the_table_at_both_thickness_boundaries() {
+        for (grade, thin_f, thick_f) in [("SMA400", 235.0, 215.0), ("SMA490", 325.0, 295.0)] {
+            for suffix in ["", "AW", "BW", "CW", "AP", "BP", "CP"] {
+                let material = steel(&format!("{grade}{suffix}"), Some(999.0));
+                for (thickness, expected_f) in [(40.0, thin_f), (40.001, thick_f), (100.0, thick_f)]
+                {
+                    assert_eq!(
+                        resolve_src_wall_plate_f(&material, thickness),
+                        Ok(expected_f)
+                    );
+                }
+                assert!(resolve_src_wall_plate_f(&material, 100.001)
+                    .unwrap_err()
+                    .contains("適用範囲"));
             }
         }
     }

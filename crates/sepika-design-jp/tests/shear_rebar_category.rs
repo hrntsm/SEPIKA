@@ -93,8 +93,13 @@ fn allowable_requires_rebar_category_and_rechecks_same_grade_and_fy_after_correc
         bond_method: BondMethod::Rc1999,
         ..Default::default()
     };
-    let demand = [0.0, 1_000.0, 0.0, 0.0, 0.0, 1_000_000.0];
     for (mut model, member) in rc_members().into_iter().chain(src_members()) {
+        let mz = if member.starts_with("SRC") {
+            280.0e6
+        } else {
+            1.0e6
+        };
+        let demand = [0.0, 1_000.0, 0.0, 0.0, 0.0, mz];
         let (normal, diagnostics) = allowable(&model, demand, &opts);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert!(normal.iter().any(|row| row.kind == CheckKind::Shear));
@@ -199,35 +204,23 @@ fn allowable_retains_rc_beam_shear_if_reinforcement_term_is_zero() {
 }
 
 #[test]
-fn allowable_src_keeps_steel_shear_but_withholds_dependent_rc_shear() {
-    for (mut model, member) in src_members() {
-        for term in [LoadTerm::Long, LoadTerm::Short] {
-            let opts = MemberDesignCheckOptions {
-                term,
-                ..Default::default()
-            };
-            let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 2_000_000_000.0];
-            let (normal, _) = allowable(&model, demand, &opts);
-            let original = assign_shear_rebar(&mut model, MaterialCategory::Steel);
-            let (partial, diagnostics) = allowable(&model, demand, &opts);
-            assert_diagnostic(&diagnostics[0], &model, member, MaterialCategory::Steel);
-            assert!(partial.iter().all(|row| row.ratio > 1.0));
-            assert!(partial.iter().any(|row| {
-                matches!(row.kind, CheckKind::AxialBending | CheckKind::Bending)
-                    && normal.contains(row)
-            }));
-            let shear = partial
-                .iter()
-                .find(|row| row.kind == CheckKind::Shear)
-                .unwrap();
-            if member == "SRC柱" && term == LoadTerm::Long {
-                assert!(normal.contains(shear));
-            } else {
-                assert!(shear.detail.contains("sQA") && shear.detail.contains("未算定"));
-            }
-            model.sections[0].shear_rebar_material = Some(original);
-        }
-    }
+fn allowable_src_keeps_the_combined_long_term_column_shear() {
+    let mut model = src::model(true, "SN400B", 0.0, 0.0);
+    let opts = MemberDesignCheckOptions {
+        term: LoadTerm::Long,
+        ..Default::default()
+    };
+    let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 2_000_000_000.0];
+    let normal = allowable(&model, demand, &opts);
+    assert!(normal
+        .0
+        .iter()
+        .any(|row| row.kind == CheckKind::Shear && row.ratio > 1.0));
+    assert!(normal.1.is_empty());
+    assign_shear_rebar(&mut model, MaterialCategory::Steel);
+    assert_eq!(allowable(&model, demand, &opts), normal);
+    model.sections[0].shear_rebar_material = None;
+    assert_eq!(allowable(&model, demand, &opts), normal);
 }
 
 #[test]
@@ -252,8 +245,13 @@ fn allowable_beams_keep_bending_failure_and_material_diagnostic_without_gravity(
         assert_eq!(partial[0].kind, CheckKind::Bending);
         assert!(partial[0].ratio > 1.0);
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-        assert_diagnostic(&diagnostics[0], &model, member, MaterialCategory::Steel);
-        assert!(diagnostics[0].contains("重力参照内力が不足"));
+        if member == "RC梁" {
+            assert_diagnostic(&diagnostics[0], &model, member, MaterialCategory::Steel);
+            assert!(diagnostics[0].contains("重力参照内力が不足"));
+        } else {
+            assert!(diagnostics[0].contains("付1.4-4"));
+            assert!(!diagnostics[0].contains("せん断補強筋材料"));
+        }
     }
 }
 
@@ -547,7 +545,7 @@ fn allowable_shear_uses_the_supported_grade_table_with_infinite_fy() {
         ..Default::default()
     };
     let demand = [0.0, 1_000.0, 0.0, 0.0, 0.0, 1_000_000.0];
-    for (mut model, member) in rc_members().into_iter().chain(src_members()) {
+    for (mut model, member) in rc_members() {
         let baseline = allowable(&model, demand, &opts);
         assert!(baseline.0.iter().any(|row| row.kind == CheckKind::Shear));
         assert!(baseline.1.is_empty(), "{member}: {:?}", baseline.1);
@@ -816,11 +814,6 @@ fn both_invalid_rebar_assignments_keep_independent_failures_and_both_diagnostics
         );
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_both_diagnostics(&diagnostics[0], &model, member);
-        let [steel_shear] = partial.as_slice() else {
-            panic!("{partial:?}");
-        };
-        assert_eq!(steel_shear.kind, CheckKind::Shear);
-        assert!(steel_shear.ratio > 1.0);
-        assert!(steel_shear.detail.contains("sQA") && steel_shear.detail.contains("未算定"));
+        assert!(partial.is_empty(), "{partial:?}");
     }
 }

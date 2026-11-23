@@ -41,6 +41,8 @@ fn beam(id: u32, a: u32, b: u32) -> ElementData {
 
 fn plate(id: u32) -> WallPlate {
     WallPlate {
+        src_wall_detailing_confirmed: false,
+        src_steel_plate: None,
         dl_support: None,
         self_weight_shares: Vec::new(),
         id: WallPlateId(id),

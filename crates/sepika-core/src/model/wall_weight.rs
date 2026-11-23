@@ -141,6 +141,17 @@ impl Model {
                 "壁版のDL・地震用重量",
             )?;
         }
+        if let Some(steel) = plate.src_steel_plate {
+            let material = self
+                .materials
+                .get(steel.material.index())
+                .filter(|m| m.id == steel.material && m.category == MaterialCategory::Steel)
+                .ok_or("壁版の内蔵鋼板の鋼材が未設定です")?;
+            material.validate_design_self_weight(
+                &format!("壁版 {} の内蔵鋼板", plate.id.0),
+                "壁版のDL・地震用重量",
+            )?;
+        }
         Ok(())
     }
 
@@ -332,7 +343,7 @@ impl Model {
         if net < 0.0 || !net.is_finite() {
             return Err("開口面積が躯体実面積を超えています".into());
         }
-        let (design, physical) = match (
+        let (mut design, mut physical) = match (
             self.wall_plate_section(plate),
             self.wall_plate_material(plate),
         ) {
@@ -359,6 +370,33 @@ impl Model {
             (None, _) if plate.section.is_some() => return Err("壁断面の参照が不正です".into()),
             _ => (0.0, 0.0),
         };
+        if let Some(steel) = plate.src_steel_plate {
+            if !self.wall_plate_becomes_element(plate)
+                || plate.slit.any()
+                || plate.opening_area != 0.0
+                || !plate.openings.is_empty()
+            {
+                return Err("内蔵鋼板の重量には無開口・無スリットの耐震壁版が必要です".into());
+            }
+            let concrete_t = self
+                .wall_plate_section(plate)
+                .and_then(|s| s.thickness)
+                .ok_or("内蔵鋼板のある壁版の厚さが未設定です")?;
+            let t = steel.thickness_mm;
+            scalar(t, true, "内蔵鋼板厚")?;
+            if t >= concrete_t {
+                return Err("内蔵鋼板厚は壁厚未満としてください".into());
+            }
+            let material = self
+                .materials
+                .get(steel.material.index())
+                .filter(|m| m.id == steel.material && m.category == MaterialCategory::Steel)
+                .ok_or("壁版の内蔵鋼板の鋼材が未設定です")?;
+            scalar(material.density, true, "内蔵鋼板の物理密度")?;
+            let retained = (concrete_t - t) / concrete_t;
+            design = design * retained + t * material.design_unit_weight_n_per_mm3();
+            physical = physical * retained + t * material.density * crate::units::GRAVITY_MM_S2;
+        }
         let finish = plate.finish_intensity();
         let intensity = WallWeightTotals {
             design_n: design + finish,

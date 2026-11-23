@@ -130,6 +130,8 @@ crate::behavior::forward_element_behavior!(InPlaneReleasedColumn, inner, {
     owns_frame_member_loads: custom,
     frame_load_response: custom,
     state_frame_load_response: custom,
+    member_shear_status: forward,
+    member_shear_uses_nonsymmetric_tangent: forward,
     recover_forces: custom,
     state_member_forces: custom,
     snapshot_state: custom,

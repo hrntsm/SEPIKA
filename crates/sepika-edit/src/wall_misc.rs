@@ -745,6 +745,8 @@ impl EditCommand for AddAttachedWallPlate {
         }
         let id = WallPlateId(model.wall_plates.len() as u32);
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id,
@@ -802,6 +804,8 @@ impl EditCommand for AssignWallPlateToRegion {
             region: self.region,
             assignment: sepika_core::model::PlateAssignment::Plate(new_id),
             plate: Some(sepika_core::model::WallPlate {
+                src_wall_detailing_confirmed: false,
+                src_steel_plate: None,
                 dl_support: None,
                 self_weight_shares: Vec::new(),
                 id: new_id,
@@ -1097,6 +1101,8 @@ impl EditCommand for SetWallPlateSection {
 /// そのまま保存する（`WallPlate` が形によらず同じフィールドを持つ設計〔D3〕を
 /// コマンド側で崩さないため）。
 pub struct SetWallPlateAttrs {
+    pub src_wall_detailing_confirmed: bool,
+    pub src_steel_plate: Option<sepika_core::model::SrcWallSteelPlate>,
     pub dl_support: Option<sepika_core::model::WallDlSupport>,
     pub self_weight_shares: Vec<f64>,
     pub id: WallPlateId,
@@ -1116,6 +1122,8 @@ impl EditCommand for SetWallPlateAttrs {
         }
         let plate = &mut model.wall_plates[idx];
         let old = SetWallPlateAttrs {
+            src_wall_detailing_confirmed: plate.src_wall_detailing_confirmed,
+            src_steel_plate: plate.src_steel_plate,
             dl_support: plate.dl_support,
             self_weight_shares: plate.self_weight_shares.clone(),
             id: self.id,
@@ -1126,6 +1134,8 @@ impl EditCommand for SetWallPlateAttrs {
             slit: plate.slit,
         };
         plate.opening_area = self.opening_area;
+        plate.src_wall_detailing_confirmed = self.src_wall_detailing_confirmed;
+        plate.src_steel_plate = self.src_steel_plate;
         plate.opening_weight = self.opening_weight;
         plate.openings = self.openings.clone();
         plate.loads = self.loads.clone();

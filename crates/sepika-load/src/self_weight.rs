@@ -42,6 +42,7 @@ pub fn self_weight_case_content(
     model: &Model,
     load_cfg: &LoadCfg,
 ) -> Result<(Vec<NodalLoad>, Vec<MemberLoad>), String> {
+    model.validate_wall_primary_materials()?;
     model
         .validate_wall_attr_refs()
         .map_err(|error| error.to_string())?;

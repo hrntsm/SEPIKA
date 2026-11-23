@@ -403,6 +403,8 @@ mod tests {
             id
         });
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(model.wall_plates.len() as u32),
             shape: WallPlateShape::Attached {
                 anchor: RegionAnchor::FloorRegion { nodes },

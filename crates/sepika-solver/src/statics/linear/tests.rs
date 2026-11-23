@@ -362,8 +362,11 @@ fn wall_physical_balance_preserves_normalized_node_order() {
     .collect();
     model.elements[0].kind = ElementKind::Wall;
     model.sections[0].frame_use = None;
-    model.sections[0].thickness = Some(10.0);
-    model.materials[0].fy = Some(345.0);
+    model.sections[0].thickness = Some(200.0);
+    model.materials[0].category = MaterialCategory::Concrete;
+    model.materials[0].young = 23_000.0;
+    model.materials[0].poisson = 0.2;
+    model.materials[0].fc = Some(24.0);
     let map = DofMap::build(&Model {
         elements: vec![ElementData {
             nodes: smallvec::smallvec![NodeId(0), NodeId(1), NodeId(2), NodeId(3)],

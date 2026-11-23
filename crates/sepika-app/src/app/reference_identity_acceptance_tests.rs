@@ -119,6 +119,7 @@ fn pushover(qu: f64) -> sepika_solver::nonlinear::pushover::PushoverResult {
         capacity_curve: vec![],
         hinges: vec![],
         shear_yields: vec![],
+        shear_diagnostics: vec![],
         mechanism: MechanismType::Partial,
         qu,
         member_response: vec![],
@@ -220,6 +221,8 @@ fn reference_identity_wall_plate_without_parent_wall_region_keeps_stable_assignm
     model.add_enclosed_wall_plate_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: None,

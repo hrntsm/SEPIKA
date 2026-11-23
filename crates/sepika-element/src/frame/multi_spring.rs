@@ -42,6 +42,8 @@ crate::behavior::forward_element_behavior!(MultiSpringElement, inner, {
     owns_frame_member_loads: forward,
     frame_load_response: forward,
     state_frame_load_response: forward,
+    member_shear_status: forward,
+    member_shear_uses_nonsymmetric_tangent: forward,
     recover_forces: forward,
     state_member_forces: forward,
     snapshot_state: forward,

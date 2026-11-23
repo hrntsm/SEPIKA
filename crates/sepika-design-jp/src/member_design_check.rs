@@ -20,7 +20,7 @@ use sepika_core::model::{ElementData, ElementKind, Model};
 use sepika_core::section_shape::SectionShape;
 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::frame::beam::MemberForces;
-use sepika_solver::statics::linear::GirderColumnFaceEnds;
+use sepika_solver::statics::linear::{GirderColumnFaceEnds, SteelPanelColumnFaceForce};
 
 pub(crate) mod rc_column_long_term_shear;
 use rc_column_long_term_shear::{missing_design_positions, ColumnShearLoads};
@@ -29,7 +29,6 @@ use crate::design_position::{design_positions, is_near_design_position};
 use crate::{
     beam_has_attached_slab, checker_for, girder_deflection, BondMethod, CheckOutcome, CheckResult,
     DesignCheck, DesignCtx, LoadTerm, MemberForcesAt, MemberKind, QdMethod, SeismicQd,
-    SteelFbBasis,
 };
 
 /// 一本部材グループ合成値（断面検定の採用応力上書き用）。
@@ -57,10 +56,16 @@ pub struct MemberDesignCheckOptions<'a> {
     pub term: LoadTerm,
     /// 同じ解析結果の大梁実柱面断面力。欠落時は対応するSRC接合部を未算定とする。
     pub girder_column_face_forces: &'a [(ElemId, GirderColumnFaceEnds)],
+    /// 同じ解析結果のS造仕口フランジ位置における荷重込み柱軸力。
+    pub steel_panel_column_face_forces: &'a [SteelPanelColumnFaceForce],
     /// 壁展開時の元壁版と生成要素の対応。壁版のない要素fixtureではNoneを許す。
     pub wall_index: Option<&'a sepika_core::wall_expand::WallExpansionIndex>,
     /// 検定する荷重ケース・組合せの既存キー。
     pub wall_case: &'a str,
+    /// 同じ解析条件でSRC建物の保有水平耐力の検討が成立済みの場合にtrue。検討の合否を問わない。
+    pub src_holding_reviewed: bool,
+    /// SRC壁の検定対象組合せに含まれる重力内力。欠落時は必要な検定を未算定にする。
+    pub src_wall_gravity_forces: Option<&'a [(ElemId, MemberForces)]>,
     /// 同じ応力バッチを生成した荷重terms。ケース文字列からは推定しない。
     /// None では大梁の長期たわみは未算定とし、壁は全荷重ケースの未対応部材荷重を検査する。
     pub load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
@@ -78,8 +83,6 @@ pub struct MemberDesignCheckOptions<'a> {
     pub q_simple_by_elem: Option<&'a HashMap<ElemId, f64>>,
     /// 一本部材グループの検定文脈上書き（梁のみ適用）。None なら部材単体の値を用いる。
     pub girder_group_overrides: Option<&'a HashMap<ElemId, GirderGroupContextOverride>>,
-    /// 鋼材の許容曲げ応力度 fb の算定基準（既定は Asd2019）。
-    pub steel_fb_basis: SteelFbBasis,
 }
 
 /// 通常の長期RC柱検定に用いる部材内力の由来。
@@ -300,7 +303,6 @@ pub fn run_member_design_checks(
             m
         });
 
-    let column_k_index = sepika_core::adjacency::NodeAdjacency::build(model);
     let mut column_mechanism_topology = None;
     let mut member_checks: Vec<(ElemId, f64, CheckOutcome)> = Vec::new();
     let mut lateral_bracing_references = Vec::new();
@@ -444,40 +446,19 @@ pub fn run_member_design_checks(
         } else {
             None
         };
-        if kind == MemberKind::Column
-            && mat.category == sepika_core::model::MaterialCategory::Steel
-            && !matches!(structure, StructureKind::S | StructureKind::Cft)
-            && !steel_attr
-                .as_ref()
-                .is_some_and(|a| a.lk_y_direct.is_some() && a.lk_z_direct.is_some())
-        {
-            if let Some(reason) = crate::steel::buckling::eccentric_column_k_reason(model, elem) {
-                for (pos, forces) in &mf.at {
-                    push_strength_outcome(
-                        &mut member_checks,
-                        *elem_id,
-                        *pos,
-                        CheckOutcome::Skipped {
-                            reason: reason.clone(),
-                        },
-                        torsion_reason(&MemberForcesAt::from_local(*pos, *forces)),
-                    );
-                }
-                continue;
+        let frame_buckling = structure == StructureKind::S
+            || (structure == StructureKind::Src && kind == MemberKind::Column);
+        let buckling_lengths = match structure {
+            StructureKind::Cft => {
+                crate::cft::direct_column_buckling_lengths(*elem_id, steel_attr.as_ref()).map(Some)
             }
-        }
-        let buckling_lengths = if structure == StructureKind::Cft {
-            crate::cft::direct_column_buckling_lengths(*elem_id, steel_attr.as_ref()).map(Some)
-        } else if structure == StructureKind::S {
-            crate::steel::buckling::resolve_steel_buckling_lengths(
-                *elem_id,
+            _ if frame_buckling => Ok(Some(crate::steel::frame_buckling_lengths(
+                model,
+                elem,
                 kind,
-                group.map_or(length, |g| g.length),
                 steel_attr.as_ref(),
-            )
-            .map(Some)
-        } else {
-            Ok(None)
+            ))),
+            _ => Ok(None),
         };
         let buckling_lengths = match buckling_lengths {
             Ok(lengths) => lengths,
@@ -499,32 +480,12 @@ pub fn run_member_design_checks(
                 continue;
             }
         };
-        let (lk_y_auto, lk_z_auto) = if kind == MemberKind::Column
-            && !matches!(structure, StructureKind::S | StructureKind::Cft)
-        {
-            match crate::steel::buckling::steel_column_k_axes_with_index(
-                model,
-                &column_k_index,
-                elem,
-            ) {
-                Some((k_y, k_z)) => (Some(k_y * length), Some(k_z * length)),
-                None => (None, None),
-            }
-        } else {
-            (None, None)
-        };
         let (lk_y, lk_z) = match buckling_lengths {
             Some((strong, weak)) => (Some(strong), Some(weak)),
-            None => (
-                steel_attr
-                    .as_ref()
-                    .and_then(|a| a.lk_y_direct)
-                    .or(lk_y_auto),
-                steel_attr
-                    .as_ref()
-                    .and_then(|a| a.lk_z_direct)
-                    .or(lk_z_auto),
-            ),
+            None => steel_attr
+                .as_ref()
+                .map(|attr| (attr.lk_y_direct, attr.lk_z_direct))
+                .unwrap_or_default(),
         };
         let (length, shear_span, end_moments_z, mid_moment_z) = match group {
             Some(g) => (g.length, g.shear_span, g.end_moments_z, g.mid_moment_z),
@@ -652,6 +613,8 @@ pub fn run_member_design_checks(
             term: options.term,
             kind,
             length,
+            node_span_mm: (structure == StructureKind::S)
+                .then(|| crate::steel::frame_node_span_mm(model, elem)),
             column_lateral_buckling_length: (structure == StructureKind::S
                 && kind == MemberKind::Column
                 && crate::steel::is_symmetric_h_section(sec))
@@ -673,7 +636,6 @@ pub fn run_member_design_checks(
             column_sum_my,
             beam_has_slab: kind == MemberKind::Girder && beam_has_attached_slab(model, elem),
             steel_attr,
-            steel_fb_basis: options.steel_fb_basis,
         };
 
         let checker: Box<dyn DesignCheck> = checker_for(structure);
@@ -720,13 +682,8 @@ pub fn run_member_design_checks(
                 ) == sepika_core::structure_kind::StructureKind::Rc
                     || matches!(
                         (&sec.shape, kind),
-                        (
-                            Some(sepika_core::section_shape::SectionShape::SrcBeamRect { .. }),
-                            MemberKind::Girder
-                        ) | (
-                            Some(sepika_core::section_shape::SectionShape::SrcColumnRect { .. }),
-                            MemberKind::Column
-                        )
+                        (Some(SectionShape::SrcColumnRect { .. }), MemberKind::Column)
+                            | (Some(SectionShape::SrcBeamRect { .. }), MemberKind::Girder)
                     ) && sepika_core::structure_kind::structure_kind_of(
                         Some(sec),
                         Some(mat.category),
@@ -780,10 +737,10 @@ pub fn run_member_design_checks(
                 );
                 check_incomplete = incomplete;
                 outcome
-            } else if structure == StructureKind::S && kind == MemberKind::Column {
+            } else if structure == StructureKind::S {
                 let (outcome, incomplete) =
                     crate::SteelDesign.check_with_incomplete(&mfa, sec, mat, &ctx);
-                check_incomplete = incomplete.map(str::to_owned);
+                check_incomplete = incomplete;
                 outcome
             } else {
                 checker.check(&mfa, sec, mat, &ctx)
@@ -798,10 +755,12 @@ pub fn run_member_design_checks(
                     result.detail.push_str(&format!(", {}", reference.detail()));
                 }
             }
-            if structure == StructureKind::S {
-                if let (Some((strong, weak)), CheckOutcome::Checked(result)) =
-                    (buckling_lengths, &mut outcome)
-                {
+            if frame_buckling {
+                if let (Some((strong, weak)), CheckOutcome::Checked(result)) = (
+                    lk_y.zip(lk_z)
+                        .filter(|(y, z)| [*y, *z].into_iter().all(|v| v.is_finite() && v > 0.0)),
+                    &mut outcome,
+                ) {
                     if !result.detail.is_empty() {
                         result.detail.push_str(", ");
                     }
@@ -1016,33 +975,36 @@ pub fn run_member_design_checks(
         .filter(|(id, _)| !duplicate_column_ids.contains(id))
         .map(|(id, mf)| (*id, mf.at.as_slice()))
         .collect();
-    let long_slices: Option<Vec<(ElemId, crate::joint_wiring::ForcesAt)>> =
-        options.long_member_forces.map(|list| {
-            list.iter()
-                .map(|(id, mf)| (*id, mf.at.as_slice()))
-                .collect()
-        });
-
     // 同じ位置の既存行を先に置き、たわみ算定可否で比較時の順序を変えない。
     member_checks.extend(standalone_deflection_checks);
 
     let joint_checks = crate::joint_wiring::collect_joint_checks_impl(
         model,
         &mf_slices,
-        long_slices.as_deref(),
         panel_moments,
         crate::joint_wiring::GirderFaceForces::Analysis(options.girder_column_face_forces),
+        Some(options.steel_panel_column_face_forces),
         options.term,
         false,
     );
 
-    let wall_checks = crate::joint_wiring::collect_wall_design_checks(
+    let gravity_wall = options.src_wall_gravity_forces.map(|forces| {
+        forces
+            .iter()
+            .map(|(id, mf)| (*id, mf.at.as_slice()))
+            .collect::<Vec<_>>()
+    });
+    let wall_checks = crate::joint_wiring::collect_wall_design_checks_for_case(
         model,
         &mf_slices,
-        options.term,
-        options.wall_index,
-        options.wall_case,
-        options.load_terms,
+        crate::joint_wiring::WallDesignInputs {
+            term: options.term,
+            index: options.wall_index,
+            case: options.wall_case,
+            load_terms: options.load_terms,
+            gravity_forces: gravity_wall.as_deref(),
+            src_holding_reviewed: options.src_holding_reviewed,
+        },
     );
     Ok(MemberDesignCheckReport {
         member_checks,

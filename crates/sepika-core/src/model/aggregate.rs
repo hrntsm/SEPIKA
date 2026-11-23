@@ -20,7 +20,6 @@ macro_rules! for_each_elem_attr_collection {
         );
         $visit!(wall_attrs, elem, WALL_ATTR_LABEL);
         $visit!(steel_design_attrs, elem, STEEL_DESIGN_ATTR_LABEL);
-        $visit!(slab_composite_attrs);
         $visit!(member_hysteresis_attrs, elem, MEMBER_HYSTERESIS_ATTR_LABEL);
         $visit!(damper_attrs, elem, DAMPER_ATTR_LABEL);
         $visit!(member_detail_attrs, elem, MEMBER_DETAIL_ATTR_LABEL);
@@ -44,7 +43,6 @@ pub struct ElemAttrs {
     pub damper: Vec<(usize, DamperAttr)>,
     /// 元の配列位置と部材の付帯情報。
     pub detail: Vec<(usize, MemberDetailAttr)>,
-    pub slab_composite: Option<SlabCompositeConnection>,
     /// 削除前の配列位置と付加線重量 [N/mm]。
     pub extra_line_weight: Vec<(usize, f64)>,
     /// 削除前の配列位置と仕上げ面重量 [N/mm²]。
@@ -198,9 +196,6 @@ pub struct Model {
     /// 壁の階重量生成方式。旧ファイル・未生成はNone（ケース方式へ推定しない）。
     #[serde(default)]
     pub wall_weight_generation: Option<WallWeightGenerationMode>,
-    /// H形鋼大梁の床板合成剛性の入力。記録がない大梁は接合未確認。
-    #[serde(default)]
-    pub slab_composite_attrs: std::collections::BTreeMap<ElemId, SlabCompositeConnection>,
     /// 一時壁展開モデルの生成元。保存モデルには含めない。
     #[serde(skip)]
     pub generated_wall_origins: std::collections::HashMap<ElemId, WallPlateId>,
@@ -344,14 +339,6 @@ impl Model {
                         assignment.node.0, id.0
                     )));
                 }
-            }
-        }
-        for &elem in self.slab_composite_attrs.keys() {
-            if self.element(elem).is_none() {
-                return Err(CoreError::DanglingRef(format!(
-                    "床板合成 -> Element {}",
-                    elem.0
-                )));
             }
         }
         self.validate_wall_attr_refs()?;
@@ -597,6 +584,18 @@ impl Model {
             }
         }
         for plate in &self.wall_plates {
+            if let Some(steel) = plate.src_steel_plate {
+                if self
+                    .materials
+                    .get(steel.material.index())
+                    .is_none_or(|m| m.id != steel.material)
+                {
+                    return Err(CoreError::DanglingRef(format!(
+                        "WallPlate {} -> Material {}",
+                        plate.id.0, steel.material.0
+                    )));
+                }
+            }
             for nid in wall_plate_node_refs(self, plate) {
                 if nid.index() >= self.nodes.len() || self.nodes[nid.index()].id != nid {
                     return Err(CoreError::DanglingRef(format!(
@@ -687,6 +686,8 @@ impl Model {
         use crate::error::CoreError;
 
         self.validate_reference_ids()?;
+        self.validate_wall_primary_materials()
+            .map_err(CoreError::InvalidInput)?;
         self.validate_frame_node_counts()?;
         self.validate_secondary_section_usage()?;
         self.validate_rc_section_usage()?;
@@ -1311,7 +1312,6 @@ impl Model {
             && self.wall_plates == other.wall_plates
             && self.stress_cfg == other.stress_cfg
             && self.steel_design_attrs == other.steel_design_attrs
-            && self.slab_composite_attrs == other.slab_composite_attrs
             && self.unassigned_beams == other.unassigned_beams
             && self.unassigned_posts == other.unassigned_posts
             && self.axes == other.axes
@@ -1564,6 +1564,11 @@ impl Model {
                 f(mid);
             }
         }
+        for plate in &mut self.wall_plates {
+            if let Some(steel) = &mut plate.src_steel_plate {
+                f(&mut steel.material);
+            }
+        }
     }
 
     /// モデル内の全ての `ElemId` 参照（要素自身の ID・部材荷重・部材別重量・側テーブル属性・
@@ -1703,11 +1708,6 @@ impl Model {
         mut matches: impl FnMut(ElemId) -> bool,
     ) -> Option<(ElemId, &'static str)> {
         macro_rules! find {
-            (slab_composite_attrs) => {
-                if let Some(id) = self.slab_composite_attrs.keys().copied().find(|id| matches(*id)) {
-                    return Some((id, "床板合成接合の指定"));
-                }
-            };
             (girder_groups) => {
                 if let Some(id) = self.girder_groups.iter().flatten().copied().find(|id| matches(*id)) {
                     return Some((id, "一本部材の指定"));
@@ -1740,15 +1740,6 @@ impl Model {
             f(member);
         }
         macro_rules! shift {
-            (slab_composite_attrs) => {
-                self.slab_composite_attrs = std::mem::take(&mut self.slab_composite_attrs)
-                    .into_iter()
-                    .map(|(mut elem, connection)| {
-                        f(&mut elem);
-                        (elem, connection)
-                    })
-                    .collect();
-            };
             (girder_groups) => {
                 for id in self.girder_groups.iter_mut().flatten() {
                     f(id);
@@ -1811,7 +1802,6 @@ impl Model {
             steel_design: take_ordered(&mut self.steel_design_attrs, |attr| {
                 (attr.elem == elem).then(|| attr.clone())
             }),
-            slab_composite: self.slab_composite_attrs.remove(&elem),
             hysteresis: take_ordered(&mut self.member_hysteresis_attrs, |attr| {
                 (attr.elem == elem).then_some(*attr)
             }),
@@ -1839,9 +1829,6 @@ impl Model {
             attr.elem = elem;
             self.steel_design_attrs
                 .insert(index.min(self.steel_design_attrs.len()), attr);
-        }
-        if let Some(connection) = attrs.slab_composite {
-            self.slab_composite_attrs.insert(elem, connection);
         }
         for (index, mut attr) in attrs.hysteresis {
             attr.elem = elem;
@@ -1878,44 +1865,6 @@ impl Model {
                 );
             }
         }
-    }
-
-    /// H形鋼の主架構大梁か。実部材化された小梁を除く。
-    pub fn is_steel_h_girder(&self, data: &ElementData) -> bool {
-        data.kind.is_primary_frame_support()
-            && data.nodes.len() == 2
-            && self.element_section(data).is_some_and(|section| {
-                section.frame_use == Some(FrameSectionUse::Girder)
-                    && matches!(
-                        section.shape,
-                        Some(crate::section_shape::SectionShape::SteelH { .. })
-                    )
-            })
-            && !self
-                .beams()
-                .any(|member| self.element_represents_secondary_member(data, member))
-    }
-
-    /// 床板合成剛性の指定を返す。未登録は未確認。
-    pub fn slab_composite_connection(&self, elem: ElemId) -> SlabCompositeConnection {
-        self.slab_composite_attrs
-            .get(&elem)
-            .copied()
-            .unwrap_or_default()
-    }
-
-    /// 床板合成剛性の指定を更新し、更新前の指定を返す。
-    pub fn set_slab_composite_connection(
-        &mut self,
-        elem: ElemId,
-        connection: SlabCompositeConnection,
-    ) -> SlabCompositeConnection {
-        if connection == SlabCompositeConnection::Unconfirmed {
-            self.slab_composite_attrs.remove(&elem)
-        } else {
-            self.slab_composite_attrs.insert(elem, connection)
-        }
-        .unwrap_or_default()
     }
 
     /// 指定部材のハンチ・継手位置のうち先頭のエントリを返す。未指定なら `None`。
@@ -2442,6 +2391,8 @@ mod node_reference_tests {
             .push(WallRegion::new(WallRegionId(0), vec![NodeId(5)]));
 
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(0),
@@ -2454,6 +2405,8 @@ mod node_reference_tests {
             slit: Default::default(),
         });
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(1),
@@ -2493,6 +2446,8 @@ mod node_reference_tests {
         });
 
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: Vec::new(),
             id: WallPlateId(2),

@@ -297,6 +297,8 @@ fn opening_audit_plate_expansion(direct: &Model) -> Model {
     let plate = input.add_enclosed_wall_plate_from_nodes(
         &boundary,
         WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: wall.section,
@@ -647,18 +649,14 @@ fn check_lateral_reactions(
     }
 }
 
-fn lateral_work(kind: ElementKind, steel: bool) -> [f64; 5] {
+fn lateral_work(kind: ElementKind) -> [f64; 5] {
     let mut previous_disp = [[0.0; 6]; 4];
     let mut previous_forces = [[[0.0; 6]; 4]; 5];
     let mut previous_load = [[0.0; 6]; 4];
     let mut work_n_mm = [0.0; 5];
     let mut external_work_n_mm = 0.0;
     for total_force_n in [0.0, 50_000.0, 100_000.0] {
-        let model = if steel {
-            steel_fixture(kind, total_force_n)
-        } else {
-            fixture(kind, Dof::Ux, total_force_n)
-        };
+        let model = fixture(kind, Dof::Ux, total_force_n);
         let result = linear_static_once(&model, LoadCaseId(0)).unwrap();
         let forces = element_nodal_forces(&model, &result);
         let mut nodal_load = [[0.0; 6]; 4];
@@ -799,130 +797,96 @@ fn orient_fixture(model: &mut Model, rotated: bool, reversed_wall: bool, reverse
 #[test]
 fn wall_system_signed_rotated_and_reordered_states_match_independent_reference() {
     let mut states = 0;
-    for steel in [false, true] {
-        let (stiffness, displacement, wall_q, wall_z, column_q, column_m) = if steel {
-            (
-                1_120_022.938_470_160_6,
-                0.089_283_885_682_368_27,
-                67_090.754_877_014_43,
-                25_159.033_078_880_41,
-                16_454.622_561_492_786,
-                -24_681_933.842_239_18,
-            )
-        } else {
-            (
-                2_668_279.578_323_177_5,
-                0.037_477_332_140_300_995,
-                100_000.0,
-                37_500.0,
-                0.0,
-                0.0,
-            )
-        };
-        for kind in KINDS {
-            for sign in [-1.0, 1.0] {
-                for rotated in [false, true] {
-                    for reversed_wall in [false, true] {
-                        for reversed_columns in [false, true] {
-                            println!("steel={steel}, kind={kind:?}, sign={sign}, rotated={rotated}, reversed_wall={reversed_wall}, reversed_columns={reversed_columns}");
-                            let mut model = if steel {
-                                steel_fixture(kind, sign * 100_000.0)
-                            } else {
-                                fixture(kind, Dof::Ux, sign * 100_000.0)
-                            };
-                            orient_fixture(&mut model, rotated, reversed_wall, reversed_columns);
-                            let dof = if rotated { Dof::Uy } else { Dof::Ux };
-                            let result = linear_static_once(&model, LoadCaseId(0)).unwrap();
-                            check_displacements(&result, dof, sign * displacement);
-                            close(
-                                sign * 100_000.0 / result.disp[2][dof as usize],
-                                stiffness,
-                                0.003,
-                            );
-                            close(projected_stiffness(&model, dof), stiffness, 0.003);
-                            let forces = element_nodal_forces(&model, &result);
-                            let mut reactions = [[0.0; 6]; 4];
-                            for (e, element) in forces.iter().enumerate() {
-                                for (node, force) in element.iter().enumerate() {
-                                    let mut expected = [0.0; 6];
-                                    if e == 4 {
-                                        expected[0] = if node < 2 { -wall_q } else { wall_q } / 2.0;
-                                        expected[2] = if node % 2 == 0 { -wall_z } else { wall_z };
-                                    } else if e < 2 && node % 2 == e {
-                                        expected[0] = if node < 2 { -column_q } else { column_q };
-                                        expected[4] = column_m;
-                                    }
-                                    let expected = rotate_z90(expected.map(|v| sign * v), rotated);
-                                    for d in 0..6 {
-                                        close(
-                                            force[d],
-                                            expected[d],
-                                            if d < 3 { 1e-5 } else { 0.01 },
-                                        );
-                                        reactions[node][d] += force[d];
-                                    }
-                                }
-                            }
-                            for load in &model.load_cases[0].nodal {
-                                for (reaction, force) in
-                                    reactions[load.node.index()].iter_mut().zip(load.values)
-                                {
-                                    *reaction -= force;
-                                }
-                            }
-                            let mut balance = [0.0; 6];
-                            for (node, reaction) in reactions.iter().enumerate() {
+    let stiffness = 2_668_279.578_323_177_5;
+    let displacement = 0.037_477_332_140_300_995;
+    let wall_q = 100_000.0;
+    let wall_z = 37_500.0;
+    for kind in KINDS {
+        for sign in [-1.0, 1.0] {
+            for rotated in [false, true] {
+                for reversed_wall in [false, true] {
+                    for reversed_columns in [false, true] {
+                        println!("kind={kind:?}, sign={sign}, rotated={rotated}, reversed_wall={reversed_wall}, reversed_columns={reversed_columns}");
+                        let mut model = fixture(kind, Dof::Ux, sign * 100_000.0);
+                        orient_fixture(&mut model, rotated, reversed_wall, reversed_columns);
+                        let dof = if rotated { Dof::Uy } else { Dof::Ux };
+                        let result = linear_static_once(&model, LoadCaseId(0)).unwrap();
+                        check_displacements(&result, dof, sign * displacement);
+                        close(
+                            sign * 100_000.0 / result.disp[2][dof as usize],
+                            stiffness,
+                            0.003,
+                        );
+                        close(projected_stiffness(&model, dof), stiffness, 0.003);
+                        let forces = element_nodal_forces(&model, &result);
+                        let mut reactions = [[0.0; 6]; 4];
+                        for (e, element) in forces.iter().enumerate() {
+                            for (node, force) in element.iter().enumerate() {
                                 let mut expected = [0.0; 6];
-                                if node < 2 {
-                                    expected[0] = -50_000.0;
+                                if e == 4 {
+                                    expected[0] = if node < 2 { -wall_q } else { wall_q } / 2.0;
+                                    expected[2] = if node % 2 == 0 { -wall_z } else { wall_z };
                                 }
-                                expected[2] = if node % 2 == 0 { -wall_z } else { wall_z };
-                                expected[4] = column_m;
                                 let expected = rotate_z90(expected.map(|v| sign * v), rotated);
                                 for d in 0..6 {
-                                    close(
-                                        reaction[d],
-                                        expected[d],
-                                        if d < 3 { 1e-5 } else { 0.01 },
-                                    );
+                                    close(force[d], expected[d], if d < 3 { 1e-5 } else { 0.01 });
+                                    reactions[node][d] += force[d];
                                 }
-                                let mut net = *reaction;
-                                for load in model.load_cases[0]
-                                    .nodal
-                                    .iter()
-                                    .filter(|l| l.node.index() == node)
-                                {
-                                    for (v, p) in net.iter_mut().zip(load.values) {
-                                        *v += p;
-                                    }
-                                }
-                                for d in 0..6 {
-                                    balance[d] += net[d];
-                                }
-                                let [x, y, z] = model.nodes[node].coord;
-                                balance[3] += y * net[2] - z * net[1];
-                                balance[4] += z * net[0] - x * net[2];
-                                balance[5] += x * net[1] - y * net[0];
                             }
-                            for (d, value) in balance.into_iter().enumerate() {
-                                close(value, 0.0, if d < 3 { 1e-5 } else { 0.01 });
-                            }
-                            let upper = std::array::from_fn::<_, 3, _>(|d| {
-                                forces[4][2][d] + forces[4][3][d]
-                            });
-                            let winding = if reversed_wall { -1.0 } else { 1.0 };
-                            let local_q = winding * upper[dof as usize];
-                            close(local_q, winding * sign * wall_q, 1e-5);
-                            close(upper[0], if rotated { 0.0 } else { sign * wall_q }, 1e-5);
-                            close(upper[1], if rotated { sign * wall_q } else { 0.0 }, 1e-5);
-                            states += 1;
                         }
+                        for load in &model.load_cases[0].nodal {
+                            for (reaction, force) in
+                                reactions[load.node.index()].iter_mut().zip(load.values)
+                            {
+                                *reaction -= force;
+                            }
+                        }
+                        let mut balance = [0.0; 6];
+                        for (node, reaction) in reactions.iter().enumerate() {
+                            let mut expected = [0.0; 6];
+                            if node < 2 {
+                                expected[0] = -50_000.0;
+                            }
+                            expected[2] = if node % 2 == 0 { -wall_z } else { wall_z };
+                            let expected = rotate_z90(expected.map(|v| sign * v), rotated);
+                            for d in 0..6 {
+                                close(reaction[d], expected[d], if d < 3 { 1e-5 } else { 0.01 });
+                            }
+                            let mut net = *reaction;
+                            for load in model.load_cases[0]
+                                .nodal
+                                .iter()
+                                .filter(|l| l.node.index() == node)
+                            {
+                                for (v, p) in net.iter_mut().zip(load.values) {
+                                    *v += p;
+                                }
+                            }
+                            for d in 0..6 {
+                                balance[d] += net[d];
+                            }
+                            let [x, y, z] = model.nodes[node].coord;
+                            balance[3] += y * net[2] - z * net[1];
+                            balance[4] += z * net[0] - x * net[2];
+                            balance[5] += x * net[1] - y * net[0];
+                        }
+                        for (d, value) in balance.into_iter().enumerate() {
+                            close(value, 0.0, if d < 3 { 1e-5 } else { 0.01 });
+                        }
+                        let upper =
+                            std::array::from_fn::<_, 3, _>(|d| forces[4][2][d] + forces[4][3][d]);
+                        let winding = if reversed_wall { -1.0 } else { 1.0 };
+                        let local_q = winding * upper[dof as usize];
+                        close(local_q, winding * sign * wall_q, 1e-5);
+                        close(upper[0], if rotated { 0.0 } else { sign * wall_q }, 1e-5);
+                        close(upper[1], if rotated { sign * wall_q } else { 0.0 }, 1e-5);
+                        states += 1;
                     }
                 }
             }
         }
     }
-    assert_eq!(states, 96);
+    assert_eq!(states, 48);
 }
 
 #[test]
@@ -951,7 +915,7 @@ fn rc_wall_stiffness_forces_reactions_and_work_match_independent_reference() {
             }
         }
         check_lateral_reactions(&model, &forces, 100_000.0, 100_000.0, 0.0);
-        let work = lateral_work(kind, false);
+        let work = lateral_work(kind);
         close(work[4], 1_873.866_607_015_049_8, 1e-6);
         for value in &work[..4] {
             close(*value, 0.0, 1e-6);
@@ -999,63 +963,41 @@ fn rc_wall_stiffness_forces_reactions_and_work_match_independent_reference() {
 }
 
 #[test]
-fn steel_plate_and_unreleased_boundary_columns_match_independent_reference() {
-    // 400角の鋼平鋼は人工数値例。板・固定端柱の曲げ/せん断コンプライアンスから得た閉式基準。
-    const PLATE_K_N_MM: f64 = 751_431.844_215_349_5;
-    const COLUMN_K_N_MM: f64 = 184_295.547_127_405_53;
-    const TOTAL_K_N_MM: f64 = 1_120_022.938_470_160_6;
-    const DISPLACEMENT_MM: f64 = 0.089_283_885_682_368_27;
-    const PLATE_Q_N: f64 = 67_090.754_877_014_43;
-    const COLUMN_Q_N: f64 = 16_454.622_561_492_786;
+fn steel_walls_are_rejected_before_static_modal_and_incremental_analysis() {
+    use sepika_solver::common::constraint::Reducer;
+    use sepika_solver::dynamic::eigen::solve_eigen;
+    use sepika_solver::nonlinear::pushover::pushover_analysis;
+    use sepika_solver::statics::analysis::SeismicDir;
+
     for kind in KINDS {
-        let model = steel_fixture(kind, 100_000.0);
-        let result = linear_static_once(&model, LoadCaseId(0)).unwrap();
-        check_displacements(&result, Dof::Ux, DISPLACEMENT_MM);
-        close(100_000.0 / result.disp[2][0], TOTAL_K_N_MM, 0.002);
-        close(projected_stiffness(&model, Dof::Ux), TOTAL_K_N_MM, 0.002);
-        let forces = element_nodal_forces(&model, &result);
-        for (node, force) in forces[4].iter().enumerate() {
-            let mut expected_wall = [0.0; 6];
-            expected_wall[0] = if node < 2 { -1.0 } else { 1.0 } * PLATE_Q_N / 2.0;
-            expected_wall[2] = if node % 2 == 0 { -1.0 } else { 1.0 } * 25_159.033_078_880_41;
-            for (d, expected) in expected_wall.iter().enumerate() {
-                close(force[d], *expected, if d < 3 { 1e-5 } else { 0.01 });
-            }
-        }
-        close(
-            (forces[4][2][0] + forces[4][3][0]) / result.disp[2][0],
-            PLATE_K_N_MM,
-            0.001,
-        );
-        for (e, element) in forces[..2].iter().enumerate() {
-            for (node, force) in element.iter().enumerate() {
-                let mut expected = [0.0; 6];
-                if node % 2 == e {
-                    expected[0] = if node < 2 { -COLUMN_Q_N } else { COLUMN_Q_N };
-                    expected[4] = -24_681_933.842_239_18;
-                }
-                for (d, expected) in expected.iter().enumerate() {
-                    close(force[d], *expected, if d < 3 { 1e-5 } else { 0.01 });
-                }
-            }
-            close(element[e + 2][0] / result.disp[2][0], COLUMN_K_N_MM, 0.001);
-        }
-        check_lateral_reactions(&model, &forces, 100_000.0, PLATE_Q_N, COLUMN_Q_N);
-        let work = lateral_work(kind, true);
-        close(work.iter().sum(), 4_464.194_284_118_414, 1e-6);
-        close(work[4], 0.5 * PLATE_K_N_MM * DISPLACEMENT_MM.powi(2), 1e-6);
-        for value in &work[..2] {
-            close(*value, 0.5 * COLUMN_K_N_MM * DISPLACEMENT_MM.powi(2), 1e-6);
-        }
-        close(work[2], 0.0, 1e-6);
-        close(work[3], 0.0, 1e-6);
-        println!(
-            "{kind:?}: steel K={}, ux={}, plate Q={}, total work={} Nmm",
-            100_000.0 / result.disp[2][0],
-            result.disp[2][0],
-            forces[4][2][0] + forces[4][3][0],
-            work.iter().sum::<f64>()
-        );
+        let mut model = steel_fixture(kind, 100_000.0);
+        let reason = model.validate_wall_primary_materials().unwrap_err();
+        assert!(reason.contains("鋼板壁 ID 4"), "{reason}");
+        assert!(reason.contains("重量は荷重として入力"), "{reason}");
+        let error = linear_static_once(&model, LoadCaseId(0)).err().unwrap();
+        assert!(error.to_string().contains(&reason), "{error}");
+        let dofmap = DofMap::build(&model);
+        let reducer = Reducer::build(&model, &dofmap);
+        let error = solve_eigen(&model, &dofmap, &reducer, 1).unwrap_err();
+        assert!(error.to_string().contains(&reason), "{error}");
+        let error = pushover_analysis(&model, &dofmap, &reducer, SeismicDir::X, 1, 1.0)
+            .err()
+            .unwrap();
+        assert!(error.contains(&reason), "{error}");
+
+        model.wall_attrs.push(WallAttr {
+            elem: ElemId(4),
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            slit: WallSlit {
+                column_face: [true, true],
+                beam_face: [true, true],
+            },
+            openings: vec![],
+            finish_intensity: 0.0,
+        });
+        let error = linear_static_once(&model, LoadCaseId(0)).err().unwrap();
+        assert!(error.to_string().contains(&reason), "{error}");
     }
 }
 

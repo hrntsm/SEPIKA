@@ -11,7 +11,6 @@ use crate::structure_kind::{shape_composite_kind, StructureKind};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WallSideColumnRole {
     RcSrcReplacement,
-    SteelPlateBoundary,
     InactiveWall,
     Unresolved,
 }
@@ -36,7 +35,7 @@ pub enum WallSideColumnReason {
     FrameMaterialMismatch,
     DuplicateColumns,
     NonParallelWalls,
-    InvalidSteelYield,
+    UnsupportedSteelWall,
 }
 
 /// 関連する全対象 ID を昇順で保持する。解析種別ごとの適用可否は利用側で判定する。
@@ -203,13 +202,25 @@ impl WallSideColumnIndex {
         members.sort_by_key(|e| e.id);
         for wall in walls {
             let structure = explicit_structure(wall, model);
+            if structure == Ok(StructureKind::S) {
+                result.walls.push(WallSideColumnWall {
+                    wall: wall.id,
+                    role: WallSideColumnRole::Unresolved,
+                    structure: Some(StructureKind::S),
+                    issues: vec![issue(
+                        WallSideColumnReason::UnsupportedSteelWall,
+                        vec![wall.id],
+                        vec![],
+                    )],
+                });
+                continue;
+            }
             let mut record = WallSideColumnWall {
                 wall: wall.id,
                 role: match structure {
                     Ok(StructureKind::Rc | StructureKind::Src) => {
                         WallSideColumnRole::RcSrcReplacement
                     }
-                    Ok(StructureKind::S) => WallSideColumnRole::SteelPlateBoundary,
                     _ => WallSideColumnRole::Unresolved,
                 },
                 structure: structure.as_ref().ok().copied(),
@@ -227,17 +238,6 @@ impl WallSideColumnIndex {
                 }
                 record.issues.push(issue(
                     WallSideColumnReason::WallNotSeismic,
-                    vec![wall.id],
-                    vec![],
-                ));
-            }
-            if record.structure == Some(StructureKind::S)
-                && model
-                    .element_material(wall)
-                    .is_some_and(|m| m.fy.is_none_or(|fy| !fy.is_finite() || fy <= 0.0))
-            {
-                record.issues.push(issue(
-                    WallSideColumnReason::InvalidSteelYield,
                     vec![wall.id],
                     vec![],
                 ));
@@ -458,7 +458,7 @@ impl WallSideColumnIndex {
             .collect())
     }
 
-    /// 壁断面へ算入する接続を返す。鋼板境界と非成立壁の側柱は算入しない。
+    /// 壁断面へ算入する接続を返す。壁の入力が不正な場合は関連 ID 付きで失敗する。
     pub fn wall_replacement_bindings(
         &self,
         wall: ElemId,
@@ -543,7 +543,6 @@ fn frame_compatible(wall: Option<StructureKind>, member: StructureKind, column: 
             matches!(member, StructureKind::Rc | StructureKind::Src)
                 || (column && member == StructureKind::Cft)
         }
-        Some(StructureKind::S) => member == StructureKind::S,
         _ => true,
     }
 }

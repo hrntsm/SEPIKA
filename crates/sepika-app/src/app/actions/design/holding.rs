@@ -203,6 +203,32 @@ impl App {
         ),
         String,
     > {
+        use sepika_design_jp::secondary::holding_capacity::FrameType;
+
+        if self.core.design_frame == FrameType::SrcFrame || self.has_src_holding_members() {
+            self.core.scoped.holding_capacity_source = None;
+            self.core.scoped.ds_beta_u_by_story.clear();
+            self.core.scoped.ds_wall_details.clear();
+            self.core.scoped.ds_beta_u_unavailable = false;
+            self.core.scoped.ds_rank_fallback_stories.clear();
+            let results = self.src_holding_results()?;
+            let all_ok = results
+                .iter()
+                .all(|r| r.result.stories.iter().all(|s| s.ok));
+            let mut current = results
+                .into_iter()
+                .find(|r| {
+                    r.source.direction == self.core.scoped.pushover_view_dir
+                        && r.source.src_sign == Some(self.core.scoped.src_holding_sign)
+                })
+                .expect("4加力方向の結果を算定済み");
+            current.source.src_both_directions_ok = Some(all_ok);
+            self.core.scoped.ds_beta_u_by_story =
+                current.source.ds_forces.iter().map(|f| f.beta_u).collect();
+            self.core.scoped.ds_wall_details = current.details;
+            self.core.scoped.holding_capacity_source = Some(current.source);
+            return Ok((current.result, current.ranks));
+        }
         let candidate = self.compute_unconfirmed_holding_capacity()?;
         let mut reasons = self.holding_adoption_unavailable_reasons();
         if let Some(reason) = self.holding_ds_conditions_unavailable_reason() {
@@ -337,14 +363,19 @@ impl App {
             .as_ref()
             .map(|b| &b.holding_evaluations);
         let saved_ds = saved_evaluations.and_then(|entries| {
-            entries
-                .iter()
-                .find(|e| e.point.direction == view_dir && e.point.purpose == EvaluationPurpose::Ds)
+            entries.iter().find(|e| {
+                e.point.direction == view_dir
+                    && e.point.purpose == EvaluationPurpose::Ds
+                    && result_validity::holding_run_sign(&e.run)
+                        == sepika_solver::nonlinear::pushover::PushoverSign::Positive
+            })
         });
         let saved_capacity = saved_evaluations.and_then(|entries| {
             entries.iter().find(|e| {
                 e.point.direction == view_dir
                     && e.point.purpose == EvaluationPurpose::HoldingCapacity
+                    && result_validity::holding_run_sign(&e.run)
+                        == sepika_solver::nonlinear::pushover::PushoverSign::Positive
             })
         });
         let mut dependencies = vec![
@@ -613,11 +644,8 @@ impl App {
                             && sepika_design_jp::MemberKind::of_element(elem, model)
                                 == sepika_design_jp::MemberKind::Brace);
                 let elem_steel = elem_is_steel(elem, model);
-                if elem_steel && matches!(elem.kind, sepika_core::model::ElementKind::Wall) {
-                    return Err(format!(
-                        "壁要素 {:?}: 鋼板壁のランク判定は未対応です",
-                        elem.id
-                    ));
+                if let Some(reason) = sepika_core::model::wall_steel_input_issue(elem, model) {
+                    return Err(reason);
                 }
                 let thickness = sepika_design_jp::material_strength::plate_thickness(sec);
                 let grade = if elem_steel {
@@ -668,48 +696,10 @@ impl App {
                     sec.shape.as_ref(),
                     Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. },)
                 ) {
-                    use sepika_design_jp::secondary::src_rank::src_column_rank_ratios;
                     if sepika_design_jp::MemberKind::of_element(elem, model)
                         != sepika_design_jp::MemberKind::Column
+                        || story_index.is_none()
                     {
-                        continue;
-                    }
-                    let Some(fc) = mat.fc.filter(|f| *f > 0.0) else {
-                        return Err(format!(
-                            "部材 {:?}・断面 {:?}: Fc が未設定または 0 以下です",
-                            elem.id, sec.id
-                        ));
-                    };
-                    let Some(resp) = resp_by_elem.get(&elem.id) else {
-                        return Err(format!(
-                            "部材 {:?}・断面 {:?}: 増分解析応答がありません",
-                            elem.id, sec.id
-                        ));
-                    };
-                    let shape = sec.shape.as_ref().expect("SRC 矩形柱と判定済み");
-                    if shape.beam_rebar().is_none() && shape.rect_column_rebar().is_none() {
-                        return Err(format!(
-                            "部材 {:?}・断面 {:?}: 配筋が未設定です",
-                            elem.id, sec.id
-                        ));
-                    }
-                    let Some(rebar_sy) =
-                        sepika_core::material_grade::rebar_yield_strength(rebar_mat).or(mat.fy)
-                    else {
-                        return Err(format!(
-                            "部材 {:?}・断面 {:?}: 主筋の降伏強度を解決できません",
-                            elem.id, sec.id
-                        ));
-                    };
-                    src_column_rank_ratios(sec, steel_material, fc, rebar_sy, resp.axial).map_err(
-                        |reason| {
-                            format!(
-                                "部材 {:?}・断面 {:?}: SRC 柱の部材種別は未評価です。{reason}",
-                                elem.id, sec.id
-                            )
-                        },
-                    )?;
-                    if story_index.is_none() {
                         continue;
                     }
                     return Err(format!(
@@ -718,26 +708,10 @@ impl App {
                     ));
                 } else if let Some(SectionShape::RcWall { thickness, .. }) = sec.shape.as_ref() {
                     if wall_has_src_boundary_column(elem, model) {
-                        let capacities = po
-                            .wall_capacities
-                            .iter()
-                            .find(|(id, _)| *id == elem.id)
-                            .map(|(_, qu)| *qu)
-                            .ok_or_else(|| {
-                                format!("壁 ID {}: 採用runの初期Quが未解決です", elem.id.0)
-                            })?;
-                        let wall = po
-                            .wall_response_at(elem.id, ds_step)
-                            .map_err(|reason| reason.description().to_string())?;
-                        let qu = capacities[usize::from(wall.qw_n < 0.0)];
-                        if !qu.is_finite() || qu <= 0.0 {
-                            return Err(format!(
-                                "壁要素 {:?}: 正負別せん断耐力を算定できません",
-                                elem.id
-                            ));
-                        }
-                        let shear_failure = wall.qw_n.abs() >= 0.99 * qu;
-                        sepika_design_jp::secondary::src_rank::src_wall_type(shear_failure)
+                        return Err(format!(
+                            "壁要素 {:?}: SRC耐震壁の自動部材種別と自動 Ds は保留です。崩壊形における破壊状況を確定する結果がありません。",
+                            elem.id
+                        ));
                     } else {
                         if mat.category != sepika_core::model::MaterialCategory::Concrete {
                             return Err(format!("壁要素 {:?}: RC材料を確認できません", elem.id));
@@ -1006,6 +980,8 @@ impl App {
             ds_mechanism: mechanism.clone(),
             ds_conditions,
             capacity_conditions,
+            src_both_directions_ok: None,
+            src_sign: None,
         });
         Ok((result, story_ranks))
     }
@@ -1414,185 +1390,107 @@ mod tests {
                 .compute_holding_capacity()
                 .err()
                 .expect("保有水平耐力は未判定");
-            assert!(
-                error.contains("増分解析 Xの入力識別情報がありません"),
-                "{error}"
-            );
+            assert!(error.contains("SRC用の保有水平耐力判定"), "{error}");
+            app.core.design_frame =
+                sepika_design_jp::secondary::holding_capacity::FrameType::SrcFrame;
+            assert!(app.compute_holding_capacity().is_err());
             assert!(app.core.scoped.holding_capacity_source.is_none());
         }
     }
 
     #[test]
-    fn src_column_auto_rank_reports_inapplicable_steel_or_missing_evidence() {
+    fn src_column_auto_rank_stays_pending_without_verified_failure_mode() {
         use super::holding_clear_span::rc_rank_portal;
         use crate::app::rc_wall_side_column_tests::fixture::expanded_model;
         use sepika_core::ids::MaterialId;
         use sepika_core::section_shape::{RebarSize, SectionShape};
-        use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
         use sepika_solver::nonlinear::pushover::ShearYieldEvent;
-        use EvaluationPurpose::{Ds, HoldingCapacity};
-        use SeismicDir::{X, Y};
 
-        for (name, expected_reason) in [
-            ("SN400B", None),
-            ("任意鋼材", Some("H 形鋼としての適用根拠")),
-            ("STK400", Some("H 形鋼としての適用根拠")),
-            ("SS490", Some("溶接を使用する部分")),
-            ("SN400C", Some("JIS G 3136 の適用範囲外")),
-            ("SN490", Some("JIS の種類記号が不完全")),
-        ] {
-            let mut model = expanded_model();
-            let mut steel = rank_input().1;
-            steel.id = MaterialId(model.materials.len() as u32);
-            steel.name = "SN400B".into();
-            steel.fy = Some(100.0);
-            let section = &mut model.sections[0];
-            let Some(SectionShape::RcColumnRect { b, d, mut rebar }) = section.shape.take() else {
-                unreachable!()
-            };
-            rebar.main_dia = RebarSize::DiameterMm(25.0);
-            rebar.y = vec![2];
-            section.shape = Some(SectionShape::SrcColumnRect {
-                b,
-                d,
-                rebar,
-                steel_height: 400.0,
-                steel_width: 200.0,
-                steel_web_thick: 8.0,
-                steel_flange_thick: 13.0,
-            });
-            let steel_id = steel.id;
-            section.steel_material = Some(steel_id);
-            model.materials.push(steel);
-            let mut app = rc_rank_portal(model, false, 3000.0, None);
+        let mut model = expanded_model();
+        let mut steel = rank_input().1;
+        steel.id = MaterialId(model.materials.len() as u32);
+        steel.name = "SN400B".into();
+        steel.fy = Some(100.0);
+        let section = &mut model.sections[0];
+        let Some(SectionShape::RcColumnRect { b, d, mut rebar }) = section.shape.take() else {
+            unreachable!()
+        };
+        rebar.main_dia = RebarSize::DiameterMm(25.0);
+        rebar.y = vec![2];
+        section.shape = Some(SectionShape::SrcColumnRect {
+            b,
+            d,
+            rebar,
+            steel_height: 400.0,
+            steel_width: 200.0,
+            steel_web_thick: 8.0,
+            steel_flange_thick: 13.0,
+        });
+        let steel_id = steel.id;
+        section.steel_material = Some(steel_id);
+        model.materials.push(steel);
+        let mut app = rc_rank_portal(model, false, 3000.0, None);
 
-            if let Some(expected_reason) = expected_reason {
-                let external_response = app.pushover_for(X).unwrap().clone();
-                let mut model = app.core.model.clone();
-                model.materials[steel_id.index()].name = name.into();
-                assert!(app.load_model(model));
-                app.run_preparation();
-                for dir in [X, Y] {
-                    app.run_seismic(dir);
-                    app.require_result_input(ResultInputKey::Static(StaticCaseKey::Seismic(dir)))
-                        .unwrap();
-                }
-
-                app.run_pushover();
-                let error = app.core.scoped.last_error.as_deref().unwrap();
-                for expected in ["部材 ID 0", "せん断降伏耐力", name, expected_reason] {
-                    assert!(error.contains(expected), "{error}");
-                }
-                assert!(app.pushover_for(X).is_none());
-
-                // 現行の増分解析では生成できない応答が届いた場合の部材種別診断を検証する。
-                app.apply_pushover_result(Ok(external_response));
-                crate::app::tests::select_holding_points(&mut app);
-
-                let assert_unevaluated = |app: &mut App| {
-                    app.require_result_input(ResultInputKey::Pushover(X))
-                        .unwrap();
-                    let response = app.pushover_for(X).unwrap();
-                    let confirmed = response
-                        .confirmed_response(response.ds_evaluation.as_ref().unwrap(), Ds)
-                        .unwrap();
-                    assert!(confirmed
-                        .members
-                        .iter()
-                        .any(|member| member.elem == ElemId(0)));
-                    response
-                        .confirmed_response(
-                            response.capacity_evaluation.as_ref().unwrap(),
-                            HoldingCapacity,
-                        )
-                        .unwrap();
-
-                    let reason = app.compute_holding_capacity().err().unwrap();
-                    for expected in [
-                        "部材 ElemId(0)・断面 SectionId(0)",
-                        "SRC 柱の部材種別は未評価",
-                        name,
-                        expected_reason,
-                    ] {
-                        assert!(reason.contains(expected), "{reason}");
-                    }
-                    assert!(app.core.scoped.holding_capacity_source.is_none());
-                };
-                assert_unevaluated(&mut app);
-                let path = std::env::temp_dir().join(format!(
-                    "sepika-src-column-rank-{}.ovika",
-                    std::process::id()
-                ));
-                app.save_project_to(path.clone());
-                assert!(
-                    app.core.scoped.last_error.is_none(),
-                    "{:?}",
-                    app.core.scoped.last_error
-                );
-                let mut reopened = App::default();
-                reopened.open_project_from(path.clone());
-                std::fs::remove_file(path).unwrap();
-                assert!(
-                    reopened.core.scoped.last_error.is_none(),
-                    "{:?}",
-                    reopened.core.scoped.last_error
-                );
-                reopened.core.design_rank_auto = true;
-                assert_unevaluated(&mut reopened);
-            } else {
-                for has_shear_yield in [false, true] {
-                    let run = app
-                        .core
-                        .scoped
-                        .results
-                        .as_mut()
-                        .unwrap()
-                        .pushover_x
-                        .as_mut()
-                        .unwrap();
-                    let step = run.ds_evaluation.as_ref().unwrap().step;
-                    let record = run
-                        .confirmed_history
-                        .as_mut()
-                        .unwrap()
-                        .iter_mut()
-                        .find(|record| record.step == step)
-                        .unwrap();
-                    let column = record
-                        .members
-                        .iter_mut()
-                        .find(|member| member.elem == ElemId(0))
-                        .unwrap();
-                    assert!(column.m_strong > column.m_weak);
-                    column.axial = 3_300_000.0;
-                    run.shear_yields.retain(|event| event.elem != ElemId(0));
-                    if has_shear_yield {
-                        run.shear_yields.push(ShearYieldEvent {
-                            step,
-                            elem: ElemId(0),
-                        });
-                    }
-
-                    let reason = app.compute_holding_capacity().err().expect("Ds は採用保留");
-                    for expected in [
-                        "部材 ElemId(0)・断面 SectionId(0)",
-                        "SRC 柱の自動部材種別と自動 Ds は保留",
-                        "告示用の圧縮耐力 N0",
-                        "曲げ耐力 M0・sM0 の定義",
-                        "崩壊形における破壊状況の根拠",
-                    ] {
-                        assert!(reason.contains(expected), "{reason}");
-                    }
-                    assert!(app.core.scoped.holding_capacity_source.is_none());
-                    assert!(app.core.scoped.ds_beta_u_by_story.is_empty());
-                }
-                app.core.design_rank_auto = false;
-                app.core.design_rank = MemberRank::FB;
-                let (candidate, ranks) = app.compute_unconfirmed_holding_capacity().unwrap();
-                assert_eq!(ranks, vec![MemberRank::FB]);
-                assert!(candidate.member_ranks.is_empty());
+        for has_shear_yield in [false, true] {
+            let run = app
+                .core
+                .scoped
+                .results
+                .as_mut()
+                .unwrap()
+                .pushover_x
+                .as_mut()
+                .unwrap();
+            let step = run.ds_evaluation.as_ref().unwrap().step;
+            let record = run
+                .confirmed_history
+                .as_mut()
+                .unwrap()
+                .iter_mut()
+                .find(|record| record.step == step)
+                .unwrap();
+            let column = record
+                .members
+                .iter_mut()
+                .find(|member| member.elem == ElemId(0))
+                .unwrap();
+            assert!(column.m_strong > column.m_weak);
+            column.axial = 3_300_000.0;
+            run.shear_yields.retain(|event| event.elem != ElemId(0));
+            if has_shear_yield {
+                run.shear_yields.push(ShearYieldEvent {
+                    step,
+                    elem: ElemId(0),
+                    detail: None,
+                });
             }
+
+            let reason = app
+                .compute_unconfirmed_holding_capacity()
+                .err()
+                .expect("Ds は採用保留");
+            for expected in [
+                "部材 ElemId(0)・断面 SectionId(0)",
+                "SRC 柱の自動部材種別と自動 Ds は保留",
+                "告示用の圧縮耐力 N0",
+                "曲げ耐力 M0・sM0 の定義",
+                "崩壊形における破壊状況の根拠",
+            ] {
+                assert!(reason.contains(expected), "{reason}");
+            }
+            assert!(app.core.scoped.holding_capacity_source.is_none());
+            assert!(app.core.scoped.ds_beta_u_by_story.is_empty());
         }
+        app.core.design_rank_auto = false;
+        app.core.design_rank = MemberRank::FB;
+        let (candidate, ranks) = app.compute_unconfirmed_holding_capacity().unwrap();
+        assert_eq!(ranks, vec![MemberRank::FB]);
+        assert!(candidate.member_ranks.is_empty());
+        assert!(app
+            .compute_holding_capacity()
+            .err()
+            .expect("他種用Dsでは未判定")
+            .contains("SRC用の保有水平耐力判定"));
     }
 
     #[test]

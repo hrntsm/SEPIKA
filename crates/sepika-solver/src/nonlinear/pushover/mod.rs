@@ -29,12 +29,15 @@ pub mod story_response;
 mod types;
 pub mod wall_response;
 
-pub use driver::{pushover_analysis, pushover_analysis_recording};
+pub use driver::{
+    pushover_analysis, pushover_analysis_recording, pushover_analysis_recording_signed,
+};
 pub use response::story_reference_node;
 pub use types::{
     CapacityPoint, DuctilityMethod, HingeEvent, HingeLevel, MechanismType, MemberHistory,
-    MemberStepState, PushoverControl, PushoverMemberResponse, PushoverResult, PushoverStep,
-    PushoverTarget, PushoverTermination, ShearYieldEvent,
+    MemberShearDiagnostic, MemberShearYield, MemberStepState, PushoverControl,
+    PushoverMemberResponse, PushoverResult, PushoverSign, PushoverStep, PushoverTarget,
+    PushoverTermination, ShearYieldEvent,
 };
 
 #[cfg(test)]
@@ -53,7 +56,7 @@ use sepika_core::rc_capacity::{rc_qsu_simple, RcCapacityInput};
 use sepika_element::behavior::{Ctx, ElementBehavior, LocalVec};
 #[cfg(test)]
 use shear_yield::{
-    compute_shear_yield_qy, compute_shear_yield_thresholds, track_shear_yield, DirThreshold,
+    build_shear_yield_thresholds, compute_shear_yield_qy, track_shear_yield, DirThreshold,
     SecMaterials, ShearDir,
 };
 #[cfg(test)]

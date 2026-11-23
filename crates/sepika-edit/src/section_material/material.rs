@@ -78,8 +78,7 @@ fn shift_material_ids(model: &mut Model, f: impl FnMut(&mut MaterialId)) {
     model.visit_material_ids(f);
 }
 
-/// 指定材料を参照している断面が存在するか（削除ガード用）。
-/// **材料は断面が持つ**ため、参照元は断面だけを見ればよい。
+/// 指定材料を参照している断面・壁版が存在するか（削除ガード用）。
 fn material_in_use(model: &Model, id: MaterialId) -> bool {
     model.sections.iter().any(|s| {
         [
@@ -89,6 +88,10 @@ fn material_in_use(model: &Model, id: MaterialId) -> bool {
             s.steel_material,
         ]
         .contains(&Some(id))
+    }) || model.wall_plates.iter().any(|plate| {
+        plate
+            .src_steel_plate
+            .is_some_and(|steel| steel.material == id)
     })
 }
 

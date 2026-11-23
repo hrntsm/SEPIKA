@@ -204,6 +204,43 @@ pub enum MechanismType {
 pub struct ShearYieldEvent {
     pub step: u32,
     pub elem: ElemId,
+    #[serde(default)]
+    pub detail: Option<MemberShearYield>,
+}
+
+/// 確定ステップで非線形せん断ばねが最初に到達した可撓端の応答。
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+pub struct MemberShearYield {
+    pub at_i: bool,
+    pub is_rc: bool,
+    /// 符号付き局所せん断力 [N]（y、zの順）。
+    pub shear_n: [f64; 2],
+    /// 同じ載荷方向の降伏せん断力 [N]。
+    pub limit_n: f64,
+    /// 一方向が支配する場合はyが0、zが1。連成する場合はなし。
+    pub governing_axis: Option<usize>,
+    pub exactly_at_limit: bool,
+}
+
+/// 確定ステップで線材せん断の適用条件を確認できない理由。
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct MemberShearDiagnostic {
+    pub step: u32,
+    pub elem: ElemId,
+    /// trueはi端、falseはj端、なしは可撓部の区間。
+    pub at_i: Option<bool>,
+    pub is_rc: bool,
+    pub reason: String,
+}
+
+impl MemberShearDiagnostic {
+    pub fn location(&self) -> &'static str {
+        match self.at_i {
+            Some(true) => "i端",
+            Some(false) => "j端",
+            None => "可撓部区間",
+        }
+    }
 }
 
 /// 終局時の部材別応答（設計用応力・部材変形角 Rp）。
@@ -302,6 +339,9 @@ pub struct PushoverResult {
     pub hinges: Vec<HingeEvent>,
     /// せん断降伏イベント履歴。
     pub shear_yields: Vec<ShearYieldEvent>,
+    /// 線材せん断ばねの適用条件を確認できなかった確定ステップ。
+    #[serde(default)]
+    pub shear_diagnostics: Vec<MemberShearDiagnostic>,
     pub mechanism: MechanismType,
     /// 性能曲線上の最大ベースシア `[N]`。保有耐力比較の採用点とは独立。
     pub qu: f64,
@@ -329,4 +369,20 @@ pub struct PushoverStep {
     pub story_drifts: Vec<f64>,
     /// 各階代表節点の [Ux, Uy, θz] [mm, mm, rad]。モデルの階と同順。
     pub floor_disp: Vec<[f64; 3]>,
+}
+/// 水平加力の向き。同じ全体軸の正負は独立した解析runとする。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum PushoverSign {
+    #[default]
+    Positive,
+    Negative,
+}
+
+impl PushoverSign {
+    pub(super) fn factor(self) -> f64 {
+        match self {
+            Self::Positive => 1.0,
+            Self::Negative => -1.0,
+        }
+    }
 }

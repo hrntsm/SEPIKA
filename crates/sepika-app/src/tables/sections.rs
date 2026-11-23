@@ -387,15 +387,11 @@ pub fn sections_table(ui: &mut egui::Ui, app: &mut App) {
     );
 
     for (section, role, material) in pending_material {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(SetSectionMaterial {
-                section,
-                role,
-                material,
-            }),
-        );
-        app.core.scoped.staleness.mark_edited();
+        app.apply_model_edit(Box::new(SetSectionMaterial {
+            section,
+            role,
+            material,
+        }));
     }
     apply_pending_actions(app, pending_focus, pending_delete);
 }

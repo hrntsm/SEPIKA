@@ -83,11 +83,10 @@ fn short_wave() -> sepika_solver::dynamic::timehistory::GroundMotion {
 }
 
 #[test]
-fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice() {
+fn pure_steel_walls_are_rejected_and_unloaded_frames_stay_at_rest() {
     use sepika_core::dof::Dof6Mask;
-    use sepika_core::ids::{MaterialId, SectionId};
+    use sepika_core::ids::MaterialId;
     use sepika_core::model::{ElementKind, MassMethod};
-    use sepika_core::section_shape::SectionShape;
     use sepika_job::{compute::compute_time_history, AnalysisSettings};
     for kind in [
         ElementKind::Beam,
@@ -109,19 +108,6 @@ fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice()
                 node.mass = Some([1.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
             }
             if steel_wall {
-                for (i, target_section) in model.sections.iter_mut().enumerate().take(2) {
-                    let mut section = SectionShape::SteelBox {
-                        height: 600.0,
-                        width: 600.0,
-                        thick: 12.0,
-                        horizontal_thick: 12.0,
-                        corner_r: Some(0.0),
-                    }
-                    .to_section(SectionId(i as u32), "鋼材".into());
-                    section.frame_use = target_section.frame_use;
-                    section.material = Some(MaterialId(2));
-                    *target_section = section;
-                }
                 model.sections[2].shape = None;
                 model.sections[2].property_basis.area = sepika_core::model::PropertyBasis::Supplied;
                 model.sections[2].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
@@ -134,11 +120,45 @@ fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice()
             }
             model.elements.retain(|e| e.kind != ElementKind::Wall);
             model.generated_wall_origins.clear();
-            let (expanded, index, _) = sepika_core::wall_expand::expand_wall_elements(&model);
-            let notice = sepika_job::notices::steel_seismic_wall_notice(&expanded, &index);
-            assert_eq!(notice.is_some(), steel_wall);
-            if let Some(notice) = notice {
-                assert!(notice.contains("せん断座屈") && notice.contains("壁版 ID: 0"));
+            if steel_wall {
+                use sepika_core::ids::LoadCaseId;
+                use sepika_job::compute;
+                use sepika_job::JobError;
+                let settings = AnalysisSettings::default();
+                for error in [
+                    compute::compute_linear_static(model.clone(), LoadCaseId(0)).unwrap_err(),
+                    compute::compute_eigen(model.clone(), 1).unwrap_err(),
+                    compute::compute_seismic(model.clone(), Default::default(), 0.25).unwrap_err(),
+                    compute::compute_pushover(model.clone(), settings).unwrap_err(),
+                    compute::compute_time_history(
+                        model.clone(),
+                        AnalysisSettings {
+                            th_nonlinear: false,
+                            ..settings
+                        },
+                        short_wave(),
+                    )
+                    .unwrap_err(),
+                    compute::compute_time_history(
+                        model.clone(),
+                        AnalysisSettings {
+                            th_nonlinear: true,
+                            ..settings
+                        },
+                        short_wave(),
+                    )
+                    .unwrap_err(),
+                    compute::compute_lumped_mass(model, settings, None, None, None, None, None)
+                        .unwrap_err(),
+                ] {
+                    assert!(
+                        matches!(&error, JobError::InvalidInput(reason)
+                            if reason.contains("鋼板壁版 ID 0")
+                                && reason.contains("重量は荷重として入力")),
+                        "{error}"
+                    );
+                }
+                continue;
             }
             for nonlinear in [false, true] {
                 let mut input = model.clone();
@@ -178,10 +198,9 @@ fn ordinary_and_pure_steel_time_history_jobs_remain_valid_with_existing_notice()
                         ..Default::default()
                     },
                     short_wave(),
-                )
-                .unwrap_or_else(|e| {
-                    panic!("{kind:?} steel_wall={steel_wall} nonlinear={nonlinear}: {e}")
-                });
+                );
+                let result =
+                    result.unwrap_or_else(|e| panic!("{kind:?} nonlinear={nonlinear}: {e}"));
                 assert_eq!(result.nonlinear, nonlinear);
                 assert!(!result.applied_long_term);
                 assert_eq!(result.non_converged_steps, 0);

@@ -49,9 +49,20 @@ fn allowable_checks(
     torsion_nmm: f64,
     options: &MemberDesignCheckOptions<'_>,
 ) -> Vec<(ElemId, f64, CheckOutcome)> {
+    let qy = if matches!(
+        model.sections[0].shape,
+        Some(
+            sepika_core::section_shape::SectionShape::SrcBeamRect { .. }
+                | sepika_core::section_shape::SectionShape::SrcColumnRect { .. }
+        )
+    ) {
+        0.0
+    } else {
+        1_000.0
+    };
     allowable_checks_with_demand(
         model,
-        [0.0, 1_000.0, 0.0, torsion_nmm, 0.0, 1_000_000.0],
+        [0.0, qy, 0.0, torsion_nmm, 0.0, 1_000_000.0],
         options,
     )
 }
@@ -296,7 +307,7 @@ fn rc_allowable_keeps_qd2_failure_without_replacing_unknown_qd1() {
 }
 
 #[test]
-fn src_allowable_preserves_shear_failure_for_beam_and_column() {
+fn src_allowable_preserves_long_term_column_shear_failure() {
     for column in [false, true] {
         let model = src::model(column, "SN400B", 0.0, 0.0);
         let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1_000_000.0];
@@ -305,54 +316,23 @@ fn src_allowable_preserves_shear_failure_for_beam_and_column() {
                 term,
                 ..Default::default()
             };
-            let correct = checked_components(
-                allowable_checks_with_demand(&model, demand, &options)
-                    .remove(0)
-                    .2,
-            );
             let components = components_with_wrong_material(&model, demand, &options);
-            assert_eq!(components.len(), 1, "{components:?}");
-            assert_eq!(
-                &components[0],
-                correct
-                    .iter()
-                    .find(|row| row.kind == CheckKind::Shear)
-                    .unwrap(),
-            );
-        }
-    }
-}
-
-#[test]
-fn src_beam_seismic_shear_keeps_steel_failure_and_only_a_confirmed_rc_demand() {
-    let model = src::model(false, "SN400B", 0.0, 0.0);
-    let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1_000_000.0];
-    for method in [QdMethod::Qd1, QdMethod::Min, QdMethod::Qd2] {
-        for q_long_n in [0.0, 10_000_000.0] {
-            let long = [(
-                ElemId(0),
-                MemberForces {
-                    at: vec![(0.5, [0.0, q_long_n, 0.0, 0.0, 0.0, 0.0])],
-                },
-            )];
-            let components = components_with_wrong_material(
-                &model,
-                demand,
-                &MemberDesignCheckOptions {
-                    long_member_forces: Some(&long),
-                    qd_method: method,
-                    ..short_term()
-                },
-            );
-            if q_long_n == 0.0 && method != QdMethod::Qd2 {
-                assert!(components.is_empty(), "{method:?} {components:?}");
-            } else {
-                assert_eq!(components.len(), 1, "{components:?}");
-                assert_eq!(components[0].kind, CheckKind::Shear);
-                assert_eq!(
-                    components[0].detail.contains("rQ=未算定"),
-                    method != QdMethod::Qd2
+            if column && term == LoadTerm::Long {
+                let correct = checked_components(
+                    allowable_checks_with_demand(&model, demand, &options)
+                        .remove(0)
+                        .2,
                 );
+                assert_eq!(components.len(), 1, "{components:?}");
+                assert_eq!(
+                    &components[0],
+                    correct
+                        .iter()
+                        .find(|row| row.kind == CheckKind::Shear)
+                        .unwrap()
+                );
+            } else {
+                assert!(components.is_empty(), "{components:?}");
             }
         }
     }
@@ -428,7 +408,10 @@ fn allowable_checks_keep_both_material_and_torsion_diagnostics() {
 
 #[test]
 fn allowable_beam_keeps_material_and_missing_gravity_diagnostics() {
-    for mut model in [rc_beam::model(false), src::model(false, "SN400B", 0.0, 0.0)] {
+    for (mut model, needs_gravity) in [
+        (rc_beam::model(false), true),
+        (src::model(false, "SN400B", 0.0, 0.0), false),
+    ] {
         assign_main_rebar(&mut model, MaterialCategory::Steel);
         let checks = allowable_checks(
             &model,
@@ -444,7 +427,11 @@ fn allowable_beam_keeps_material_and_missing_gravity_diagnostics() {
                 panic!("主筋・重力参照に未算定条件があります: {outcome:?}");
             };
             assert_material_diagnostic(&reason, MaterialCategory::Steel);
-            assert!(reason.contains("重力参照内力が不足"), "{reason}");
+            assert_eq!(
+                reason.contains("重力参照内力が不足"),
+                needs_gravity,
+                "{reason}"
+            );
         }
     }
 }

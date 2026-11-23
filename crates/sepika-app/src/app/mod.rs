@@ -435,7 +435,7 @@ pub struct MemberChecks {
     pub positions: Vec<PositionCheck>,
 }
 
-/// 節点単位の検定（柱梁接合部・パネルゾーン・冷間成形耐力比・耐震壁など）。
+/// 節点単位の検定（柱梁接合部・パネルゾーン・耐震壁など）。
 /// `label` は「接合部(RC)」等の種別表示用。
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct JointCheck {
@@ -529,6 +529,12 @@ pub struct ResultsBundle {
     pub reference_sources: Vec<(result_validity::ResultInputKey, references::InputReference)>,
     #[serde(default)]
     pub holding_evaluations: Vec<result_validity::HoldingEvaluationInput>,
+    #[serde(default)]
+    pub(crate) src_pushover_negative: Vec<(
+        SeismicDir,
+        AnalysisSettings,
+        sepika_solver::nonlinear::pushover::PushoverResult,
+    )>,
     pub statics: Vec<(StaticCaseKey, sepika_solver::statics::linear::StaticOnce)>,
     /// 荷重組合せの解析結果（組合せ名で保持）
     pub combos: Vec<(String, sepika_solver::statics::linear::StaticOnce)>,
@@ -541,7 +547,7 @@ pub struct ResultsBundle {
     pub panel_moments: Vec<(sepika_core::ids::NodeId, [f64; 2])>,
     /// 部材単位の断面検定結果（部材ごとに検定位置をグループ化）。
     pub member_checks: Vec<MemberChecks>,
-    /// 節点単位の検定結果（柱梁接合部・パネルゾーン・冷間成形耐力比など）。
+    /// 節点単位の検定結果（柱梁接合部・パネルゾーンなど）。
     pub joint_checks: Vec<JointCheck>,
     pub wall_checks: Vec<sepika_design_jp::wall_check::WallCheck>,
     /// 床の中での小梁設計（単純梁・片持ち梁）。実部材化された小梁は全体 FEM で検定する
@@ -628,6 +634,11 @@ pub struct StaticAllComputed {
 /// 送る結果。
 pub enum JobResult {
     Pushover(Box<Result<sepika_solver::nonlinear::pushover::PushoverResult, String>>),
+    SrcPushover {
+        result: Box<Result<sepika_solver::nonlinear::pushover::PushoverResult, String>>,
+        conditions: AnalysisSettings,
+        input: Vec<u8>,
+    },
     /// 固有値解析（モード数は起動時の `analysis_cfg.n_modes`）。
     Modal(Result<sepika_solver::dynamic::eigen::ModalResult, String>),
     /// 時刻歴応答解析。`ResponseResult` は詳細記録を含み大きいため Box で運ぶ。
@@ -986,6 +997,7 @@ pub struct ModelScoped {
     /// `compute_holding_capacity` が設定する（表示用）。
     pub ds_beta_u_by_story: Vec<f64>,
     pub ds_wall_details: Vec<String>,
+    pub(crate) src_holding_sign: sepika_solver::nonlinear::pushover::PushoverSign,
     pub holding_capacity_source: Option<HoldingCapacitySource>,
     /// 架構種別が耐力壁付き／筋かい付きなのに耐力壁・筋かいを検出できず、βu を
     /// 算定できなかったため架構種別別 Ds 表へフォールバックしたか（表示用）。
@@ -1070,6 +1082,7 @@ impl Default for ModelScoped {
             preparation: None,
             ds_beta_u_by_story: Vec::new(),
             ds_wall_details: Vec::new(),
+            src_holding_sign: sepika_solver::nonlinear::pushover::PushoverSign::Positive,
             holding_capacity_source: None,
             ds_beta_u_unavailable: false,
             ds_rank_fallback_stories: Vec::new(),
@@ -1780,6 +1793,7 @@ pub(crate) use result_validity::{
     displayed_wall_checks, displayed_wall_summary, evaluate_check, INVALID_CHECK_COMPONENTS,
 };
 mod actions;
+pub(crate) use actions::design::src_holding;
 pub mod node_grid;
 #[cfg(test)]
 mod node_grid_tests;
@@ -2471,9 +2485,9 @@ fn member_material_groups(model: &sepika_core::model::Model) -> (Vec<ElemId>, Ve
     (steel, rc)
 }
 #[cfg(test)]
-mod steel_wall_notice_tests;
-#[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wall_material_tests;
 
 #[cfg(all(test, feature = "gui"))]
 mod focus_id_remap_tests;

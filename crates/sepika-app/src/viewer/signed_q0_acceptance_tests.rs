@@ -353,12 +353,15 @@ fn src_column_th_detail_keeps_axial_bending_ng_when_gravity_reference_is_missing
 
     let ordinary = labels(&app, &rec, false);
     assert!(!ordinary.contains(reason), "{ordinary}");
-    let (_, shear_only_ng) = ordinary
+    let (_, ordinary_tip) = ordinary
         .split_once("引張側 t=0.750000 s  ξ=1.00:")
         .unwrap_or_else(|| panic!("{ordinary}"));
-    assert!(shear_only_ng.contains("(NG)"), "{ordinary}");
-    assert!(shear_only_ng.contains("軸+曲げ 0.00"), "{ordinary}");
-    assert!(shear_only_ng.contains("せん断 "), "{ordinary}");
+    assert!(
+        ordinary_tip
+            .contains("時刻歴の地震内力から設計用せん断力と材料別の負担曲げを確定できません"),
+        "{ordinary}"
+    );
+    assert!(!ordinary_tip.contains("(OK)"), "{ordinary}");
 }
 
 #[test]
@@ -421,7 +424,7 @@ fn src_column_th_detail_reports_gravity_reference_even_if_other_inputs_prevent_c
         ] {
             assert_eq!(row.matches(reason).count(), 1, "{text}");
         }
-        assert!(!row.contains("検定比 "), "{text}");
+        assert_eq!(row.contains("(NG)"), n.is_finite(), "{text}");
     };
 
     let material = app.core.model.sections[0].shear_rebar_material.take();
@@ -467,18 +470,22 @@ fn concrete_beam_th_detail_keeps_bending_ng_and_shear_rebar_diagnostic_without_g
         };
 
         let text = labels(&app, &recording, true);
-        for message in [
-            "ξ=0.50:",
-            "(NG)",
-            "曲げ ",
-            member,
-            "せん断補強筋材料「SD345」",
-            "材料区分は「鋼材」",
-            "断面タブでせん断補強筋に「鉄筋」区分の材料を割り当て",
-            "重力参照内力が不足",
-        ] {
+        for message in ["ξ=0.50:", "(NG)", "曲げ ", member] {
             assert!(text.contains(message), "{text}");
         }
+        if member == "RC梁" {
+            for message in ["せん断補強筋材料「SD345」", "材料区分は「鋼材」"] {
+                assert!(text.contains(message), "{text}");
+            }
+        } else {
+            assert!(text.contains("付1.4-4"), "{text}");
+            assert!(!text.contains("せん断補強筋材料"), "{text}");
+        }
+        assert_eq!(
+            text.contains("重力参照内力が不足"),
+            member == "RC梁",
+            "{text}"
+        );
         assert!(
             !text.contains("(OK)") && !text.contains("せん断 "),
             "{text}"
@@ -575,6 +582,7 @@ fn set_gravity_forces(app: &mut App, at: Option<Vec<(f64, [f64; 6])>>) {
                 column_end_axial_forces: Vec::new(),
                 panel_moments: Vec::new(),
                 girder_column_face_forces: Vec::new(),
+                steel_panel_column_face_forces: Vec::new(),
             },
         )],
         ..Default::default()
@@ -623,7 +631,6 @@ fn time_history_gravity_gaps_are_scoped_to_each_position_and_required_component(
         model.steel_design_attrs = vec![cft::direct_lengths(ElemId(0), Some(3000.0), Some(3000.0))];
         load(model)
     };
-    let src = crate::app::src_ql_acceptance_tests::src_beam_app(true, QdMethod::Qd2);
     let response = [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0];
     let rec = gravity_test_record(response, response);
 
@@ -632,7 +639,6 @@ fn time_history_gravity_gaps_are_scoped_to_each_position_and_required_component(
         ("RC円形", rc_app(true)),
         ("CFT角形", cft_app(false)),
         ("CFT円形", cft_app(true)),
-        ("SRC梁", src),
     ] {
         for missing_combo in [true, false] {
             set_gravity_forces(&mut app, None);
@@ -658,18 +664,7 @@ fn time_history_gravity_gaps_are_scoped_to_each_position_and_required_component(
             }
         }
 
-        let valid = [
-            f64::NAN,
-            0.0,
-            if member == "SRC梁" {
-                f64::INFINITY
-            } else {
-                -0.0
-            },
-            f64::NAN,
-            f64::INFINITY,
-            f64::NAN,
-        ];
+        let valid = [f64::NAN, 0.0, -0.0, f64::NAN, f64::INFINITY, f64::NAN];
         let mut gy_missing = valid;
         gy_missing[1] = f64::NAN;
         set_gravity_forces(
@@ -690,11 +685,7 @@ fn time_history_gravity_gaps_are_scoped_to_each_position_and_required_component(
         assert_eq!(split.matches("(OK)").count(), 2, "{member}: {split}");
         assert_eq!(split.matches("検定不能:").count(), 2, "{member}: {split}");
         assert!(split.contains("Qy方向"), "{member}: {split}");
-        assert_eq!(
-            split.contains("Qz方向"),
-            member != "SRC梁",
-            "{member}: {split}"
-        );
+        assert!(split.contains("Qz方向"), "{member}: {split}");
 
         set_gravity_forces(
             &mut app,
@@ -709,24 +700,13 @@ fn time_history_gravity_gaps_are_scoped_to_each_position_and_required_component(
             Some([0.0, 0.5, 0.75, 1.0].map(|xi| (xi, gy_missing)).to_vec()),
         );
         let mut independent_ng = response;
-        if member == "SRC梁" {
-            independent_ng[5] = 1.0e9;
-        } else {
-            independent_ng[2] = 2.0e6;
-        }
+        independent_ng[2] = 2.0e6;
         let rec = gravity_test_record(independent_ng, independent_ng);
         let text = labels(&app, &rec, true);
         assert_eq!(text.matches("(NG)").count(), 4, "{member}: {text}");
         assert_eq!(text.matches("検定不能:").count(), 4, "{member}: {text}");
         assert!(!text.contains("(OK)"), "{member}: {text}");
-        assert!(
-            text.contains(if member == "SRC梁" {
-                "曲げ "
-            } else {
-                "せん断 "
-            }),
-            "{member}: {text}"
-        );
+        assert!(text.contains("せん断 "), "{member}: {text}");
         assert_eq!(
             text.contains("検定比の下限"),
             member == "CFT円形",
@@ -765,19 +745,17 @@ fn time_history_gravity_gaps_are_scoped_to_each_position_and_required_component(
             assert!(!qd2.contains("検定不能"), "{member}: {qd2}");
         }
 
-        if member != "SRC梁" {
-            let mut axial_ng = response;
-            axial_ng[0] = -30.0e6;
-            axial_ng[5] = 1.0;
-            let rec = gravity_test_record(axial_ng, axial_ng);
-            set_gravity_forces(&mut app, None);
-            let text = labels(&app, &rec, true);
-            assert_eq!(text.matches("(NG)").count(), 4, "{member}: {text}");
-            assert!(text.contains("軸+曲げ "), "{member}: {text}");
-            assert!(!text.contains("(OK)"), "{member}: {text}");
-            if member.starts_with("RC") {
-                assert!(text.contains("許容曲げが非正"), "{member}: {text}");
-            }
+        let mut axial_ng = response;
+        axial_ng[0] = -30.0e6;
+        axial_ng[5] = 1.0;
+        let rec = gravity_test_record(axial_ng, axial_ng);
+        set_gravity_forces(&mut app, None);
+        let text = labels(&app, &rec, true);
+        assert_eq!(text.matches("(NG)").count(), 4, "{member}: {text}");
+        assert!(text.contains("軸+曲げ "), "{member}: {text}");
+        assert!(!text.contains("(OK)"), "{member}: {text}");
+        if member.starts_with("RC") {
+            assert!(text.contains("許容曲げが非正"), "{member}: {text}");
         }
     }
 }

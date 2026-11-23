@@ -93,6 +93,8 @@ pub fn with_plate(wall: bool, kinds: [ElementKind; 4]) -> Model {
     }];
     if wall {
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(0),
             shape: WallPlateShape::Enclosed,
             section: None,

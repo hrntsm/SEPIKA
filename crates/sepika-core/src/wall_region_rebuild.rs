@@ -234,6 +234,8 @@ mod tests {
         model.add_enclosed_wall_plate_from_nodes(
             &nodes,
             WallPlate {
+                src_wall_detailing_confirmed: false,
+                src_steel_plate: None,
                 dl_support: None,
                 self_weight_shares: Vec::new(),
                 id: WallPlateId(0),

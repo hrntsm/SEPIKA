@@ -440,7 +440,6 @@ pub(super) fn draw_modeling_with_view(
                 analysis,
                 app.adopted_wall_capacity_for(
                     elem,
-                    model,
                     analysis,
                     view.pushover_dir
                         .unwrap_or(app.core.scoped.pushover_view_dir),
@@ -1228,7 +1227,9 @@ fn show_wall_modeling_detail_with_view(
         return;
     };
     ui.label(format!("壁長 lw={:.0} mm ／ 壁高 h={:.0} mm", g.lw, g.h));
-    if modeling_analysis == ModelingAnalysis::Static {
+    if modeling_analysis == ModelingAnalysis::Static
+        || !sepika_element::wall::misc_wall::is_rc_wall(elem, model)
+    {
         return;
     }
     match sepika_element::wall::wall_element::wall_column_fiber_lp(elem, model) {
@@ -1242,7 +1243,6 @@ fn show_wall_modeling_detail_with_view(
     }
     let qu = app.adopted_wall_capacity_for(
         elem,
-        model,
         modeling_analysis,
         viewport
             .pushover_dir
@@ -1250,16 +1250,9 @@ fn show_wall_modeling_detail_with_view(
         viewport.spatial_case_id(app),
     );
     if let Ok(qu) = qu {
-        let label = if sepika_element::wall::misc_wall::is_rc_wall(elem, model) {
-            format!(
-                "面内せん断（{}）",
-                model.stress_cfg.rc_wall_shear_method.label()
-            )
-        } else {
-            "面内せん断".to_string()
-        };
         ui.label(format!(
-            "{label}: 正 Qu={:.0} kN／負 Qu={:.0} kN",
+            "面内せん断（{}）: 正 Qu={:.0} kN／負 Qu={:.0} kN",
+            model.stress_cfg.rc_wall_shear_method.label(),
             force_kn(qu[0]),
             force_kn(qu[1])
         ));
@@ -1454,7 +1447,7 @@ mod tests {
     }
 
     #[test]
-    fn wall_modeling_detail_labels_rc_methods_and_keeps_steel_capacity_untagged() {
+    fn wall_modeling_detail_labels_rc_capacities_and_omits_steel_capacities() {
         use sepika_core::ids::LoadCaseId;
         use sepika_core::model::RcWallShearMethod::{ArakawaMean, ArakawaMin};
         use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination, DL_CASE_NAME};
@@ -1522,24 +1515,9 @@ mod tests {
         model.sections[0].shape = None;
         model.sections[0].material = Some(MaterialId(0));
         model.materials[0] = crate::sample::portal_frame().materials[0].clone();
-        let expected_capacity_n = 3_256_255.518229489;
-        for method in [ArakawaMin, ArakawaMean] {
-            model.stress_cfg.rc_wall_shear_method = method;
-            let app = App::default();
-            let capacity = app
-                .adopted_wall_capacity(&wall, &model, ModelingAnalysis::Incremental)
-                .unwrap();
-            for value in capacity {
-                assert!((value - expected_capacity_n).abs() < 1e-6);
-            }
-            let text = rendered_wall_detail(&app, &model, &wall);
-            assert!(
-                text.iter()
-                    .any(|text| text == "面内せん断: 正 Qu=3256 kN／負 Qu=3256 kN"),
-                "{text:?}"
-            );
-            assert!(text.iter().all(|text| !text.contains("荒川")), "{text:?}");
-        }
+        let text = rendered_wall_detail(&App::default(), &model, &wall);
+        assert!(text.iter().any(|text| text.starts_with("壁長")), "{text:?}");
+        assert!(text.iter().all(|text| !text.contains("Qu")), "{text:?}");
     }
 
     /// 指定した種別・フォースレジームの 2 節点部材を作る（テスト用の最小構成）。
@@ -1928,6 +1906,8 @@ mod tests {
         ]
         .into_iter()
         .map(|(id, section, span)| WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(id),
             shape: WallPlateShape::Attached {
                 anchor: RegionAnchor::Line {

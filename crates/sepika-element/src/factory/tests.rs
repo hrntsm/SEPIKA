@@ -1603,7 +1603,9 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
         crate::frame::beam::state::ElasticLoadState,
     );
     let initial = behavior.snapshot_state();
-    let initial = initial.downcast_ref::<Snapshot>().unwrap();
+    let initial = crate::frame::shear::axial_bending_snapshot(initial.as_ref())
+        .downcast_ref::<Snapshot>()
+        .unwrap();
     let k0 = 6.0 * 20000.0 * 833.33 / 5000.0;
     for spring in &initial.0 {
         assert!((spring.probe(0.0).1 - k0).abs() < 1e-9);
@@ -1623,7 +1625,9 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
     };
     behavior.update_state(&du, true, &ctx).unwrap();
     let before = behavior.snapshot_state();
-    let state = before.downcast_ref::<Snapshot>().unwrap();
+    let state = crate::frame::shear::axial_bending_snapshot(before.as_ref())
+        .downcast_ref::<Snapshot>()
+        .unwrap();
     let k = behavior.tangent_stiffness(&ctx);
     let f = behavior.internal_force(&ctx);
     for i in 0..12 {
@@ -1640,7 +1644,9 @@ fn zero_increment_concentrated_factory_keeps_equilibrium_tangent_force_and_histo
     behavior.update_state(&zero, false, &ctx).unwrap();
     behavior.commit_state();
     let after = behavior.snapshot_state();
-    let after = after.downcast_ref::<Snapshot>().unwrap();
+    let after = crate::frame::shear::axial_bending_snapshot(after.as_ref())
+        .downcast_ref::<Snapshot>()
+        .unwrap();
     assert_eq!(state.1, after.1);
     assert_eq!(state.2, after.2);
     for end in 0..2 {
@@ -1753,96 +1759,9 @@ fn direct_side_column_factories_reject_conflicting_endpoint_and_section_ownershi
 }
 
 #[test]
-fn steel_plate_boundary_clones_preserve_registered_section_ownership_without_rc_release() {
-    use sepika_core::section_shape::SectionShape;
+fn steel_wall_is_rejected_by_linear_and_nonlinear_factories() {
     let mut model = wall_side_column_factory_model();
     model.materials[1].category = MaterialCategory::Steel;
-    for (index, usage) in [(0, FrameSectionUse::Girder), (1, FrameSectionUse::Column)] {
-        let mut section = SectionShape::SteelBox {
-            height: 600.0,
-            width: 600.0,
-            thick: 12.0,
-            horizontal_thick: 12.0,
-            corner_r: Some(0.0),
-        }
-        .to_section(SectionId(index), "S".into());
-        section.frame_use = Some(usage);
-        section.material = Some(MaterialId(1));
-        model.sections[index as usize] = section;
-    }
-    model.sections[2].shape = None;
-    model.sections[2].material = Some(MaterialId(1));
-    model.sections[2].thickness = Some(9.0);
-    let mut alternative = model.sections[1].clone();
-    alternative.id = SectionId(3);
-    alternative.material = Some(MaterialId(0));
-    model.sections.push(alternative);
-    for representation in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
-        let mut data = model.elements[3].clone();
-        data.kind = representation;
-        for kind in [
-            None,
-            Some(AnalysisKind::Incremental),
-            Some(AnalysisKind::TimeHistory),
-        ] {
-            assert!(wall_side_column_input_issue(&data, &model, kind).is_none());
-            assert!(crate::wall::side_column::wall_side_column_release(&data, &model).is_none());
-            let valid = match kind {
-                None => build_behavior(&data, &model),
-                Some(analysis) => {
-                    build_nonlinear_behavior(&data, &model, StrengthBasis::Nominal, analysis, None)
-                }
-            };
-            assert_eq!(valid.n_dof(), 12);
-            assert!(valid.owns_frame_member_loads());
-            let mut conflicting = data.clone();
-            conflicting.section = Some(SectionId(3));
-            let reason = wall_side_column_input_issue(&conflicting, &model, kind).unwrap();
-            assert!(reason.contains("断面参照"));
-            if kind.is_none() {
-                assert_eq!(
-                    crate::frame::member_load::cmq_with_rigid_zone(&model, &conflicting, &[]).err(),
-                    Some(reason.clone())
-                );
-            }
-            let panic = std::panic::catch_unwind(|| match kind {
-                None => build_behavior(&conflicting, &model),
-                Some(analysis) => build_nonlinear_behavior(
-                    &conflicting,
-                    &model,
-                    StrengthBasis::Nominal,
-                    analysis,
-                    None,
-                ),
-            })
-            .err()
-            .unwrap();
-            assert_eq!(panic.downcast_ref::<String>(), Some(&reason));
-        }
-    }
-}
-
-#[test]
-fn steel_plate_wall_factory_rejects_boundary_column_with_girder_section_use() {
-    let mut model = wall_side_column_factory_model();
-    model.materials[1].category = MaterialCategory::Steel;
-    for index in [0, 1] {
-        let mut section = sepika_core::section_shape::SectionShape::SteelBox {
-            height: 600.0,
-            width: 600.0,
-            thick: 12.0,
-            horizontal_thick: 12.0,
-            corner_r: Some(0.0),
-        }
-        .to_section(SectionId(index), "S".into());
-        section.frame_use = Some(FrameSectionUse::Girder);
-        section.material = Some(MaterialId(1));
-        model.sections[index as usize] = section;
-    }
     model.sections[2].shape = None;
     model.sections[2].material = Some(MaterialId(1));
     model.sections[2].thickness = Some(9.0);
@@ -1851,13 +1770,19 @@ fn steel_plate_wall_factory_rejects_boundary_column_with_girder_section_use() {
         .iter()
         .find(|elem| elem.kind == ElementKind::Wall)
         .unwrap();
+    let expected = model.validate_wall_primary_materials().unwrap_err();
     for kind in [
         None,
         Some(AnalysisKind::Incremental),
         Some(AnalysisKind::TimeHistory),
     ] {
-        let reason = wall_side_column_input_issue(wall, &model, kind).unwrap();
-        assert!(reason.contains("側柱には柱用断面が必要"), "{reason}");
+        assert_eq!(
+            wall_side_column_input_issue(wall, &model, kind).as_ref(),
+            Some(&expected)
+        );
+        if let Some(kind) = kind {
+            assert!(nonlinear_input_issues_for_kind(&model, kind).contains(&expected));
+        }
         let panic = std::panic::catch_unwind(|| match kind {
             None => build_behavior(wall, &model),
             Some(kind) => {
@@ -1866,7 +1791,7 @@ fn steel_plate_wall_factory_rejects_boundary_column_with_girder_section_use() {
         })
         .err()
         .unwrap();
-        assert_eq!(panic.downcast_ref::<String>(), Some(&reason));
+        assert_eq!(panic.downcast_ref::<String>(), Some(&expected));
     }
 }
 

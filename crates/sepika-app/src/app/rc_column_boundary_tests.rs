@@ -1,4 +1,5 @@
 use super::*;
+use sepika_core::result_contract::DESIGN_CONTRACT_VERSION;
 use sepika_design_jp::{CheckKind, CheckOutcome};
 #[path = "../../../sepika-design-jp/tests/fixtures/rc_column_axial_boundary_model.rs"]
 pub(crate) mod input;
@@ -252,7 +253,10 @@ fn rc_column_boundary_gui_saves_axial_and_shear_ng_with_unchecked_bending() {
             app.core.scoped.last_error
         );
         let design = app.current_design_results().unwrap();
-        assert_eq!(design.design_contract_version, Some(110));
+        assert_eq!(
+            design.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
         let expected_forces = design.member_forces.clone();
         let expected = design.member_checks.clone();
         assert_eq!(expected.len(), 1);
@@ -314,7 +318,10 @@ fn rc_column_boundary_gui_saves_axial_and_shear_ng_with_unchecked_bending() {
         assert!(stale.current_design_results().is_none());
         stale.run_design_check();
         let rechecked = stale.current_design_results().unwrap();
-        assert_eq!(rechecked.design_contract_version, Some(110));
+        assert_eq!(
+            rechecked.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
         assert_eq!(rechecked.member_forces, expected_forces);
         assert_eq!(
             serde_json::to_value(&rechecked.member_checks).unwrap(),

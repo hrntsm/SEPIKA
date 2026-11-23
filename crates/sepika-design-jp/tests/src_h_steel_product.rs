@@ -21,6 +21,8 @@ fn inputs(column: bool) -> (sepika_core::model::Model, DesignCtx, MemberForcesAt
             MemberKind::Girder
         },
         term: LoadTerm::Long,
+        lk_y: Some(6000.0),
+        lk_z: Some(6000.0),
         rebar_material: Some(model.materials[1].clone()),
         shear_rebar_material: Some(model.materials[1].clone()),
         steel_material: Some(model.materials[2].clone()),

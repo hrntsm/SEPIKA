@@ -94,6 +94,66 @@ fn group_col(g: GroupType) -> usize {
     }
 }
 
+/// SRC造の柱群。FD柱を除いた水平耐力 [N] で分類し、除去による局部崩壊がある場合はD。
+pub fn src_column_group(
+    columns: &[(MemberRank, f64)],
+    local_failure_after_fd_removal: bool,
+) -> Option<GroupType> {
+    if columns.iter().any(|(_, q)| !q.is_finite() || *q <= 0.0) {
+        return None;
+    }
+    if local_failure_after_fd_removal {
+        return columns
+            .iter()
+            .any(|(rank, _)| *rank == MemberRank::FD)
+            .then_some(GroupType::D);
+    }
+    let contributing: Vec<_> = columns
+        .iter()
+        .filter(|(rank, _)| *rank != MemberRank::FD)
+        .map(|(rank, q)| (rank_index_for_group(*rank), *q))
+        .collect();
+    let total_n: f64 = contributing.iter().map(|(_, q)| *q).sum();
+    total_n.is_finite().then(|| member_group(&contributing))?
+}
+
+/// 耐力壁を設けないSRC剛節架構の構造特性係数 Ds の下限。
+pub fn ds_src_frame(column_group: GroupType) -> f64 {
+    [0.25, 0.30, 0.35, 0.40][group_col(column_group)]
+}
+
+/// SRC壁式構造の構造特性係数 Ds の下限。
+pub fn ds_src_wall_structure(wall_group: GroupType) -> f64 {
+    [0.40, 0.45, 0.50, 0.50][group_col(wall_group)]
+}
+
+/// SRC剛節架構と耐力壁を併用した層の構造特性係数 Ds の下限。βu が (0, 1] の範囲外なら None。
+pub fn ds_src_wall_frame(
+    wall_group: GroupType,
+    beta_u: f64,
+    column_group: GroupType,
+) -> Option<f64> {
+    if !(0.0 < beta_u && beta_u <= 1.0) {
+        return None;
+    }
+    let row = match (wall_group, beta_band(beta_u)) {
+        (GroupType::A, BetaBand::Low) => [0.25, 0.30, 0.35, 0.40],
+        (GroupType::A, BetaBand::Mid) => [0.30, 0.35, 0.40, 0.45],
+        (GroupType::A, BetaBand::High) => [0.35, 0.40, 0.40, 0.50],
+        (GroupType::B, BetaBand::Low) => [0.30, 0.30, 0.35, 0.40],
+        (GroupType::B, BetaBand::Mid) => [0.35, 0.35, 0.40, 0.45],
+        (GroupType::B, BetaBand::High) => [0.40, 0.40, 0.45, 0.50],
+        (GroupType::C, BetaBand::Low) => [0.30, 0.30, 0.35, 0.40],
+        (GroupType::C, BetaBand::Mid) => [0.35, 0.40, 0.40, 0.45],
+        (GroupType::C, BetaBand::High) => [0.45, 0.45, 0.45, 0.50],
+        (GroupType::D, BetaBand::Low) => [0.35, 0.35, 0.40, 0.40],
+        (GroupType::D, BetaBand::Mid) => [0.40, 0.45, 0.45, 0.45],
+        (GroupType::D, BetaBand::High) => [0.50, 0.50, 0.50, 0.50],
+        (_, BetaBand::Zero) => return None,
+    };
+    Some(row[group_col(column_group)])
+}
+
 /// RC 造の各階の構造特性係数 Ds（告示「各階の Ds」表）。
 ///
 /// `wall_group`: 耐力壁の部材群としての種別、`beta_u`: 耐力壁の水平耐力の和を保有水平
@@ -300,6 +360,52 @@ pub fn steel_brace_type(lambda: f64, f_value: f64) -> MemberRank {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn src_wall_frame_uses_inclusive_beta_boundaries() {
+        for (beta, expected) in [(0.3, 0.25), (0.300001, 0.30), (0.7, 0.30), (0.700001, 0.35)] {
+            assert_eq!(
+                ds_src_wall_frame(GroupType::A, beta, GroupType::A),
+                Some(expected)
+            );
+        }
+        for beta in [0.0, -0.1, 1.01, f64::NAN, f64::INFINITY] {
+            assert_eq!(ds_src_wall_frame(GroupType::A, beta, GroupType::A), None);
+        }
+    }
+
+    #[test]
+    fn src_fd_columns_do_not_weigh_in_group_ratios_and_local_failure_overrides_group() {
+        let columns = [
+            (MemberRank::FA, 510.0),
+            (MemberRank::FC, 190.0),
+            (MemberRank::FB, 300.0),
+            (MemberRank::FD, 10_000.0),
+        ];
+        assert_eq!(src_column_group(&columns, false), Some(GroupType::A));
+        assert_eq!(src_column_group(&columns, true), Some(GroupType::D));
+        assert_eq!(src_column_group(&columns[..3], true), None);
+        assert_eq!(src_column_group(&columns[3..], false), None);
+    }
+
+    #[test]
+    fn src_required_capacity_at_beta_half_uses_src_lower_bound() {
+        let ds = ds_src_wall_frame(GroupType::A, 0.5, GroupType::A).unwrap();
+        let evaluated = super::super::holding_capacity::check_holding_capacity_at_state(
+            &[275_000.0],
+            &[10.0],
+            &[1_000_000.0],
+            &[ds],
+            &[1.0],
+            &[1.0],
+            &[0.0],
+            &[3000.0],
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(evaluated.stories[0].qun, 300_000.0);
+        assert!(!evaluated.stories[0].ok);
+    }
 
     /// 部材群種別: γA・γC のしきい値、種別 D の混在、空・耐力総和 0 の分岐。
     #[test]

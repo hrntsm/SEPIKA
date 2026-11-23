@@ -49,7 +49,10 @@ fn usual_factory_rigid_axial_yield_unloading_and_work_use_node_length_and_actual
                 let initial = member.tangent_stiffness(&ctx).get(6, 6);
                 assert_relative_eq!(initial, 200000.0 * 20000.0 / 3000.0, epsilon = 1e-6);
                 let initial_state = member.snapshot_state();
-                let initial_state = initial_state.downcast_ref::<FiberBeamSnapshot>().unwrap();
+                let initial_state =
+                    crate::frame::shear::axial_bending_snapshot(initial_state.as_ref())
+                        .downcast_ref::<FiberBeamSnapshot>()
+                        .unwrap();
                 for point in &initial_state.7 {
                     assert_relative_eq!(
                         point.0.stiffness[0][0],
@@ -88,7 +91,9 @@ fn usual_factory_rigid_axial_yield_unloading_and_work_use_node_length_and_actual
                 );
                 assert!(member.tangent_stiffness(&ctx).get(6, 6) < 0.1 * initial);
                 let state = member.snapshot_state();
-                let state = state.downcast_ref::<FiberBeamSnapshot>().unwrap();
+                let state = crate::frame::shear::axial_bending_snapshot(state.as_ref())
+                    .downcast_ref::<FiberBeamSnapshot>()
+                    .unwrap();
                 for point in &state.7 {
                     assert_relative_eq!(point.0.stiffness[0][0], 20000.0 * et, epsilon = 1e-3);
                 }

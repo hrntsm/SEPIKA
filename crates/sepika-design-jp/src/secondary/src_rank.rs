@@ -2,12 +2,8 @@
 //!
 //! - [`src_column_rank`] — 与えた耐力比と破壊状況による SRC 柱の表引き
 //! - [`src_wall_type`] — SRC 耐震壁の種別（せん断破壊 WC・それ以外 WA）
-//! - [`src_column_rank_ratios`] — 耐力比 N/N0・sM0/M0 の候補値
 
 use super::holding_capacity::MemberRank;
-use sepika_core::model::{Material, Section};
-use sepika_core::rc_rebar_geom::RectEdge;
-use sepika_core::section_shape::SectionShape;
 
 /// SRC 柱の表 2.6.6-5 を、圧縮力と圧縮耐力の比 `n_over_n0`、鉄骨部分と柱全体の曲げ耐力の比 `smo_over_m0` で引く。
 /// `shear_failure` は崩壊形における破壊状況を表す（せん断破壊は `true`、曲げ破壊は `false`）。
@@ -40,67 +36,6 @@ pub fn src_wall_type(shear_failure: bool) -> MemberRank {
     } else {
         MemberRank::FA
     }
-}
-
-/// SRC 矩形柱の強軸の候補値 `(N/N0, sM0/M0)` を返す。告示用の耐力比としての適用は未確認。
-/// `fc` と `rebar_sy` は N/mm²、`n_ult` は N（圧縮正、引張は 0 扱い）。
-/// 入力が不正な場合は理由を返し、断面幾何・実板厚のエラーには入力寸法 [mm] を含める。
-pub fn src_column_rank_ratios(
-    section: &Section,
-    steel_material: Option<&Material>,
-    fc: f64,
-    rebar_sy: f64,
-    n_ult: f64,
-) -> Result<(f64, f64), String> {
-    let Some(
-        ref shape @ SectionShape::SrcColumnRect {
-            b,
-            d,
-            ref rebar,
-            steel_height: sh,
-            steel_width: sb,
-            steel_web_thick: tw,
-            steel_flange_thick: tf,
-        },
-    ) = section.shape
-    else {
-        return Err("SRC 矩形柱の断面形状が必要です".into());
-    };
-    let steel = steel_material.ok_or("内蔵鉄骨の材料が未割当、または参照先が不明です")?;
-    let minimum_mm = crate::material_strength::src_h_steel_minimum_thickness_mm(steel)?;
-    let s_f = crate::material_strength::section_steel_f(section, Some(steel))
-        .map_err(|reason| format!("{reason}（入力実板厚 ウェブ厚 {tw} mm、フランジ厚 {tf} mm）"))?;
-    crate::material_strength::validate_src_h_steel_thickness(&steel.name, tw, tf, minimum_mm)?;
-    if [fc, rebar_sy].iter().any(|v| !v.is_finite() || *v <= 0.0) || !n_ult.is_finite() {
-        return Err("SRC 柱のコンクリート強度・主筋強度・軸力が不正です".into());
-    }
-    shape.validate_src_geometry().map_err(|reason| {
-        format!(
-            "SRC 柱の断面・配筋形状が不正です: {reason}（入力寸法 SRC 断面幅 {b} mm、断面せい {d} mm、内蔵 H 形鋼のせい {sh} mm、フランジ幅 {sb} mm、ウェブ厚 {tw} mm、フランジ厚 {tf} mm）"
-        )
-    })?;
-    let edge = rebar.edge_steel(RectEdge::Top, b, d);
-
-    let hw = sh - 2.0 * tf;
-    let s_a = 2.0 * sb * tf + hw * tw;
-    let s_zp = sb * tf * (sh - tf) + tw * hw * hw / 4.0;
-    let s_m0 = s_zp * s_f;
-
-    let rebar_area = rebar.total_main_area();
-    let ac = (b * d - s_a - rebar_area).max(0.0);
-    let n0 = ac * fc + s_a * s_f + rebar_area * rebar_sy;
-    if !n0.is_finite() || n0 <= 0.0 {
-        return Err("SRC 柱の圧縮耐力の候補値を算定できません".into());
-    }
-
-    let de = (d - edge.centroid_from_edge_mm).max(0.0);
-    let r_m0 = 0.9 * edge.area_mm2 * rebar_sy * de;
-    let m0 = s_m0 + r_m0;
-    if !m0.is_finite() || m0 <= 0.0 {
-        return Err("SRC 柱の曲げ耐力の候補値を算定できません".into());
-    }
-
-    Ok((n_ult.max(0.0) / n0, s_m0 / m0))
 }
 
 #[cfg(test)]

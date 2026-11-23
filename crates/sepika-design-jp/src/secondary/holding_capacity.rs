@@ -120,6 +120,7 @@ pub enum FrameType {
     RcWall,
     SteelFrame,
     SteelBrace,
+    SrcFrame,
 }
 
 /// 告示1792 の Ds 値。
@@ -143,6 +144,12 @@ pub fn ds_value(frame: FrameType, rank: MemberRank) -> f64 {
         (SteelBrace, FB) => 0.35,
         (SteelBrace, FC) => 0.40,
         (SteelBrace, FD) => 0.50,
+        (SrcFrame, rank) => super::ds_group::ds_src_frame(match rank {
+            FA => super::ds_group::GroupType::A,
+            FB => super::ds_group::GroupType::B,
+            FC => super::ds_group::GroupType::C,
+            FD => super::ds_group::GroupType::D,
+        }),
     }
 }
 
@@ -171,19 +178,30 @@ pub fn check_holding_capacity(
         .capacity_curve
         .last()
         .ok_or("保有耐力: 性能曲線がありません")?;
+    let usable = pushover
+        .capacity_curve
+        .iter()
+        .filter(|point| pushover.shear_design_unavailable_at(point.step).is_none());
     let n = qud_by_story.len();
     let mut qu = vec![0.0_f64; n];
-    for point in &pushover.capacity_curve {
+    let mut last_usable = None;
+    for point in usable {
         if point.story_shear.len() != n || point.story_shear.iter().any(|q| !q.is_finite()) {
             return Err("保有耐力: 性能曲線の層せん断力が欠損又は不正です".into());
         }
         for (peak, &q) in qu.iter_mut().zip(&point.story_shear) {
             *peak = peak.max(q);
         }
+        last_usable = Some(point);
     }
+    let last_usable = last_usable.ok_or_else(|| {
+        pushover
+            .shear_design_unavailable_at(last_point.step)
+            .unwrap_or_else(|| "保有耐力: 採用可能な性能曲線がありません".into())
+    })?;
     check_holding_capacity_at_state(
         &qu,
-        &last_point.story_drift,
+        &last_usable.story_drift,
         qud_by_story,
         ds_by_story,
         fes_by_story,
@@ -490,6 +508,7 @@ mod tests {
             }],
             hinges: vec![],
             shear_yields: vec![],
+            shear_diagnostics: vec![],
             mechanism: MechanismType::Overall,
             qu: 0.0,
             member_response: vec![],
@@ -540,6 +559,7 @@ mod tests {
             ],
             hinges: vec![],
             shear_yields: vec![],
+            shear_diagnostics: vec![],
             mechanism: MechanismType::Overall,
             qu: 150.0,
             member_response: vec![],
@@ -565,6 +585,48 @@ mod tests {
             result.stories[0].qu
         );
         assert!((result.stories[0].drift_angle - 12.0 / 3000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn rc_shear_limit_excludes_reference_steps_from_holding_capacity_peak() {
+        use sepika_solver::nonlinear::pushover::{
+            CapacityPoint, MemberShearYield, ShearYieldEvent,
+        };
+
+        let mut pushover = pushover_with_qu(vec![90.0], vec![5.0]);
+        pushover.capacity_curve.push(CapacityPoint {
+            step: 1,
+            roof_disp: 10.0,
+            base_shear: 150.0,
+            story_shear: vec![150.0],
+            story_drift: vec![10.0],
+        });
+        pushover.shear_yields.push(ShearYieldEvent {
+            step: 1,
+            elem: ElemId(0),
+            detail: Some(MemberShearYield {
+                at_i: true,
+                is_rc: true,
+                shear_n: [140.0, 0.0],
+                limit_n: 100.0,
+                governing_axis: Some(0),
+                exactly_at_limit: false,
+            }),
+        });
+        let result = check_holding_capacity(
+            &pushover,
+            &[400.0],
+            &[0.3],
+            &[1.0],
+            &[1.0],
+            &[0.0],
+            &[3000.0],
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(result.stories[0].qu, 90.0);
+        assert_eq!(result.stories[0].drift_angle, 5.0 / 3000.0);
+        assert!(!result.stories[0].ok);
     }
 
     #[test]

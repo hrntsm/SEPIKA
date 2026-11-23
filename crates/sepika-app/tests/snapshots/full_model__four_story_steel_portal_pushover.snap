@@ -3,7 +3,7 @@ source: crates/sepika-app/tests/full_model.rs
 assertion_line: 1786
 expression: "format!(\"steps={}\\nQu={}\\nmechanism={:?}\\nhinges={}\", push.steps.len(),\nsig4(push.qu), push.mechanism, push.hinges.len(),)"
 ---
-steps=42
-Qu=1.073e5
+steps=41
+Qu=1.082e5
 mechanism=Partial
 hinges=0

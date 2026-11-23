@@ -61,6 +61,9 @@ fn apply_du_trial_mode(
     let snapshot = super::transaction::StateSnapshot::capture(behaviors);
     let ctx = Ctx { model };
     let update = |(index, b): (usize, &mut Box<dyn ElementBehavior>)| {
+        if b.panel_column_sections().is_some() {
+            return Ok(());
+        }
         let gdofs = b.global_dofs(dofmap);
         let du_elem = LocalVec {
             data: SmallVec::from_vec(gather_u_elem(&gdofs, du_free)),
@@ -76,7 +79,11 @@ fn apply_du_trial_mode(
     } else {
         behaviors.iter_mut().enumerate().map(update).collect()
     };
-    if let Some(error) = results.into_iter().find_map(Result::err) {
+    if let Err(error) = results
+        .into_iter()
+        .collect::<Result<(), _>>()
+        .and_then(|()| update_coupled_panels(model, dofmap, behaviors, du_free))
+    {
         snapshot.restore(behaviors);
         return Err(error);
     }
@@ -179,6 +186,9 @@ fn apply_loaded_trial_mode(
     let snapshot = super::transaction::StateSnapshot::capture(behaviors);
     let ctx = Ctx { model };
     let update = |(index, behavior): (usize, &mut Box<dyn ElementBehavior>)| {
+        if behavior.panel_column_sections().is_some() {
+            return Ok(());
+        }
         let du = LocalVec {
             data: SmallVec::from_vec(gather_u_elem(&mappings[index], du_free)),
         };
@@ -200,9 +210,91 @@ fn apply_loaded_trial_mode(
     } else {
         behaviors.iter_mut().enumerate().map(update).collect()
     };
-    if let Some(error) = results.into_iter().find_map(Result::err) {
+    if let Err(error) = results
+        .into_iter()
+        .collect::<Result<(), _>>()
+        .and_then(|()| update_coupled_panels(model, dofmap, behaviors, du_free))
+    {
         snapshot.restore(behaviors);
         return Err(error);
+    }
+    Ok(())
+}
+
+fn update_coupled_panels(
+    model: &Model,
+    dofmap: &DofMap,
+    behaviors: &mut [Box<dyn ElementBehavior>],
+    du_free: &[f64],
+) -> Result<(), String> {
+    let ctx = Ctx { model };
+    for index in 0..behaviors.len() {
+        let Some(columns) = behaviors[index].panel_column_sections() else {
+            continue;
+        };
+        let panel_id = model.elements[index].id.0;
+        let mut axial_n = [0.0; 2];
+        let mut gradient = Vec::new();
+        for (axial, column) in axial_n.iter_mut().zip(columns) {
+            let invalid = |reason: &str| {
+                format!(
+                    "仕口パネル ID {panel_id}・柱 ID {}: {reason}",
+                    column.element.0
+                )
+            };
+            let behavior = behaviors
+                .get(column.element_position)
+                .filter(|_| {
+                    model
+                        .elements
+                        .get(column.element_position)
+                        .is_some_and(|element| element.id == column.element)
+                })
+                .ok_or_else(|| invalid("上下柱の試行要素がありません"))?;
+            let response = behavior
+                .state_frame_load_response()
+                .map_err(|reason| invalid(&reason))?
+                .ok_or_else(|| invalid("上下柱の荷重込み断面力が取得できません"))?;
+            *axial = response
+                .section
+                .at_continuous_section_mm(column.position_mm, column.length_mm)
+                .map_err(|reason| invalid(&reason))?[0];
+            let stiffness = behavior.tangent_stiffness(&ctx);
+            for (dof, global) in behavior.global_dofs(dofmap).into_iter().enumerate() {
+                if global == usize::MAX {
+                    continue;
+                }
+                // 同一の絶対部材荷重では断面力の荷重切片に変位微分はない。
+                // 内部軸力は i 端節点抵抗の材軸成分と逆向きになる。
+                let slope = -0.5
+                    * column
+                        .axis
+                        .iter()
+                        .enumerate()
+                        .map(|(r, axis)| axis * stiffness.get(r, dof))
+                        .sum::<f64>();
+                if !slope.is_finite() {
+                    return Err(invalid("上下柱の軸力変位微分が非有限です"));
+                }
+                if slope != 0.0 {
+                    gradient.push((global, slope));
+                }
+            }
+        }
+        let mean = axial_n[0].midpoint(axial_n[1]);
+        if mean == 0.0 && axial_n[0] != -axial_n[1] {
+            return Err(format!(
+                "仕口パネル ID {panel_id}: 上下柱の軸力平均の非零値を表現できません"
+            ));
+        }
+        let panel = &mut behaviors[index];
+        let gdofs = panel.global_dofs(dofmap);
+        let du = LocalVec {
+            data: SmallVec::from_vec(gather_u_elem(&gdofs, du_free)),
+        };
+        panel
+            .update_panel_state(&du, mean, gradient)
+            .map_err(|error| error.to_string())?;
     }
     Ok(())
 }

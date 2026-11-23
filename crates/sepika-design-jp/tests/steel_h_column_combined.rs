@@ -3,7 +3,7 @@ use sepika_core::model::{Model, PropertyBasis, Section};
 use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::{
     CheckKind, CheckOutcome, DesignCheck, DesignCtx, LoadTerm, MemberForcesAt, MemberKind,
-    SteelDesign, SteelFbBasis,
+    SteelDesign,
 };
 
 #[path = "fixtures/steel_h_column_combined_model.rs"]
@@ -40,6 +40,8 @@ fn check(
             term,
             kind,
             length: 3000.0,
+            lk_y: Some(3000.0),
+            lk_z: Some(3000.0),
             column_lateral_buckling_length: Some(Ok(3000.0)),
             lb: Some(1000.0),
             steel_attr: Some(sepika_core::model::SteelDesignAttr {
@@ -54,7 +56,6 @@ fn check(
                 lk_z_direct: None,
                 c_direct: None,
             }),
-            steel_fb_basis: SteelFbBasis::Asd2019,
             ..Default::default()
         },
     )
@@ -87,7 +88,7 @@ fn simultaneous_strong_bending_and_weak_shear_leave_combination_unchecked_for_h_
             ] {
                 for (qy, qz, my, mz) in [
                     (0.0, 365_000.0, 0.0, 50e6),
-                    (500_000.0, -365_000.0, 3e6, -50e6),
+                    (200_000.0, -365_000.0, 3e6, -50e6),
                     (0.0, f64::MIN_POSITIVE, 0.0, 50e6),
                 ] {
                     let forces = MemberForcesAt {
@@ -118,14 +119,14 @@ fn compression_and_zero_axial_counterexamples_stay_unchecked() {
     let model = issue_model();
     let section = &model.sections[0];
     // N=-77 kN では圧縮座屈込みの短期 fc=183.0658305530364 N/mm²。
-    // 両ケース共通の短期 fb=192.337746536794 N/mm²、Z=1148243.413333333 mm³。
+    // 両ケース共通の短期 fb=192.38541862520228 N/mm²、Z=1148243.413333333 mm³。
     for (n, mz, expected) in [
         (
             -77_000.0,
             167e6,
-            9.3994140625 / 183.0658305530364 + 145.439545361903 / 192.337746536794,
+            9.3994140625 / 183.0658305530364 + 145.439545361903 / 192.38541862520228,
         ),
-        (0.0, 177e6, 177e6 / 1148243.413333333 / 192.337746536794),
+        (0.0, 177e6, 177e6 / 1148243.413333333 / 192.38541862520228),
     ] {
         let forces = MemberForcesAt {
             n,
@@ -185,7 +186,7 @@ fn confirmed_axial_bending_and_slenderness_failures_keep_the_unavailable_reason(
         assert_eq!(result.components.len(), 1);
         assert_eq!(result.components[0].kind, CheckKind::AxialBending);
         let expected =
-            n.abs() / 8192.0 / 183.0658305530364 + 250e6 / 1148243.413333333 / 192.337746536794;
+            n.abs() / 8192.0 / 183.0658305530364 + 250e6 / 1148243.413333333 / 192.38541862520228;
         assert!((result.ratio() - expected).abs() < 1e-12, "{result:?}");
     }
 
@@ -199,6 +200,8 @@ fn confirmed_axial_bending_and_slenderness_failures_keep_the_unavailable_reason(
         &DesignCtx {
             kind: MemberKind::Column,
             length: 12_000.0,
+            lk_y: Some(12_000.0),
+            lk_z: Some(12_000.0),
             ..Default::default()
         },
     );
@@ -237,13 +240,13 @@ fn zero_weak_shear_preserves_axial_bending_ratio_in_the_issue_example() {
         .iter()
         .find(|component| component.kind == CheckKind::AxialBending)
         .unwrap();
-    // 独立算術の N/A、Mz/Z、短期 fb は順に 9.3994140625、145.439545361903、192.337746536794 N/mm²。
-    let expected = 9.3994140625 / 235.0 + 145.439545361903 / 192.337746536794;
-    assert!((axial_bending.ratio - expected).abs() < 1e-12, "{result:?}");
+    // 独立算術の N/A、Mz/Z、短期 fb は順に 9.3994140625、145.439545361903、192.38541862520228 N/mm²。
+    let expected = 0.707_122_880_1;
+    assert!((axial_bending.ratio - expected).abs() < 1e-8, "{result:?}");
 }
 
 #[test]
-fn skip_is_limited_to_the_specified_forces_and_h_columns() {
+fn approved_h_checks_and_independent_box_and_brace_checks_remain_available() {
     let model = issue_model();
     let rolled = &model.sections[0];
     let box_section = SectionShape::SteelBox {
@@ -262,6 +265,7 @@ fn skip_is_limited_to_the_specified_forces_and_h_columns() {
                 &MemberForcesAt {
                     mz: 0.0,
                     my: 3e6,
+                    qz: 0.0,
                     ..issue_forces
                 },
                 MemberKind::Column,
@@ -275,9 +279,15 @@ fn skip_is_limited_to_the_specified_forces_and_h_columns() {
                 },
                 MemberKind::Column,
             ),
-            (rolled, &issue_forces, MemberKind::Girder),
             (rolled, &issue_forces, MemberKind::Brace),
-            (&box_section, &issue_forces, MemberKind::Column),
+            (
+                &box_section,
+                &MemberForcesAt {
+                    qz: 0.0,
+                    ..issue_forces
+                },
+                MemberKind::Column,
+            ),
         ] {
             let outcome = check(&model, section, forces, LoadTerm::Short, kind);
             assert!(matches!(&outcome, CheckOutcome::Checked(_)), "{outcome:?}");

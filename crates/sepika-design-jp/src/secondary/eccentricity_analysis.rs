@@ -1192,6 +1192,7 @@ mod tests {
             member_forces,
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            steel_panel_column_face_forces: Vec::new(),
             column_end_axial_forces: col_local_forces
                 .iter()
                 .enumerate()
@@ -1454,6 +1455,7 @@ mod tests {
             )],
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            steel_panel_column_face_forces: Vec::new(),
             column_end_axial_forces: Vec::new(),
             column_end_horizontal_forces: vec![(ElemId(0), Ok([[1000.0, 0.0], [-1000.0, -0.0]]))],
         };
@@ -1472,6 +1474,7 @@ mod tests {
             )],
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            steel_panel_column_face_forces: Vec::new(),
             column_end_axial_forces: Vec::new(),
             column_end_horizontal_forces: vec![(ElemId(0), Ok([[0.0, 1000.0], [-0.0, -1000.0]]))],
         };

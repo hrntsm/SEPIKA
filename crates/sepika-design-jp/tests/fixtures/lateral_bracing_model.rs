@@ -89,6 +89,23 @@ pub fn frame(split: bool) -> Model {
         model.elements.push(element(4, 5, 1, 0));
         model.girder_groups = vec![vec![ElemId(0), ElemId(3), ElemId(4)]];
     }
+    model.steel_design_attrs = model
+        .elements
+        .iter()
+        .filter(|elem| elem.section == Some(SectionId(0)))
+        .map(|elem| SteelDesignAttr {
+            elem: elem.id,
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: None,
+            lateral_brace_count: None,
+            lk_y_direct: Some(20_000.0),
+            lk_z_direct: Some(20_000.0),
+            c_direct: None,
+            column_lateral_buckling_end_supports: None,
+        })
+        .collect();
     for id in [1, 2] {
         model.elements[id].local_axis.ref_vector = [1.0, 0.0, 0.0];
     }

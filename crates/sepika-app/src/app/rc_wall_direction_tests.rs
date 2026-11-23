@@ -1,92 +1,10 @@
+use super::wall_material_tests::rc_wall_model as fixture;
 use super::*;
 use sepika_core::ids::WallPlateId;
 use sepika_core::model::{ElementKind, MaterialCategory, Model};
-use sepika_core::section_shape::{
-    BeamStirrup, RcBeamRebar, RcRectColumnRebar, RectColumnHoop, SectionShape,
-};
+use sepika_core::section_shape::SectionShape;
 use sepika_element::factory::StrengthBasis;
 use sepika_element::wall::wall_element::WallElement;
-
-fn fixture() -> Model {
-    let mut model = super::steel_wall_notice_tests::steel_wall_model();
-    model.panel_zone = sepika_core::model::PanelZoneMode::None;
-    model.materials.truncate(1);
-    let concrete = &mut model.materials[0];
-    concrete.name = "Fc24".into();
-    concrete.category = MaterialCategory::Concrete;
-    concrete.fc = Some(24.0);
-    concrete.fy = None;
-    concrete.young = 23000.0;
-    concrete.poisson = 0.2;
-    concrete.density = 2.4e-9;
-    concrete.shear = None;
-    let mut vertical = concrete.clone();
-    vertical.id = MaterialId(1);
-    vertical.name = "SD345".into();
-    vertical.category = MaterialCategory::Rebar;
-    vertical.fc = None;
-    vertical.fy = Some(345.0);
-    vertical.young = 205000.0;
-    vertical.strength_factor = Some(1.0);
-    let mut horizontal = vertical.clone();
-    horizontal.id = MaterialId(2);
-    horizontal.name = "SD295A".into();
-    horizontal.fy = Some(295.0);
-    model.materials.extend([vertical, horizontal]);
-    let column = SectionShape::RcColumnRect {
-        b: 600.0,
-        d: 600.0,
-        rebar: RcRectColumnRebar {
-            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
-            x: vec![8],
-            y: vec![8],
-            cover: 50.0,
-            hoop: RectColumnHoop {
-                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
-                pitch: 100.0,
-                legs_x: 2,
-                legs_y: 2,
-            },
-        },
-    };
-    let beam = SectionShape::RcBeamRect {
-        b: 600.0,
-        d: 600.0,
-        rebar: RcBeamRebar {
-            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(22.0),
-            top: vec![8],
-            bottom: vec![8],
-            cover: 50.0,
-            stirrup: BeamStirrup {
-                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
-                pitch: 100.0,
-                legs: 2,
-            },
-        },
-    };
-    for (index, old) in model.sections.iter_mut().enumerate().take(3) {
-        let shape = match index {
-            0 => column.clone(),
-            1 => beam.clone(),
-            _ => SectionShape::RcWall {
-                thickness: 200.0,
-                ps: 0.0025,
-                pwh_ratio: Some(0.006),
-                pwv_ratio: Some(0.002),
-            },
-        };
-        let mut section = shape.to_section(old.id, old.name.clone());
-        section.frame_use = old.frame_use;
-        section.material = Some(MaterialId(0));
-        section.rebar_material = Some(MaterialId(1));
-        section.shear_rebar_material = Some(MaterialId(2));
-        *old = section;
-    }
-    for element in &mut model.elements {
-        element.force_regime = sepika_core::model::ForceRegime::AxialBendingInteract;
-    }
-    model
-}
 
 fn capacity(model: &Model) -> [f64; 2] {
     let (expanded, _, _) = sepika_core::wall_expand::expand_wall_elements(model);

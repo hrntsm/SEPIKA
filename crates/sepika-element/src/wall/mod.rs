@@ -6,6 +6,7 @@
 pub mod misc_wall;
 pub mod shear_section;
 pub mod side_column;
+pub mod src_face;
 pub mod static_face;
 pub mod wall_element;
 

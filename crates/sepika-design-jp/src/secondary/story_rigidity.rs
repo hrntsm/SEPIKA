@@ -109,6 +109,9 @@ pub fn validate_rigidity_node_ids(model: &Model) -> Result<(), String> {
 fn validate_rigidity_inputs(model: &Model, story: StoryId) -> Result<(), String> {
     validate_rigidity_node_ids(model).map_err(|reason| evaluation_error(story, reason))?;
     model
+        .validate_wall_primary_materials()
+        .map_err(|reason| evaluation_error(story, reason))?;
+    model
         .validate_wall_attr_refs()
         .map_err(|error| evaluation_error(story, error.to_string()))
 }

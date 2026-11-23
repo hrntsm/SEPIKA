@@ -1,7 +1,9 @@
 #[path = "../../sepika-core/tests/support/frame_support_model.rs"]
 mod fixture;
 use sepika_core::model::*;
-use sepika_job::{prepare::prepare_model_for_analysis, settings::AnalysisSettings};
+use sepika_job::{
+    error::JobError, prepare::prepare_model_for_analysis, settings::AnalysisSettings,
+};
 
 fn resultant(model: &Model, nodal: &[NodalLoad], member: &[MemberLoad]) -> [f64; 4] {
     let mut sum = [0.; 4];
@@ -51,6 +53,15 @@ fn set_plate_section(model: &mut Model, wall: bool) {
     plate_material.id = sepika_core::ids::MaterialId(1);
     plate_material.name = "板材".into();
     plate_material.density = 7.85e-9;
+    if wall {
+        plate_material.category = MaterialCategory::Concrete;
+        plate_material.young = 23_000.0;
+        plate_material.poisson = 0.2;
+        plate_material.density =
+            sepika_core::units::to_internal::mass_density_from_unit_weight_kn_m3(24.0);
+        plate_material.fc = Some(24.0);
+        plate_material.fy = None;
+    }
     model.materials.push(plate_material);
     section.material = Some(sepika_core::ids::MaterialId(1));
     section.shape = None;
@@ -59,6 +70,11 @@ fn set_plate_section(model: &mut Model, wall: bool) {
     if wall {
         for plate in &mut model.wall_plates {
             plate.section = Some(plate_id);
+            // 壁の躯体 2.40 と既存仕上げ 2.50 に加え、合計 10.35 kN/m² とする。
+            plate.loads.push(AreaLoad {
+                kind: "付加仕上げ".into(),
+                value: 0.00545,
+            });
         }
     } else {
         model.stories.push(Story::new(
@@ -528,12 +544,50 @@ fn 取付き床の斜め未到達異レベルとパネルは分割支持にな�
 
 #[test]
 fn 取付き床のbrace用途不整合とwall準備拒否は正式受理対照に数えない() {
+    use sepika_core::ids::{MaterialId, SectionId};
+    use sepika_core::section_shape::SectionShape;
+
     let mut brace = attached_floor(false, false);
     brace.elements[1].kind = ElementKind::Brace {
         tension_only: false,
     };
     assert!(brace.validate().is_err());
     let mut wall = attached_floor(false, false);
+    let material_id = MaterialId(wall.materials.len() as u32);
+    wall.materials.push(Material {
+        id: material_id,
+        name: "Fc24".into(),
+        category: MaterialCategory::Concrete,
+        young: 23_000.0,
+        poisson: 0.2,
+        density: 2.4e-9,
+        shear: None,
+        fc: Some(24.0),
+        fy: None,
+        concrete_class: Default::default(),
+        strength_factor: None,
+    });
+    let section_id = SectionId(wall.sections.len() as u32);
+    let mut section = SectionShape::RcWall {
+        thickness: 150.0,
+        ps: 0.002,
+        pwh_ratio: None,
+        pwv_ratio: None,
+    }
+    .to_section(section_id, "W150".into());
+    section.material = Some(material_id);
+    wall.sections.push(section);
     wall.elements[1].kind = ElementKind::Wall;
-    assert!(prepare_model_for_analysis(&mut wall, &AnalysisSettings::default(), None).is_err());
+    wall.elements[1].section = Some(section_id);
+    let error = prepare_model_for_analysis(&mut wall, &AnalysisSettings::default(), None)
+        .err()
+        .expect("物理壁版に対応しない解析壁要素は準備できない");
+    let JobError::InvalidInput(reason) = error else {
+        panic!("入力不備の診断が必要です: {error}");
+    };
+    let primary_reason = reason.strip_prefix("入力不備: ").unwrap_or(&reason);
+    assert!(
+        primary_reason.starts_with("解析壁要素 1: 物理壁版IDが未定義"),
+        "{reason}"
+    );
 }

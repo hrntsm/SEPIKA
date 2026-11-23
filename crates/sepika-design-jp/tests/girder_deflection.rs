@@ -45,12 +45,12 @@ fn girder(steel: bool, fixed: bool, m_i_knm: f64, m_j_knm: f64) -> Model {
         material.poisson = 0.3;
         material.fc = None;
         material.fy = Some(235.0);
-        let mut section = SectionShape::SteelBox {
-            height: 400.0,
-            width: 400.0,
-            thick: 10.0,
-            horizontal_thick: 10.0,
-            corner_r: Some(0.0),
+        let mut section = SectionShape::SteelH {
+            height: 500.0,
+            width: 300.0,
+            web_thick: 12.0,
+            flange_thick: 20.0,
+            root_r: Some(0.0),
         }
         .to_section(SectionId(0), "鋼梁".into());
         section.frame_use = Some(FrameSectionUse::Girder);
@@ -141,7 +141,7 @@ fn steel_girder_reports_signed_reference_without_a_deflection_ratio() {
     assert_eq!(report.steel_deflection_references.len(), 1);
     let (id, detail) = &report.steel_deflection_references[0];
     assert_eq!(*id, ElemId(0));
-    assert!(detail.contains("δ=4.895368 mm, v=+4.895368 mm"), "{detail}");
+    assert!(detail.contains("δ=2.455453 mm, v=+2.455453 mm"), "{detail}");
     assert!(detail.contains("x=3000.000 mm"), "{detail}");
     assert!(control.steel_deflection_references[0]
         .1

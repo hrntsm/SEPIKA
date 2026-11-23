@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[test]
-    fn pure_steel_boundary_columns_are_not_released() {
+    fn steel_wall_does_not_release_adjacent_columns() {
         for kind in [
             ElementKind::Beam,
             ElementKind::Fiber,
@@ -371,11 +371,7 @@ mod tests {
             assert!(wall_side_column_release(member, &model).is_none());
             assert!(index.release_axis(member, &model).is_none());
             let classified = index.classification().classify(member, &model);
-            assert!(classified.issues.is_empty());
-            assert_eq!(
-                classified.bindings[0].role,
-                sepika_core::model::WallSideColumnRole::SteelPlateBoundary
-            );
+            assert!(classified.bindings.is_empty());
         }
     }
 

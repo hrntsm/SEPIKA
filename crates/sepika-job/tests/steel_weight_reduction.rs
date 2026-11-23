@@ -24,7 +24,6 @@ fn two_columns(factor: f64, method: MassMethod) -> Model {
         node.restraint.set_free(Dof::Uy);
     }
     model.elements.truncate(2);
-    model.slab_composite_attrs.clear();
     model.materials.truncate(1);
     model.sections.truncate(1);
     model.sections[0].name = "鋼柱".into();

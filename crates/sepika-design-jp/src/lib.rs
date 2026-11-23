@@ -51,17 +51,6 @@ pub use steel::SteelDesign;
 
 use sepika_core::model::{Material, Section, SteelDesignAttr};
 
-/// 鋼材の許容曲げ応力度 fb の算定基準。
-///
-/// - `Standard1973`: 鋼構造設計規準 1973 年版。
-/// - `Asd2019`: 鋼構造許容応力度設計規準 2019 年版。既定値。
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub enum SteelFbBasis {
-    #[default]
-    Asd2019,
-    Standard1973,
-}
-
 /// RC 梁付着検定の方式。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum BondMethod {
@@ -86,7 +75,7 @@ pub enum QdMethod {
 }
 
 impl QdMethod {
-    /// QD1・QD2 から設計用せん断力を決定する（RC・SRC梁などの決定規約）。
+    /// QD1・QD2 から設計用せん断力を決定する（RCなどの決定規約）。
     /// `Qd1` 選択時でも QD1 が無効（`qd1` が非有限）なら QD2 で代替する。
     pub(crate) fn resolve(self, qd1: f64, qd2: f64) -> f64 {
         match self {
@@ -346,22 +335,24 @@ pub struct DesignCtx {
     pub steel_material: Option<sepika_core::model::Material>,
     pub term: LoadTerm,
     pub kind: MemberKind,
-    /// 部材長 `[mm]`。通常の圧縮座屈長さ lk と鋼梁の横座屈長さ lb の既定値として用いる。
+    /// 実材軸長 `[mm]`。
     pub length: f64,
-    /// 一般H形鋼柱の横座屈長さ [mm] または現行条件で算定できない理由。未指定時は未確認。
+    /// 節点座標間距離 [mm]。単独検定で未指定なら、座屈長さ・横座屈長さの既定値の基準には `length` を用いる。
+    pub node_span_mm: Option<f64>,
+    /// 一般H形鋼柱の横座屈長さ [mm] または現行条件で算定できない理由。未指定時は節点間距離。
     pub column_lateral_buckling_length: Option<Result<f64, &'static str>>,
     /// フェース控除後の内法長 `[mm]`。
     /// None のときは [`Self::length`]（幾何長）で代替する。
     pub clear_length: Option<f64>,
-    /// 横座屈長さ lb [mm] の直接値。H形鋼大梁の横座屈照査ではこの値を優先し、`None` なら位置別の直接入力、等間隔横補剛による値、部材長の順に採用する。
+    /// 横座屈長さ lb [mm] の直接値。H形鋼大梁ではこの値、位置別直接入力、等間隔横補剛による値、節点間距離の順に採用する。
     /// 上下非対称組立H形鋼大梁の純強軸曲げでは、`Some(0.0)` または該当位置の直接入力0で横座屈低減なしの断面照査を行う。
     /// 自動算定値や部材長から得た0は、この断面照査の条件として採用しない。
     pub lb: Option<f64>,
     /// 強軸まわり座屈長さ lk_y `[mm]`（断面二次半径 i_y=√(Iy/A) と対）。
-    /// None なら `length`（座屈長さ係数 K=1 相当）。[`effective_slenderness`] 参照。
+    /// 通常S部材・SRC柱の単独検定では `None` のとき柱は `1.2 × length`、梁・ブレースは `length`。
     pub lk_y: Option<f64>,
     /// 弱軸まわり座屈長さ lk_z `[mm]`（断面二次半径 i_z=√(Iz/A) と対）。
-    /// None なら `length`（座屈長さ係数 K=1 相当）。[`effective_slenderness`] 参照。
+    /// 通常S部材・SRC柱の単独検定で `None` の場合の既定値は [`Self::lk_y`] と同じ。
     pub lk_z: Option<f64>,
     /// せん断スパン比 M/(Q·d) 算定用の部材代表値 `(|Mz|max, 対応する |Qy|)`
     /// （強軸曲げ方向）。「モーメントが最大となる検定位置の値を採用」の規定に
@@ -398,8 +389,6 @@ pub struct DesignCtx {
     /// S 造部材の断面検定属性（継手・スカラップ欠損率、横座屈長さ入力）。
     /// `Model::steel_design_attrs` 由来。None は欠損なし。一般H形鋼柱の横座屈支点は未確認。
     pub steel_attr: Option<SteelDesignAttr>,
-    /// 鋼材の許容曲げ応力度 fb の算定基準。既定は `Asd2019`。
-    pub steel_fb_basis: SteelFbBasis,
 }
 
 impl Default for DesignCtx {
@@ -411,6 +400,7 @@ impl Default for DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
             length: 0.0,
+            node_span_mm: None,
             column_lateral_buckling_length: None,
             clear_length: None,
             lb: None,
@@ -427,7 +417,6 @@ impl Default for DesignCtx {
             column_sum_my: None,
             beam_has_slab: false,
             steel_attr: None,
-            steel_fb_basis: SteelFbBasis::default(),
         }
     }
 }
@@ -448,39 +437,7 @@ pub fn beam_has_attached_slab(
     model: &sepika_core::model::Model,
     elem: &sepika_core::model::ElementData,
 ) -> bool {
-    if elem.nodes.len() < 2 || (model.floor_regions.is_empty() && model.slabs.is_empty()) {
-        return false;
-    }
-    let n0 = elem.nodes[0];
-    let n1 = elem.nodes[elem.nodes.len() - 1];
-
-    let mut referenced = std::collections::HashSet::new();
-    for region in &model.floor_regions {
-        referenced.extend(region.slab_ids.iter().copied());
-        let has_thickness = region
-            .slab_ids
-            .iter()
-            .filter_map(|&id| model.slab(id))
-            .any(|s| model.slab_plate_thickness(s).is_some());
-        if has_thickness && region.boundary.contains(&n0) && region.boundary.contains(&n1) {
-            return true;
-        }
-    }
-    model.slabs.iter().any(|s| {
-        if referenced.contains(&s.id) {
-            return false;
-        }
-        if model.slab_plate_thickness(s).is_none() {
-            return false;
-        }
-        if let Some(b) = s.boundary_nodes(model) {
-            b.contains(&n0) && b.contains(&n1)
-        } else if let Some([a, b]) = s.edge_nodes(model, 0) {
-            (a == n0 && b == n1) || (a == n1 && b == n0)
-        } else {
-            false
-        }
-    })
+    model.beam_has_attached_slab(elem)
 }
 
 /// 強軸・弱軸の座屈長さを個別に扱った有効細長比 λ の算定

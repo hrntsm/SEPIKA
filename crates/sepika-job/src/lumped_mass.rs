@@ -41,6 +41,9 @@ pub struct LumpedMassBuildInput<'a> {
 
 /// ダンパー指定・生成質量の整合を検証し、質点系を生成する。不備は `InvalidInput`。
 pub fn build_lumped_mass(inp: LumpedMassBuildInput<'_>) -> JobResult<LumpedMassModel> {
+    inp.model
+        .validate_wall_primary_materials()
+        .map_err(JobError::InvalidInput)?;
     crate::weight_preparation::require_current_generated_mass(inp.model)?;
     inp.model
         .validate_wall_weight_generation()
@@ -577,6 +580,7 @@ mod tests {
                 .collect(),
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            steel_panel_column_face_forces: Vec::new(),
             column_end_axial_forces: Vec::new(),
             column_end_horizontal_forces: qz
                 .iter()
@@ -610,6 +614,7 @@ mod tests {
                 .collect(),
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            steel_panel_column_face_forces: Vec::new(),
             column_end_axial_forces: Vec::new(),
             column_end_horizontal_forces: qy
                 .iter()
@@ -662,6 +667,7 @@ mod tests {
             capacity_curve: Vec::new(),
             hinges: Vec::new(),
             shear_yields: Vec::new(),
+            shear_diagnostics: Vec::new(),
             mechanism: sepika_solver::nonlinear::pushover::MechanismType::Overall,
             qu: 0.0,
             member_response: Vec::new(),
@@ -1177,6 +1183,8 @@ mod tests {
         model.wall_weight_generation =
             Some(sepika_core::model::WallWeightGenerationMode::GravityCasesOnly);
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: WallPlateId(0),
             shape: WallPlateShape::Attached {
                 anchor: RegionAnchor::FloorRegion {

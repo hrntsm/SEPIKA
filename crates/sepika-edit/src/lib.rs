@@ -1,6 +1,8 @@
 use sepika_core::ids::{MaterialId, SectionId};
 use sepika_core::model::Model;
 
+mod src_wall_confirmation;
+
 /// 編集適用前から適用後への材料・断面 ID の挿入・削除。列挙順に適用する。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IdChange {
@@ -236,6 +238,10 @@ impl UndoStack {
             self.last_error = Some(format!("モデルは未更新: {reason}"));
             return false;
         }
+        if let Err(error) = candidate.validate_wall_primary_materials() {
+            self.last_error = Some(error);
+            return false;
+        }
         if let Err(error) = candidate.validate_rc_section_usage() {
             self.last_error = Some(error.to_string());
             return false;
@@ -244,6 +250,7 @@ impl UndoStack {
             self.last_error = Some(error.to_string());
             return false;
         }
+        let inv = src_wall_confirmation::invalidate_changed(model, &mut candidate, inv);
         *model = candidate;
         self.affects_calculation = affects_calculation;
         self.id_changes = inv.inverse_id_changes();
@@ -365,6 +372,10 @@ impl UndoStack {
         }
         if let Err(reason) = candidate.validate_assignment_region_identity() {
             self.last_error = Some(format!("モデル・履歴は未更新: {reason}"));
+            return;
+        }
+        if let Err(error) = candidate.validate_wall_primary_materials() {
+            self.last_error = Some(format!("モデル・履歴は未更新: {error}"));
             return;
         }
         if let Err(error) = candidate.validate_rc_section_usage() {

@@ -175,7 +175,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 
 | [0115](0115-h-column-weak-axis-combined-stress.md) | accepted | H形鋼柱の弱軸せん断と軸曲げの同一点評価を適用制限する |
 
-| [0116](0116-steel-girder-slab-composite-applicability.md) | accepted | H形鋼大梁の合成剛性を床板主材料と設計者の明示確認で制限する |
+| [0116](0116-steel-girder-slab-composite-applicability.md) | superseded by ADR-0148 | H形鋼大梁の合成剛性を床板主材料と設計者の明示確認で制限する |
 
 | [0117](0117-unequal-built-h-strong-axis-shear.md) | accepted | 上下のフランジ厚が異なる組立H形鋼の強軸せん断を未算定とする |
 
@@ -195,7 +195,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0129](0129-src-pushover-shear-steel-applicability.md) | accepted | SRC矩形梁・柱の増分解析でせん断降伏に用いる内蔵H形鋼の基準強度を確認する |
 | [0130](0130-src-joint-hoops-by-plane.md) | accepted | SRC接合部帯筋を節点と構面ごとに登録する |
 | [0131](0131-src-joint-allowable-shear.md) | accepted | SRC柱梁接合部を構面別に評価し、応力欠落と応力伝達の別途確認を保持する |
-| [0132](0132-steel-column-lateral-buckling-end-supports.md) | accepted | 一般H形鋼柱の横座屈長さに実材端支持の確認を求める |
+| [0132](0132-steel-column-lateral-buckling-end-supports.md) | superseded by ADR-0148 | 一般H形鋼柱の横座屈長さに実材端支持の確認を求める |
 | [0133](0133-column-horizontal-force-section.md) | accepted | 通常柱の負担水平力を上階SL接続節点の層側で求める |
 | [0134](0134-story-column-paths-for-rigidity.md) | accepted | 偏心率は上下階SL間の区間が定まる柱をすべて集計する |
 | [0135](0135-torsional-cancellation-holds-column-stiffness.md) | accepted | ねじれで柱の層間変位が相殺される層の水平剛性を保留する |
@@ -211,6 +211,8 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0145](0145-rc-column-long-term-shear-span.md) | accepted | RC柱の長期設計用せん断力を両材端フェース間で求める |
 | [0146](0146-rc-column-long-term-shear-alpha.md) | accepted | RC柱の長期せん断で必要な方向に両材端フェースの小さい割増係数を使う |
 | [0147](0147-rc-calculation-sources.md) | accepted | RCの算定根拠を技術基準解説書とRC規準にそろえる |
+| [0148](0148-steel-calculation-sources.md) | accepted | S造・SRC造の算定根拠を指定の5資料にそろえる |
+| [0149](0149-src-shear-wall-scope.md) | accepted | SRC耐震壁は両側SRC柱付きの壁を対象にする |
 
 ## 規約
 

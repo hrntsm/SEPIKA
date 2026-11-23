@@ -129,6 +129,12 @@ pub(crate) fn collect_rigid_zone_walls(model: &Model) -> Vec<InFrameMiscWallGeom
 /// 雑壁にしない（要素は節点集合の一致で引き当てる）。
 /// 要素が見つからないときは算入しない。
 fn plate_is_misc_wall(plate: &WallPlate, model: &Model) -> bool {
+    if model
+        .wall_plate_section(plate)
+        .is_some_and(|section| model.wall_section_uses_steel(section))
+    {
+        return false;
+    }
     if !model.wall_plate_covers_region(plate) {
         return true;
     }
@@ -148,9 +154,9 @@ fn plate_is_misc_wall(plate: &WallPlate, model: &Model) -> bool {
 
 /// 壁版が RC 造の壁か（[`is_rc_wall`] の壁版版）。
 fn plate_is_rc_wall(plate: &WallPlate, model: &Model) -> bool {
-    let sec_is_rc_wall = model
-        .wall_plate_section(plate)
-        .is_some_and(|s| matches!(s.shape, Some(SectionShape::RcWall { .. })));
+    let sec_is_rc_wall = model.wall_plate_section(plate).is_some_and(|s| {
+        matches!(s.shape, Some(SectionShape::RcWall { .. })) && !model.wall_section_uses_steel(s)
+    });
     let mat_is_rc = model
         .wall_plate_material(plate)
         .is_some_and(|m| m.category == MaterialCategory::Concrete);
@@ -402,6 +408,8 @@ mod tests {
         let plate_id = model.add_enclosed_wall_plate_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             sepika_core::model::WallPlate {
+                src_wall_detailing_confirmed: false,
+                src_steel_plate: None,
                 dl_support: None,
                 self_weight_shares: Vec::new(),
                 id: sepika_core::ids::WallPlateId(0),
@@ -517,44 +525,39 @@ mod tests {
         assert!(!wall_is_seismic(&data, &model), "対角材は上辺に一致しない");
     }
 
-    /// 鋼板耐震壁は RC 規準に由来する条件（板厚 120mm・開口周比）を課さない。
-    /// 鋼板は板厚 9〜16mm 程度のため、材種を問わず課すと成立しなくなる。
-    ///
-    /// **耐震スリットは材種を問わず課す。** 縁が切れていれば面内せん断を周辺の
-    /// 柱梁へ伝えられないのは、鋼板耐震壁でも同じだからである。
     #[test]
-    fn 鋼板耐震壁にはrc固有の成立条件を課さない() {
-        use sepika_core::model::WallAttr;
-
-        let (mut model, data) = make_model(9.0);
+    fn 鋼板壁は耐震壁として成立しない() {
+        let (mut model, data) = make_model(150.0);
+        model.sections[0].material = Some(MaterialId(0));
+        assert!(wall_is_seismic(&data, &model));
         model.materials[0].category = MaterialCategory::Steel;
-        model.materials[0].fc = None;
-        model.materials[0].fy = Some(235.0);
-        model.sections[0].shape = None;
-        model.sections[0].thickness = Some(9.0);
+        assert!(!wall_is_seismic(&data, &model));
+    }
+
+    #[test]
+    fn 鋼板壁版は雑壁剛性に算入しない() {
+        let (mut model, data) = make_model(150.0);
+        model.sections[0].material = Some(MaterialId(0));
+        model.elements.push(data);
+        let slit = WallSlit {
+            column_face: [true, false],
+            beam_face: [false, false],
+        };
         model.wall_attrs.push(WallAttr {
             elem: ElemId(0),
-            opening_area: 3.0e6,
+            opening_area: 0.0,
             opening_weight: 0.0,
-            slit: sepika_core::model::WallSlit::default(),
+            slit,
             openings: vec![],
             finish_intensity: 0.0,
         });
-        assert!(!is_rc_wall(&data, &model));
-        assert!(
-            wall_is_seismic(&data, &model),
-            "鋼板耐震壁は板厚・開口の条件を課さない"
-        );
-
-        model.wall_attrs[0].slit.column_face = [true, false];
-        assert!(
-            !wall_is_seismic(&data, &model),
-            "スリットは材種を問わず課す"
-        );
-
-        let (model, data) = make_model(9.0);
-        assert!(is_rc_wall(&data, &model));
-        assert!(!wall_is_seismic(&data, &model));
+        add_wall_plate(&mut model, vec![], slit);
+        assert_eq!(misc_stiffness_wall_plates(&model).len(), 1);
+        model.materials[0].category = MaterialCategory::Steel;
+        assert!(misc_stiffness_wall_plates(&model).is_empty());
+        assert!(collect_rigid_zone_walls(&model).is_empty());
+        let reason = model.validate_wall_primary_materials().unwrap_err();
+        assert!(reason.contains("鋼板壁版 ID 0"), "{reason}");
     }
 
     /// 耐震壁と周辺架構の構造種別が食い違うモデルは入力不備として報告する。

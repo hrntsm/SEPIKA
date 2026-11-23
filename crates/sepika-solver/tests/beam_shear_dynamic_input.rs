@@ -72,7 +72,7 @@ fn cantilever(kind: ElementKind) -> Model {
 }
 
 #[test]
-fn nodal_mass_assembly_preserves_the_mass_before_the_girder_connection_is_confirmed() {
+fn nodal_mass_assembly_preserves_mass_with_a_concrete_slab_on_steel_girders() {
     let mut model = cantilever(ElementKind::Beam);
     model.nodes[1].coord = [5000.0, 0.0, 0.0];
     model.nodes[1].mass = Some([2.75, 0.0, 0.0, 0.0, 0.0, 0.0]);
@@ -116,16 +116,9 @@ fn nodal_mass_assembly_preserves_the_mass_before_the_girder_connection_is_confir
             one_way: None,
         },
     );
-    let other_supports: Vec<_> = model.elements[1..]
-        .iter_mut()
-        .map(|elem| {
-            elem.section = Some(SectionId(0));
-            elem.local_axis.ref_vector = [0.0, 0.0, 1.0];
-            elem.id
-        })
-        .collect();
-    for id in other_supports {
-        model.set_slab_composite_connection(id, SlabCompositeConnection::NonComposite);
+    for elem in &mut model.elements[1..] {
+        elem.section = Some(SectionId(0));
+        elem.local_axis.ref_vector = [0.0, 0.0, 1.0];
     }
 
     let dofmap = DofMap::build(&model);
@@ -135,18 +128,6 @@ fn nodal_mass_assembly_preserves_the_mass_before_the_girder_connection_is_confir
             .to_dense();
         assert_eq!(m[(0, 0)], 2.75);
     }
-    let reducer = Reducer::build(&model, &dofmap);
-    assert!(matches!(
-        solve_eigen(&model, &dofmap, &reducer, 1),
-        Err(SolveError::InvalidInput(reason)) if reason.contains("RC床板との接合条件が未確認")
-    ));
-    model.mass_method = MassMethod::CorrectedLumped;
-    assert!(matches!(
-        assemble_global_m(&model, &dofmap, MassOption::Consistent),
-        Err(SolveError::InvalidInput(reason)) if reason.contains("RC床板との接合条件が未確認")
-    ));
-
-    model.mass_method = MassMethod::LumpedOnly;
     model.materials[0].shear = Some(0.0);
     assert!(matches!(
         assemble_global_m(&model, &dofmap, MassOption::Consistent),

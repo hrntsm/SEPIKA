@@ -37,9 +37,18 @@ pub(super) fn decode_recorded_input(
                 bool,
                 sepika_design_jp::BondMethod,
                 sepika_design_jp::QdMethod,
+                bool,
                 Option<(ResultInputKey, Option<Vec<u8>>)>,
             );
-            let (model, short_term, rc_damage_control, bond_method, qd_method, source): DesignInput = rmp_serde::from_slice(bytes).map_err(unavailable)?;
+            let (
+                model,
+                short_term,
+                rc_damage_control,
+                bond_method,
+                qd_method,
+                _src_holding_reviewed,
+                source,
+            ): DesignInput = rmp_serde::from_slice(bytes).map_err(unavailable)?;
             let source = source.map(|(key, input)| {
                 let input = input
                     .and_then(|bytes| decode_recorded_input(&key, &bytes, None).ok())
@@ -88,6 +97,9 @@ pub struct HoldingEvaluationInput {
     pub point: sepika_solver::nonlinear::pushover::story_response::EvaluationPoint,
     pub conditions: AnalysisSettings,
     pub run: sepika_solver::nonlinear::pushover::PushoverResult,
+    #[serde(default)]
+    pub(crate) src_confirmation:
+        Option<super::actions::design::src_holding::SrcHoldingConfirmation>,
 }
 
 #[derive(Clone, Debug)]
@@ -107,6 +119,8 @@ pub struct HoldingCapacitySource {
     pub ds_mechanism: sepika_solver::nonlinear::pushover::MechanismType,
     pub ds_conditions: AnalysisSettings,
     pub capacity_conditions: AnalysisSettings,
+    pub src_both_directions_ok: Option<bool>,
+    pub src_sign: Option<sepika_solver::nonlinear::pushover::PushoverSign>,
 }
 
 pub(crate) const INVALID_CHECK_COMPONENTS: &str =
@@ -204,6 +218,7 @@ impl ResultsBundle {
             || !self.panel_moments.is_empty()
             || self.pushover_x.is_some()
             || self.pushover_y.is_some()
+            || !self.src_pushover_negative.is_empty()
             || !self.holding_evaluations.is_empty()
             || self.time_history.is_some()
             || !self.time_histories.is_empty()
@@ -523,18 +538,27 @@ impl App {
         &mut self,
         purpose: sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose,
     ) -> Result<(), String> {
+        self.adopt_holding_evaluation_for(
+            self.core.scoped.pushover_view_dir,
+            sepika_solver::nonlinear::pushover::PushoverSign::Positive,
+            purpose,
+        )
+    }
+
+    pub(crate) fn adopt_holding_evaluation_for(
+        &mut self,
+        dir: SeismicDir,
+        sign: sepika_solver::nonlinear::pushover::PushoverSign,
+        purpose: sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose,
+    ) -> Result<(), String> {
         use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
-        let dir = self.core.scoped.pushover_view_dir;
-        self.require_result_input(ResultInputKey::Pushover(dir))?;
-        let bundle = self
-            .core
-            .scoped
-            .results
-            .as_mut()
-            .ok_or("増分解析結果がありません")?;
-        let po = bundle
-            .pushover_for_dir(dir)
-            .ok_or("対象方向の増分解析結果がありません")?;
+        use sepika_solver::nonlinear::pushover::PushoverSign;
+        if sign == PushoverSign::Positive {
+            self.require_result_input(ResultInputKey::Pushover(dir))?;
+        }
+        let (conditions, po) = self
+            .src_latest_pushover(dir, sign)
+            .ok_or("対象方向・符号の増分解析結果がありません")?;
         let point = if purpose == EvaluationPurpose::Ds {
             &po.ds_evaluation
         } else {
@@ -543,10 +567,29 @@ impl App {
         .as_ref()
         .ok_or("目的別評価点が未指定です")?
         .clone();
+        if self.result_input_with_settings(&ResultInputKey::Pushover(dir), conditions)
+            != point.input_generation
+            || point.direction != dir
+        {
+            return Err("目的別評価点の方向・生成入力が現在のモデルと一致しません".into());
+        }
         po.confirmed_response(&point, purpose)?;
         let mut run = po.clone();
         if let Some(history) = &mut run.confirmed_history {
-            history.retain(|r| r.step == point.step);
+            if run
+                .wall_run
+                .as_ref()
+                .is_some_and(|id| !id.src_wall_elements.is_empty())
+            {
+                history.retain(|r| r.step <= point.step);
+                for record in history.iter_mut().filter(|record| record.step < point.step) {
+                    record.members.clear();
+                    record.cuts.clear();
+                    record.src_frame_faces.clear();
+                }
+            } else {
+                history.retain(|r| r.step == point.step);
+            }
         }
         if let Some(history) = &mut run.wall_history {
             history.retain(|r| r.step == point.step);
@@ -558,13 +601,28 @@ impl App {
         }
         let input = HoldingEvaluationInput {
             point,
-            conditions: self.core.analysis_cfg,
+            conditions,
             run,
+            src_confirmation: None,
         };
-        bundle
+        self.core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
             .holding_evaluations
-            .retain(|e| e.point.direction != dir || e.point.purpose != purpose);
-        bundle.holding_evaluations.push(input);
+            .retain(|e| {
+                e.point.direction != dir
+                    || e.point.purpose != purpose
+                    || self::holding_run_sign(&e.run) != sign
+            });
+        self.core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .holding_evaluations
+            .push(input);
         Ok(())
     }
 
@@ -715,8 +773,19 @@ impl App {
         }
     }
 
+    pub(super) fn src_wall_holding_reviewed(&self, seismic_combination: bool) -> bool {
+        seismic_combination
+            && self
+                .core
+                .model
+                .wall_plates
+                .iter()
+                .any(|p| p.src_wall_detailing_confirmed)
+            && self.src_holding_results().is_ok()
+    }
+
     fn design_input(&self, source: Option<ResultInputKey>) -> Vec<u8> {
-        let term = match &source {
+        let state = match &source {
             Some(ResultInputKey::Static(key)) => {
                 let id = match key {
                     StaticCaseKey::User(id) => Some(*id),
@@ -739,8 +808,12 @@ impl App {
                     .ok()
                 }),
             _ => None,
-        }
-        .is_some_and(|state| state.duration == sepika_core::load_combo::LoadDuration::Short);
+        };
+        let term = state
+            .is_some_and(|state| state.duration == sepika_core::load_combo::LoadDuration::Short);
+        let seismic_combination = state.is_some_and(|state| {
+            state.combination && state.action == sepika_core::load_combo::LoadAction::Seismic
+        });
         let source = source.map(|key| {
             let input = self
                 .core
@@ -763,6 +836,7 @@ impl App {
             self.core.analysis_cfg.rc_damage_control,
             self.core.analysis_cfg.bond_method,
             self.core.analysis_cfg.qd_method,
+            self.src_wall_holding_reviewed(seismic_combination),
             source,
         ))
         .expect("検定入力の直列化")
@@ -990,6 +1064,15 @@ impl App {
             None => Err(format!("解析結果の利用は無効です。{label}の入力識別情報がありません。{label}を再実行してください。")),
         }
     }
+}
+
+pub(super) fn holding_run_sign(
+    run: &sepika_solver::nonlinear::pushover::PushoverResult,
+) -> sepika_solver::nonlinear::pushover::PushoverSign {
+    use sepika_solver::nonlinear::pushover::PushoverSign;
+    run.wall_run
+        .as_ref()
+        .map_or(PushoverSign::Positive, |id| id.sign)
 }
 
 fn is_standard_seismic_case(case: &sepika_core::model::LoadCase) -> bool {
@@ -2009,6 +2092,50 @@ mod purpose_tests {
         );
         app
     }
+
+    #[test]
+    fn rc_shear_reference_step_is_visible_but_cannot_be_adopted() {
+        use sepika_core::ids::ElemId;
+        use sepika_solver::nonlinear::pushover::{MemberShearYield, ShearYieldEvent};
+
+        let mut app = ready();
+        super::super::tests::select_holding_points(&mut app);
+        let po = app
+            .core
+            .scoped
+            .results
+            .as_mut()
+            .unwrap()
+            .pushover_x
+            .as_mut()
+            .unwrap();
+        let step = po.capacity_evaluation.as_ref().unwrap().step;
+        po.shear_yields.push(ShearYieldEvent {
+            step,
+            elem: ElemId(0),
+            detail: Some(MemberShearYield {
+                at_i: true,
+                is_rc: true,
+                shear_n: [120_000.0, 0.0],
+                limit_n: 100_000.0,
+                governing_axis: Some(0),
+                exactly_at_limit: false,
+            }),
+        });
+        let error = app
+            .adopt_holding_evaluation(EvaluationPurpose::HoldingCapacity)
+            .unwrap_err();
+        assert!(error.contains("参考結果"));
+        let error = app.compute_unconfirmed_holding_capacity().err().unwrap();
+        assert!(error.contains("終局せん断耐力Qu"));
+        let csv = crate::summary::build_report_csv(&app);
+        assert!(csv.contains("[線材のせん断応答]"));
+        assert!(csv.contains(&format!("RC部材 0 可撓部i端 局所y step {step}")));
+        assert!(csv.contains("120.000 kN"));
+        assert!(csv.contains("Qu=100.000 kN"));
+        assert!(app.core.scoped.holding_capacity_source.is_none());
+    }
+
     #[test]
     fn 目的別run条件の差を許容し同時点の独立期待値と保存帳票を維持する() {
         let mut app = two_purposes();

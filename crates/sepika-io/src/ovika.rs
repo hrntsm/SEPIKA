@@ -115,11 +115,14 @@ pub struct OvikaContents {
 }
 
 /// モデルと派生データを .ovika へ保存する。
-/// 参照 ID の不整合と形状算定の断面積の不一致は書込前に拒否し、モデルを変更しない。
+/// 不正な参照 ID・壁の主材料・断面性能は書込前に拒否する。
 pub fn save_ovika(path: &Path, model: &Model, extras: OvikaExtras<'_>) -> Result<(), IoError> {
     model
         .validate_reference_ids()
         .map_err(|e| IoError::Decode(e.to_string()))?;
+    model
+        .validate_wall_primary_materials()
+        .map_err(IoError::Decode)?;
     model
         .validate_frame_node_counts()
         .map_err(|e| IoError::Decode(e.to_string()))?;
@@ -219,7 +222,7 @@ fn sync_parent_dir(_path: &Path) -> std::io::Result<()> {
 /// モデルと、同梱されていれば付随データ（準備計算の結果・解析結果・解析タブの
 /// 設定値）を読み込む。該当エントリを持たないファイル（それらが最新でない状態で
 /// 保存したプロジェクト）では [`OvikaContents`] の該当項目が `None` になる。
-/// [`Model::validate_reference_ids`] の不整合は、付随データを返す前に拒否する。
+/// 参照 ID や壁の主材料に不備があれば付随データを返す前に拒否する。
 pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
     let f = std::fs::File::open(path)?;
     let mut archive = zip::ZipArchive::new(f).map_err(|e| IoError::Zip(e.to_string()))?;
@@ -267,6 +270,9 @@ pub fn load_ovika(path: &Path) -> Result<OvikaContents, IoError> {
         .validate_reference_ids()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
+        .validate_wall_primary_materials()
+        .map_err(IoError::Decode)?;
+    model
         .validate_frame_node_counts()
         .map_err(|e| IoError::Decode(e.to_string()))?;
     model
@@ -302,6 +308,53 @@ mod tests {
     use sepika_core::ids::*;
     use sepika_core::model::*;
     use sepika_core::section_shape::*;
+
+    #[test]
+    fn steel_wall_plate_is_rejected_by_project_save_and_load() {
+        let mut model = make_rich_model();
+        model.materials.push(Material {
+            id: MaterialId(0),
+            name: "SN400B".into(),
+            category: MaterialCategory::Steel,
+            young: 205000.0,
+            poisson: 0.3,
+            density: 7.85e-9,
+            shear: None,
+            fc: None,
+            fy: Some(235.0),
+            concrete_class: Default::default(),
+            strength_factor: None,
+        });
+        model.sections[0].material = Some(MaterialId(0));
+        let path = crate::test_util::test_tmp().join("steel-wall-primary.ovika");
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        let original = std::fs::read(&path).unwrap();
+
+        model.wall_plates[0].section = Some(SectionId(0));
+        assert!(matches!(
+            save_ovika(&path, &model, OvikaExtras::default()),
+            Err(IoError::Decode(reason))
+                if reason.contains("鋼板壁版 ID 0") && reason.contains("重量は荷重として入力")
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+
+        let bytes = rmp_serde::to_vec_named(&model).unwrap();
+        let manifest = Manifest {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            units: "internal: N-mm-s".into(),
+            created_by: "test".into(),
+            entries: vec![crate::manifest::EntryHash {
+                name: "model.msgpack".into(),
+                sha256: sha256_of(&bytes),
+            }],
+        };
+        write_zip_with_manifest(&path, &manifest, &bytes);
+        assert!(matches!(
+            load_ovika(&path),
+            Err(IoError::Decode(reason))
+                if reason.contains("鋼板壁版 ID 0") && reason.contains("重量は荷重として入力")
+        ));
+    }
 
     #[test]
     fn removed_member_attributes_are_rejected_on_project_load() {
@@ -539,6 +592,8 @@ mod tests {
                         });
                     } else {
                         model.wall_plates.push(WallPlate {
+                            src_wall_detailing_confirmed: false,
+                            src_steel_plate: None,
                             id: WallPlateId(0),
                             shape: WallPlateShape::Enclosed,
                             section: Some(SectionId(0)),
@@ -1055,6 +1110,8 @@ mod tests {
         model.slab_thickness = 150.0;
         model.next_secondary_member_id = 7;
         model.wall_plates.push(sepika_core::model::WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             dl_support: None,
             self_weight_shares: vec![0.75, 0.25, 0.0],
             id: sepika_core::ids::WallPlateId(0),
@@ -1167,6 +1224,8 @@ mod tests {
         let mut model = make_3node_model();
         model.wall_weight_generation = Some(WallWeightGenerationMode::GravityCasesOnly);
         model.wall_plates.push(WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
             id: sepika_core::ids::WallPlateId(0),
             shape: WallPlateShape::Attached {
                 anchor: sepika_core::model::RegionAnchor::Point(NodeId(0)),

@@ -180,6 +180,13 @@ impl App {
         let is_seismic_combo = state.as_ref().is_ok_and(|s| {
             s.combination && s.action == sepika_core::load_combo::LoadAction::Seismic
         });
+        let needs_src_wall_gravity = state.as_ref().is_ok_and(|s| {
+            s.combination && s.duration == sepika_core::load_combo::LoadDuration::Short
+        }) && design_model
+            .elements
+            .iter()
+            .any(|e| sepika_core::src_wall_capacity::is_src_wall_candidate(design_model, e));
+        let needs_gravity = is_seismic_combo || needs_src_wall_gravity;
         let selected_combo_name = match self.core.scoped.last_static {
             Some(StaticKey::Combo(index)) => {
                 results.combos.get(index).map(|(name, _)| name.as_str())
@@ -208,11 +215,11 @@ impl App {
         };
         let gravity_terms = load_terms
             .as_deref()
-            .filter(|_| is_seismic_combo)
+            .filter(|_| needs_gravity)
             .map_or_else(Vec::new, |terms| {
                 sepika_job::design_gravity_terms(&self.core.model, terms)
             });
-        let gravity_long_owned = if is_seismic_combo {
+        let gravity_long_owned = if needs_gravity {
             match sepika_job::complete_design_gravity_forces(&gravity_terms, |lc| {
                 sepika_job::compute::compute_linear_static(self.core.model.clone(), lc)
                     .ok()
@@ -228,7 +235,7 @@ impl App {
         } else {
             None
         };
-        let long_member_forces = gravity_long_owned.as_deref();
+        let long_member_forces = gravity_long_owned.as_deref().filter(|_| is_seismic_combo);
         let group_overrides =
             sepika_design_jp::girder_group_overrides(&self.core.model, &results.member_forces);
         let q0_by_elem = if long_member_forces.is_some() {
@@ -288,8 +295,21 @@ impl App {
                     term: self.core.design_term,
                     girder_column_face_forces: selected_response
                         .map_or(&[], |response| &response.girder_column_face_forces),
+                    steel_panel_column_face_forces: selected_response
+                        .filter(|response| {
+                            response.panel_moments == results.panel_moments
+                                && (response.member_forces == results.member_forces
+                                    || selected_combo_name.is_some()
+                                        && same_saved_member_forces(
+                                            &response.member_forces,
+                                            &results.member_forces,
+                                        ))
+                        })
+                        .map_or(&[], |response| &response.steel_panel_column_face_forces),
                     wall_index: wall_index.as_ref(),
                     wall_case: &wall_case,
+                    src_holding_reviewed: self.src_wall_holding_reviewed(is_seismic_combo),
+                    src_wall_gravity_forces: gravity_long_owned.as_deref(),
                     load_terms: load_terms.as_deref(),
                     rc_column_long_term_shear,
                     rc_damage_control: self.core.analysis_cfg.rc_damage_control,
@@ -298,7 +318,6 @@ impl App {
                     long_member_forces,
                     q_simple_by_elem: Some(&q0_by_elem),
                     girder_group_overrides: Some(&group_overrides),
-                    steel_fb_basis: sepika_design_jp::SteelFbBasis::default(),
                 },
             )
         } else {

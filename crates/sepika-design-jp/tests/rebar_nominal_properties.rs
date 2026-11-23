@@ -156,7 +156,7 @@ fn beam_bond_checks_use_perimeter_and_transverse_area() {
 }
 
 #[test]
-fn rc_and_src_beam_allowable_bending_and_shear_use_nominal_areas() {
+fn rc_and_src_beam_bending_and_rc_beam_shear_use_nominal_areas() {
     let mut model = beam_model();
     let mut ctx = beam_ctx(&model);
     ctx.steel_material = Some(input::material("SS400", MaterialCategory::Steel));
@@ -203,16 +203,13 @@ fn rc_and_src_beam_allowable_bending_and_shear_use_nominal_areas() {
             steel_flange_thick: 12.0,
         }
         .to_section(SectionId(0), "SRC梁".into());
-        let src = checked(SrcDesign.check(&forces, &src, &model.materials[0], &ctx));
+        let src_forces = MemberForcesAt { qy: 0.0, ..forces };
+        let src = checked(SrcDesign.check(&src_forces, &src, &model.materials[0], &ctx));
         assert_near(
             ratio(&src, CheckKind::Bending),
             30e6 / (z_steel * 235.0 / 1.5 + rc_ma),
         );
-        // この断面ではRC部分の許容せん断力 rQA1 が支配する。
-        let qa_rc = 350.0 * j * (alpha * fc_shear + 97.5 * pw);
-        let force_rc = 20_000.0 * at * j / (z_steel + at * j);
-        let shear_ratio = force_rc / qa_rc;
-        assert_near(ratio(&src, CheckKind::Shear), shear_ratio);
+        assert_eq!(src.components.len(), 1);
     }
 }
 

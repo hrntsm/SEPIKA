@@ -1,6 +1,9 @@
 use crate::transform::LocalFrame;
 use sepika_core::geom::vec3::dot;
-use sepika_core::model::{wall_element_geometry, ElementData, Model, WallSideColumnIndex};
+use sepika_core::model::{
+    wall_element_geometry, wall_steel_input_issue, ElementData, Material, MaterialCategory, Model,
+    WallSideColumnIndex,
+};
 use sepika_core::section_shape::face_geometry::{Primitive, SectionGeometry};
 use sepika_core::section_shape::{
     concrete_young_modulus_gamma, material_strip_section_properties, MaterialSectionStrip,
@@ -27,11 +30,56 @@ pub(super) struct WallSection {
     length: f64,
     thickness: f64,
     material: Elasticity,
+    embedded: Option<EmbeddedStrip>,
+}
+
+struct EmbeddedStrip {
+    limits_mm: [f64; 2],
+    thickness_mm: f64,
+    material: Elasticity,
+}
+
+pub(super) fn embedded_plate<'a>(
+    wall: &ElementData,
+    model: &'a Model,
+    thickness_mm: f64,
+) -> Result<Option<(f64, &'a Material)>, String> {
+    let Some(plate) = model
+        .generated_wall_origins
+        .get(&wall.id)
+        .and_then(|id| model.wall_plate(*id))
+        .and_then(|wall| wall.src_steel_plate)
+    else {
+        return Ok(None);
+    };
+    if !plate.force_transfer_confirmed {
+        return Err("内蔵鋼板とコンクリート・周辺鉄骨との一体性と軸力・曲げ・せん断の伝達を確認してください".into());
+    }
+    if !plate.thickness_mm.is_finite()
+        || !(0.0 < plate.thickness_mm && plate.thickness_mm < thickness_mm)
+    {
+        return Err("内蔵鋼板厚は壁厚未満の有限正値が必要です".into());
+    }
+    let steel = model
+        .materials
+        .get(plate.material.index())
+        .filter(|m| m.id == plate.material && m.category == MaterialCategory::Steel)
+        .ok_or("内蔵鋼板の鋼材が不明です")?;
+    if ![steel.young, steel.shear_modulus(), steel.density]
+        .iter()
+        .all(|v| v.is_finite() && *v > 0.0)
+    {
+        return Err("内蔵鋼板のヤング係数・せん断弾性係数・密度は有限正値が必要です".into());
+    }
+    Ok(Some((plate.thickness_mm, steel)))
 }
 
 impl WallSection {
     /// モデルへ登録された壁の断面を返す。壁 ID・節点・断面の所有が一致しなければ失敗する。
     pub fn new(data: &ElementData, model: &Model) -> Result<Self, String> {
+        if let Some(issue) = wall_steel_input_issue(data, model) {
+            return Err(issue);
+        }
         let owner = model
             .elements
             .iter()
@@ -63,6 +111,7 @@ impl WallSection {
                 young: wall_young,
                 shear,
             },
+            embedded: None,
         };
         let index = WallSideColumnIndex::build(model);
         let bindings = index
@@ -174,7 +223,39 @@ impl WallSection {
         {
             return Err("壁・側柱の寸法または材料定数が不正です".into());
         }
+        if let Some((thickness_mm, steel)) = embedded_plate(data, model, thickness)? {
+            let rule = sepika_core::src_wall_capacity::resolve_src_wall(model, data)?
+                .ok_or("内蔵鋼板には両側SRC柱を持つSRC耐震壁が必要です")?;
+            let limits_mm = result.clear_width_limits_mm()?;
+            if (limits_mm[1] - limits_mm[0] - rule.clear_length_mm()).abs() > 1e-9 * geometry.lw {
+                return Err("内蔵鋼板の内法幅が耐力断面と一致しません".into());
+            }
+            if matches!(section.shape, Some(SectionShape::RcWall { pwv_ratio: Some(pwv), .. })
+                if thickness_mm + thickness * pwv >= thickness)
+            {
+                return Err("内蔵鋼板と縦筋を除いた壁板コンクリート厚が正になりません".into());
+            }
+            result.embedded = Some(EmbeddedStrip {
+                limits_mm,
+                thickness_mm,
+                material: Elasticity {
+                    young: steel.young,
+                    shear: steel.shear_modulus(),
+                },
+            });
+        }
         Ok(result)
+    }
+
+    pub(super) fn clear_width_limits_mm(&self) -> Result<[f64; 2], String> {
+        let [Some(left), Some(right)] = &self.columns else {
+            return Err("壁板の内法幅には両側柱が必要です".into());
+        };
+        let limits = [left.center + left.extent[1], right.center + right.extent[0]];
+        if limits[0] < 0.0 || limits[0] >= limits[1] || limits[1] > self.length {
+            return Err("壁板の内法幅が不正です".into());
+        }
+        Ok(limits)
     }
 
     fn strip(&self, x: f64, length_mm: f64) -> Result<MaterialSectionStrip, String> {
@@ -198,11 +279,17 @@ impl WallSection {
         } else {
             None
         };
+        let plate = self
+            .embedded
+            .as_ref()
+            .filter(|p| (p.limits_mm[0]..=p.limits_mm[1]).contains(&x));
+        let plate_edges = plate.map(|p| [-0.5 * p.thickness_mm, 0.5 * p.thickness_mm]);
         let mut edges: Vec<_> = intervals
             .iter()
             .flatten()
             .flat_map(|(span, _)| *span)
             .chain(wall.into_iter().flatten())
+            .chain(plate_edges.into_iter().flatten())
             .collect();
         edges.sort_by(f64::total_cmp);
         edges.dedup();
@@ -227,7 +314,13 @@ impl WallSection {
             }
             if owner.is_none() && !void && wall.is_some_and(|span| span[0] <= mid && mid <= span[1])
             {
-                owner = Some(self.material);
+                owner = Some(
+                    if let Some(plate) = plate.filter(|p| 2.0 * mid.abs() < p.thickness_mm) {
+                        plate.material
+                    } else {
+                        self.material
+                    },
+                );
             }
             if let Some(mat) = owner {
                 let b = pair[1] - pair[0];
@@ -249,6 +342,9 @@ impl WallSection {
 
     pub fn properties(&self) -> Result<MaterialStripSectionProperties, String> {
         let mut boundaries = vec![0.0, self.length];
+        if let Some(plate) = &self.embedded {
+            boundaries.extend(plate.limits_mm);
+        }
         for c in self.columns.iter().flatten() {
             for (p, _) in &c.geometry.parts {
                 boundaries.extend(p.breaks(c.direction).iter().map(|x| x + c.center));
@@ -406,6 +502,7 @@ mod tests {
             length: 4000.0,
             thickness: 150.0,
             material,
+            embedded: None,
         }
     }
 

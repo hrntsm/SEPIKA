@@ -4,6 +4,8 @@
 - Date: 2026-10-18
 - Related: [#496](https://github.com/hrntsm/SEPIKA/issues/496)、[ADR 0013](0013-adopt-wall-element-model.md)、[ADR 0019](0019-material-wall-section-and-directional-strength.md)
 
+純鋼板の境界柱に関する分類は [ADR 0148](0148-steel-calculation-sources.md) の純鋼板耐震壁の廃止により適用を終えた。
+
 ## 背景と判断理由
 
 側柱の物理的役割を Beam の検出処理と一体にすると、Fiber／MultiSpring への表現変更で壁側の断面算入や解放判定が変わる。
