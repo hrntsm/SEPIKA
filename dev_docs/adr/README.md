@@ -212,6 +212,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0146](0146-rc-column-long-term-shear-alpha.md) | accepted | RC柱の長期せん断で必要な方向に両材端フェースの小さい割増係数を使う |
 | [0147](0147-rc-calculation-sources.md) | accepted | RCの算定根拠を技術基準解説書とRC規準にそろえる |
 | [0148](0148-steel-calculation-sources.md) | accepted | S造・SRC造の算定根拠を指定の5資料にそろえる |
+| [0149](0149-src-shear-wall-scope.md) | accepted | SRC耐震壁は両側SRC柱付きの壁を対象にする |
 
 ## 規約
 
