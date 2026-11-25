@@ -1176,6 +1176,28 @@ fn round_main_rebar_holds_bond_but_retains_bending_and_shear_failures() {
                 .filter_map(|(_, pos, outcome)| (pos == face_i).then_some(outcome))
                 .collect::<Vec<_>>()
             };
+            let time_history = |model: &sepika_core::model::Model, mz, qy| {
+                let ctx = DesignCtx {
+                    term,
+                    bond_method: method,
+                    rc_damage_control: true,
+                    length: 1500.0,
+                    clear_length: Some(1000.0),
+                    rebar_material: Some(model.materials[2].clone()),
+                    shear_rebar_material: Some(model.materials[1].clone()),
+                    ..Default::default()
+                };
+                RcDesign
+                    .check_time_history(
+                        &MemberForcesAt::from_local(face_i, [0.0, qy, 0.0, 0.0, 0.0, mz]),
+                        &model.sections[0],
+                        &model.materials[0],
+                        &ctx,
+                        false,
+                        None,
+                    )
+                    .collect::<Vec<_>>()
+            };
             for grade in ["SR235", "SR295"] {
                 model.materials[2] = material(grade, MaterialCategory::Rebar);
                 model.materials[2].id = sepika_core::ids::MaterialId(2);
@@ -1195,29 +1217,37 @@ fn round_main_rebar_holds_bond_but_retains_bending_and_shear_failures() {
                     CheckOutcome::Skipped { .. } => true,
                 }));
 
-                let light = outcomes(&model, 1e6, 1_000.0);
-                assert!(
-                    matches!(light.as_slice(), [CheckOutcome::Skipped { reason }] if is_round_bond_reason(reason)),
-                    "{grade} {term:?} {method:?}: {light:?}"
-                );
-
-                let heavy = outcomes(&model, 400e6, 600_000.0);
-                let [CheckOutcome::Checked(ng), CheckOutcome::Skipped { reason }] =
-                    heavy.as_slice()
-                else {
-                    panic!("{grade} {term:?} {method:?}: {heavy:?}");
-                };
-                assert!(is_round_bond_reason(reason));
-                assert!(!ng.ok());
-                assert_eq!(
-                    ng.components
-                        .iter()
-                        .filter(|c| c.ratio > 1.0)
-                        .map(|c| c.kind)
-                        .collect::<Vec<_>>(),
-                    [CheckKind::Bending, CheckKind::Shear],
-                );
-                assert!(ng.components.iter().all(|c| c.kind != CheckKind::Bond));
+                let light = (1e6, 1_000.0);
+                let heavy = (400e6, 600_000.0);
+                for (entry, light, heavy) in [
+                    (
+                        "通常検定",
+                        outcomes(&model, light.0, light.1),
+                        outcomes(&model, heavy.0, heavy.1),
+                    ),
+                    (
+                        "時刻歴簡易検定",
+                        time_history(&model, light.0, light.1),
+                        time_history(&model, heavy.0, heavy.1),
+                    ),
+                ] {
+                    assert!(
+                        matches!(light.as_slice(), [CheckOutcome::Skipped { reason }] if is_round_bond_reason(reason)),
+                        "{entry} {grade} {term:?} {method:?}: {light:?}"
+                    );
+                    let [CheckOutcome::Checked(ng), CheckOutcome::Skipped { reason }] =
+                        heavy.as_slice()
+                    else {
+                        panic!("{entry} {grade} {term:?} {method:?}: {heavy:?}");
+                    };
+                    assert!(is_round_bond_reason(reason));
+                    assert!(!ng.ok());
+                    assert_eq!(
+                        ng.components.iter().map(|c| c.kind).collect::<Vec<_>>(),
+                        [CheckKind::Bending, CheckKind::Shear],
+                    );
+                    assert!(ng.components.iter().all(|c| c.ratio > 1.0));
+                }
             }
 
             let mut deformed = model.clone();
