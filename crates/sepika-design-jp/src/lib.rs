@@ -395,6 +395,8 @@ pub struct DesignCtx {
     /// RC矩形梁のQD1を適用できない理由。QD1/minで `None` を渡す呼出側は、
     /// 両端の強軸曲げ伝達、有限で正のフェース間内法、両端が同じ断面であることを確認する。
     pub rc_beam_qd1_issue: Option<String>,
+    /// 一本部材の外端断面から確認した正負方向の降伏曲げ和の最大値 [N·mm]。
+    pub rc_grouped_beam_qd1_sum_my_nmm: Option<f64>,
     /// S 造部材の断面検定属性（継手・スカラップ欠損率、横座屈長さ入力）。
     /// `Model::steel_design_attrs` 由来。None は欠損なし。一般H形鋼柱の横座屈支点は未確認。
     pub steel_attr: Option<SteelDesignAttr>,
@@ -428,6 +430,7 @@ impl Default for DesignCtx {
             column_sum_my: None,
             beam_has_slab: false,
             rc_beam_qd1_issue: None,
+            rc_grouped_beam_qd1_sum_my_nmm: None,
             steel_attr: None,
         }
     }

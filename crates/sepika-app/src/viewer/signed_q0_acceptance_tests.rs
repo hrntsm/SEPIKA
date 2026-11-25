@@ -1121,3 +1121,36 @@ fn time_history_damage_control_requires_current_generation_input_and_nonempty_lo
             .contains("固定・架構用積載以外"));
     }
 }
+
+#[test]
+fn grouped_rc_qd1_time_history_stays_unchecked_instead_of_using_segment_reactions() {
+    let mut app = App::default();
+    app.core.analysis_cfg.rc_damage_control = false;
+    assert!(app.load_model(crate::app::signed_q0_acceptance_tests::grouped_rc_qd1_model(true)));
+    app.run_combination(0);
+    let rec = ThRecording {
+        peak_member_forces: app
+            .current_static()
+            .unwrap()
+            .member_forces
+            .iter()
+            .map(|(_, mf)| Some(mf.clone()))
+            .collect(),
+        ..Default::default()
+    };
+    app.run_combination(1);
+    for elem_index in 0..2 {
+        for method in [
+            sepika_design_jp::QdMethod::Qd1,
+            sepika_design_jp::QdMethod::Min,
+        ] {
+            app.core.analysis_cfg.qd_method = method;
+            let text = member_labels(&app, &rec, elem_index, true);
+            assert!(text.contains("一本部材グループ"), "{text}");
+        }
+        app.core.analysis_cfg.qd_method = sepika_design_jp::QdMethod::Qd2;
+        let text = member_labels(&app, &rec, elem_index, true);
+        assert!(!text.contains("一本部材グループ"), "{text}");
+        assert!(text.contains("検定比"), "{text}");
+    }
+}

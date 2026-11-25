@@ -367,3 +367,101 @@ fn non_rc_values_and_map_presence_keep_existing_behavior() {
         .unwrap()
         .is_empty());
 }
+
+fn split_rc_beam() -> Model {
+    let mut model = model();
+    model.nodes[1].coord[0] = 4000.0;
+    let mut node = model.nodes[1].clone();
+    node.id = NodeId(2);
+    node.coord[0] = 2000.0;
+    model.nodes.push(node);
+    let mut right = model.elements[0].clone();
+    right.id = ElemId(1);
+    right.nodes[0] = NodeId(2);
+    model.elements[0].nodes[1] = NodeId(2);
+    model.elements.push(right);
+    model.sections[0].frame_use = Some(FrameSectionUse::Girder);
+    model.girder_groups = vec![vec![ElemId(0), ElemId(1)]];
+    model
+}
+
+#[test]
+fn grouped_rc_q0_uses_whole_span_reactions_without_exposing_a_segment_q0() {
+    use sepika_job::design_q0::{rc_beam_q0_for_gravity_cases, rc_grouped_beam_q0_by_terms};
+
+    let mut single = model();
+    single.nodes[1].coord[0] = 4000.0;
+    single.load_cases[0].member = vec![MemberLoad::full_length_uniform(
+        ElemId(0),
+        [0.0, 0.0, -1.0],
+        4000.0,
+        10.0,
+    )];
+    all_helpers(&single, 20_000.0);
+    let mut split = split_rc_beam();
+    split.load_cases[0].member = [ElemId(0), ElemId(1)]
+        .map(|id| MemberLoad::full_length_uniform(id, [0.0, 0.0, -1.0], 2000.0, 10.0))
+        .into();
+    let terms = [(LoadCaseId(0), 1.0)];
+    let q0 = rc_grouped_beam_q0_by_terms(&split, &terms);
+    for id in [ElemId(0), ElemId(1)] {
+        close(*q0[&id].as_ref().unwrap(), 20_000.0);
+        assert!(!simple_beam_q0_by_terms(&split, &terms)
+            .unwrap()
+            .contains_key(&id));
+        assert!(
+            rc_beam_q0_for_gravity_cases(&split, split.element(id).unwrap())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    // 右区間の x=1000 mm で 8 kN 上向き。全スパンの左端18 kN、右端14 kN。
+    let mut unload = point(1000.0, -8000.0);
+    unload.elem = ElemId(1);
+    split.load_cases[1].member.push(unload);
+    let q0 = rc_grouped_beam_q0_by_terms(&split, &[(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)]);
+    for value in q0.values() {
+        close(*value.as_ref().unwrap(), 18_000.0);
+    }
+}
+
+#[test]
+fn grouped_rc_q0_rejects_unresolved_middle_load_and_axis_without_using_segment_values() {
+    use sepika_job::design_q0::rc_grouped_beam_q0_by_terms;
+
+    let mut split = split_rc_beam();
+    let invalid = [
+        ("中間節点", {
+            let mut m = split.clone();
+            m.load_cases[0].nodal = vec![NodalLoad::manual(
+                NodeId(2),
+                [0.0, 0.0, -1000.0, 0.0, 0.0, 0.0],
+            )];
+            m
+        }),
+        ("集中荷重位置", {
+            let mut m = split.clone();
+            m.load_cases[0].member = vec![point(3000.0, 1000.0)];
+            m
+        }),
+        ("局所軸", {
+            let mut m = split.clone();
+            m.elements[1].local_axis.ref_vector = [f64::NAN, 0.0, 1.0];
+            m
+        }),
+    ];
+    let terms = [(LoadCaseId(0), 1.0)];
+    for (reason, model) in invalid {
+        assert!(simple_beam_q0_by_terms(&model, &terms).unwrap().is_empty());
+        let q0 = rc_grouped_beam_q0_by_terms(&model, &terms);
+        for id in [ElemId(0), ElemId(1)] {
+            let message = q0[&id].as_ref().unwrap_err();
+            assert!(message.contains(reason), "{message}");
+        }
+    }
+    split.load_cases[0].member.clear();
+    for value in rc_grouped_beam_q0_by_terms(&split, &terms).values() {
+        assert_eq!(*value, Ok(0.0));
+    }
+}

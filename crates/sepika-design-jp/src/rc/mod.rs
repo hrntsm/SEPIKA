@@ -24,6 +24,7 @@ pub(crate) mod section_props;
 mod shear_capacity;
 
 pub use beam::beam_qd1_clear_span;
+mod grouped_beam;
 pub(crate) use beam::{
     beam_supports_slab, column_transmits_bending, frame_end_positions, restrains_direction,
     transmits_bending,
@@ -35,6 +36,8 @@ pub use column_mechanism::{
     compute_column_mechanism_sum_my, design_axial_for_mechanism,
     time_history_column_mechanism_sum_my, ColumnMechanism, ColumnMechanismTopology,
 };
+pub(crate) use grouped_beam::grouped_beam_qd1_mechanism;
+pub use grouped_beam::{grouped_beam_qd1_axis, GroupedBeamQd1Axis};
 pub use wall_nonlinear::{
     wall_shear_beta_s, wall_shear_crack, wall_shear_trilinear, wall_shear_ultimate,
     WallShearTrilinear, WallShearTrilinearInput,

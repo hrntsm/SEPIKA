@@ -159,8 +159,26 @@ pub fn beam_qd1_clear_span(
         .iter()
         .any(|group| group.contains(&elem.id))
     {
-        return Err("QD1用に一本部材グループの両端断面とQ0を確定できません".into());
+        return Err(
+            "単要素のQD1では一本部材グループの全スパンの外端断面・重力反力を確認できません".into(),
+        );
     }
+    validate_beam_qd1_section_geometry(model, elem)?;
+    let [i, j] = frame_end_positions(model, elem).ok_or("QD1用の梁の材軸を確定できません")?;
+    let [_, _, ez] = local_frame_axes(i, j, elem.local_axis.ref_vector)?;
+    let span_mm = dist(i, j)
+        - beam_qd1_face_distance(model, adjacency, elem, 0, ez)?
+        - beam_qd1_face_distance(model, adjacency, elem, 1, ez)?;
+    if !span_mm.is_finite() || span_mm <= 0.0 {
+        return Err("QD1に必要な有限で正の内法長さが成立しません".into());
+    }
+    Ok(span_mm)
+}
+
+pub(super) fn validate_beam_qd1_section_geometry(
+    model: &Model,
+    elem: &ElementData,
+) -> Result<(), String> {
     if model.member_detail(elem.id).is_some_and(|detail| {
         [detail.haunch_i, detail.haunch_j]
             .into_iter()
@@ -172,84 +190,86 @@ pub fn beam_qd1_clear_span(
     if beam_supports_slab(model, elem) {
         return Err("QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません".into());
     }
+    Ok(())
+}
+
+pub(super) fn beam_qd1_face_distance(
+    model: &Model,
+    adjacency: &NodeAdjacency,
+    elem: &ElementData,
+    index: usize,
+    ez: [f64; 3],
+) -> Result<f64, String> {
     if !elem.kind.is_primary_frame_support() {
         return Err("QD1用に両端の強軸曲げを伝達する梁要素を確認できません".into());
     }
     let [i, j] = frame_end_positions(model, elem).ok_or("QD1用の梁の材軸を確定できません")?;
-    let [_, _, ez] = local_frame_axes(i, j, elem.local_axis.ref_vector)?;
     let length_mm = dist(i, j);
-    let mut distances_mm = [0.0; 2];
-    let column_faces = girder_column_faces(model, elem, adjacency);
-    for (index, end) in ["i端", "j端"].into_iter().enumerate() {
-        if !transmits_bending(elem.end_cond[index]) {
-            return Err(format!(
-                "QD1用の梁の{end}で強軸曲げが解放されているか接合剛性が不正です"
-            ));
-        }
-        let node = elem
-            .nodes
-            .get(index)
-            .and_then(|id| model.node(*id))
-            .ok_or_else(|| format!("QD1用の梁の{end}に接続する節点を確認できません"))?;
-        let restrained = restrains_direction(node, ez, [Dof::Rx, Dof::Ry, Dof::Rz]);
-        let others = || {
-            adjacency
-                .elements_at(model, node.id)
-                .filter(|other| other.id != elem.id)
-        };
-        let column_connected = others().any(|other| {
-            model
-                .element_section(other)
-                .is_some_and(|section| section.frame_use == Some(FrameSectionUse::Column))
-        });
-        let unsupported = || {
-            format!(
+    let end = ["i端", "j端"][index];
+    if !transmits_bending(elem.end_cond[index]) {
+        return Err(format!(
+            "QD1用の梁の{end}で強軸曲げが解放されているか接合剛性が不正です"
+        ));
+    }
+    let node = elem
+        .nodes
+        .get(index)
+        .and_then(|id| model.node(*id))
+        .ok_or_else(|| format!("QD1用の梁の{end}に接続する節点を確認できません"))?;
+    let restrained = restrains_direction(node, ez, [Dof::Rx, Dof::Ry, Dof::Rz]);
+    let others = || {
+        adjacency
+            .elements_at(model, node.id)
+            .filter(|other| other.id != elem.id)
+    };
+    let column_connected = others().any(|other| {
+        model
+            .element_section(other)
+            .is_some_and(|section| section.frame_use == Some(FrameSectionUse::Column))
+    });
+    let unsupported = || {
+        format!(
             "QD1用の梁の{end}が自由端・回転自由な支点、または強軸曲げの伝達先を確認できない接合です"
         )
-        };
-        let distance_mm = if column_connected {
-            let face = column_faces
-                .as_ref()
-                .ok_or_else(|| format!("QD1用の内法長さ: {end}の実柱面を確認できません"))?[index]
-                .as_ref()
-                .map_err(|reason| format!("QD1用の内法長さ: {reason}"))?;
-            if !restrained
-                && !others().any(|column| {
-                    face.columns.contains(&column.id)
-                        && column_transmits_bending(model, column, node, ez)
-                })
-            {
-                return Err(unsupported());
-            }
-            if index == 0 {
-                face.position_mm
-            } else {
-                length_mm - face.position_mm
-            }
+    };
+    let distance_mm = if column_connected {
+        let column_faces = girder_column_faces(model, elem, adjacency);
+        let face = column_faces
+            .as_ref()
+            .ok_or_else(|| format!("QD1用の内法長さ: {end}の実柱面を確認できません"))?[index]
+            .as_ref()
+            .map_err(|reason| format!("QD1用の内法長さ: {reason}"))?;
+        if !restrained
+            && !others().any(|column| {
+                face.columns.contains(&column.id)
+                    && column_transmits_bending(model, column, node, ez)
+            })
+        {
+            return Err(unsupported());
+        }
+        if index == 0 {
+            face.position_mm
         } else {
-            if !restrained {
-                return Err(unsupported());
-            }
-            if others().next().is_some() {
-                return Err(format!(
-                    "QD1用の内法長さ: {end}で柱以外の接続部材との実端面を確認できません"
-                ));
-            }
-            [elem.rigid_zone.face_i, elem.rigid_zone.face_j][index]
-                .ok_or_else(|| format!("QD1用の内法長さ: {end}のフェース距離が未算定です"))?
-        };
-        if !distance_mm.is_finite() || distance_mm < 0.0 {
+            length_mm - face.position_mm
+        }
+    } else {
+        if !restrained {
+            return Err(unsupported());
+        }
+        if others().next().is_some() {
             return Err(format!(
-                "QD1用の内法長さ: {end}のフェース距離が有限な非負値ではありません"
+                "QD1用の内法長さ: {end}で柱以外の接続部材との実端面を確認できません"
             ));
         }
-        distances_mm[index] = distance_mm;
+        [elem.rigid_zone.face_i, elem.rigid_zone.face_j][index]
+            .ok_or_else(|| format!("QD1用の内法長さ: {end}のフェース距離が未算定です"))?
+    };
+    if !distance_mm.is_finite() || distance_mm < 0.0 {
+        return Err(format!(
+            "QD1用の内法長さ: {end}のフェース距離が有限な非負値ではありません"
+        ));
     }
-    let span_mm = length_mm - distances_mm[0] - distances_mm[1];
-    if !span_mm.is_finite() || span_mm <= 0.0 {
-        return Err("QD1に必要な有限で正の内法長さが成立しません".into());
-    }
-    Ok(span_mm)
+    Ok(distance_mm)
 }
 
 /// 部材の一部でも、実際に割り当てられた床板を支持する場合に true。
@@ -333,13 +353,22 @@ fn beam_qd1_sum_my(
     if ctx.beam_has_slab {
         return Err("QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません".into());
     }
-    let sigma_y = rebar_sigma_y_of(ctx.rebar_material.as_ref());
+    let [top_nmm, bottom_nmm] =
+        beam_qd1_end_moments(shape, ctx.rebar_material.as_ref(), main_rebar_valid)?;
+    Ok(top_nmm + bottom_nmm)
+}
+
+pub(super) fn beam_qd1_end_moments(
+    shape: &SectionShape,
+    rebar_material: Option<&Material>,
+    main_rebar_valid: bool,
+) -> Result<[f64; 2], String> {
+    let sigma_y = rebar_sigma_y_of(rebar_material);
     if !main_rebar_valid || !sigma_y.is_finite() || sigma_y <= 0.0 {
         return Err("QD1用の梁端降伏曲げモーメントに必要な主筋の降伏強度を確定できません".into());
     }
 
-    let mut sum_my_nmm = 0.0;
-    for (tension_is_top, side) in [(true, "上端"), (false, "下端")] {
+    let magnitude = |tension_is_top, side| {
         let props = axis_props_from_shape(shape, RcDirection::Strong, tension_is_top)
             .ok_or_else(|| format!("QD1用の梁端の{side}引張断面を確定できません"))?;
         let my_nmm = 0.9 * props.at * sigma_y * props.d;
@@ -348,10 +377,9 @@ fn beam_qd1_sum_my(
                 "QD1用の梁端の{side}引張降伏曲げモーメントを確定できません"
             ));
         }
-        sum_my_nmm += my_nmm;
-    }
-    // 両端に同じ断面を使うため、逆符号の二つの組合せは同じ和になる。
-    Ok(sum_my_nmm)
+        Ok(my_nmm)
+    };
+    Ok([magnitude(true, "上端")?, magnitude(false, "下端")?])
 }
 
 /// 梁の断面検定（RC 規準 13条）。強軸曲げ mz とそれに対のせん断 qy のみを扱う。
@@ -445,7 +473,10 @@ pub(crate) fn beam_check(
             forces.pos,
             forces.qy,
             ctx.rc_beam_qd1_issue.as_deref(),
-            || beam_qd1_sum_my(shape, ctx, main_rebar_valid),
+            || {
+                ctx.rc_grouped_beam_qd1_sum_my_nmm
+                    .map_or_else(|| beam_qd1_sum_my(shape, ctx, main_rebar_valid), Ok)
+            },
         ) {
             Ok(demand_n) => Some(demand_n),
             Err(reason) => {

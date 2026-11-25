@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 
 use sepika_core::ids::{ElemId, LoadCaseId};
-use sepika_core::model::{ElementData, LoadCaseKind, MemberLoadKind, Model, LL_FRAME_CASE_NAME};
+use sepika_core::model::{
+    ElementData, LoadCaseKind, MemberLoad, MemberLoadKind, Model, LL_FRAME_CASE_NAME,
+};
 use sepika_element::frame::beam::MemberForces;
 
 /// 地震用重量に使う重力ケース ID 列。検定用QL・QD1用Q0とは区別する。
@@ -243,8 +245,7 @@ fn rc_beam_q0_by_terms(
     terms: &[(LoadCaseId, f64)],
     elements: &[ElementData],
 ) -> Result<HashMap<ElemId, f64>, String> {
-    use sepika_core::geom::vec3;
-
+    use std::collections::HashSet;
     if terms.is_empty() {
         return Ok(HashMap::new());
     }
@@ -253,8 +254,12 @@ fn rc_beam_q0_by_terms(
             return Ok(HashMap::new());
         }
     }
+    let grouped: HashSet<_> = model.girder_groups.iter().flatten().copied().collect();
     let mut reactions: HashMap<ElemId, Option<(f64, f64)>> = HashMap::new();
-    for elem in elements.iter().filter(|elem| is_rc_beam(model, elem)) {
+    for elem in elements
+        .iter()
+        .filter(|elem| is_rc_beam(model, elem) && !grouped.contains(&elem.id))
+    {
         reactions.insert(elem.id, rc_beam_geometry(model, elem)?.map(|_| (0.0, 0.0)));
     }
     for (id, factor) in terms {
@@ -269,47 +274,14 @@ fn rc_beam_q0_by_terms(
                 continue;
             };
             let geometry = rc_beam_geometry(model, elem)?;
-            let contribution = (|| {
-                let (length_mm, ey) = geometry?;
-                if !load.dir.iter().all(|v| v.is_finite()) {
-                    return None;
-                }
-                let dir_norm = vec3::norm(load.dir);
-                if !dir_norm.is_finite() || dir_norm <= 0.0 {
-                    return None;
-                }
-                let projection = vec3::dot(vec3::scale(load.dir, 1.0 / dir_norm), ey);
-                let (total_n, moment_n_mm) = match load.kind {
-                    MemberLoadKind::Point { a, p } => {
-                        if !a.is_finite() || !p.is_finite() {
-                            return None;
-                        }
-                        (p, p * a.clamp(0.0, length_mm))
-                    }
-                    MemberLoadKind::Distributed { a, b, w1, w2 } => {
-                        if ![a, b, w1, w2].iter().all(|v| v.is_finite()) {
-                            return None;
-                        }
-                        let a = a.clamp(0.0, length_mm);
-                        let b = b.clamp(0.0, length_mm);
-                        if b <= a {
-                            return Some((0.0, 0.0));
-                        }
-                        let h_mm = b - a;
-                        let total_n = (w1 + w2) * h_mm / 2.0;
-                        let moment_n_mm = a * total_n + h_mm * h_mm * (w1 + 2.0 * w2) / 6.0;
-                        (total_n, moment_n_mm)
-                    }
-                };
+            let contribution = geometry.and_then(|(length_mm, ey)| {
+                let (total_n, moment_n_mm, projection) =
+                    rc_q0_load_resultants(load, length_mm, ey)?;
                 let rj_n = moment_n_mm / length_mm;
-                let ri_n = total_n - rj_n;
-                let ri_n = ri_n * projection * factor;
+                let ri_n = (total_n - rj_n) * projection * factor;
                 let rj_n = rj_n * projection * factor;
-                [total_n, moment_n_mm, projection, ri_n, rj_n]
-                    .iter()
-                    .all(|v| v.is_finite())
-                    .then_some((ri_n, rj_n))
-            })();
+                (ri_n.is_finite() && rj_n.is_finite()).then_some((ri_n, rj_n))
+            });
             *acc = acc.zip(contribution).and_then(|((ri, rj), (di, dj))| {
                 let sum = (ri + di, rj + dj);
                 (sum.0.is_finite() && sum.1.is_finite()).then_some(sum)
@@ -320,6 +292,169 @@ fn rc_beam_q0_by_terms(
         .into_iter()
         .filter_map(|(id, reactions)| reactions.map(|(ri, rj)| (id, ri.abs().max(rj.abs()))))
         .collect())
+}
+
+fn rc_q0_load_resultants(
+    load: &MemberLoad,
+    length_mm: f64,
+    ey: [f64; 3],
+) -> Option<(f64, f64, f64)> {
+    use sepika_core::geom::vec3;
+    if !load.dir.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let dir_norm = vec3::norm(load.dir);
+    if !dir_norm.is_finite() || dir_norm <= 0.0 {
+        return None;
+    }
+    let projection = vec3::dot(vec3::scale(load.dir, 1.0 / dir_norm), ey);
+    let (total_n, moment_n_mm) = match load.kind {
+        MemberLoadKind::Point { a, p } => {
+            if !a.is_finite() || !p.is_finite() {
+                return None;
+            }
+            (p, p * a.clamp(0.0, length_mm))
+        }
+        MemberLoadKind::Distributed { a, b, w1, w2 } => {
+            if ![a, b, w1, w2].iter().all(|v| v.is_finite()) {
+                return None;
+            }
+            let a = a.clamp(0.0, length_mm);
+            let b = b.clamp(0.0, length_mm);
+            if b <= a {
+                return Some((0.0, 0.0, projection));
+            }
+            let h_mm = b - a;
+            let total_n = (w1 + w2) * h_mm / 2.0;
+            let moment_n_mm = a * total_n + h_mm * h_mm * (w1 + 2.0 * w2) / 6.0;
+            (total_n, moment_n_mm)
+        }
+    };
+    (total_n.is_finite() && moment_n_mm.is_finite() && projection.is_finite()).then_some((
+        total_n,
+        moment_n_mm,
+        projection,
+    ))
+}
+
+/// 一本部材に指定したRC矩形梁の全スパンQ0 [N]（全区間の要素IDで同じ結果を参照）。
+/// 選択重力項の部材荷重を用いる。対応を確認できない区間・荷重は理由付き未算定とする。
+pub fn rc_grouped_beam_q0_by_terms(
+    model: &Model,
+    terms: &[(LoadCaseId, f64)],
+) -> HashMap<ElemId, Result<f64, String>> {
+    let mut results = HashMap::new();
+    for group in &model.girder_groups {
+        if !group.iter().any(|id| {
+            model
+                .element(*id)
+                .is_some_and(|elem| is_rc_beam(model, elem))
+        }) {
+            continue;
+        }
+        let result = rc_grouped_beam_q0(model, terms, group);
+        for id in group {
+            results.insert(*id, result.clone());
+        }
+    }
+    results
+}
+
+fn rc_grouped_beam_q0(
+    model: &Model,
+    terms: &[(LoadCaseId, f64)],
+    group: &[ElemId],
+) -> Result<f64, String> {
+    use std::collections::HashSet;
+
+    let span = sepika_design_jp::rc::grouped_beam_qd1_axis(model, group)?;
+    let interior_nodes: HashSet<_> = span
+        .parts
+        .iter()
+        .skip(1)
+        .map(|(elem, _)| elem.nodes[0])
+        .collect();
+    let mut offset_mm = 0.0;
+    let parts: HashMap<_, _> = span
+        .parts
+        .iter()
+        .map(|(elem, length_mm)| {
+            let part = (elem.id, (offset_mm, *length_mm));
+            offset_mm += length_mm;
+            part
+        })
+        .collect();
+    let span_mm = offset_mm;
+    if !span_mm.is_finite() || span_mm <= 0.0 {
+        return Err("QD1用の一本部材の全長が不正です".into());
+    }
+
+    let mut valid_case = false;
+    let mut ri_n = 0.0;
+    let mut rj_n = 0.0;
+    for (id, factor) in terms.iter().copied().filter(|(_, factor)| *factor != 0.0) {
+        if !factor.is_finite() {
+            return Err("QD1用の一本部材の長期荷重係数が非有限です".into());
+        }
+        let case = model
+            .load_cases
+            .iter()
+            .find(|case| case.id == id)
+            .ok_or_else(|| format!("QD1用の一本部材の長期荷重ケース {} を確認できません", id.0))?;
+        if !matches!(
+            case.kind,
+            LoadCaseKind::Dead | LoadCaseKind::Live | LoadCaseKind::Snow
+        ) {
+            return Err(format!(
+                "QD1用の一本部材の荷重ケース {} は選択重力ケースではありません",
+                id.0
+            ));
+        }
+        valid_case = true;
+        if let Some(load) = case.nodal.iter().find(|load| {
+            interior_nodes.contains(&load.node) && load.values.iter().any(|v| *v != 0.0)
+        }) {
+            return Err(format!(
+                "QD1用の一本部材の中間節点 {} の節点荷重をスパンの部材荷重に対応付けられません",
+                load.node.0
+            ));
+        }
+        for load in &case.member {
+            if model.element(load.elem).is_none() {
+                return Err(format!(
+                    "QD1用の一本部材の長期荷重の対象部材 {} を確認できません",
+                    load.elem.0
+                ));
+            }
+            let Some(&(start_mm, length_mm)) = parts.get(&load.elem) else {
+                continue;
+            };
+            let invalid_load = |reason| {
+                format!(
+                    "QD1用の一本部材の区間 {} の長期部材荷重: {reason}",
+                    load.elem.0
+                )
+            };
+            load.validate_extent(length_mm).map_err(invalid_load)?;
+            load.validate_direction().map_err(invalid_load)?;
+            let (total_n, moment_n_mm, projection) =
+                rc_q0_load_resultants(load, length_mm, span.axes[1]).ok_or_else(|| {
+                    invalid_load("有限な荷重合力と一次モーメントを求められません".into())
+                })?;
+            let rj_load_n = start_mm / span_mm * total_n + moment_n_mm / span_mm;
+            let ri_contribution_n = (total_n - rj_load_n) * projection * factor;
+            let rj_contribution_n = rj_load_n * projection * factor;
+            ri_n += ri_contribution_n;
+            rj_n += rj_contribution_n;
+            if !ri_n.is_finite() || !rj_n.is_finite() {
+                return Err("QD1用の一本部材の長期荷重端反力が非有限です".into());
+            }
+        }
+    }
+    if !valid_case {
+        return Err("QD1用の一本部材の長期荷重ケースが不足しています".into());
+    }
+    Ok(ri_n.abs().max(rj_n.abs()))
 }
 
 fn other_beam_q0_by_elem(model: &Model, lc: LoadCaseId) -> HashMap<ElemId, f64> {

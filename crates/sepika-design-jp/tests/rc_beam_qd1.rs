@@ -495,3 +495,160 @@ fn damage_control_beam_uses_signed_combined_shear_without_qd_selection() {
         }
     }
 }
+
+fn split_beam() -> Model {
+    use sepika_core::ids::NodeId;
+
+    let mut model = model();
+    let mut midpoint = model.nodes[0].clone();
+    midpoint.id = NodeId(2);
+    midpoint.coord[0] = 2250.0;
+    midpoint.restraint = Dof6Mask::FREE;
+    model.nodes.push(midpoint);
+
+    let mut right = model.elements[0].clone();
+    right.id = ElemId(1);
+    right.nodes[0] = NodeId(2);
+    right.rigid_zone.face_i = Some(0.0);
+    model.elements[0].nodes[1] = NodeId(2);
+    model.elements[0].rigid_zone.face_j = Some(0.0);
+    model.elements.push(right);
+    model.girder_groups = vec![vec![ElemId(0), ElemId(1)]];
+    model
+}
+
+fn check_split(
+    model: &Model,
+    method: QdMethod,
+    group_q0: Option<Result<f64, String>>,
+) -> Vec<(ElemId, f64, CheckOutcome)> {
+    let response = [
+        (
+            ElemId(0),
+            [
+                model.elements[0].rigid_zone.face_i_or_zero() / 2250.0,
+                0.5,
+                1.0,
+            ],
+        ),
+        (
+            ElemId(1),
+            [
+                0.0,
+                0.5,
+                1.0 - model.elements[1].rigid_zone.face_j_or_zero() / 2250.0,
+            ],
+        ),
+    ]
+    .map(|(id, stations)| {
+        (
+            id,
+            MemberForces {
+                at: stations
+                    .into_iter()
+                    .map(|pos| (pos, [0.0, 80_000.0, 0.0, 0.0, 0.0, 10e6]))
+                    .collect(),
+            },
+        )
+    });
+    let overrides = sepika_design_jp::girder_group_overrides(model, &response);
+    let group_q0 = group_q0.map(|q0| HashMap::from([(ElemId(0), q0.clone()), (ElemId(1), q0)]));
+    run_member_design_checks(
+        model,
+        &response,
+        &[],
+        &MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            qd_method: method,
+            long_member_forces: Some(&response),
+            q_simple_by_elem: Some(&HashMap::from([
+                (ElemId(0), 10_000.0),
+                (ElemId(1), 10_000.0),
+            ])),
+            rc_grouped_beam_q0: group_q0.as_ref(),
+            girder_group_overrides: Some(&overrides),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .member_checks
+}
+
+#[test]
+fn splitting_rc_beam_preserves_qd1_and_checks_both_outer_faces() {
+    let stations = [250.0 / 4500.0, 0.5, 1.0 - 250.0 / 4500.0];
+    let rows = stations.map(|pos| (pos, [0.0, 80_000.0, 0.0, 0.0, 0.0, 10e6]));
+    let single = check(&model(), QdMethod::Qd1, Some(20_000.0), &rows, 80_000.0);
+    let split = check_split(&split_beam(), QdMethod::Qd1, Some(Ok(20_000.0)));
+    let expected_n = 93_390.556_25;
+    assert_eq!(single.len(), 3);
+    assert_eq!(split.len(), 6, "{split:?}");
+    for (_, _, outcome) in single.iter().chain(&split) {
+        assert_shear_n(outcome, expected_n);
+    }
+    assert_eq!(split[0].1, 250.0 / 2250.0);
+    assert_eq!(split[5].1, 1.0 - 250.0 / 2250.0);
+}
+
+#[test]
+fn grouped_rc_beam_uses_the_larger_of_opposite_yield_combinations_at_outer_sections() {
+    use sepika_core::ids::SectionId;
+
+    let mut model = split_beam();
+    let mut right = model.sections[0].clone();
+    right.id = SectionId(1);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut right.shape else {
+        unreachable!();
+    };
+    rebar.top = vec![6];
+    rebar.bottom = vec![3];
+    model.sections.push(right);
+    model.elements[1].section = Some(SectionId(1));
+    let outcomes = check_split(&model, QdMethod::Qd1, Some(Ok(20_000.0)));
+    // 同一有効せいの左2/4本・右6/3本。逆符号の組の合計は10本相当と5本相当。
+    // 10-D19の0.9Atσydは489.270 kN·mとなり、内法4 mのせん断に20 kNを加える。
+    assert_eq!(outcomes.len(), 6, "{outcomes:?}");
+    for (_, _, outcome) in outcomes {
+        assert_shear_n(&outcome, 142_317.593_75);
+    }
+}
+
+#[test]
+fn grouped_rc_beam_qd1_does_not_accept_an_element_only_q0_or_unverified_span() {
+    let mut reversed_axis = split_beam();
+    reversed_axis.elements[1].local_axis.ref_vector = [0.0, 0.0, -1.0];
+    let mut intermediate_release = split_beam();
+    intermediate_release.elements[1].end_cond[0] = EndCondition::Pinned;
+    let mut missing_face = split_beam();
+    missing_face.elements[1].rigid_zone.face_j = None;
+    let variants = [
+        (split_beam(), None, "全スパンの重力反力"),
+        (
+            split_beam(),
+            Some(Err("中間節点荷重".into())),
+            "中間節点荷重",
+        ),
+        (reversed_axis, Some(Ok(20_000.0)), "局所軸の向き"),
+        (intermediate_release, Some(Ok(20_000.0)), "強軸曲げの連続性"),
+        (missing_face, Some(Ok(20_000.0)), "フェース距離が未算定"),
+    ];
+    for (model, q0, expected) in variants {
+        for method in [QdMethod::Qd1, QdMethod::Min] {
+            let outcomes = check_split(&model, method, q0.clone());
+            assert!(outcomes.len() >= 6, "{outcomes:?}");
+            assert!(
+                outcomes
+                    .iter()
+                    .filter(|(_, _, outcome)| matches!(
+                        outcome, CheckOutcome::Skipped { reason } if reason.contains(expected)
+                    ))
+                    .count()
+                    >= 6,
+                "{expected}: {outcomes:?}"
+            );
+            assert!(outcomes.iter().all(|(_, _, outcome)| !matches!(
+                outcome, CheckOutcome::Checked(result) if result.components.iter().any(|c| c.kind == CheckKind::Shear)
+            )));
+        }
+    }
+}
