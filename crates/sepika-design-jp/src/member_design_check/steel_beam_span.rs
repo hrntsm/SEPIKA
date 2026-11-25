@@ -1,10 +1,17 @@
 use std::collections::HashMap;
 
+use sepika_core::geom::vec3::dist;
 use sepika_core::ids::{ElemId, LoadCaseId};
-use sepika_core::model::{ElementData, MemberLoad, Model, Section};
+use sepika_core::model::{
+    ElementData, EndCondition, MemberLoad, MemberLoadExtent, MemberLoadKind, Model, Section,
+    SteelDesignAttr,
+};
 use sepika_core::structure_kind::StructureKind;
 use sepika_element::frame::beam::MemberForces;
-use sepika_element::frame::member_load::{frame_strong_bending_span, FrameStrongBendingPeak};
+use sepika_element::frame::member_load::{
+    frame_strong_bending_span, frame_strong_bending_span_mm, verify_frame_bending_stations_mm,
+    FrameStrongBendingPeak,
+};
 use sepika_element::transform::LocalFrame;
 
 use crate::steel::{beam_lateral_buckling_length, SteelBeamMomentDiagram};
@@ -56,11 +63,7 @@ impl<'a> BeamSpanLoads<'a> {
         elem: &ElementData,
         forces: &MemberForces,
         ctx: &DesignCtx,
-        grouped: bool,
     ) -> Result<SteelBeamSpan, String> {
-        if grouped {
-            return Err("一本部材グループの全長に対応する強軸曲げ分布が未確認です".into());
-        }
         if [0.0, 0.5, 1.0].into_iter().any(|pos| {
             let (lb, partial) = beam_lateral_buckling_length(ctx, pos);
             partial || !lb.is_finite() || (lb - ctx.length).abs() > 1e-9
@@ -100,6 +103,12 @@ impl<'a> BeamSpanLoads<'a> {
         }
         let span =
             frame_strong_bending_span(&frame, ctx.length, [face_i_mm, end_mm], loads, forces)?;
+        Ok(SteelBeamSpan::from(span))
+    }
+}
+
+impl From<sepika_element::frame::member_load::FrameStrongBendingSpan> for SteelBeamSpan {
+    fn from(span: sepika_element::frame::member_load::FrameStrongBendingSpan) -> Self {
         let diagram = if span.interior_maximum {
             SteelBeamMomentDiagram::InteriorMaximum
         } else if span.monotonic {
@@ -107,14 +116,369 @@ impl<'a> BeamSpanLoads<'a> {
         } else {
             SteelBeamMomentDiagram::Unverified
         };
-        Ok(SteelBeamSpan {
+        Self {
             diagram,
             demand_peaks: span.demand_peaks,
-        })
+        }
     }
 }
 
 pub(super) struct SteelBeamSpan {
     pub diagram: SteelBeamMomentDiagram,
     pub demand_peaks: Vec<FrameStrongBendingPeak>,
+}
+
+pub(super) enum GroupBending {
+    WithoutWholeSpan { length_mm: Option<f64> },
+    Whole { length_mm: f64, span: SteelBeamSpan },
+}
+
+struct GroupMember<'a> {
+    elem: &'a ElementData,
+    attr: Option<&'a SteelDesignAttr>,
+    frame: LocalFrame,
+    start_mm: f64,
+    end_mm: f64,
+    length_mm: f64,
+}
+
+pub(super) fn grouped_bending_spans(
+    model: &Model,
+    member_forces: &[(ElemId, MemberForces)],
+    force_rows: &HashMap<ElemId, usize>,
+    loads: Result<&BeamSpanLoads<'_>, &&'static str>,
+) -> HashMap<ElemId, Result<GroupBending, String>> {
+    if model.girder_groups.is_empty() {
+        return HashMap::new();
+    }
+    let forces: HashMap<_, _> = member_forces.iter().map(|(id, f)| (*id, f)).collect();
+    let mut memberships = HashMap::<_, usize>::new();
+    for id in model.girder_groups.iter().flatten() {
+        *memberships.entry(*id).or_default() += 1;
+    }
+
+    let mut spans = HashMap::new();
+    for group in &model.girder_groups {
+        let result = if group.iter().any(|id| memberships[id] != 1) {
+            Err("一本部材の構成要素が重複しています".into())
+        } else {
+            grouped_bending_span(model, group, &forces, force_rows, loads, &mut spans)
+        };
+        if let Err(reason) = result {
+            for &id in group {
+                spans.entry(id).or_insert_with(|| {
+                    independently_specified_partial_span(model, id).ok_or_else(|| reason.clone())
+                });
+            }
+        }
+    }
+    spans
+}
+
+fn independently_specified_partial_span(model: &Model, id: ElemId) -> Option<GroupBending> {
+    let elem = model.element(id)?;
+    let mut attrs = model
+        .steel_design_attrs
+        .iter()
+        .filter(|attr| attr.elem == id);
+    let (i, mid, j) = attrs.next()?.lb_direct?;
+    if attrs.next().is_some() {
+        return None;
+    }
+    let [start, end] = model.primary_frame_axis_ends(elem).ok()??;
+    let length_mm = dist(start, end);
+    (length_mm.is_finite()
+        && length_mm > 1e-9
+        && [i, mid, j]
+            .into_iter()
+            .all(|lb| lb.is_finite() && (lb == 0.0 || lb > 0.0 && lb < length_mm - 1e-9)))
+    .then_some(GroupBending::WithoutWholeSpan {
+        length_mm: Some(length_mm),
+    })
+}
+
+fn grouped_bending_span(
+    model: &Model,
+    group: &[ElemId],
+    saved: &HashMap<ElemId, &MemberForces>,
+    force_rows: &HashMap<ElemId, usize>,
+    loads: Result<&BeamSpanLoads<'_>, &&'static str>,
+    spans: &mut HashMap<ElemId, Result<GroupBending, String>>,
+) -> Result<(), String> {
+    if group.is_empty() {
+        return Err("一本部材を構成する梁要素が不足しています".into());
+    }
+    let attrs = group
+        .iter()
+        .map(|id| {
+            let mut rows = model
+                .steel_design_attrs
+                .iter()
+                .filter(|attr| attr.elem == *id);
+            let attr = rows.next();
+            if rows.next().is_some() {
+                return Err("一本部材の横座屈属性が重複しています");
+            }
+            Ok(attr)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let section_only = |attr: Option<&SteelDesignAttr>| {
+        attr.is_some_and(|attr| attr.lb_direct == Some((0.0, 0.0, 0.0)))
+    };
+    if attrs.iter().copied().all(section_only) {
+        spans.extend(
+            group
+                .iter()
+                .map(|&id| (id, Ok(GroupBending::WithoutWholeSpan { length_mm: None }))),
+        );
+        return Ok(());
+    }
+
+    let mut members = Vec::with_capacity(group.len());
+    let mut total_mm = 0.0;
+    let mut previous: Option<(&ElementData, [f64; 3])> = None;
+    let mut outer_frame = None;
+
+    for (id, attr) in group.iter().zip(attrs) {
+        let elem = model.element(*id).ok_or("一本部材の梁要素がありません")?;
+        let section = model
+            .element_section(elem)
+            .ok_or("一本部材の断面がありません")?;
+        let material = model
+            .element_material(elem)
+            .ok_or("一本部材の材料がありません")?;
+        if MemberKind::try_of_element(elem, model) != Ok(MemberKind::Girder)
+            || !crate::steel::is_symmetric_h_section(section)
+            || sepika_core::structure_kind::structure_kind_of(
+                Some(section),
+                Some(material.category),
+            ) != StructureKind::S
+        {
+            return Err("一本部材が上下対称H形鋼大梁のみで構成されていません".into());
+        }
+        let [i, j] = model
+            .primary_frame_axis_ends(elem)?
+            .ok_or("一本部材の実材軸が未確認です")?;
+        let frame = LocalFrame::from_nodes(i, j, elem.local_axis.ref_vector)?;
+        let length_mm = dist(i, j);
+        if !length_mm.is_finite() || length_mm <= 1e-9 {
+            return Err("一本部材の実材軸長が不正です".into());
+        }
+        let root = outer_frame.get_or_insert(frame);
+        if root
+            .rot
+            .iter()
+            .zip(frame.rot)
+            .any(|(a, b)| dist(*a, b) > 1e-12)
+        {
+            return Err("一本部材の実材軸が共線かつ同方向ではありません".into());
+        }
+        if let Some((prev, prev_j)) = previous {
+            if prev.end_cond[1] != EndCondition::Fixed || elem.end_cond[0] != EndCondition::Fixed {
+                return Err("一本部材の内部に端部解放があります".into());
+            }
+            if prev.nodes.last() != elem.nodes.first()
+                || dist(prev_j, i) > 1e-9
+                || prev.section != elem.section
+            {
+                return Err("一本部材の接続節点・実材軸または断面が連続していません".into());
+            }
+        }
+        let end_mm = total_mm + length_mm;
+        members.push(GroupMember {
+            elem,
+            attr,
+            frame,
+            start_mm: total_mm,
+            end_mm,
+            length_mm,
+        });
+        total_mm = end_mm;
+        previous = Some((elem, j));
+    }
+    if !total_mm.is_finite() {
+        return Err("一本部材の実材軸長が不正です".into());
+    }
+    let partial = |attr: &SteelDesignAttr| {
+        let ctx = DesignCtx {
+            length: total_mm,
+            steel_attr: Some(attr.clone()),
+            ..Default::default()
+        };
+        [0.0, 0.5, 1.0].into_iter().all(|pos| {
+            let (lb, partial) = beam_lateral_buckling_length(&ctx, pos);
+            lb.is_finite() && (lb == 0.0 || lb > 0.0 && partial)
+        })
+    };
+    for member in &members {
+        let length_mm = if section_only(member.attr) {
+            None
+        } else if member.attr.is_some_and(partial) {
+            Some(total_mm)
+        } else {
+            continue;
+        };
+        spans.insert(
+            member.elem.id,
+            Ok(GroupBending::WithoutWholeSpan { length_mm }),
+        );
+    }
+    if group.iter().any(|id| spans.contains_key(id)) {
+        return Err("一本部材の全要素に共通の単一補剛区間が指定されていません".into());
+    }
+    if group.len() < 2 {
+        return Err("一本部材を構成する梁要素が不足しています".into());
+    }
+    let beam_loads = loads.map_err(|reason| (**reason).to_owned())?;
+    let mut previous_end: Option<[f64; 6]> = None;
+    let mut rows = Vec::new();
+    let mut loads = Vec::new();
+    let mut faces = [0.0; 2];
+    let c_direct = members[0].attr.and_then(|attr| attr.c_direct);
+
+    for (index, member) in members.iter().enumerate() {
+        let GroupMember {
+            elem,
+            attr,
+            start_mm,
+            length_mm,
+            ..
+        } = *member;
+        let id = &elem.id;
+        let attr = attr.ok_or("一本部材の有効支点間距離が指定されていません")?;
+        let lb = attr
+            .lb_direct
+            .ok_or("一本部材の有効支点間距離が指定されていません")?;
+        if [lb.0, lb.1, lb.2]
+            .into_iter()
+            .any(|lb| !lb.is_finite() || (lb - total_mm).abs() > 1e-9)
+        {
+            return Err("一本部材の実材軸全長と指定した単一補剛区間が一致しません".into());
+        }
+        if attr.has_section_loss()
+            || attr.lateral_brace_count.is_some_and(|n| n > 0)
+            || attr.c_direct.is_some_and(|c| !c.is_finite() || c <= 0.0)
+            || c_direct != attr.c_direct
+        {
+            return Err("一本部材で共通の無欠損断面と単一補剛区間の条件を確認できません".into());
+        }
+        let [Some(face_i_mm), Some(face_j_mm)] = [elem.rigid_zone.face_i, elem.rigid_zone.face_j]
+        else {
+            return Err("一本部材の材端フェース位置が未確認です".into());
+        };
+        if !(face_i_mm >= 0.0 && face_j_mm >= 0.0 && face_i_mm + face_j_mm < length_mm) {
+            return Err("一本部材の材端フェース位置が不正です".into());
+        }
+        if index != 0
+            && (face_i_mm != 0.0
+                || elem.rigid_zone.rigid_length_i() != 0.0
+                || elem.end_cond[0] != EndCondition::Fixed)
+            || index + 1 != group.len()
+                && (face_j_mm != 0.0
+                    || elem.rigid_zone.rigid_length_j() != 0.0
+                    || elem.end_cond[1] != EndCondition::Fixed)
+        {
+            return Err("一本部材の内部に材端フェースまたは剛域があります".into());
+        }
+
+        if index == 0 {
+            faces[0] = face_i_mm;
+        }
+        if index + 1 == group.len() {
+            faces[1] = face_j_mm;
+        }
+        if force_rows.get(id) != Some(&1) {
+            return Err("一本部材の一意な解析断面力がありません".into());
+        }
+        let mf = saved[id];
+        let Some(&(0.0, start)) = mf.at.first() else {
+            return Err("一本部材の要素i端の解析断面力がありません".into());
+        };
+        let Some(&(1.0, end)) = mf.at.last() else {
+            return Err("一本部材の要素j端の解析断面力がありません".into());
+        };
+        if let Some(prev_end) = previous_end {
+            if prev_end
+                .into_iter()
+                .zip(start)
+                .any(|(a, b)| (a - b).abs() > 1e-8 * a.abs().max(b.abs()).max(1.0))
+            {
+                return Err("一本部材の要素境界で解析断面力が連続していません".into());
+            }
+        }
+        let local_loads = beam_loads.0.get(id).map_or(&[][..], Vec::as_slice);
+        let local_stations: Vec<_> = mf.at.iter().map(|&(xi, f)| (xi * length_mm, f)).collect();
+        verify_frame_bending_stations_mm(&member.frame, length_mm, local_loads, &local_stations)?;
+        for &(factor, original) in local_loads {
+            original.validate_extent(length_mm)?;
+            let mut load = original.clone();
+            match &mut load.kind {
+                MemberLoadKind::Point { a, .. } => {
+                    if !(0.0..=length_mm).contains(a)
+                        || index != 0 && *a == 0.0
+                        || index + 1 != group.len() && *a == length_mm
+                    {
+                        return Err("一本部材の要素境界と集中部材荷重の対応が未確認です".into());
+                    }
+                    *a += start_mm;
+                }
+                MemberLoadKind::Distributed { a, b, .. } => {
+                    if !(0.0 <= *a && *a < *b && *b <= length_mm) {
+                        return Err("一本部材の要素と分布荷重の範囲が一致しません".into());
+                    }
+                    *a += start_mm;
+                    *b += start_mm;
+                }
+            }
+            load.extent = MemberLoadExtent::FixedDistance;
+            loads.push((factor, load));
+        }
+        // 集中荷重の前後が全長座標への加算で同じ値に丸まるため、局所で照合した内部断面は再照合しない。
+        if index == 0 {
+            rows.push((start_mm, start));
+        }
+        rows.push((member.end_mm, end));
+        previous_end = Some(end);
+    }
+
+    let demand = [faces[0], total_mm - faces[1]];
+    let loads: Vec<_> = loads.iter().map(|(factor, load)| (*factor, load)).collect();
+    let span = SteelBeamSpan::from(frame_strong_bending_span_mm(
+        &outer_frame.expect("一本部材の構成要素あり"),
+        total_mm,
+        demand,
+        &loads,
+        &rows,
+    )?);
+    spans.extend(members.into_iter().map(|member| {
+        let demand_peaks = span
+            .demand_peaks
+            .iter()
+            .filter_map(|peak| {
+                if !(member.start_mm..=member.end_mm).contains(&peak.x_mm) {
+                    return None;
+                }
+                let x_mm = (peak.x_mm - member.start_mm).clamp(0.0, member.length_mm);
+                Some(FrameStrongBendingPeak {
+                    xi: x_mm / member.length_mm,
+                    x_mm,
+                    left: peak.left,
+                    right: peak.right.clone(),
+                    is_i_face: peak.is_i_face,
+                    is_j_face: peak.is_j_face,
+                })
+            })
+            .collect();
+        (
+            member.elem.id,
+            Ok(GroupBending::Whole {
+                length_mm: total_mm,
+                span: SteelBeamSpan {
+                    diagram: span.diagram,
+                    demand_peaks,
+                },
+            }),
+        )
+    }));
+    Ok(())
 }

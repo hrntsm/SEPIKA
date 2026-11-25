@@ -486,6 +486,15 @@ fn girder_group_keeps_direct_lateral_length() {
         root_r: Some(0.0),
     });
     model.sections[0].j = 600_000.0;
+    let mut end = model.nodes[1].clone();
+    end.id = NodeId(2);
+    end.coord[0] = 5_500.0;
+    model.nodes.push(end);
+    let mut second = model.elements[0].clone();
+    second.id = ElemId(1);
+    second.nodes = [NodeId(1), NodeId(2)].into_iter().collect();
+    model.elements.push(second);
+    model.girder_groups = vec![vec![ElemId(0), ElemId(1)]];
     let mf = MemberForces {
         at: vec![(0.5, [0.0, 0.0, 0.0, 0.0, 0.0, 20_000_000.0])],
     };
@@ -512,7 +521,12 @@ fn girder_group_keeps_direct_lateral_length() {
             },
         )
         .unwrap();
-        let result = result(report.member_checks[0].2.clone());
+        let (_, _, outcome) = report
+            .member_checks
+            .into_iter()
+            .find(|(id, _, _)| *id == ElemId(0))
+            .unwrap();
+        let result = result(outcome);
         assert!(result.components[0]
             .detail
             .contains(&format!("lb={mid_lb_mm} mm")));

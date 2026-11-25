@@ -553,6 +553,8 @@ pub enum SteelBeamMomentDiagram {
     /// 単調または内部最大を確認できていない。
     #[default]
     Unverified,
+    /// 一本部材の補剛区間が未確認。要素単体の長さや部分区間指定で代替しない。
+    UnverifiedGroup,
 }
 
 pub(crate) use beam::beam_lateral_buckling_length;

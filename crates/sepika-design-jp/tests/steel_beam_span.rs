@@ -4,11 +4,11 @@ mod combined_column;
 #[path = "fixtures/steel_beam_span_model.rs"]
 mod input;
 
-use sepika_core::ids::LoadCaseId;
-use sepika_core::model::{MemberLoad, MemberLoadKind, Model};
+use sepika_core::ids::{ElemId, LoadCaseId, NodeId};
+use sepika_core::model::{MemberLoad, MemberLoadKind, Model, SteelDesignAttr};
 use sepika_design_jp::{
-    run_member_design_checks, CheckKind, CheckOutcome, CheckResult, LoadTerm,
-    MemberDesignCheckOptions,
+    girder_group_overrides, run_member_design_checks, CheckKind, CheckOutcome, CheckResult,
+    LoadTerm, MemberDesignCheckOptions,
 };
 use sepika_solver::statics::{analysis::Analysis, linear::StaticOnce};
 
@@ -18,22 +18,43 @@ fn check(
     term: LoadTerm,
     terms: Option<&[(LoadCaseId, f64)]>,
 ) -> Vec<(f64, CheckOutcome)> {
-    run_member_design_checks(
+    check_member(model, solved, term, terms, input::BEAM)
+}
+
+fn check_member(
+    model: &Model,
+    solved: &StaticOnce,
+    term: LoadTerm,
+    terms: Option<&[(LoadCaseId, f64)]>,
+    member: ElemId,
+) -> Vec<(f64, CheckOutcome)> {
+    let groups = girder_group_overrides(model, &solved.member_forces);
+    checked_member(
         model,
-        &solved.member_forces,
-        &solved.panel_moments,
+        solved,
         &MemberDesignCheckOptions {
             term,
             steel_beam_span_load_terms: terms,
+            girder_group_overrides: Some(&groups),
             ..Default::default()
         },
+        member,
     )
-    .unwrap()
-    .member_checks
-    .into_iter()
-    .filter(|(id, _, _)| *id == input::BEAM)
-    .map(|(_, pos, result)| (pos, result))
-    .collect()
+}
+
+fn checked_member(
+    model: &Model,
+    solved: &StaticOnce,
+    options: &MemberDesignCheckOptions<'_>,
+    member: ElemId,
+) -> Vec<(f64, CheckOutcome)> {
+    run_member_design_checks(model, &solved.member_forces, &solved.panel_moments, options)
+        .unwrap()
+        .member_checks
+        .into_iter()
+        .filter(|(id, _, _)| *id == member)
+        .map(|(_, pos, result)| (pos, result))
+        .collect()
 }
 
 fn at(outcomes: &[(f64, CheckOutcome)], xi: f64) -> &CheckResult {
@@ -499,4 +520,447 @@ fn assert_j_face_inside_cut(face_j_mm: f64) {
     );
     check_bending(at_face, 1.117_006_539, "σax=18.3105");
     assert!(!at_face.ok());
+}
+
+const SECOND_BEAM: ElemId = ElemId(1);
+const SPLIT_MM: f64 = 4_800.0;
+
+fn split_cantilever(mut model: Model, split_mm: f64) -> Model {
+    let mut joint = model.nodes[1].clone();
+    joint.id = NodeId(2);
+    joint.coord[0] = split_mm;
+    model.nodes.push(joint);
+    let mut second = model.elements[0].clone();
+    second.id = SECOND_BEAM;
+    second.nodes[0] = NodeId(2);
+    model.elements[0].nodes[1] = NodeId(2);
+    model.elements.push(second);
+    model.girder_groups = vec![vec![input::BEAM, SECOND_BEAM]];
+    let length = input::LENGTH_MM;
+    model.steel_design_attrs = [input::BEAM, SECOND_BEAM]
+        .into_iter()
+        .map(|elem| SteelDesignAttr {
+            elem,
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: Some((length, length, length)),
+            lateral_brace_count: None,
+            lk_y_direct: None,
+            lk_z_direct: None,
+            c_direct: None,
+            column_lateral_buckling_end_supports: None,
+        })
+        .collect();
+    model
+}
+
+#[test]
+fn split_and_unsplit_girders_have_the_same_verified_interior_maximum_and_allowable_stress() {
+    let whole = input::short_point_combination();
+    let divided = split_cantilever(whole.clone(), SPLIT_MM);
+    let solve = |model: &Model| {
+        Analysis::prepare(model)
+            .unwrap()
+            .linear_combination(&model.combinations[0])
+            .unwrap()
+    };
+    let divided_response = solve(&divided);
+    let divided_i = &divided_response.member_forces[0].1;
+    let divided_j = &divided_response.member_forces[1].1;
+    near(divided_i.at[0].1[5] / 1e6, 100.0);
+    near(divided_i.at.last().unwrap().1[5] / 1e6, 72.0);
+    near(divided_j.at[0].1[5] / 1e6, 72.0);
+    near(divided_j.at.last().unwrap().1[5] / 1e6, 0.0);
+    let whole_response = solve(&whole);
+    for (term, ratio, fb) in [
+        (LoadTerm::Long, 1.793_841_894, "fb=65.5414"),
+        (LoadTerm::Short, 1.195_894_596, "fb=98.3121"),
+    ] {
+        for (model, response, xi) in [
+            (&whole, &whole_response, 0.25),
+            (&divided, &divided_response, 2_000.0 / SPLIT_MM),
+        ] {
+            let result = check(model, response, term, Some(&model.combinations[0].terms));
+            let peak = at(&result, xi);
+            assert!(!peak.ok());
+            check_bending(peak, ratio, fb);
+            check_bending(peak, ratio, "C=1.0000, 塑性限界細長比=0.3000");
+        }
+    }
+}
+
+#[test]
+fn split_girder_supports_monotonic_reverse_curvature_and_the_outer_end_ratio() {
+    let model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let results = check(
+        &model,
+        &solved,
+        LoadTerm::Short,
+        Some(&[(input::DEAD, 1.0)]),
+    );
+    check_bending(
+        at(&results, 0.0),
+        0.381_705_817,
+        "C=2.1333, 塑性限界細長比=0.7000",
+    );
+}
+
+#[test]
+fn unverified_split_girder_keeps_independent_bending_failure() {
+    let model = split_cantilever(input::cantilever(50_000.0, 0.0, None), SPLIT_MM);
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let mut disconnected = model.clone();
+    let mut duplicate_joint = disconnected.nodes[2].clone();
+    duplicate_joint.id = NodeId(3);
+    disconnected.nodes.push(duplicate_joint);
+    disconnected.elements[1].nodes[0] = NodeId(3);
+    let mut bent = model.clone();
+    bent.nodes[2].coord[1] = 100.0;
+    let mut reversed = model.clone();
+    reversed.elements[1].local_axis.ref_vector = [0.0, 0.0, -1.0];
+    let mut missing = solved.clone();
+    missing.member_forces.retain(|(id, _)| *id != SECOND_BEAM);
+    let mut discontinuous = solved.clone();
+    discontinuous.member_forces[1].1.at[0].1[5] += 1e6;
+    let mut unconfirmed_supports = model.clone();
+    unconfirmed_supports.steel_design_attrs.pop();
+
+    for (model, response, reason) in [
+        (
+            &disconnected,
+            &solved,
+            "接続節点・実材軸または断面が連続していません",
+        ),
+        (&bent, &solved, "実材軸が共線かつ同方向ではありません"),
+        (&reversed, &solved, "実材軸が共線かつ同方向ではありません"),
+        (&model, &missing, "一意な解析断面力がありません"),
+        (
+            &model,
+            &discontinuous,
+            "要素境界で解析断面力が連続していません",
+        ),
+        (
+            &unconfirmed_supports,
+            &solved,
+            "有効支点間距離が指定されていません",
+        ),
+    ] {
+        let results = check(
+            model,
+            response,
+            LoadTerm::Short,
+            Some(&[(input::DEAD, 1.0)]),
+        );
+        assert!(
+            results.iter().any(|(_, outcome)| matches!(outcome,
+            CheckOutcome::Skipped { reason: actual } if actual.contains(reason))),
+            "{results:?}"
+        );
+        let start = at(&results, 0.0);
+        assert!(!start.ok());
+        check_bending(start, 1.482_375_287, "fb上限=235.0000");
+    }
+}
+
+#[test]
+fn split_distributed_load_finds_the_maximum_on_the_later_element() {
+    let split_mm = 1_600.0;
+    let model = input::cantilever(
+        20_000.0,
+        0.0,
+        Some(MemberLoadKind::Distributed {
+            a: 0.0,
+            b: split_mm,
+            w1: -12.5,
+            w2: -10.0,
+        }),
+    );
+    let mut model = split_cantilever(model, split_mm);
+    model.load_cases[0].member.push(MemberLoad::manual(
+        SECOND_BEAM,
+        [0.0, 0.0, 1.0],
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 6_400.0,
+            w1: -10.0,
+            w2: 0.0,
+        },
+    ));
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let terms = [(input::DEAD, 1.0)];
+    let later = check_member(&model, &solved, LoadTerm::Short, Some(&terms), SECOND_BEAM);
+    // 自由端側の荷重合力が釣り合う位置は全長比 1−√0.4。
+    let xi_local = ((1.0 - 0.4_f64.sqrt()) * input::LENGTH_MM - split_mm) / 6_400.0;
+    check_bending(at(&later, xi_local), 0.597_609_997, "fb=98.3121");
+}
+
+#[test]
+fn verified_full_span_uses_its_own_length_with_or_without_caller_group_override() {
+    let model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let mut groups = girder_group_overrides(&model, &solved.member_forces);
+    for group in groups.values_mut() {
+        group.length = 9_000.0;
+    }
+    for override_length in [None, Some(&groups)] {
+        let results = checked_member(
+            &model,
+            &solved,
+            &MemberDesignCheckOptions {
+                term: LoadTerm::Short,
+                steel_beam_span_load_terms: Some(&[(input::DEAD, 1.0)]),
+                girder_group_overrides: override_length,
+                ..Default::default()
+            },
+            input::BEAM,
+        );
+        let start = at(&results, 0.0);
+        check_bending(start, 0.381_705_817, "採用横座屈長さ lb=8000 mm");
+        check_bending(start, 0.381_705_817, "C=2.1333, 塑性限界細長比=0.7000");
+    }
+}
+
+#[test]
+fn split_girder_keeps_explicit_zero_and_positive_partial_bracing_without_a_full_span_diagram() {
+    let model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    for (direct, count, ratio, fb, lb) in [
+        (
+            Some((0.0, 0.0, 0.0)),
+            None,
+            0.277_945_366,
+            "fb=235.0000",
+            "lb=0 mm",
+        ),
+        (
+            Some((4_000.0, 4_000.0, 4_000.0)),
+            None,
+            0.387_510_162,
+            "fb=168.5560",
+            "lb=4000 mm",
+        ),
+        (None, Some(1), 0.387_510_162, "fb=168.5560", "lb=4000 mm"),
+    ] {
+        let mut model = model.clone();
+        for attr in &mut model.steel_design_attrs {
+            attr.lb_direct = direct;
+            attr.lateral_brace_count = count;
+        }
+        let results = check(&model, &solved, LoadTerm::Short, None);
+        let start = at(&results, 0.0);
+        check_bending(start, ratio, fb);
+        check_bending(start, ratio, lb);
+        assert!(!results
+            .iter()
+            .any(|(_, outcome)| matches!(outcome, CheckOutcome::Skipped { .. })));
+    }
+}
+
+#[test]
+fn a_single_elements_partial_bracing_does_not_verify_the_unset_part_of_the_girder() {
+    let mut model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
+    model.steel_design_attrs[0].lb_direct = None;
+    model.steel_design_attrs[0].lateral_brace_count = Some(1);
+    model.steel_design_attrs.pop();
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let first = check(&model, &solved, LoadTerm::Short, None);
+    check_bending(at(&first, 0.0), 0.387_510_162, "lb=4000 mm");
+    let second = check_member(&model, &solved, LoadTerm::Short, None, SECOND_BEAM);
+    assert!(second.iter().any(|(_, outcome)| matches!(outcome,
+        CheckOutcome::Skipped { reason } if reason.contains("共通の単一補剛区間が指定されていません"))));
+    assert!(
+        second.iter().all(|(_, outcome)| !matches!(outcome,
+        CheckOutcome::Checked(row) if row.components.iter().any(|c| c.kind == CheckKind::Bending)))
+    );
+}
+
+#[test]
+fn split_girder_preserves_the_left_cut_at_a_saved_point_load_station() {
+    let load_mm = 2_000.5;
+    let whole = input::cantilever(
+        22_500.0,
+        0.0,
+        Some(MemberLoadKind::Point {
+            a: load_mm,
+            p: -40_000.0,
+        }),
+    );
+    let split = split_cantilever(whole.clone(), 4_001.0);
+    let terms = [(input::DEAD, 1.0)];
+    for (model, xi) in [(&whole, load_mm / input::LENGTH_MM), (&split, 0.5)] {
+        let solved = Analysis::prepare(model)
+            .unwrap()
+            .linear_static(input::DEAD)
+            .unwrap();
+        for (term, expected, fb) in [
+            (LoadTerm::Long, 1.793_692_407, "fb=65.5414"),
+            (LoadTerm::Short, 1.195_794_938, "fb=98.3121"),
+        ] {
+            let results = check(model, &solved, term, Some(&terms));
+            check_bending(at(&results, xi), expected, fb);
+            let cuts: Vec<_> = results
+                .iter()
+                .filter_map(|(pos, row)| match row {
+                    CheckOutcome::Checked(row) if (pos - xi).abs() < 1e-12 => {
+                        Some(row.detail.as_str())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                cuts.iter().any(|detail| detail.contains("集中荷重の左側")),
+                "{results:?}"
+            );
+            assert!(
+                cuts.iter().any(|detail| detail.contains("集中荷重の右側")),
+                "{results:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn split_girder_keeps_zero_and_positive_partial_bracing_in_separate_positions() {
+    let mut model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
+    for attr in &mut model.steel_design_attrs {
+        attr.lb_direct = Some((0.0, 4_000.0, 4_000.0));
+    }
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let results = check(&model, &solved, LoadTerm::Short, None);
+    let start = at(&results, 0.0);
+    check_bending(start, 0.277_945_366, "fb=235.0000");
+    check_bending(start, 0.277_945_366, "lb=0 mm");
+    let center = at(&results, 0.5);
+    check_bending(center, 0.232_506_097, "fb=168.5560");
+    check_bending(center, 0.232_506_097, "lb=4000 mm");
+    assert!(results
+        .iter()
+        .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))));
+}
+
+#[test]
+fn later_element_verifies_saved_cut_before_rounding_into_global_coordinates() {
+    let split_mm = 4_096.4;
+    let local_load_mm = 1_951.8;
+    let load_mm = split_mm + local_load_mm;
+    let whole = input::cantilever(
+        60_000.0,
+        0.0,
+        Some(MemberLoadKind::Point {
+            a: load_mm,
+            p: -80_000.0,
+        }),
+    );
+    let mut split = split_cantilever(input::cantilever(60_000.0, 0.0, None), split_mm);
+    split.load_cases[0].member.push(MemberLoad::manual(
+        SECOND_BEAM,
+        [0.0, 0.0, 1.0],
+        MemberLoadKind::Point {
+            a: local_load_mm,
+            p: -80_000.0,
+        },
+    ));
+    let solve = |model: &Model| {
+        Analysis::prepare(model)
+            .unwrap()
+            .linear_static(input::DEAD)
+            .unwrap()
+    };
+    let whole_response = solve(&whole);
+    let split_response = solve(&split);
+    near(split_response.member_forces[1].1.at[1].1[1], -60_000.0);
+    let terms = [(input::DEAD, 1.0)];
+    for (term, ratio, fb) in [
+        (LoadTerm::Long, 1.556_098_048, "fb=65.5414"),
+        (LoadTerm::Short, 1.037_398_699, "fb=98.3121"),
+    ] {
+        for (model, response, id, xi) in [
+            (
+                &whole,
+                &whole_response,
+                input::BEAM,
+                load_mm / input::LENGTH_MM,
+            ),
+            (&split, &split_response, SECOND_BEAM, 0.5),
+        ] {
+            let results = check_member(model, response, term, Some(&terms), id);
+            let peak = at(&results, xi);
+            assert!(!peak.ok());
+            check_bending(peak, ratio, fb);
+        }
+    }
+    let mut inconsistent = split_response;
+    inconsistent.member_forces[1].1.at[1].1[1] = 20_000.0;
+    let later = check_member(
+        &split,
+        &inconsistent,
+        LoadTerm::Short,
+        Some(&terms),
+        SECOND_BEAM,
+    );
+    assert!(later
+        .iter()
+        .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+        if reason.contains("釣合いを確認できません"))));
+}
+
+#[test]
+fn invalid_group_does_not_override_independent_local_direct_bracing() {
+    let mut model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    model.girder_groups[0].reverse();
+    for attr in &mut model.steel_design_attrs {
+        attr.lb_direct = Some((2_000.0, 2_000.0, 2_000.0));
+    }
+    let independent = check(&model, &solved, LoadTerm::Short, None);
+    let start = at(&independent, 0.0);
+    check_bending(start, 0.300_217_044, "fb=217.5665");
+    check_bending(start, 0.300_217_044, "lb=2000 mm");
+    assert!(independent
+        .iter()
+        .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))));
+
+    for (direct, count) in [
+        (None, None),
+        (None, Some(1)),
+        (Some((SPLIT_MM, SPLIT_MM, SPLIT_MM)), None),
+    ] {
+        for attr in &mut model.steel_design_attrs {
+            attr.lb_direct = direct;
+            attr.lateral_brace_count = count;
+        }
+        let unverified = check(&model, &solved, LoadTerm::Short, None);
+        assert!(unverified.iter().any(|(_, row)| matches!(row,
+            CheckOutcome::Skipped { reason } if reason.contains("連続していません"))));
+        assert!(unverified
+            .iter()
+            .all(|(_, row)| !matches!(row, CheckOutcome::Checked(known)
+            if known.components.iter().any(|c| c.kind == CheckKind::Bending))));
+    }
 }

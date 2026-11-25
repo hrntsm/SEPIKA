@@ -221,6 +221,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0155](0155-rc-column-qd1-floor-girder-hold.md) | accepted | 床板筋の寄与を確認できないRC大梁による柱のせん断需要低減は保留する |
 | [0156](0156-src-h-manufacture-plate-strength.md) | accepted | SRC内蔵H形断面の軸力・曲げの材料強度は製造区分と各母材の実板厚から選ぶ |
 | [0157](0157-rc-shear-damage-control-demand.md) | accepted | RC梁・柱の損傷制御では長期・水平の合算応答を用いる |
+| [0158](0158-grouped-steel-girder-lateral-buckling.md) | accepted | 一本部材の鋼梁横座屈は明示した単一補剛区間全体で照合する |
 
 ## 規約
 

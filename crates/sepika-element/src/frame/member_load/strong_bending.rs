@@ -18,6 +18,8 @@ pub struct FrameStrongBendingSpan {
 /// 強軸曲げの需要を照査する全長比と、その位置の局所断面力 [N, N·mm]。
 pub struct FrameStrongBendingPeak {
     pub xi: f64,
+    /// 実材軸i端からの距離 [mm]。
+    pub x_mm: f64,
     /// 集中荷重位置では左極限。
     pub left: [f64; 6],
     /// i端フェースまたは区間内部で集中荷重による断面力の跳びがある場合の右極限。
@@ -38,62 +40,48 @@ pub fn frame_strong_bending_span(
     loads: &[(f64, &MemberLoad)],
     forces: &MemberForces,
 ) -> Result<FrameStrongBendingSpan, String> {
+    if forces.at.first().is_none_or(|(xi, _)| *xi != 0.0) {
+        return Err("i端の解析断面力がありません".into());
+    }
+    if forces.at.last().is_none_or(|(xi, _)| *xi != 1.0) {
+        return Err("j端の解析断面力がありません".into());
+    }
+    let stations_mm: Vec<_> = forces
+        .at
+        .iter()
+        .map(|&(xi, force)| (xi * length_mm, force))
+        .collect();
+    frame_strong_bending_span_mm(
+        frame,
+        length_mm,
+        [demand_lo, demand_hi],
+        loads,
+        &stations_mm,
+    )
+}
+
+/// i端からの実距離 [mm] で両端と保存断面力を照合する。集中部材荷重と同じ位置の断面力は左極限とする。
+/// 照合位置は昇順かつ重複なしとし、入力断面力と釣合いが一致しない場合は理由付きエラーを返す。
+pub fn frame_strong_bending_span_mm(
+    frame: &LocalFrame,
+    length_mm: f64,
+    [demand_lo, demand_hi]: [f64; 2],
+    loads: &[(f64, &MemberLoad)],
+    stations_mm: &[(f64, [f64; 6])],
+) -> Result<FrameStrongBendingSpan, String> {
     if !(0.0 <= demand_lo && demand_lo < demand_hi && demand_hi <= length_mm) {
         return Err("強軸曲げの需要を評価する区間が不正です".into());
     }
-    let Some(&(0.0, start)) = forces.at.first() else {
-        return Err("i端の解析断面力がありません".into());
-    };
-    let Some(&(1.0, observed_end)) = forces.at.last() else {
-        return Err("j端の解析断面力がありません".into());
-    };
-    if forces.at.windows(2).any(|pair| pair[0].0 >= pair[1].0) {
-        return Err("解析断面力の評価位置が不正です".into());
-    }
-    let loads = loads
-        .iter()
-        .map(|&(factor, load)| {
-            let mut load = load.clone();
-            match &mut load.kind {
-                MemberLoadKind::Point { p, .. } => *p *= factor,
-                MemberLoadKind::Distributed { w1, w2, .. } => {
-                    *w1 *= factor;
-                    *w2 *= factor;
-                }
-            }
-            load
-        })
-        .collect::<Vec<_>>();
-    let map = FrameDeadLoadMap::new(&loads, frame, length_mm, 0.0, 0.0)?;
-    let origin = [
-        -start[0], start[1], start[2], -start[3], -start[4], -start[5],
-    ];
-    let mut node_force = [0.0; 12];
-    node_force[..6].copy_from_slice(&origin);
-    let response = LoadedFrameSection::new(map, node_force);
-    let scales: [f64; 6] = std::array::from_fn(|i| {
-        forces
-            .at
-            .iter()
-            .map(|(_, f)| f[i].abs())
-            .fold(1.0, f64::max)
-    });
-    for &(xi, observed) in &forces.at {
-        let recovered = response.at(xi)?;
-        if (0..6).any(|i| {
-            !observed[i].is_finite()
-                || (recovered[i] - observed[i]).abs() > 1e-8 * scales[i].max(recovered[i].abs())
-        }) {
-            return Err("解析断面力と部材荷重の釣合いを確認できません".into());
-        }
-    }
+    let response = verified_frame_bending_response_mm(frame, length_mm, loads, stations_mm)?;
+    let observed_end = stations_mm.last().expect("照合済みj端").1;
+    let loads = &response.map.loads;
 
     let strong_loads: Vec<_> = loads
         .iter()
         .filter_map(|load| resolve(load, frame)[1])
         .collect();
     let mut breaks = vec![0.0, length_mm];
-    for load in &loads {
+    for load in loads {
         match load.kind {
             MemberLoadKind::Point { a, .. } => breaks.push(a),
             MemberLoadKind::Distributed { a, b, .. } => breaks.extend([a, b]),
@@ -221,6 +209,7 @@ pub fn frame_strong_bending_span(
             };
             FrameStrongBendingPeak {
                 xi: x / length_mm,
+                x_mm: x,
                 left,
                 right,
                 is_i_face: x == demand_lo,
@@ -234,6 +223,79 @@ pub fn frame_strong_bending_span(
         interior_maximum,
         demand_peaks,
     })
+}
+
+/// 線形静的応答から、i端起点の実距離 [mm] と局所断面力 [N, N·mm] を照合する。
+/// 両端必須。位置は昇順かつ重複なしとし、集中荷重と同位置では左極限の断面力を照合する。
+pub fn verify_frame_bending_stations_mm(
+    frame: &LocalFrame,
+    length_mm: f64,
+    loads: &[(f64, &MemberLoad)],
+    stations_mm: &[(f64, [f64; 6])],
+) -> Result<(), String> {
+    verified_frame_bending_response_mm(frame, length_mm, loads, stations_mm).map(|_| ())
+}
+
+fn verified_frame_bending_response_mm(
+    frame: &LocalFrame,
+    length_mm: f64,
+    loads: &[(f64, &MemberLoad)],
+    stations_mm: &[(f64, [f64; 6])],
+) -> Result<LoadedFrameSection, String> {
+    let Some(&(0.0, start)) = stations_mm.first() else {
+        return Err("i端の解析断面力がありません".into());
+    };
+    let Some(&(distance_mm, _)) = stations_mm.last() else {
+        return Err("j端の解析断面力がありません".into());
+    };
+    if distance_mm != length_mm {
+        return Err("j端の解析断面力がありません".into());
+    }
+    if stations_mm
+        .iter()
+        .any(|(x_mm, _)| !(0.0..=length_mm).contains(x_mm))
+        || stations_mm.windows(2).any(|pair| pair[0].0 >= pair[1].0)
+    {
+        return Err("解析断面力の評価位置が不正です".into());
+    }
+    let loads = loads
+        .iter()
+        .map(|&(factor, load)| {
+            let mut load = load.clone();
+            match &mut load.kind {
+                MemberLoadKind::Point { p, .. } => *p *= factor,
+                MemberLoadKind::Distributed { w1, w2, .. } => {
+                    *w1 *= factor;
+                    *w2 *= factor;
+                }
+            }
+            load
+        })
+        .collect::<Vec<_>>();
+    let map = FrameDeadLoadMap::new(&loads, frame, length_mm, 0.0, 0.0)?;
+    let origin = [
+        -start[0], start[1], start[2], -start[3], -start[4], -start[5],
+    ];
+    let mut node_force = [0.0; 12];
+    node_force[..6].copy_from_slice(&origin);
+    let response = LoadedFrameSection::new(map, node_force);
+    let scales: [f64; 6] = std::array::from_fn(|i| {
+        stations_mm
+            .iter()
+            .map(|(_, f)| f[i].abs())
+            .fold(1.0, f64::max)
+    });
+    for &(x_mm, observed) in stations_mm {
+        let recovered = response.at_mm(x_mm)?;
+        if (0..6).any(|i| {
+            !observed[i].is_finite()
+                || (recovered[i] - observed[i]).abs() > 1e-8 * scales[i].max(recovered[i].abs())
+        }) {
+            return Err("解析断面力と部材荷重の釣合いを確認できません".into());
+        }
+    }
+
+    Ok(response)
 }
 
 impl LoadedFrameSection {
