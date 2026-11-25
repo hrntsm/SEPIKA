@@ -151,6 +151,417 @@ fn qd1_continuous_column_uses_half_head_girder_moment() {
 }
 
 #[test]
+fn qd1_continuous_column_compares_the_reduced_girder_moments() {
+    for (head_bars, foot_bars, expected_n) in [
+        (2, 1, reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N),
+        (2, 3, reference::TWO_HEAD_GIRDERS_HALF_QD1_N),
+        (4, 3, reference::REVERSIBLE_THREE_BAR_FOOT_QD1_N),
+    ] {
+        let mut model = fixture::column_with_reversible_girders(
+            column::column_model(false, 0.0),
+            head_bars,
+            foot_bars,
+        );
+        let ratio = expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N;
+        assert_qd1_shear_ratio(&model, ratio);
+        for elem in &mut model.elements {
+            elem.nodes.swap(0, 1);
+        }
+        assert_qd1_shear_ratio(&model, ratio);
+    }
+}
+
+#[test]
+fn qd1_chooses_the_foot_when_both_unscaled_girder_sums_are_below_column_yield() {
+    let mut model = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 1);
+    let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut model.sections[0].shape else {
+        unreachable!();
+    };
+    rebar.x = vec![4];
+    rebar.y = vec![4];
+    // 柱My=217.288602 kN·m、未係数の梁和は柱頭190.333125 kN·m・柱脚95.166562 kN·m。
+    assert_qd1_shear_ratio(
+        &model,
+        176_581.255_475_634 / reference::COLUMN_ALLOWABLE_SHEAR_N,
+    );
+}
+
+#[test]
+fn qd1_does_not_use_a_slab_supported_girder_for_new_demand_reductions() {
+    use sepika_core::ids::SlabId;
+    use sepika_core::model::{LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape};
+
+    for (column_bars, foot_bars, slab_edge, expected_n) in [
+        (3, 4, [NodeId(1), NodeId(2)], 227_114.990_935_399),
+        (4, 4, [NodeId(1), NodeId(2)], 208_303.442_920_260),
+        (
+            3,
+            1,
+            [NodeId(0), NodeId(7)],
+            reference::TWO_HEAD_GIRDERS_HALF_QD1_N,
+        ),
+    ] {
+        let mut model =
+            fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, foot_bars);
+        let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut model.sections[0].shape else {
+            unreachable!();
+        };
+        rebar.x = vec![column_bars];
+        rebar.y = vec![column_bars];
+        let section_id = SectionId(3);
+        let mut section =
+            SectionShape::RcSlab { thickness: 150.0 }.to_section(section_id, "床板".into());
+        section.material = model.sections[0].material;
+        model.sections.push(section);
+        model.slabs.push(Slab {
+            id: SlabId(0),
+            shape: SlabShape::Attached {
+                anchor: RegionAnchor::Line {
+                    nodes: slab_edge,
+                    span: [0.0, 1.0],
+                    transfer: LoadTransfer::Anchor,
+                },
+                extent: [1500.0; 2],
+            },
+            plate: SlabPlate {
+                section: Some(section_id),
+                ..Default::default()
+            },
+            reference_story: None,
+            vertical_eccentricity_mm: None,
+            tip_loads: Vec::new(),
+        });
+        assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+    }
+}
+
+#[test]
+fn qd1_new_head_yield_requires_the_girders_to_bend_about_the_column_axis() {
+    for (far_y, far_z, reference, expected_n) in [
+        (
+            0.0,
+            1500.0,
+            [0.0, 0.0, 1.0],
+            reference::TWO_HEAD_GIRDERS_HALF_QD1_N,
+        ),
+        (
+            0.0,
+            1600.0,
+            [0.0, 0.0, 1.0],
+            reference::TWO_HEAD_GIRDERS_HALF_QD1_N,
+        ),
+        (750.0, 1500.0, [0.0, 0.0, 1.0], 227_114.990_935_399),
+        (0.0, 1500.0, [0.0, 1.0, 0.0], 227_114.990_935_399),
+        (0.0, 1500.0, [1.0, 0.0, 1e-13], 227_114.990_935_399),
+    ] {
+        let mut model =
+            fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
+        model.nodes[2].coord = [4000.0, far_y, far_z];
+        model.elements[1].local_axis.ref_vector = reference;
+        assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+    }
+
+    let mut prior = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
+    let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut prior.sections[0].shape else {
+        unreachable!();
+    };
+    rebar.x = vec![4];
+    rebar.y = vec![4];
+    prior.elements[1].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    assert_qd1_shear_ratio(
+        &prior,
+        208_303.442_920_260 / reference::COLUMN_ALLOWABLE_SHEAR_N,
+    );
+}
+
+#[test]
+fn qd1_keeps_the_planar_mechanisms_after_rotating_the_frame_off_global_axes() {
+    for (x_direction, y_direction, scale) in [(3.0, 4.0, 5.0), (3.0, 1.0, 4.0)] {
+        for (head_bars, expected_n) in [
+            (2, reference::TWO_HEAD_GIRDERS_HALF_QD1_N),
+            (4, reference::REVERSIBLE_THREE_BAR_FOOT_QD1_N),
+        ] {
+            let mut model = fixture::column_with_reversible_girders(
+                column::column_model(false, 0.0),
+                head_bars,
+                3,
+            );
+            for node in &mut model.nodes {
+                let [x, y, z] = node.coord;
+                node.coord = [
+                    (x_direction * x - y_direction * y) / scale,
+                    (y_direction * x + x_direction * y) / scale,
+                    z,
+                ];
+            }
+            for elem in &mut model.elements {
+                if elem.section == Some(SectionId(0)) {
+                    elem.local_axis.ref_vector = [x_direction, y_direction, 0.0];
+                }
+            }
+            for girder in [1, 5, 6, 7] {
+                model.elements[girder].local_axis.ref_vector = [x_direction, y_direction, 1.0];
+            }
+            assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+        }
+    }
+}
+
+#[test]
+fn qd1_new_head_yield_requires_concrete_base_material() {
+    for (column_bars, expected_n) in [(3, 227_114.990_935_399), (4, 208_303.442_920_260)] {
+        let mut model =
+            fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
+        let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut model.sections[0].shape else {
+            unreachable!();
+        };
+        rebar.x = vec![column_bars];
+        rebar.y = vec![column_bars];
+        model.sections[GIRDER_SECTION.index()].material = Some(fixture::WRONG_REBAR);
+        assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+    }
+}
+
+#[test]
+fn qd1_new_head_yield_excludes_a_girder_connected_to_a_floor_shell_at_both_ends() {
+    for (column_bars, shares_both, expected_n) in [
+        (3, true, 227_114.990_935_399),
+        (3, false, reference::TWO_HEAD_GIRDERS_HALF_QD1_N),
+        (4, true, 208_303.442_920_260),
+    ] {
+        let mut model =
+            fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
+        let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut model.sections[0].shape else {
+            unreachable!();
+        };
+        rebar.x = vec![column_bars];
+        rebar.y = vec![column_bars];
+        let section = SectionId(model.sections.len() as u32);
+        let mut slab =
+            SectionShape::RcSlab { thickness: 150.0 }.to_section(section, "床シェル".into());
+        slab.material = model.sections[0].material;
+        model.sections.push(slab);
+
+        let mut far = model.nodes[2].clone();
+        far.id = NodeId(model.nodes.len() as u32);
+        far.coord[1] = 4000.0;
+        let far_id = far.id;
+        model.nodes.push(far);
+        let beam_end = if shares_both {
+            NodeId(2)
+        } else {
+            let mut independent = model.nodes[2].clone();
+            independent.id = NodeId(model.nodes.len() as u32);
+            let independent_id = independent.id;
+            model.nodes.push(independent);
+            independent_id
+        };
+        let mut shell = model.elements[fixture::GIRDER.index()].clone();
+        shell.id = ElemId(model.elements.len() as u32);
+        shell.kind = ElementKind::Shell;
+        shell.section = Some(section);
+        shell.nodes = [beam_end, far_id, NodeId(3), NodeId(1)]
+            .into_iter()
+            .collect();
+        model.elements.push(shell);
+
+        assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+    }
+}
+
+#[test]
+fn qd1_excludes_foot_girder_yield_if_a_girder_section_is_rotated() {
+    let mut model = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 1);
+    model.elements[6].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    assert_qd1_shear_ratio(
+        &model,
+        reference::TWO_HEAD_GIRDERS_HALF_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
+    );
+}
+
+#[test]
+fn qd1_excludes_foot_girder_yield_unless_the_continuation_and_beam_pair_are_confirmed() {
+    let lower = 4;
+    let left = 7;
+    for variant in 0..10 {
+        let mut model =
+            fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 1);
+        match variant {
+            0 => {
+                let mut separate = model.nodes[0].clone();
+                separate.id = NodeId(model.nodes.len() as u32);
+                model.elements[lower].nodes[1] = separate.id;
+                model.nodes.push(separate);
+            }
+            1 => model.nodes[5].coord[0] = 100.0,
+            2 => model.elements[lower].end_offsets_mm[1][0] = 100.0,
+            3 => model.elements[lower].end_cond[1] = EndCondition::Pinned,
+            4 => model.nodes[0].restraint = Dof6Mask::FIXED,
+            5 => model.nodes[1].support_spring = Some([0.0, 0.0, 0.0, 0.0, 1000.0, 0.0]),
+            6 => model.constraints.push(Constraint::RigidLink {
+                master: NodeId(0),
+                slaves: vec![NodeId(7)],
+                dofs: Dof6Mask::FIXED,
+            }),
+            7 => model.elements[left].end_cond[1] = EndCondition::Pinned,
+            8 => model.nodes[8].coord[2] = 100.0,
+            9 => {
+                model.nodes[8].restraint = Dof6Mask::FREE;
+                model.elements.pop();
+                model.nodes.pop();
+            }
+            _ => unreachable!(),
+        }
+        assert_qd1_shear_ratio(
+            &model,
+            reference::TWO_HEAD_GIRDERS_HALF_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
+        );
+    }
+}
+
+#[test]
+fn qd1_excludes_foot_girder_yield_with_another_skew_or_orthogonal_girder() {
+    for x in [750.0, 0.0] {
+        let mut model =
+            fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 1);
+        model.girder_torsion = GirderTorsionMode::Keep;
+        let mut far = model.nodes[0].clone();
+        far.id = NodeId(model.nodes.len() as u32);
+        far.coord = [x, 4000.0, 0.0];
+        far.restraint = Dof6Mask::FIXED;
+        let mut girder = model.elements[6].clone();
+        girder.id = ElemId(model.elements.len() as u32);
+        girder.nodes[1] = far.id;
+        model.elements.push(girder);
+        model.nodes.push(far);
+
+        assert_qd1_shear_ratio(
+            &model,
+            reference::TWO_HEAD_GIRDERS_HALF_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
+        );
+    }
+}
+
+#[test]
+fn qd1_excludes_foot_girder_yield_when_a_rigid_link_restrains_rotation_to_ground() {
+    let mut model = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 1);
+    let mut rotation = Dof6Mask::FREE;
+    rotation.set_fixed(Dof::Ry);
+    model.constraints.push(Constraint::RigidLink {
+        master: NodeId(5),
+        slaves: vec![NodeId(0)],
+        dofs: rotation,
+    });
+
+    assert_qd1_shear_ratio(
+        &model,
+        reference::TWO_HEAD_GIRDERS_HALF_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
+    );
+}
+
+#[test]
+fn qd1_excludes_foot_girder_yield_if_an_rc_shape_has_a_nonconcrete_base_material() {
+    for member in [3, 4, 6] {
+        let mut model =
+            fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 1);
+        let section = model.elements[member].section.unwrap();
+        let mut nonconcrete = model.sections[section.index()].clone();
+        nonconcrete.id = SectionId(model.sections.len() as u32);
+        nonconcrete.name = "主材料が鋼材の断面".into();
+        nonconcrete.material = Some(fixture::WRONG_REBAR);
+        model.elements[member].section = Some(nonconcrete.id);
+        model.sections.push(nonconcrete);
+
+        assert_qd1_shear_ratio(
+            &model,
+            reference::TWO_HEAD_GIRDERS_HALF_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
+        );
+    }
+}
+
+#[test]
+fn qd1_excludes_foot_girder_yield_at_wall_plate_before_and_after_expansion() {
+    let mut model = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 1);
+    fixture::add_wall_below_reversible_column(&mut model);
+    assert!(model
+        .elements
+        .iter()
+        .all(|elem| elem.kind != ElementKind::Wall));
+    let (expanded, _, report) = sepika_core::wall_expand::expand_wall_elements(&model);
+    assert_eq!(report.generated, 1);
+    for model in [&model, &expanded] {
+        assert_qd1_shear_ratio(
+            model,
+            reference::TWO_HEAD_GIRDERS_HALF_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
+        );
+    }
+}
+
+#[test]
+fn qd1_excludes_foot_girder_yield_when_a_brace_has_offset_at_the_column_foot() {
+    let mut model = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 1);
+    let section = SectionId(model.sections.len() as u32);
+    let mut brace_section = SectionShape::SteelH {
+        height: 250.0,
+        width: 125.0,
+        web_thick: 6.0,
+        flange_thick: 9.0,
+        root_r: Some(8.0),
+    }
+    .to_section(section, "柱脚のブレース".into());
+    brace_section.frame_use = Some(FrameSectionUse::Brace);
+    brace_section.material = Some(fixture::WRONG_REBAR);
+    model.sections.push(brace_section);
+
+    let mut brace = model.elements[COLUMN.index()].clone();
+    brace.id = ElemId(model.elements.len() as u32);
+    brace.kind = ElementKind::Brace {
+        tension_only: false,
+    };
+    brace.nodes = [NodeId(9), NodeId(0)].into_iter().collect();
+    brace.end_cond = [EndCondition::Pinned; 2];
+    brace.section = Some(section);
+    model.elements.push(brace);
+
+    for (offsets, expected_n) in [
+        ([[0.0; 3]; 2], reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N),
+        (
+            [[0.0, 0.0, 100.0], [0.0; 3]],
+            reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N,
+        ),
+        (
+            [[0.0; 3], [0.0, 0.0, 100.0]],
+            reference::TWO_HEAD_GIRDERS_HALF_QD1_N,
+        ),
+    ] {
+        model.elements.last_mut().unwrap().end_offsets_mm = offsets;
+        assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+    }
+}
+
+#[test]
+fn qd1_keeps_existing_foot_girder_yield_when_the_head_has_no_direct_upper_column() {
+    let mut model = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 4, 1);
+    model.elements[3].nodes[0] = NodeId(2);
+    model.nodes[4].coord[0] = model.nodes[2].coord[0];
+    let assert_foot_yield = |model: &Model| {
+        model.validate().unwrap();
+        assert_near(
+            column_qd1_by_direction(model, [-100_000.0; 2], 1500.0)[0],
+            reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N,
+            1e-6,
+        );
+    };
+    assert_foot_yield(&model);
+    model.constraints.push(Constraint::RigidLink {
+        master: NodeId(1),
+        slaves: vec![NodeId(2)],
+        dofs: Dof6Mask::FIXED,
+    });
+    assert_foot_yield(&model);
+}
+
+#[test]
 fn qd1_sloped_fiber_girder_contributes_without_counting_as_upper_column() {
     let mut model = yielding_head_model();
     fixture::add_column_above(&mut model, NodeId(1), ElementKind::Fiber);

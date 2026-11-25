@@ -5,76 +5,79 @@ use std::collections::HashSet;
 use num_rational::BigRational;
 use num_traits::Zero;
 use sepika_core::adjacency::NodeAdjacency;
+use sepika_core::dof::{Dof, Dof6Mask};
 use sepika_core::geom::vec3::{norm, sub};
 use sepika_core::ids::NodeId;
-use sepika_core::model::{ElementData, ElementKind, EndCondition, Material, Model};
+use sepika_core::model::{
+    Constraint, ElementData, ElementKind, EndCondition, Material, MaterialCategory, Model,
+};
 use sepika_core::rc_capacity::{rc_column_mu_simple, rc_mu_simple, RcCapacityInput};
 use sepika_core::section_shape::SectionShape;
 use sepika_element::frame::rigid_arm::resolve_lengths;
 use sepika_element::transform::LocalFrame;
 use sepika_solver::common::constraint::Reducer;
+use smallvec::SmallVec;
 
+use super::beam::{
+    beam_supports_slab, column_transmits_bending, restrains_direction, transmits_bending,
+};
 use super::section_props::{axis_props_from_shape, rebar_info_from_shape, AxisProps};
 use crate::material_strength::{main_rebar_category_issue, rebar_sigma_y_of};
 use crate::member_design_check::combine_incomplete_reasons;
 use crate::ultimate::rc_props::RcDirection;
 use crate::MemberKind;
 
-/// 柱端のヒンジ種別。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ColumnEndHinge {
-    /// 梁ヒンジ。
-    Beam,
-    /// 柱ヒンジ。
-    Column,
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ColumnHead {
+    Continuous,
+    Terminal,
+    Unconfirmed,
 }
 
-/// 1 端のヒンジを判定する。
-/// `force_column_hinge`: その端を強制的に柱ヒンジにする場合 true。
-pub fn resolve_column_end_hinge(
-    column_my: f64,
-    sum_beam_my: f64,
-    force_column_hinge: bool,
-) -> ColumnEndHinge {
-    if force_column_hinge || sum_beam_my <= 1e-9 || column_my <= sum_beam_my + 1e-9 {
-        ColumnEndHinge::Column
-    } else {
-        ColumnEndHinge::Beam
-    }
+fn beam_yield_is_lower(beam_my: f64, column_my: f64) -> bool {
+    beam_my > 1e-9 && column_my > beam_my + 1e-9
 }
 
-/// 両端ヒンジから ΣMy を組み立てる。両端とも梁降伏なら下端を柱降伏へ落とす。
-/// 柱頭の梁寄与に係数を掛ける。係数が `None` の柱頭は柱降伏とする。
-#[allow(clippy::too_many_arguments)]
-pub fn sum_my_from_end_hinges(
-    hinge_i: ColumnEndHinge,
-    hinge_j: ColumnEndHinge,
-    column_my_i: f64,
-    column_my_j: f64,
-    sum_beam_my_i: f64,
-    sum_beam_my_j: f64,
-    i_is_bottom: bool,
-    head_beam_factor: Option<f64>,
+fn has_concrete_material(model: &Model, member: &ElementData) -> bool {
+    model
+        .element_material(member)
+        .is_some_and(|material| material.category == MaterialCategory::Concrete)
+}
+
+fn mechanism_moment(
+    [foot_my, head_my]: [f64; 2],
+    [foot_beams, head_beams]: [f64; 2],
+    head: ColumnHead,
+    allow_new_head_yield: impl FnOnce() -> bool,
+    allow_foot_yield: impl FnOnce() -> bool,
 ) -> f64 {
-    let (mut hi, mut hj) = (hinge_i, hinge_j);
-    if hi == ColumnEndHinge::Beam && hj == ColumnEndHinge::Beam {
-        if i_is_bottom {
-            hi = ColumnEndHinge::Column;
+    let both_columns = foot_my + head_my;
+    if head != ColumnHead::Continuous {
+        // 上階に続かない場合は、一般階の上下反転で従来の採否を置き換えられない。
+        return if beam_yield_is_lower(head_beams, head_my) {
+            match head {
+                ColumnHead::Terminal => foot_my + head_beams,
+                _ => both_columns,
+            }
+        } else if beam_yield_is_lower(foot_beams, foot_my) {
+            head_my + 0.5 * foot_beams
         } else {
-            hj = ColumnEndHinge::Column;
-        }
+            both_columns
+        };
     }
-    let contrib = |h, col_my, beam_sum, beam_factor: Option<f64>| match (h, beam_factor) {
-        (ColumnEndHinge::Beam, Some(factor)) => factor * beam_sum,
-        _ => col_my,
-    };
-    let (factor_i, factor_j) = if i_is_bottom {
-        (Some(0.5), head_beam_factor)
-    } else {
-        (head_beam_factor, Some(0.5))
-    };
-    contrib(hi, column_my_i, sum_beam_my_i, factor_i)
-        + contrib(hj, column_my_j, sum_beam_my_j, factor_j)
+
+    let mut moment = both_columns;
+    let head_beam_my = 0.5 * head_beams;
+    if beam_yield_is_lower(head_beam_my, head_my)
+        && (beam_yield_is_lower(head_beams, head_my) || allow_new_head_yield())
+    {
+        moment = moment.min(foot_my + head_beam_my);
+    }
+    let foot_beam_my = 0.5 * foot_beams;
+    if beam_yield_is_lower(foot_beam_my, foot_my) && allow_foot_yield() {
+        moment = moment.min(head_my + foot_beam_my);
+    }
+    moment
 }
 
 /// 設計軸力 N = NL + n·|NE|（圧縮正）。`n` は引張正の部材軸力。
@@ -214,16 +217,58 @@ fn rigid_arm_is_parallel(
     exact_delta(0) * exact(axis_y) == exact_delta(1) * exact(axis_x)
 }
 
-fn sum_beam_my_at_node(
+fn girder_strong_axis_is_parallel(
     model: &Model,
-    adjacency: &NodeAdjacency,
+    girder: &ElementData,
+    [axis_x, axis_y]: [f64; 2],
+) -> bool {
+    let Ok(Some([i, j])) = model.primary_frame_axis_end_positions(girder) else {
+        return false;
+    };
+    let reference = girder.local_axis.ref_vector;
+    let Ok(frame) = LocalFrame::from_nodes(i, j, reference) else {
+        return false;
+    };
+    let [local_zx, local_zy, local_zz] = frame.rot[2];
+    let axis_len = axis_x.hypot(axis_y);
+    // 参照方向の直交成分が小さい場合は、実際の基底が代替軸を使うことがある。
+    if local_zz.abs() > 1e-12
+        || (local_zx * (axis_y / axis_len) - local_zy * (axis_x / axis_len)).abs() > 1e-12
+    {
+        return false;
+    }
+    // 正規化や座標差の丸めで、同一構面内の平行を否定したり微小な斜交を見落としたりしない。
+    let exact = |value| BigRational::from_float(value).expect("有限な材軸端と断面参照方向");
+    let [dx, dy, dz] = std::array::from_fn(|k| exact(j[k]) - exact(i[k]));
+    let [rx, ry, rz] = reference.map(exact);
+    let normal_x = &dy * &rz - &dz * &ry;
+    let normal_y = &dz * &rx - &dx * &rz;
+    let normal_z = &dx * &ry - &dy * &rx;
+    normal_z.is_zero()
+        && (!normal_x.is_zero() || !normal_y.is_zero())
+        && normal_x * exact(axis_y) == normal_y * exact(axis_x)
+}
+
+fn node_pair(i: NodeId, j: NodeId) -> [NodeId; 2] {
+    [i.min(j), i.max(j)]
+}
+
+#[derive(Default)]
+struct GirderMoments<'a> {
+    sum_my: f64,
+    girders: SmallVec<[&'a ElementData; 2]>,
+}
+
+fn sum_beam_my_at_node<'a>(
+    model: &'a Model,
+    adjacency: &'a NodeAdjacency,
     node: NodeId,
     load_h: [f64; 2],
     peer_h: [f64; 2],
     prefer_on_tie: bool,
     column_bending_axis: Option<[f64; 2]>,
-) -> Result<Option<f64>, String> {
-    let mut sum = Some(0.0);
+) -> Result<Option<GirderMoments<'a>>, String> {
+    let mut sum = Some(GirderMoments::default());
     for other in adjacency.elements_at(model, node) {
         let (Some(n0), Some(n1)) = (
             other.nodes.first().and_then(|n| model.nodes.get(n.index())),
@@ -303,8 +348,11 @@ fn sum_beam_my_at_node(
         }
         sum = sum
             .zip(beam_my_simple(shape, material))
-            .map(|(sum, my)| sum + my)
-            .filter(|sum| sum.is_finite());
+            .and_then(|(mut sum, my)| {
+                sum.sum_my += my;
+                sum.girders.push(other);
+                sum.sum_my.is_finite().then_some(sum)
+            });
     }
     Ok(sum)
 }
@@ -313,18 +361,75 @@ fn sum_beam_my_at_node(
 pub struct ColumnMechanismTopology {
     frame: NodeAdjacency,
     linked_nodes: HashSet<NodeId>,
+    unconfirmed_reverse_joints: HashSet<NodeId>,
+    shell_node_pairs: HashSet<[NodeId; 2]>,
 }
 
 impl ColumnMechanismTopology {
     /// 検定対象モデルの主架構線材と、別節点との連結拘束を索引化する。
     pub fn new(model: &Model) -> Self {
+        let mut unconfirmed_reverse_joints = HashSet::new();
+        let mut shell_node_pairs = HashSet::new();
+        for elem in &model.elements {
+            match elem.kind {
+                ElementKind::PanelZone => {
+                    unconfirmed_reverse_joints.extend(elem.nodes.first().copied());
+                }
+                ElementKind::NodalSpring | ElementKind::Wall => {
+                    unconfirmed_reverse_joints.extend(elem.nodes.iter().copied())
+                }
+                ElementKind::Shell => {
+                    unconfirmed_reverse_joints.extend(elem.nodes.iter().copied());
+                    for (index, &first) in elem.nodes.iter().enumerate() {
+                        shell_node_pairs.extend(
+                            elem.nodes[index + 1..]
+                                .iter()
+                                .map(|&second| node_pair(first, second)),
+                        );
+                    }
+                }
+                // 軸力要素も、偏心端では軸力により付加曲げを節点へ伝える。
+                ElementKind::Brace { .. } => unconfirmed_reverse_joints.extend(
+                    elem.nodes
+                        .iter()
+                        .zip(elem.end_offsets_mm)
+                        .filter_map(|(&node, offset)| (offset != [0.0; 3]).then_some(node)),
+                ),
+                _ => {}
+            }
+        }
+        // 時刻歴の簡易検定では、壁が解析要素へ展開される前のモデルを受け取ることがある。
+        unconfirmed_reverse_joints.extend(
+            model
+                .wall_plates
+                .iter()
+                .filter(|plate| model.wall_plate_becomes_element(plate))
+                .filter_map(|plate| plate.boundary_nodes(model))
+                .flatten(),
+        );
+        // 固定節点への拘束は、縮約後に別節点への参照を残さず回転を止めることがある。
+        for constraint in &model.constraints {
+            match constraint {
+                Constraint::RigidLink { master, slaves, .. } => {
+                    unconfirmed_reverse_joints.insert(*master);
+                    unconfirmed_reverse_joints.extend(slaves.iter().copied());
+                }
+                Constraint::Mpc { master, terms } => {
+                    unconfirmed_reverse_joints.insert(*master);
+                    unconfirmed_reverse_joints.extend(terms.iter().map(|&(node, _, _)| node));
+                }
+                Constraint::RigidDiaphragm { .. } => {}
+            }
+        }
         Self {
             frame: NodeAdjacency::primary_frame(model),
             linked_nodes: Reducer::explicit_constraint_linked_nodes(model),
+            unconfirmed_reverse_joints,
+            shell_node_pairs,
         }
     }
 
-    fn head_beam_factor(&self, model: &Model, head: NodeId, head_z_mm: f64) -> Option<f64> {
+    fn column_head(&self, model: &Model, head: NodeId, head_z_mm: f64) -> ColumnHead {
         let has_upper_column = self.frame.elements_at(model, head).any(|elem| {
             matches!(
                 MemberKind::try_of_element(elem, model),
@@ -336,12 +441,140 @@ impl ColumnMechanismTopology {
             })
         });
         if has_upper_column {
-            Some(0.5)
+            ColumnHead::Continuous
         } else if self.linked_nodes.contains(&head) {
-            None
+            ColumnHead::Unconfirmed
         } else {
-            Some(1.0)
+            ColumnHead::Terminal
         }
+    }
+
+    fn allows_new_head_yield(
+        &self,
+        model: &Model,
+        girders: &[&ElementData],
+        bending_axis: Option<[f64; 2]>,
+    ) -> bool {
+        let Some(bending_axis) = bending_axis else {
+            return false;
+        };
+        girders.iter().all(|girder| {
+            has_concrete_material(model, girder)
+                && !beam_supports_slab(model, girder)
+                && !self
+                    .shell_node_pairs
+                    .contains(&node_pair(girder.nodes[0], girder.nodes[1]))
+                && girder_strong_axis_is_parallel(model, girder, bending_axis)
+        })
+    }
+
+    fn has_direct_rc_continuation(
+        &self,
+        model: &Model,
+        column: &ElementData,
+        joint: NodeId,
+        above: bool,
+    ) -> bool {
+        let Some(node) = model.node(joint) else {
+            return false;
+        };
+        if node.restraint.0 & Dof6Mask::FIXED.0 != 0
+            || node.support_spring.is_some()
+            || self.unconfirmed_reverse_joints.contains(&joint)
+        {
+            return false;
+        }
+        let mut found = false;
+        for elem in self.frame.elements_at(model, joint) {
+            if elem.id == column.id {
+                continue;
+            }
+            match MemberKind::try_of_element(elem, model) {
+                Ok(MemberKind::Girder) => continue,
+                Ok(MemberKind::Column) => {}
+                _ => return false,
+            }
+            let far = elem.nodes[usize::from(elem.nodes[0] == joint)];
+            if found
+                || !has_concrete_material(model, elem)
+                || !model.node(far).is_some_and(|far| {
+                    far.coord[..2] == node.coord[..2]
+                        && if above {
+                            far.coord[2] > node.coord[2]
+                        } else {
+                            far.coord[2] < node.coord[2]
+                        }
+                })
+                || elem.end_offsets_mm != [[0.0; 3]; 2]
+                || elem.end_cond != [EndCondition::Fixed; 2]
+                || !matches!(
+                    model
+                        .element_section(elem)
+                        .and_then(|sec| sec.shape.as_ref()),
+                    Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. })
+                )
+            {
+                return false;
+            }
+            found = true;
+        }
+        found
+    }
+
+    fn has_opposing_foot_girders(
+        &self,
+        model: &Model,
+        foot: NodeId,
+        girders: &[&ElementData],
+        bending_axis: Option<[f64; 2]>,
+    ) -> bool {
+        let (Some(node), [first, second], Some([bx, by])) =
+            (model.node(foot), girders, bending_axis)
+        else {
+            return false;
+        };
+        // 加力方向の割当から外れる梁も、斜交曲げやねじりを柱脚へ伝え得る。
+        if self.frame.elements_at(model, foot).any(|elem| {
+            elem.id != first.id
+                && elem.id != second.id
+                && matches!(
+                    MemberKind::try_of_element(elem, model),
+                    Ok(MemberKind::Girder)
+                )
+        }) {
+            return false;
+        }
+        let shear_axis = [by, -bx];
+        let component = usize::from(shear_axis[0] == 0.0);
+        let rotation = [bx, by, 0.0].map(|value| value / bx.hypot(by));
+        let mut opposing = [false; 2];
+        for girder in [first, second] {
+            let end = usize::from(girder.nodes[1] == foot);
+            let Some(far) = model.node(girder.nodes[1 - end]) else {
+                return false;
+            };
+            let side = usize::from(far.coord[component] > node.coord[component]);
+            let has_far_support = far.restraint.is_fixed(Dof::Uz)
+                || (transmits_bending(girder.end_cond[1 - end])
+                    && (restrains_direction(far, rotation, [Dof::Rx, Dof::Ry, Dof::Rz])
+                        || self.frame.elements_at(model, far.id).any(|column| {
+                            matches!(
+                                MemberKind::try_of_element(column, model),
+                                Ok(MemberKind::Column)
+                            ) && column_transmits_bending(model, column, far, rotation)
+                        })));
+            if opposing[side]
+                || !has_far_support
+                || !has_concrete_material(model, girder)
+                || beam_supports_slab(model, girder)
+                || !girder_strong_axis_is_parallel(model, girder, [bx, by])
+                || !rigid_arm_is_parallel([node.coord, far.coord], [[0.0; 3]; 2], shear_axis)
+            {
+                return false;
+            }
+            opposing[side] = true;
+        }
+        opposing == [true; 2]
     }
 }
 
@@ -475,12 +708,19 @@ fn column_mechanism_sum_my(
 
     let i_is_bottom = p_i[2] <= p_j[2];
     let design_n = design_axial(i_is_bottom);
-    let (head, head_z_mm) = if i_is_bottom {
-        (nj, p_j[2])
+    let (foot, head, head_z_mm) = if i_is_bottom {
+        (ni, nj, p_j[2])
     } else {
-        (ni, p_i[2])
+        (nj, ni, p_i[2])
     };
-    let head_beam_factor = topology.head_beam_factor(model, head, head_z_mm);
+    let column_head = topology.column_head(model, head, head_z_mm);
+    let continuous_rc_joint_pair = column_head == ColumnHead::Continuous
+        && p_i[..2] == p_j[..2]
+        && has_concrete_material(model, column)
+        && column.end_cond == [EndCondition::Fixed; 2]
+        && column.end_offsets_mm == [[0.0; 3]; 2]
+        && topology.has_direct_rc_continuation(model, column, head, true)
+        && topology.has_direct_rc_continuation(model, column, foot, false);
 
     let sum_for = |strong: bool,
                    load_h: [f64; 2],
@@ -519,17 +759,29 @@ fn column_mechanism_sum_my(
         };
         match beams {
             (Some(bi), Some(bj)) if column.end_offsets_mm == [[0.0; 3]; 2] => {
-                let hi = resolve_column_end_hinge(col_i, bi, false);
-                let hj = resolve_column_end_hinge(col_j, bj, false);
-                Ok(Some(sum_my_from_end_hinges(
-                    hi,
-                    hj,
-                    col_i,
-                    col_j,
-                    bi,
-                    bj,
-                    i_is_bottom,
-                    head_beam_factor,
+                let (column_my, beams) = if i_is_bottom {
+                    ([col_i, col_j], [bi, bj])
+                } else {
+                    ([col_j, col_i], [bj, bi])
+                };
+                let [foot_beams, head_beams] = beams;
+                let allow_new_head_yield =
+                    || topology.allows_new_head_yield(model, &head_beams.girders, bending_axis);
+                let allow_foot_yield = || {
+                    continuous_rc_joint_pair
+                        && topology.has_opposing_foot_girders(
+                            model,
+                            foot,
+                            &foot_beams.girders,
+                            bending_axis,
+                        )
+                };
+                Ok(Some(mechanism_moment(
+                    column_my,
+                    [foot_beams.sum_my, head_beams.sum_my],
+                    column_head,
+                    allow_new_head_yield,
+                    allow_foot_yield,
                 )))
             }
             _ => Ok(Some(col_i + col_j)),
@@ -546,58 +798,6 @@ fn column_mechanism_sum_my(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn hinge_column_when_no_beams_or_weaker_beams() {
-        assert_eq!(
-            resolve_column_end_hinge(100.0, 0.0, false),
-            ColumnEndHinge::Column
-        );
-        assert_eq!(
-            resolve_column_end_hinge(100.0, 100.0, false),
-            ColumnEndHinge::Column
-        );
-        assert_eq!(
-            resolve_column_end_hinge(100.0, 80.0, false),
-            ColumnEndHinge::Beam
-        );
-        assert_eq!(
-            resolve_column_end_hinge(100.0, 200.0, true),
-            ColumnEndHinge::Column
-        );
-    }
-
-    #[test]
-    fn both_beam_hinges_force_bottom_to_column() {
-        // 両端梁 → 下端(i) を柱へ。ΣMy = col_i + 0.5*beam_j
-        let s = sum_my_from_end_hinges(
-            ColumnEndHinge::Beam,
-            ColumnEndHinge::Beam,
-            100.0,
-            120.0,
-            300.0,
-            400.0,
-            true,
-            Some(0.5),
-        );
-        assert!((s - (100.0 + 0.5 * 400.0)).abs() < 1e-9, "s={s}");
-    }
-
-    #[test]
-    fn mixed_hinges_add_contributions() {
-        // i 柱 + j 梁 → col_i + 0.5*beam_j
-        let s = sum_my_from_end_hinges(
-            ColumnEndHinge::Column,
-            ColumnEndHinge::Beam,
-            100.0,
-            120.0,
-            300.0,
-            400.0,
-            true,
-            Some(0.5),
-        );
-        assert!((s - (100.0 + 200.0)).abs() < 1e-9);
-    }
 
     #[test]
     fn design_axial_adds_abs_earthquake() {

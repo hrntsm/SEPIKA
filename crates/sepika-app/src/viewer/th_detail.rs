@@ -1502,6 +1502,62 @@ mod tests {
     }
 
     #[test]
+    fn rc_column_peak_qd1_uses_the_lower_confirmed_single_end_girder_mechanism() {
+        use super::rc_column_mechanism_input as input;
+        use super::rc_column_mechanism_reference::{
+            COLUMN_ALLOWABLE_SHEAR_N, REVERSIBLE_ONE_BAR_FOOT_QD1_N,
+            REVERSIBLE_THREE_BAR_FOOT_QD1_N, TWO_HEAD_GIRDERS_HALF_QD1_N,
+        };
+        use crate::app::rc_column_boundary_tests::input as column;
+        use sepika_design_jp::QdMethod;
+
+        for (head_bars, foot_bars, free_beam_end, expected_n) in [
+            (2, 1, false, REVERSIBLE_ONE_BAR_FOOT_QD1_N),
+            (2, 1, true, TWO_HEAD_GIRDERS_HALF_QD1_N),
+            (4, 3, false, REVERSIBLE_THREE_BAR_FOOT_QD1_N),
+        ] {
+            let mut model = input::column_with_reversible_girders(
+                column::column_model(false, 0.0),
+                head_bars,
+                foot_bars,
+            );
+            if free_beam_end {
+                model.elements.pop();
+                model.nodes.pop();
+            }
+            let app = rc_column_peak_check_app(model, QdMethod::Qd1, -100_000.0);
+            let text = rc_column_peak_check_text(&app, -100_000.0);
+            let ratio = expected_n / COLUMN_ALLOWABLE_SHEAR_N;
+            assert!(text.contains(&format!("せん断 {ratio:.2}")), "{text}");
+            assert!(text.contains(&format!("検定比 {ratio:.3} (OK)")), "{text}");
+        }
+    }
+
+    #[test]
+    fn rc_column_peak_qd1_excludes_foot_girder_yield_at_unexpanded_wall_plate() {
+        use super::rc_column_mechanism_input as input;
+        use super::rc_column_mechanism_reference::{
+            COLUMN_ALLOWABLE_SHEAR_N, TWO_HEAD_GIRDERS_HALF_QD1_N,
+        };
+        use crate::app::rc_column_boundary_tests::input as column;
+        use sepika_design_jp::QdMethod;
+
+        let mut model =
+            input::column_with_reversible_girders(column::column_model(false, 0.0), 2, 1);
+        input::add_wall_below_reversible_column(&mut model);
+        let app = rc_column_peak_check_app(model, QdMethod::Qd1, -100_000.0);
+        assert!(app
+            .core
+            .model
+            .elements
+            .iter()
+            .all(|elem| elem.kind != sepika_core::model::ElementKind::Wall));
+        let text = rc_column_peak_check_text(&app, -100_000.0);
+        let ratio = TWO_HEAD_GIRDERS_HALF_QD1_N / COLUMN_ALLOWABLE_SHEAR_N;
+        assert!(text.contains(&format!("検定比 {ratio:.3} (OK)")), "{text}");
+    }
+
+    #[test]
     fn rc_column_peak_qd1_check_counts_nonlinear_girders_and_falls_back_to_column_ends() {
         use super::rc_column_mechanism_input as input;
         use super::rc_column_mechanism_reference::{

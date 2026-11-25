@@ -1,4 +1,4 @@
-use sepika_core::dof::Dof;
+use sepika_core::dof::{Dof, Dof6Mask};
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
 use sepika_core::model::{
     ElementKind, FrameSectionUse, LoadCase, LoadCaseKind, LoadCombination, MaterialCategory, Model,
@@ -157,4 +157,111 @@ pub fn add_column_above(model: &mut Model, base: NodeId, kind: ElementKind) {
     upper.end_offsets_mm = [[0.0; 3]; 2];
     model.nodes.push(top);
     model.elements.push(upper);
+}
+
+pub fn column_with_reversible_girders(model: Model, head_bars: u32, foot_bars: u32) -> Model {
+    let mut model = column_with_yielding_head_girders(model);
+    add_column_above(&mut model, NodeId(1), ElementKind::Beam);
+
+    let mut bottom = model.nodes[0].clone();
+    bottom.id = NodeId(model.nodes.len() as u32);
+    bottom.coord[2] = -3000.0;
+    let mut lower = model.elements[COLUMN.index()].clone();
+    lower.id = ElemId(model.elements.len() as u32);
+    lower.nodes = [bottom.id, NodeId(0)].into_iter().collect();
+    model.nodes[0].restraint = Dof6Mask::FREE;
+    model.nodes.push(bottom);
+    model.elements.push(lower);
+
+    let foot_section = SectionId(2);
+    let mut foot = model.sections[GIRDER_SECTION.index()].clone();
+    foot.id = foot_section;
+    foot.name = "柱脚の梁".into();
+    model.sections.push(foot);
+    for (section, count) in [(GIRDER_SECTION, head_bars), (foot_section, foot_bars)] {
+        let Some(SectionShape::RcBeamRect { rebar, .. }) =
+            &mut model.sections[section.index()].shape
+        else {
+            unreachable!();
+        };
+        rebar.top = vec![count];
+        rebar.bottom = vec![count];
+    }
+
+    for (joint, x, section) in [
+        (NodeId(1), -4000.0, GIRDER_SECTION),
+        (NodeId(0), 4000.0, foot_section),
+        (NodeId(0), -4000.0, foot_section),
+    ] {
+        let mut far = model.nodes[joint.index()].clone();
+        far.id = NodeId(model.nodes.len() as u32);
+        far.coord[0] = x;
+        let mut girder = model.elements[GIRDER.index()].clone();
+        girder.id = ElemId(model.elements.len() as u32);
+        girder.section = Some(section);
+        girder.nodes = if x > 0.0 {
+            [joint, far.id]
+        } else {
+            [far.id, joint]
+        }
+        .into_iter()
+        .collect();
+        model.nodes.push(far);
+        model.elements.push(girder);
+    }
+    for joint in [NodeId(7), NodeId(8)] {
+        let mut base = model.nodes[joint.index()].clone();
+        base.id = NodeId(model.nodes.len() as u32);
+        base.coord[2] = -3000.0;
+        base.restraint = Dof6Mask::FIXED;
+        let mut side_column = model.elements[COLUMN.index()].clone();
+        side_column.id = ElemId(model.elements.len() as u32);
+        side_column.nodes = [base.id, joint].into_iter().collect();
+        model.nodes.push(base);
+        model.elements.push(side_column);
+    }
+    model
+}
+
+pub fn add_wall_below_reversible_column(model: &mut Model) {
+    use sepika_core::ids::{WallPlateId, WallRegionId};
+    use sepika_core::model::{WallPlate, WallPlateShape, WallRegion};
+
+    let boundary = [NodeId(5), NodeId(9), NodeId(7), NodeId(0)];
+    let mut base_girder = model.elements[GIRDER.index()].clone();
+    base_girder.id = ElemId(model.elements.len() as u32);
+    base_girder.nodes = [boundary[0], boundary[1]].into_iter().collect();
+    model.elements.push(base_girder);
+
+    let section = SectionId(model.sections.len() as u32);
+    let mut wall_section = SectionShape::RcWall {
+        thickness: 150.0,
+        ps: 0.0025,
+        pwh_ratio: Some(0.0025),
+        pwv_ratio: Some(0.0025),
+    }
+    .to_section(section, "柱脚に接する壁".into());
+    wall_section.material = model.sections[0].material;
+    wall_section.rebar_material = Some(REBAR);
+    model.sections.push(wall_section);
+    let plate = model.add_enclosed_wall_plate_from_nodes(
+        &boundary,
+        WallPlate {
+            src_wall_detailing_confirmed: false,
+            src_steel_plate: None,
+            self_weight_shares: Vec::new(),
+            id: WallPlateId(0),
+            shape: WallPlateShape::Enclosed,
+            section: Some(section),
+            opening_area: 0.0,
+            opening_weight: 0.0,
+            openings: Vec::new(),
+            loads: Vec::new(),
+            slit: Default::default(),
+            dl_support: None,
+        },
+    );
+    let mut region = WallRegion::new(WallRegionId(0), boundary.to_vec());
+    region.wall_plate_ids.push(plate);
+    model.wall_regions.push(region);
 }
