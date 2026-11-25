@@ -886,6 +886,7 @@ fn direct_rc_beam_qd1_rejects_missing_q0_without_reviving_ql_and_accepts_valid_z
         mz: 30_000_000.0,
     };
     let mut ctx = ctx_beam(crate::LoadTerm::Short);
+    ctx.rc_damage_control = false;
     ctx.length = 6000.0;
     for method in [QdMethod::Qd1, QdMethod::Min] {
         ctx.seismic_qd = Some(SeismicQd {

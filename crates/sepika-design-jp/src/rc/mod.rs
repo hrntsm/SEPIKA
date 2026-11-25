@@ -96,8 +96,8 @@ impl DesignCheck for RcDesign {
 
 impl RcDesign {
     /// 時刻歴の簡易検定で未算定理由がある位置では、独立に確定した不適合を別に返す。
-    /// 時刻歴のRC柱で地震時せん断を照査する場合は、参照欠損時も `ctx.seismic_qd` を設定する。
-    /// その他の部材で必要な重力参照内力を用意できない場合は `missing_gravity` に true を渡す。
+    /// 損傷制御では確認済みの長期・水平合算断面力を渡す。安全確保の地震時RC柱は、重力参照欠損時も `ctx.seismic_qd` を設定する。
+    /// その他の安全確保で必要な重力参照内力を用意できない場合は `missing_gravity` に true を渡す。
     pub fn check_outcomes(
         &self,
         forces: &MemberForcesAt,
@@ -106,17 +106,34 @@ impl RcDesign {
         ctx: &DesignCtx,
         missing_gravity: bool,
     ) -> impl Iterator<Item = CheckOutcome> {
-        use crate::member_design_check::{
-            combine_incomplete_reasons, concrete_member_torsion_reason, strength_outcomes,
-        };
+        self.check_time_history(forces, sec, mat, ctx, missing_gravity, None)
+    }
+
+    /// 損傷制御用の長期・水平合算応答を確認できないとき、せん断を未算定とする。
+    pub fn check_time_history(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        missing_gravity: bool,
+        damage_control_shear_issue: Option<&str>,
+    ) -> impl Iterator<Item = CheckOutcome> {
+        use crate::member_design_check::{concrete_member_torsion_reason, strength_outcomes};
+        let damage_control = ctx.term == crate::LoadTerm::Short && ctx.rc_damage_control;
         let strict_column_gravity = ctx.term == crate::LoadTerm::Short
+            && !damage_control
             && ctx.seismic_qd.is_some()
             && matches!(
                 sec.shape,
                 Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. })
             );
-        let missing_shear_reference = (missing_gravity && !strict_column_gravity)
-            .then_some("設計用せん断力に必要な重力参照内力が不足しています");
+        let missing_shear_reference = if damage_control {
+            damage_control_shear_issue
+        } else {
+            (missing_gravity && !strict_column_gravity)
+                .then_some("設計用せん断力に必要な重力参照内力が不足しています")
+        };
         let (outcome, incomplete) = self.check_with_gravity_mode(
             forces,
             sec,
@@ -177,13 +194,17 @@ impl RcDesign {
         let main_rebar_valid = material_issue.is_none();
         let shear_rebar_valid = shear_material_issue.is_none();
         let beam = matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }));
-        let shear_issue = missing_shear_reference;
+        let incomplete_damage_control =
+            matches!(column_gravity, ColumnGravityMode::TimeHistory { .. })
+                && ctx.term == crate::LoadTerm::Short
+                && ctx.rc_damage_control
+                && missing_shear_reference.is_some();
         let mut section_issue = None;
         let outcome = if let (false, true, true, Some(reason)) = (
             beam,
             main_rebar_valid,
             shear_rebar_valid,
-            missing_shear_reference,
+            missing_shear_reference.filter(|_| !incomplete_damage_control),
         ) {
             CheckOutcome::Skipped {
                 reason: reason.into(),
@@ -196,15 +217,15 @@ impl RcDesign {
                 ctx,
                 main_rebar_valid,
                 shear_rebar_valid,
-                shear_issue,
+                missing_shear_reference,
                 column_gravity,
                 &mut section_issue,
             )
         };
         let incomplete =
             combine_incomplete_reasons(material_issue, shear_material_issue.as_deref());
-        let incomplete = if beam || incomplete.is_some() {
-            combine_incomplete_reasons(incomplete, shear_issue)
+        let incomplete = if beam || incomplete.is_some() || incomplete_damage_control {
+            combine_incomplete_reasons(incomplete, missing_shear_reference)
         } else {
             incomplete
         };
@@ -298,17 +319,6 @@ impl RcDesign {
                 Ok(input) => input,
                 Err(reason) => return CheckOutcome::Skipped { reason },
             };
-        if let (false, true, true, Some(reason)) = (
-            matches!(shape, SectionShape::RcBeamRect { .. }),
-            main_rebar_valid,
-            shear_rebar_valid,
-            shear_issue,
-        ) {
-            return CheckOutcome::Skipped {
-                reason: reason.into(),
-            };
-        }
-
         match shape {
             SectionShape::RcBeamRect { rebar, .. } => beam::beam_check(
                 forces,

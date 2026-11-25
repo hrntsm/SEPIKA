@@ -167,7 +167,20 @@ impl App {
             .elements
             .iter()
             .any(|e| sepika_core::src_wall_capacity::is_src_wall_candidate(design_model, e));
-        let needs_gravity = is_seismic_combo || needs_src_wall_gravity;
+        let damage_control = self.core.analysis_cfg.rc_damage_control;
+        let needs_other_seismic_gravity = design_model.elements.iter().any(|e| {
+            let sec = e
+                .section
+                .and_then(|id| design_model.sections.get(id.index()));
+            let material = design_model.element_material(e);
+            matches!(
+                sepika_core::structure_kind::structure_kind_of(sec, material.map(|m| m.category)),
+                sepika_core::structure_kind::StructureKind::Src
+                    | sepika_core::structure_kind::StructureKind::Cft
+            )
+        });
+        let needs_gravity = is_seismic_combo && (!damage_control || needs_other_seismic_gravity)
+            || needs_src_wall_gravity;
         let selected_combo_name = match self.core.scoped.last_static {
             Some(StaticKey::Combo(index)) => {
                 results.combos.get(index).map(|(name, _)| name.as_str())
@@ -200,6 +213,7 @@ impl App {
             .map_or_else(Vec::new, |terms| {
                 sepika_job::design_gravity_terms(&self.core.model, terms)
             });
+        let mut gravity_error = None;
         let gravity_long_owned = if needs_gravity {
             match sepika_job::complete_design_gravity_forces(&gravity_terms, |lc| {
                 sepika_job::compute::compute_linear_static(self.core.model.clone(), lc)
@@ -209,7 +223,7 @@ impl App {
                 Ok(forces) => Some(forces),
                 Err(reason) => {
                     let name = selected_combo_name.unwrap_or_default();
-                    load_error = Some(format!("荷重組合せ「{name}」: {reason}"));
+                    gravity_error = Some(format!("荷重組合せ「{name}」: {reason}"));
                     None
                 }
             }
@@ -219,7 +233,8 @@ impl App {
         let long_member_forces = gravity_long_owned.as_deref().filter(|_| is_seismic_combo);
         let group_overrides =
             sepika_design_jp::girder_group_overrides(&self.core.model, &results.member_forces);
-        let q0_by_elem = if long_member_forces.is_some()
+        let q0_by_elem = if !damage_control
+            && long_member_forces.is_some()
             && self.core.analysis_cfg.qd_method != sepika_design_jp::QdMethod::Qd2
         {
             match sepika_job::simple_beam_q0_by_terms(&self.core.model, &gravity_terms) {
@@ -253,6 +268,16 @@ impl App {
             }
             None => None,
         };
+        let matches_saved_member_forces = selected_response.is_some_and(|response| {
+            same_saved_member_forces(&response.member_forces, &results.member_forces)
+        });
+        if damage_control
+            && is_seismic_combo
+            && load_error.is_none()
+            && !matches_saved_member_forces
+        {
+            load_error = Some("検定断面力と選択した地震組合せの保存応答が一致しません。組合せを選択し直してください".into());
+        }
         use sepika_design_jp::RcColumnLongTermShearInput;
         let rc_column_long_term_shear = if state
             .as_ref()
@@ -269,15 +294,12 @@ impl App {
         } else {
             RcColumnLongTermShearInput::Unverified
         };
-        let steel_beam_span_load_terms = if load_error.is_none()
-            && selected_response.is_some_and(|response| {
-                same_saved_member_forces(&response.member_forces, &results.member_forces)
-            }) {
+        let steel_beam_span_load_terms = if load_error.is_none() && matches_saved_member_forces {
             load_terms.as_deref()
         } else {
             None
         };
-        let route21 = if load_error.is_none() {
+        let route21 = if load_error.is_none() && gravity_error.is_none() {
             match self.selected_route21_inputs() {
                 Ok(inputs) => inputs,
                 Err(reason) => {
@@ -337,6 +359,34 @@ impl App {
         };
         if let Some(reason) = &load_error {
             report.skip_for_load_state(reason);
+        } else if let Some(reason) = &gravity_error {
+            if damage_control && self.core.design_term == sepika_design_jp::LoadTerm::Short {
+                use sepika_core::section_shape::SectionShape;
+                use sepika_core::structure_kind::{structure_kind_of, StructureKind};
+                let rc_members: std::collections::HashSet<_> = design_model
+                    .elements
+                    .iter()
+                    .filter(|elem| {
+                        let sec = elem
+                            .section
+                            .and_then(|id| design_model.sections.get(id.index()));
+                        let category = design_model.element_material(elem).map(|m| m.category);
+                        structure_kind_of(sec, category) == StructureKind::Rc
+                            && matches!(
+                                sec.and_then(|s| s.shape.as_ref()),
+                                Some(
+                                    SectionShape::RcBeamRect { .. }
+                                        | SectionShape::RcColumnRect { .. }
+                                        | SectionShape::RcColumnCircle { .. }
+                                )
+                            )
+                    })
+                    .map(|elem| elem.id)
+                    .collect();
+                report.skip_except_members(reason, |elem| rc_members.contains(&elem));
+            } else {
+                report.skip_for_load_state(reason);
+            }
         }
         let joint_checks = report
             .joint_checks

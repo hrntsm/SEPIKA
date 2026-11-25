@@ -1361,6 +1361,7 @@ fn design_check_covers_every_member() {
         "QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません";
 
     let mut app = analyzed();
+    app.core.analysis_cfg.rc_damage_control = false;
     assert_eq!(app.core.analysis_cfg.qd_method, QdMethod::Min);
     app.run_design_check();
     assert_no_error(&app, "断面検定");

@@ -453,3 +453,45 @@ fn a_slab_assigned_to_part_of_the_beam_blocks_qd1_and_rectangular_ultimate_shear
     );
     assert!(result.unchecked_reason.unwrap().contains("スラブ付きRC梁"));
 }
+
+#[test]
+fn damage_control_beam_uses_signed_combined_shear_without_qd_selection() {
+    let model = model();
+    for (gravity_n, combined_n, expected_n) in [
+        (50_000.0, 200_000.0, 200_000.0),
+        (-50_000.0, 100_000.0, 100_000.0),
+        (50_000.0, -100_000.0, 100_000.0),
+    ] {
+        let response = [(
+            ElemId(0),
+            MemberForces {
+                at: vec![(0.5, [0.0, combined_n, 0.0, 0.0, 0.0, 30e6])],
+            },
+        )];
+        let gravity = [(
+            ElemId(0),
+            MemberForces {
+                at: vec![(0.5, [0.0, gravity_n, 0.0, 0.0, 0.0, 0.0])],
+            },
+        )];
+        for method in [QdMethod::Qd1, QdMethod::Qd2, QdMethod::Min] {
+            for long_member_forces in [Some(gravity.as_slice()), Some(&[][..]), None] {
+                let report = run_member_design_checks(
+                    &model,
+                    &response,
+                    &[],
+                    &MemberDesignCheckOptions {
+                        term: LoadTerm::Short,
+                        rc_damage_control: true,
+                        qd_method: method,
+                        long_member_forces,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                assert_eq!(report.member_checks.len(), 1);
+                assert_shear_n(&report.member_checks[0].2, expected_n);
+            }
+        }
+    }
+}

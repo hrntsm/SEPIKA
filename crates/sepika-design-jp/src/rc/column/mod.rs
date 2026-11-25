@@ -25,6 +25,7 @@ const MAX_SHEAR_ALPHA: f64 = 1.5;
 pub(super) fn qd1_mechanism(ctx: &DesignCtx) -> Option<&ColumnMechanism> {
     (ctx.kind == MemberKind::Column
         && ctx.term == LoadTerm::Short
+        && !ctx.rc_damage_control
         && ctx
             .seismic_qd
             .as_ref()
@@ -55,7 +56,7 @@ fn gravity_shear_reference_issue(
     pos: f64,
     q_index: usize,
 ) -> Option<&'static str> {
-    let qd = ctx.seismic_qd.as_ref()?;
+    let qd = ctx.seismic_qd.as_ref().filter(|_| !ctx.rc_damage_control)?;
     if pos.is_finite()
         && qd
             .long_at
@@ -599,6 +600,8 @@ pub(super) fn column_check(
         let (q_design_y, q_design_z) =
             if saved_long_term || !shear_reference_valid(confirmed_shear_only, incomplete) {
                 (None, None)
+            } else if short_damage_control {
+                (Some(forces.qy.abs()), Some(forces.qz.abs()))
             } else if !main_rebar_valid {
                 (
                     demand_without_main_rebar(forces.qy, 1),
@@ -759,6 +762,8 @@ pub(super) fn column_check(
         let (q_design_y, q_design_z) =
             if saved_long_term || !shear_reference_valid(confirmed_shear_only, incomplete) {
                 (None, None)
+            } else if short_damage_control {
+                (Some(forces.qy.abs()), Some(forces.qz.abs()))
             } else if !main_rebar_valid {
                 (
                     demand_without_main_rebar(forces.qy, 1),
@@ -1146,6 +1151,7 @@ mod tests {
             mz: 60.0e6,
         };
         let mut ctx_outer_none = ctx_column(LoadTerm::Short);
+        ctx_outer_none.rc_damage_control = false;
         ctx_outer_none.seismic_qd = Some(SeismicQd {
             long_at: vec![(0.0, [forces.n, 40_000.0, 20_000.0, 0.0, 0.0, 0.0])],
             n_factor: 1.5,
@@ -1156,6 +1162,7 @@ mod tests {
         });
         ctx_outer_none.column_sum_my = None;
         let mut ctx_dirs_missing = ctx_column(LoadTerm::Short);
+        ctx_dirs_missing.rc_damage_control = false;
         ctx_dirs_missing.seismic_qd = Some(SeismicQd {
             long_at: vec![(0.0, [forces.n, 40_000.0, 20_000.0, 0.0, 0.0, 0.0])],
             n_factor: 1.5,

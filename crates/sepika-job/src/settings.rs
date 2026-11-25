@@ -77,7 +77,7 @@ pub struct AnalysisSettings {
     pub snow_delta1: f64,
     /// 同 δ3（既定 0.35）。
     pub snow_delta3: f64,
-    /// RC 短期許容せん断力の「損傷制御のための検討」（false=安全確保のための検討）。
+    /// RC短期せん断の検討目的。trueは損傷制御、falseは安全確保。
     pub rc_damage_control: bool,
     /// 地震時短期の設計用せん断力 QD の決定方法（QD1/QD2/min）。
     pub qd_method: sepika_design_jp::QdMethod,

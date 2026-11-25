@@ -635,7 +635,7 @@ fn common_member_check_retains_only_independent_failures_when_beam_bending_is_un
             QdMethod::Qd2,
             None,
             None,
-            Some((1.643_190_723, 0.951_062_597)),
+            Some((1.095_460_482, 0.951_062_597)),
             None,
         ),
         (
@@ -643,7 +643,7 @@ fn common_member_check_retains_only_independent_failures_when_beam_bending_is_un
             QdMethod::Qd2,
             Some(gravity.as_slice()),
             None,
-            Some((3.012_516_326, 1.743_614_760)),
+            Some((2.008_344_217, 1.743_614_760)),
             None,
         ),
         (
@@ -705,7 +705,7 @@ fn common_member_check_retains_only_independent_failures_when_beam_bending_is_un
                 long_member_forces: long,
                 q_simple_by_elem: q0,
                 bond_method: BondMethod::Rc1991,
-                rc_damage_control: true,
+                rc_damage_control: false,
                 ..Default::default()
             },
         )
@@ -766,6 +766,7 @@ fn simplified_beam_check_keeps_1999_bond_failure_with_bending_and_reference_issu
         rebar_material: Some(rebar.clone()),
         shear_rebar_material: Some(rebar.clone()),
         bond_method: BondMethod::Rc1999,
+        rc_damage_control: false,
         seismic_qd: Some(SeismicQd {
             method: QdMethod::Min,
             long_at: vec![(0.5, [0.0; 6])],
@@ -1119,6 +1120,7 @@ fn simplified_zero_bending_beam_reports_unavailable_shear_instead_of_a_pass() {
     assert!(matches!(RcDesign.check(&zero, &section, concrete, &ctx),
         CheckOutcome::Checked(result) if result.ok()));
     ctx.term = LoadTerm::Short;
+    ctx.rc_damage_control = false;
     ctx.seismic_qd = Some(SeismicQd {
         method: QdMethod::Qd2,
         long_at: vec![(0.0, [0.0, -20_000.0, 0.0, 0.0, 0.0, 0.0])],
