@@ -1585,9 +1585,15 @@ mod tests {
         let text = peak_recording_text(&app, &app.core.model.elements[i], i, &recording, true);
         let (_, middle) = text.split_once("ξ=0.50:").expect("中間断面");
         let (middle, _) = middle.split_once("ξ=1.00:").expect("終端断面");
+        for label in ["せん断 ", "軸 "] {
+            let ratio = middle
+                .lines()
+                .find_map(|line| line.strip_prefix(label))
+                .and_then(|ratio| ratio.parse::<f64>().ok())
+                .unwrap_or_else(|| panic!("{label}の不適合が中間断面にない: {middle}"));
+            assert!(ratio > 1.0, "{middle}");
+        }
         for expected in [
-            "せん断 1.01",
-            "軸 ",
             "許容曲げが非正",
             "Qy方向の柱頭",
             "梁端降伏曲げを確認できない",
