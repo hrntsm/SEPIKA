@@ -117,6 +117,122 @@ pub(super) fn asymmetric_built_h_combination_reasons(
     .flatten()
 }
 
+pub(super) fn check_symmetric_h_tension_plate_slenderness(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    mat: &Material,
+) -> Result<(), String> {
+    let (height_mm, flange_width_mm, flange_thick_mm, web_thick_mm, root_r_mm) = match sec.shape {
+        Some(
+            ref shape @ SectionShape::SteelH {
+                height,
+                width,
+                flange_thick,
+                web_thick,
+                root_r,
+            },
+        ) => {
+            shape.validate_surface_radius()?;
+            (
+                height,
+                width,
+                flange_thick,
+                web_thick,
+                root_r.unwrap_or(0.0),
+            )
+        }
+        Some(SectionShape::SteelBuiltH {
+            height,
+            upper_width,
+            upper_thick,
+            web_thick,
+            ..
+        }) => (height, upper_width, upper_thick, web_thick, 0.0),
+        _ => unreachable!("上下対称H形鋼だけを検定する"),
+    };
+    let web_clear_mm = height_mm - 2.0 * flange_thick_mm;
+    if sec.depth != height_mm
+        || flange_width_mm < web_thick_mm
+        || [
+            sec.property_basis.area,
+            sec.property_basis.iy,
+            sec.property_basis.depth,
+        ]
+        .contains(&PropertyBasis::PendingShape)
+        || [
+            web_clear_mm,
+            flange_width_mm,
+            flange_thick_mm,
+            web_thick_mm,
+            sec.area,
+            sec.iy,
+        ]
+        .iter()
+        .any(|&v| !v.is_finite() || v <= 0.0)
+    {
+        return Err("局部座屈の幅厚比照査に必要なH形断面の寸法・全断面性能を確定できません".into());
+    }
+
+    let web_flat_mm = web_clear_mm - 2.0 * root_r_mm;
+    let tension_mpa = forces.n / sec.area;
+    let gradient_mpa_per_mm = forces.mz.abs() / sec.iy;
+    let flange_bending_mpa = gradient_mpa_per_mm * (height_mm / 2.0);
+    let web_bending_mpa = gradient_mpa_per_mm * (web_flat_mm / 2.0);
+    if [tension_mpa, flange_bending_mpa, web_bending_mpa]
+        .iter()
+        .any(|v| !v.is_finite())
+    {
+        return Err("局部座屈の幅厚比照査に必要な合成応力度を有限値で算定できません".into());
+    }
+
+    let flange = if forces.mz > 0.0 {
+        "上フランジ b/t"
+    } else {
+        "下フランジ b/t"
+    };
+    let mut reasons = Vec::new();
+    for (label, width_mm, thick_mm, coefficient, compressed) in [
+        (
+            flange,
+            flange_width_mm / 2.0,
+            flange_thick_mm,
+            0.53,
+            flange_bending_mpa > tension_mpa,
+        ),
+        (
+            "ウェブ d/t",
+            web_flat_mm,
+            web_thick_mm,
+            1.6,
+            web_bending_mpa > tension_mpa,
+        ),
+    ] {
+        if !compressed {
+            continue;
+        }
+        let f_mpa = resolve_steel_f(Some(mat), Some(thick_mm))
+            .map_err(|reason| format!("{label} の幅厚比の限界値を算定できません。{reason}"))?;
+        let limit = coefficient * (mat.young / f_mpa).sqrt();
+        let ratio = width_mm / thick_mm;
+        if !ratio.is_finite() || !limit.is_finite() || limit <= 0.0 {
+            return Err(format!(
+                "{label} の幅厚比または限界値を有限値で算定できません"
+            ));
+        }
+        if ratio > limit {
+            reasons.push(format!("{label}={ratio:.4}（上限 {limit:.4}）"));
+        }
+    }
+    if reasons.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "局部座屈の影響を省ける幅厚比の条件を満たさないため、軸曲げ検定は未算定です。{}",
+            reasons.join("、"),
+        ))
+    }
+}
+
 fn validate_built_h_plate_slenderness(
     shape: &SectionShape,
     mat: &Material,
