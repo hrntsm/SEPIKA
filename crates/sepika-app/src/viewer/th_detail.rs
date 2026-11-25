@@ -1730,16 +1730,23 @@ mod tests {
     }
 
     #[test]
-    fn usd685_main_bar_reason_does_not_hide_independent_time_history_shear_ng() {
+    fn usd_main_bar_reason_does_not_hide_independent_time_history_shear_ng() {
         use crate::app::rc_column_boundary_tests::input;
         use sepika_core::ids::MaterialId;
 
-        for grade in ["USD685", "USD685A", "USD685B"] {
+        for (grade, family, fy) in [
+            ("USD590", "USD590", 590.0),
+            ("USD590A", "USD590", 590.0),
+            ("USD590B", "USD590", 590.0),
+            ("USD685", "USD685", 685.0),
+            ("USD685A", "USD685", 685.0),
+            ("USD685B", "USD685", 685.0),
+        ] {
             let mut model = input::column_model(false, 0.0);
             let mut main = model.materials[1].clone();
             main.id = MaterialId(2);
             main.name = grade.into();
-            main.fy = Some(685.0);
+            main.fy = Some(fy);
             model.sections[0].rebar_material = Some(main.id);
             model.materials.push(main);
 
@@ -1749,7 +1756,7 @@ mod tests {
             assert!(
                 text.lines().any(|row| row.starts_with("検定不能:")
                     && row.contains("許容軸力境界のRC柱")
-                    && row.contains("USD685系主筋の認定に基づく許容応力度")),
+                    && row.contains(&format!("{family}系主筋の認定に基づく許容応力度"))),
                 "{grade}: {text}"
             );
             assert!(
