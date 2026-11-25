@@ -329,6 +329,7 @@ impl App {
                     long_member_forces,
                     q_simple_by_elem: Some(&q0_by_elem),
                     girder_group_overrides: Some(&group_overrides),
+                    rc_column_ductility_applicability: None,
                 },
             )
         } else {
@@ -365,6 +366,7 @@ impl App {
 
         if let Some(bundle) = self.core.scoped.results.as_mut() {
             bundle.member_checks = member_checks;
+            bundle.rc_column_ductility_advisories = report.rc_column_ductility_advisories;
             bundle.joint_checks = joint_checks;
             bundle.wall_checks = report.wall_checks;
             bundle.beam_checks = beam_checks;

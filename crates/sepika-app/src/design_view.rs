@@ -1,8 +1,119 @@
 use crate::app::App;
 mod src_holding;
+
 use sepika_core::units::to_display::{
     area_load_kn_per_m2, force_kn, moment_kn_m, moment_kn_m_per_m,
 };
+use sepika_design_jp::{
+    RcColumnDuctilityAdvisory, RcColumnDuctilityApplicability, RcColumnDuctilityComparison,
+};
+
+pub(crate) fn rc_column_ductility_summary(advisory: &RcColumnDuctilityAdvisory) -> String {
+    use RcColumnDuctilityApplicability::*;
+    use RcColumnDuctilityComparison::*;
+
+    let mut text = match advisory.applicability {
+        Undetermined => "適用判別不能・設計者の確認が必要。標準値との参考比較。".to_owned(),
+        Applicable => "対象。標準推奨値との比較。".to_owned(),
+        NotApplicable => return "非対象（設計者の明示指定）。".into(),
+        ExperimentalException => return "実験根拠による例外。個別上限と適否は別途確認。".into(),
+    };
+    let observations = advisory
+        .positions
+        .iter()
+        .filter_map(|&(xi, result)| match result {
+            Compared {
+                compression_n_per_mm2,
+                standard_n_per_mm2,
+                exceeds_standard,
+            } => Some((
+                xi,
+                compression_n_per_mm2,
+                standard_n_per_mm2,
+                exceeds_standard,
+            )),
+            _ => None,
+        });
+    if let Some((xi, stress, limit, exceeds)) = observations.max_by(|a, b| a.1.total_cmp(&b.1)) {
+        let comparison = if exceeds {
+            "標準値超過"
+        } else {
+            "標準値以下"
+        };
+        text.push_str(&format!(
+            " 確認できた検定位置の最大 {stress:.3} N/mm²（位置 {xi:.6}）／Fc/3 = {limit:.3} N/mm²。表示丸め前の比較は{comparison}。"
+        ));
+    } else if advisory.positions.iter().any(|(_, r)| *r == NoCompression) {
+        text.push_str(" 確認できた軸力はゼロまたは引張。");
+    }
+    let unavailable = advisory
+        .positions
+        .iter()
+        .filter(|(_, r)| *r == Unavailable)
+        .count();
+    if unavailable > 0 {
+        text.push_str(&format!(" 比較できない位置 {unavailable} 箇所。"));
+    }
+    text
+}
+
+fn rc_column_ductility_section(ui: &mut egui::Ui, app: &mut App) {
+    let Some(bundle) = app.current_design_results() else {
+        return;
+    };
+    let advisories = &bundle.rc_column_ductility_advisories;
+    if advisories.is_empty() {
+        return;
+    }
+    let exceeds = advisories
+        .iter()
+        .filter(|advisory| {
+            advisory.positions.iter().any(|(_, result)| {
+                matches!(
+                    result,
+                    RcColumnDuctilityComparison::Compared {
+                        exceeds_standard: true,
+                        ..
+                    }
+                )
+            })
+        })
+        .count();
+    let unavailable = advisories
+        .iter()
+        .filter(|row| {
+            row.positions
+                .iter()
+                .any(|(_, result)| *result == RcColumnDuctilityComparison::Unavailable)
+        })
+        .count();
+    let mut focus = None;
+    ui.collapsing(
+        format!(
+            "RC柱の短期圧縮靱性推奨（{} 本、標準値の数値超過 {exceeds} 本、比較できない位置あり {unavailable} 本）",
+            advisories.len(),
+        ),
+        |ui| {
+            ui.label("適用は設計者が確認してください。比較には有効な短期荷重組合せが必要です。許容応力度の検定比・合否には含みません。");
+            egui::ScrollArea::vertical()
+                .id_salt("rc_column_ductility")
+                .max_height(200.0)
+                .show(ui, |ui| {
+                    for advisory in advisories {
+                        ui.horizontal(|ui| {
+                            if ui.button(format!("#{}", advisory.elem.0)).clicked() {
+                                focus = Some(advisory.elem);
+                            }
+                            ui.add(egui::Label::new(rc_column_ductility_summary(advisory)).wrap());
+                        });
+                    }
+                });
+        },
+    );
+    if let Some(elem) = focus {
+        app.select_member(elem);
+    }
+}
 
 fn story_metrics_section(ui: &mut egui::Ui, app: &mut App) {
     let mut cfg = app.core.analysis_cfg;
@@ -329,6 +440,8 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             checked_count, skipped_count, ng_count
         ));
     }
+
+    rc_column_ductility_section(ui, app);
 
     let n = checks.len();
     let mut focus: Option<sepika_core::ids::ElemId> = None;

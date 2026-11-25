@@ -216,6 +216,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0150](0150-rc-beam-directional-bond-stress.md) | accepted | 非降伏RC梁の大地震時付着照査は確認済みの方向別応力度から行う |
 | [0151](0151-rc-column-qd1-mechanism-comparison.md) | accepted | 一般階のRC柱のQD1は適用条件を満たす片側梁降伏を係数適用後に比較する |
 | [0152](0152-rc-beam-directional-hinge-shear-demand.md) | accepted | RC梁の方向別両端降伏による要求せん断力は独立した直接入力で求める |
+| [0153](0153-rc-column-ductility-advisory.md) | accepted | RC柱の短期圧縮靱性推奨は設計者の適用判断と独立した付記で扱う |
 
 ## 規約
 

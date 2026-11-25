@@ -22,8 +22,12 @@ use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::frame::beam::MemberForces;
 use sepika_solver::statics::linear::{GirderColumnFaceEnds, SteelPanelColumnFaceForce};
 
+mod rc_column_ductility;
 pub(crate) mod rc_column_long_term_shear;
 mod steel_beam_span;
+pub use rc_column_ductility::{
+    RcColumnDuctilityAdvisory, RcColumnDuctilityApplicability, RcColumnDuctilityComparison,
+};
 use rc_column_long_term_shear::{missing_design_positions, ColumnShearLoads};
 
 use crate::design_position::{design_positions, is_near_design_position};
@@ -75,6 +79,9 @@ pub struct MemberDesignCheckOptions<'a> {
     pub steel_beam_span_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
     /// 通常の長期RC柱検定に渡す線形静的解析結果の由来。
     pub rc_column_long_term_shear: RcColumnLongTermShearInput<'a>,
+    /// 設計者が判断したRC柱ごとの短期圧縮靱性推奨の適用。未指定の柱は判別不能とする。
+    pub rc_column_ductility_applicability:
+        Option<&'a HashMap<ElemId, RcColumnDuctilityApplicability>>,
     /// RC 短期許容せん断力で損傷制御式（2/3·α）を使うか。
     pub rc_damage_control: bool,
     /// RC 梁付着検定の方式（既定は 1999）。
@@ -107,6 +114,8 @@ pub struct MemberDesignCheckReport {
     /// 部材断面検定（危険断面位置を含む）。
     /// RC・SRC・CFTでねじりモーメントが非零または非有限の位置には未算定行を返す。
     pub member_checks: Vec<(ElemId, f64, CheckOutcome)>,
+    /// RC柱の短期圧縮靱性推奨の付記。長期は空で、許容応力度の検定比・合否に含めない。
+    pub rc_column_ductility_advisories: Vec<RcColumnDuctilityAdvisory>,
     /// 必要横補剛箇所数の参考結果。検定比・合否には含めない。
     pub lateral_bracing_references: Vec<(
         ElemId,
@@ -126,6 +135,11 @@ impl MemberDesignCheckReport {
         let skipped = || CheckOutcome::Skipped {
             reason: reason.into(),
         };
+        for advisory in &mut self.rc_column_ductility_advisories {
+            for (_, comparison) in &mut advisory.positions {
+                *comparison = RcColumnDuctilityComparison::Unavailable;
+            }
+        }
         for (_, detail) in &mut self.steel_deflection_references {
             *detail = format!("たわみ参考 未算定（{reason}）");
         }
@@ -166,6 +180,20 @@ pub(crate) fn is_steel_input_target(
     shape.is_some_and(|s| shape_default_kind(s) == StructureKind::S)
         || mat.is_some_and(|m| m.category == MaterialCategory::Steel)
         || shape.is_none() && mat.is_none()
+}
+
+fn is_rc_column_target(model: &Model, elem: &ElementData) -> bool {
+    elem.kind.is_primary_frame_support()
+        && model.element_section(elem).is_some_and(|sec| {
+            sec.frame_use == Some(sepika_core::model::FrameSectionUse::Column)
+                && matches!(
+                    sec.shape,
+                    Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. })
+                )
+                && model.element_material(elem).is_some_and(|material| {
+                    structure_kind_of(Some(sec), Some(material.category)) == StructureKind::Rc
+                })
+        })
 }
 
 fn frame_check_target(elem: &ElementData) -> bool {
@@ -320,7 +348,7 @@ pub fn run_member_design_checks(
         && model
             .elements
             .iter()
-            .any(|elem| rc_column_long_term_shear::is_target(model, elem)))
+            .any(|elem| is_rc_column_target(model, elem)))
     .then(|| ColumnShearLoads::from_input(model, options.rc_column_long_term_shear));
     let requires_column_envelope = column_shear_loads
         .as_ref()
@@ -334,7 +362,7 @@ pub fn run_member_design_checks(
             requires_column_envelope
                 && elem_by_id
                     .get(id)
-                    .is_some_and(|elem| rc_column_long_term_shear::is_target(model, elem))
+                    .is_some_and(|elem| is_rc_column_target(model, elem))
                 && !seen_column_ids.insert(*id)
         })
         .collect();
@@ -425,7 +453,7 @@ pub fn run_member_design_checks(
         let structure = structure_kind_of(Some(sec), Some(mat.category));
         let long_term_shear = column_shear_loads
             .as_ref()
-            .filter(|_| rc_column_long_term_shear::is_target(model, elem))
+            .filter(|_| is_rc_column_target(model, elem))
             .and_then(|loads| {
                 checked_column_ids.insert(*elem_id);
                 loads.envelope(model, elem, mf)
@@ -1126,9 +1154,7 @@ pub fn run_member_design_checks(
 
     if requires_column_envelope {
         for elem in &model.elements {
-            if !checked_column_ids.contains(&elem.id)
-                && rc_column_long_term_shear::is_target(model, elem)
-            {
+            if !checked_column_ids.contains(&elem.id) && is_rc_column_target(model, elem) {
                 for pos in design_positions(elem, model, model.member_length(elem)) {
                     member_checks.push((
                         elem.id,
@@ -1180,8 +1206,18 @@ pub fn run_member_design_checks(
             src_holding_reviewed: options.src_holding_reviewed,
         },
     );
+    let rc_column_ductility_advisories = if options.term == LoadTerm::Short {
+        rc_column_ductility::collect(
+            model,
+            member_forces,
+            options.rc_column_ductility_applicability,
+        )
+    } else {
+        Vec::new()
+    };
     Ok(MemberDesignCheckReport {
         member_checks,
+        rc_column_ductility_advisories,
         lateral_bracing_references,
         steel_deflection_references,
         joint_checks,

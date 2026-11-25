@@ -734,19 +734,22 @@ pub(super) fn draw_check_ratio_with_view(
 }
 
 /// B-3: 部材 `elem_id` の検定詳細（位置×式）をポインタ位置にツールチップ表示する。
-/// `app.core.scoped.results.member_checks` に当該部材の検定がなければ何も描かない。
 pub(super) fn show_check_tooltip(ui: &egui::Ui, app: &App, elem_id: ElemId) {
     let Some(results) = app.current_design_results() else {
         return;
     };
     let positions = elem_check_positions(&results.member_checks, elem_id);
-    if positions.is_empty() {
+    let advisory = results
+        .rc_column_ductility_advisories
+        .iter()
+        .find(|row| row.elem == elem_id);
+    if positions.is_empty() && advisory.is_none() {
         return;
     }
-    let basis = match &positions[0].outcome {
-        CheckOutcome::Checked(cr) => cr.basis.clone(),
-        CheckOutcome::Skipped { reason } => reason.clone(),
-    };
+    let basis = positions.first().map(|row| match &row.outcome {
+        CheckOutcome::Checked(cr) => cr.basis.as_str(),
+        CheckOutcome::Skipped { reason } => reason.as_str(),
+    });
     let (kinds, rows) = build_tooltip_rows(positions);
 
     #[allow(deprecated)]
@@ -755,7 +758,21 @@ pub(super) fn show_check_tooltip(ui: &egui::Ui, app: &App, elem_id: ElemId) {
         ui.layer_id(),
         egui::Id::new("check_ratio_tooltip"),
         |ui| {
-            ui.label(format!("部材 #{} ({basis})", elem_id.0));
+            if let Some(basis) = basis {
+                ui.label(format!("部材 #{} ({basis})", elem_id.0));
+            } else {
+                ui.label(format!("部材 #{}", elem_id.0));
+            }
+            if let Some(advisory) = advisory {
+                ui.label("RC柱の短期圧縮靱性推奨（許容応力度検定とは別）");
+                ui.add(
+                    egui::Label::new(crate::design_view::rc_column_ductility_summary(advisory))
+                        .wrap(),
+                );
+            }
+            if positions.is_empty() {
+                return;
+            }
             egui::Grid::new("check_ratio_tooltip_grid")
                 .striped(true)
                 .show(ui, |ui| {
