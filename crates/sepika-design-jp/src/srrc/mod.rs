@@ -15,7 +15,7 @@ pub mod joint_hoops;
 pub mod panel_zone;
 
 pub(crate) use crate::ratio_or_large;
-pub(crate) use crate::rc::{AxisProps as SrcAxisProps, shear_alpha};
+pub(crate) use crate::rc::{shear_alpha, AxisProps as SrcAxisProps};
 pub use column::{
     SrcColumnHeadLimit, SrcColumnRoute21RcShear, SrcColumnRoute21Shear, SrcColumnRoute21ShearAxis,
     SrcColumnSeismicBending, SrcColumnSeismicBendingAxis, SrcColumnSeismicBendingEnd,

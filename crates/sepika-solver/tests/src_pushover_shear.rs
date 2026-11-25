@@ -12,10 +12,10 @@ use sepika_math::solver::SolveError;
 use sepika_solver::common::constraint::Reducer;
 use sepika_solver::dynamic::damping::{Damping, DampingAccumulation};
 use sepika_solver::dynamic::timehistory::{
-    GroundMotion, NewmarkCfg, NonlinearThCfg, ResponseResult, nonlinear_time_history_analysis,
+    nonlinear_time_history_analysis, GroundMotion, NewmarkCfg, NonlinearThCfg, ResponseResult,
 };
 use sepika_solver::nonlinear::pushover::{
-    PushoverControl, PushoverResult, PushoverTarget, pushover_analysis_recording,
+    pushover_analysis_recording, PushoverControl, PushoverResult, PushoverTarget,
 };
 use sepika_solver::statics::analysis::SeismicDir;
 
@@ -657,13 +657,12 @@ fn rigid_diaphragm_src_girder_keeps_auto_spring_but_explicit_fiber_requires_manu
 
     let mut model = restrained_member(FrameSectionUse::Girder, 10.0, 13.0);
     model.elements[0].kind = ElementKind::Beam;
-    model.constraints.push(Constraint::rigid_diaphragm(
-        StoryId(1),
-        NodeId(1),
-        vec![],
-    ));
-    let Some(SectionShape::SrcBeamRect { steel_manufacture, .. }) =
-        model.sections[0].shape.as_mut()
+    model
+        .constraints
+        .push(Constraint::rigid_diaphragm(StoryId(1), NodeId(1), vec![]));
+    let Some(SectionShape::SrcBeamRect {
+        steel_manufacture, ..
+    }) = model.sections[0].shape.as_mut()
     else {
         unreachable!();
     };
@@ -675,7 +674,10 @@ fn rigid_diaphragm_src_girder_keeps_auto_spring_but_explicit_fiber_requires_manu
 
     model.elements[0].force_regime = ForceRegime::AxialBendingInteract;
     let error = run(&mut model, SeismicDir::Y, 1_000.0).unwrap_err();
-    assert!(error.contains("部材 ID 0") && error.contains("製造区分が不明"), "{error}");
+    assert!(
+        error.contains("部材 ID 0") && error.contains("製造区分が不明"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -750,7 +752,7 @@ fn src_fiber_response_uses_each_plate_strength_for_axial_and_bending() {
     use sepika_core::model::AnalysisKind;
     use sepika_element::behavior::{Ctx, LocalVec};
     use sepika_element::factory::{
-        StrengthBasis, build_nonlinear_behavior, ensure_nonlinear_input_with_basis,
+        build_nonlinear_behavior, ensure_nonlinear_input_with_basis, StrengthBasis,
     };
 
     for (basis, kind, factor) in [

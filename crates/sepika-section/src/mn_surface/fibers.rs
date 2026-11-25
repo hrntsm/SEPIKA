@@ -1,7 +1,7 @@
 //! 断面形状から全塑性計算用のファイバ/バネ配置を生成する。
 
 use sepika_core::error::RebarGeometryError;
-use sepika_core::section_shape::{RebarPoint, RebarSize, SectionShape, concrete_young_modulus};
+use sepika_core::section_shape::{concrete_young_modulus, RebarPoint, RebarSize, SectionShape};
 
 use super::types::{FiberRegion, PlasticFiber, StrengthParams, YieldModelKind};
 

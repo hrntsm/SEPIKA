@@ -1132,7 +1132,11 @@ mod tests {
                     )
                     .is_none());
                     let reason = crate::factory::ensure_nonlinear_input(&model).unwrap_err();
-                    let expected = if is_src && name == "SM520" { "種類記号が不完全" } else { "適用範囲" };
+                    let expected = if is_src && name == "SM520" {
+                        "種類記号が不完全"
+                    } else {
+                        "適用範囲"
+                    };
                     assert!(reason.contains(expected), "{reason}");
                     assert!(analysis_plastic_fibers(
                         &data,
@@ -1149,8 +1153,14 @@ mod tests {
             model.materials[1].name = "任意鋼材".into();
             for fy in [177.0, 235.0, 335.0, 999.0] {
                 model.materials[1].fy = Some(fy);
-                assert_eq!(resolve_fiber_yield(&model, &data).steel, (!is_src).then_some(fy));
-                assert_eq!(crate::factory::ensure_nonlinear_input(&model).is_ok(), !is_src);
+                assert_eq!(
+                    resolve_fiber_yield(&model, &data).steel,
+                    (!is_src).then_some(fy)
+                );
+                assert_eq!(
+                    crate::factory::ensure_nonlinear_input(&model).is_ok(),
+                    !is_src
+                );
             }
         }
     }

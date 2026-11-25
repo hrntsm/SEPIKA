@@ -524,7 +524,7 @@ fn build_shape_fibers(
     strength: StrengthParams,
     concrete_rule: HysteresisModel,
 ) -> Result<(Vec<Fiber>, Vec<Box<dyn UniaxialMaterial>>), RebarGeometryError> {
-    use sepika_section::mn_surface::{AnnulusRes, FiberRegion, max_dimension, plastic_fibers_at};
+    use sepika_section::mn_surface::{max_dimension, plastic_fibers_at, AnnulusRes, FiberRegion};
 
     let rebar_fy = yield_.rebar.or(yield_.main);
     let target = max_dimension(shape) / 16.0;
