@@ -7375,9 +7375,6 @@ fn rc_cantilever_frame() -> sepika_core::model::Model {
     model
 }
 
-/// 終局検定（靭性保証型耐震設計指針）の App 経由の一括算定を検証する。
-/// RC 矩形の柱・梁について `compute_ultimate_checks` が部材別の終局せん断・付着
-/// 余裕度を返し、柱には軸終局耐力（Nuc/Nut）が付くことを確認する。
 #[test]
 fn test_compute_ultimate_checks_rc_frame() {
     use sepika_design_jp::MemberKind;

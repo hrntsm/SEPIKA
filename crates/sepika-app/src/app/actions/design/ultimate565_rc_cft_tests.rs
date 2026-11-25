@@ -1306,6 +1306,170 @@ fn actual_rc_beam_with_verified_zero_axial_force_displays_arakawa_mean_capacity(
     }
 }
 
+#[cfg(feature = "gui")]
+#[test]
+fn rc_ultimate_ovika_rejects_retired_settings_and_old_response_contract() {
+    use sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION;
+    use sepika_io::ovika::{load_ovika, save_ovika, OvikaExtras};
+
+    let path = std::env::temp_dir().join(format!("sepika1871-{}.ovika", std::process::id()));
+    let mut app = column(false);
+    app.core.model.load_cases[0].nodal[0].values[1] = 6000.0;
+    solve_statics(&mut app);
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::X);
+    app.core.analysis_cfg.push_steps = 3;
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let static_labels = ultimate_table_labels(&mut app).join("\n");
+    assert!(
+        static_labels.contains("静的・両端ヒンジ略算では終局せん断は未算定"),
+        "{static_labels}"
+    );
+
+    app.core.ultimate_use_pushover = true;
+    let run = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .pushover_x
+        .as_mut()
+        .unwrap();
+    let step = run.confirmed_history.as_ref().unwrap()[1].step;
+    run.capacity_evaluation = Some(
+        run.evaluation_point(
+            EvaluationPurpose::HoldingCapacity,
+            SeismicDir::X,
+            step,
+            "RC柱の終局せん断の採用ステップ".into(),
+        )
+        .unwrap(),
+    );
+    app.save_project_to(path.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let saved = load_ovika(&path).unwrap();
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    assert!(loaded.core.ultimate_use_pushover);
+    let labels = ultimate_table_labels(&mut loaded);
+    for number in ["301.9", "7.60"] {
+        assert!(labels.iter().any(|label| label == number), "{labels:?}");
+    }
+
+    let mut saved_results: SavedResults = rmp_serde::from_slice(&saved.results.unwrap()).unwrap();
+    assert_eq!(
+        saved_results.bundle.analysis_contract_version,
+        Some(ANALYSIS_CONTRACT_VERSION)
+    );
+    // 廃止直前の版の境界を検証するため、入力照合に必要な現行の記録をそろえたまま版を戻す。
+    saved_results.bundle.analysis_contract_version = Some(108);
+    saved_results.bundle.design_contract_version = Some(109);
+    let old_results = rmp_serde::to_vec_named(&saved_results).unwrap();
+
+    let mut settings: serde_json::Value =
+        rmp_serde::from_slice(&saved.analysis_settings.unwrap()).unwrap();
+    let retired = [
+        ("ultimate_shear_ductility", serde_json::json!(true)),
+        ("ultimate_rp", serde_json::json!(0.05)),
+        ("ultimate_lightweight", serde_json::json!(true)),
+    ];
+    for (field, value) in &retired {
+        assert!(settings["design_settings"].get(field).is_none());
+        settings["design_settings"][field] = value.clone();
+    }
+    let old_settings = rmp_serde::to_vec_named(&settings).unwrap();
+    save_ovika(
+        &path,
+        &saved.model,
+        OvikaExtras {
+            results: Some(&old_results),
+            analysis_settings: Some(&old_settings),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(
+        reopened.core.scoped.last_error.is_none(),
+        "{:?}",
+        reopened.core.scoped.last_error
+    );
+    assert_eq!(reopened.core.model.elements.len(), 1);
+    assert!(!reopened.core.ultimate_use_pushover);
+    assert!(reopened.core.log.entries.iter().any(|entry| {
+        entry
+            .message
+            .contains("保存された解析タブの設定値を読み込めませんでした")
+            && entry.message.contains("ultimate_")
+    }));
+    assert!(reopened.pushover_for(SeismicDir::X).is_none());
+    let notice = reopened
+        .core
+        .scoped
+        .result_contract_notice
+        .as_deref()
+        .unwrap();
+    assert!(
+        notice.contains("保存版=108") && notice.contains("再実行"),
+        "{notice}"
+    );
+    reopened.core.ultimate_use_pushover = true;
+    let error = reopened.compute_ultimate_checks().unwrap_err();
+    assert!(error.contains("ultimate_input_stale"), "{error}");
+    let labels = ultimate_table_labels(&mut reopened);
+    let text = labels.join("\n");
+    for expected in [
+        "終局せん断は適用条件を満たす普通コンクリートの無孔矩形断面が対象",
+        "梁は荒川mean式、柱は修正荒川mean式",
+        "円形柱は曲げ・軸の照査対象ですが、終局せん断は未算定",
+        "RC規準16条",
+        "確定総応答が不足・未検定",
+        "増分解析を再実行",
+    ] {
+        assert!(text.contains(expected), "{text}");
+    }
+    for number in ["301.9", "7.60"] {
+        assert!(!labels.iter().any(|label| label == number), "{labels:?}");
+    }
+    for retired_label in ["靭性指針式(Vu)", "塑性理論式(Qsu)", "ヒンジ回転角 Rp:"] {
+        assert!(!text.contains(retired_label), "{text}");
+    }
+    reopened.save_project_to(path.clone());
+    assert!(
+        reopened.core.scoped.last_error.is_none(),
+        "{:?}",
+        reopened.core.scoped.last_error
+    );
+    let resaved = load_ovika(&path).unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert!(resaved.results.is_none());
+    let settings: serde_json::Value =
+        rmp_serde::from_slice(&resaved.analysis_settings.unwrap()).unwrap();
+    assert_eq!(settings["design_settings"]["ultimate_use_pushover"], true);
+    for (field, _) in retired {
+        assert!(
+            settings["design_settings"].get(field).is_none(),
+            "{settings}"
+        );
+    }
+}
+
 #[test]
 fn actual_rc_beam_shear_uses_a_valid_physical_span_even_if_legacy_span_is_negative() {
     use sepika_core::dof::{Dof, Dof6Mask};
