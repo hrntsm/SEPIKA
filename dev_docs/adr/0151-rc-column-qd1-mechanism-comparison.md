@@ -1,6 +1,6 @@
 # 一般階のRC柱のQD1は適用条件を満たす片側梁降伏を係数適用後に比較する
 
-- Status: accepted
+- Status: partially superseded by [ADR 0155](0155-rc-column-qd1-floor-girder-hold.md)（床板付き候補の扱い）
 - Date: 2026-11-25
 - Related: [#1817](https://github.com/hrntsm/SEPIKA/issues/1817)
 

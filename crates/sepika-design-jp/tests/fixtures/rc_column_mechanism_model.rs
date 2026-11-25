@@ -1,8 +1,8 @@
 use sepika_core::dof::{Dof, Dof6Mask};
-use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
+use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId, SlabId};
 use sepika_core::model::{
-    ElementKind, FrameSectionUse, LoadCase, LoadCaseKind, LoadCombination, MaterialCategory, Model,
-    NodalLoad,
+    ElementKind, FrameSectionUse, LoadCase, LoadCaseKind, LoadCombination, LoadTransfer,
+    MaterialCategory, Model, NodalLoad, RegionAnchor, Slab, SlabPlate, SlabShape,
 };
 use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, RebarSize, SectionShape};
 
@@ -264,4 +264,60 @@ pub fn add_wall_below_reversible_column(model: &mut Model) {
     let mut region = WallRegion::new(WallRegionId(0), boundary.to_vec());
     region.wall_plate_ids.push(plate);
     model.wall_regions.push(region);
+}
+
+pub fn attach_slab(model: &mut Model, nodes: [NodeId; 2]) {
+    let section = SectionId(model.sections.len() as u32);
+    let mut slab = SectionShape::RcSlab { thickness: 150.0 }.to_section(section, "床板".into());
+    slab.material = model.sections[0].material;
+    model.sections.push(slab);
+    model.slabs.push(Slab {
+        id: SlabId(model.slabs.len() as u32),
+        shape: SlabShape::Attached {
+            anchor: RegionAnchor::Line {
+                nodes,
+                span: [0.0, 1.0],
+                transfer: LoadTransfer::Anchor,
+            },
+            extent: [1500.0; 2],
+        },
+        plate: SlabPlate {
+            section: Some(section),
+            ..Default::default()
+        },
+        reference_story: None,
+        vertical_eccentricity_mm: None,
+        tip_loads: Vec::new(),
+    });
+}
+
+pub fn column_with_slab_sensitive_head(model: Model, continuous: bool) -> (Model, [NodeId; 2]) {
+    let (mut model, bars, edge) = if continuous {
+        (
+            column_with_reversible_girders(model, 2, 4),
+            2,
+            [NodeId(1), NodeId(6)],
+        )
+    } else {
+        (
+            column_with_opposing_head_girders(model, ElementKind::Beam),
+            1,
+            [NodeId(1), NodeId(4)],
+        )
+    };
+    let Some(SectionShape::RcBeamRect { rebar, .. }) =
+        &mut model.sections[GIRDER_SECTION.index()].shape
+    else {
+        unreachable!();
+    };
+    rebar.top = vec![bars];
+    rebar.bottom = vec![bars];
+    if continuous {
+        let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut model.sections[0].shape else {
+            unreachable!();
+        };
+        rebar.x = vec![4];
+        rebar.y = vec![4];
+    }
+    (model, edge)
 }

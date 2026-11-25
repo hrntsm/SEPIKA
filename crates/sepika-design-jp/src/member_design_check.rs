@@ -695,7 +695,7 @@ pub fn run_member_design_checks(
                         response.map_or(0.0, |(_, n)| n),
                     )
                 });
-            let column_sum_my = if response_end_axial_issue.is_some() {
+            let mut column_sum_my = if response_end_axial_issue.is_some() {
                 None
             } else {
                 crate::rc::compute_column_mechanism_sum_my(
@@ -735,6 +735,17 @@ pub fn run_member_design_checks(
                         }
                     }
                 });
+            if let (Some(mechanism), Some(reason)) = (&mut column_sum_my, column_end_axial_issue) {
+                for (direction, hold) in [&mut mechanism.qy, &mut mechanism.qz]
+                    .into_iter()
+                    .zip(&mut mechanism.floor_yield_holds)
+                {
+                    if hold.is_some() {
+                        *direction = Err(combine_incomplete_reasons(hold.take(), Some(reason))
+                            .expect("床板付梁を除外した需要を確定できない理由"));
+                    }
+                }
+            }
             (
                 column_sum_my,
                 column_end_axial_issue,

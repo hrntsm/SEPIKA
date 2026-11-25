@@ -14,7 +14,9 @@ use sepika_core::model::{
     Story,
 };
 use sepika_core::section_shape::SectionShape;
-use sepika_design_jp::rc::{compute_column_mechanism_sum_my, ColumnMechanismTopology};
+use sepika_design_jp::rc::{
+    compute_column_mechanism_sum_my, time_history_column_mechanism_sum_my, ColumnMechanismTopology,
+};
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, LoadTerm, MemberDesignCheckOptions, QdMethod,
 };
@@ -28,11 +30,21 @@ fn check(
     gravity_n: Option<f64>,
     forces: [f64; 6],
 ) -> Vec<CheckOutcome> {
+    check_stations(model, method, gravity_n, forces, &[0.5])
+}
+
+fn check_stations(
+    model: &Model,
+    method: QdMethod,
+    gravity_n: Option<f64>,
+    forces: [f64; 6],
+    stations: &[f64],
+) -> Vec<CheckOutcome> {
     let dist = |force| {
         [(
             COLUMN,
             MemberForces {
-                at: vec![(0.5, force)],
+                at: stations.iter().map(|&pos| (pos, force)).collect(),
             },
         )]
     };
@@ -51,10 +63,7 @@ fn check(
     .unwrap()
     .member_checks
     .into_iter()
-    .map(|(elem, pos, row)| {
-        assert_eq!((elem, pos), (COLUMN, 0.5));
-        row
-    })
+    .filter_map(|(elem, pos, row)| (elem == COLUMN && pos == 0.5).then_some(row))
     .collect()
 }
 
@@ -72,11 +81,12 @@ fn set_head_story_name(model: &mut Model, name: &str) {
 
 fn assert_qd1_shear_ratio(model: &Model, expected: f64) {
     model.validate().unwrap();
-    let rows = check(
+    let rows = check_stations(
         model,
         QdMethod::Qd1,
         Some(-100_000.0),
         [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0],
+        &[0.0, 0.5, 1.0],
     );
     let [CheckOutcome::Checked(result)] = &rows[..] else {
         panic!("{rows:?}");
@@ -186,131 +196,221 @@ fn qd1_chooses_the_foot_when_both_unscaled_girder_sums_are_below_column_yield() 
     );
 }
 
-fn attach_slab_for_mechanism(model: &mut Model, slab_edge: [NodeId; 2]) {
-    use sepika_core::ids::SlabId;
-    use sepika_core::model::{LoadTransfer, RegionAnchor, Slab, SlabPlate, SlabShape};
-
-    let section_id = SectionId(model.sections.len() as u32);
-    let mut section =
-        SectionShape::RcSlab { thickness: 150.0 }.to_section(section_id, "床板".into());
-    section.material = model.sections[0].material;
-    model.sections.push(section);
-    model.slabs.push(Slab {
-        id: SlabId(model.slabs.len() as u32),
-        shape: SlabShape::Attached {
-            anchor: RegionAnchor::Line {
-                nodes: slab_edge,
-                span: [0.0, 1.0],
-                transfer: LoadTransfer::Anchor,
-            },
-            extent: [1500.0; 2],
-        },
-        plate: SlabPlate {
-            section: Some(section_id),
-            ..Default::default()
-        },
-        reference_story: None,
-        vertical_eccentricity_mm: None,
-        tip_loads: Vec::new(),
-    });
-}
-
 #[test]
-fn slab_attachment_keeps_existing_head_reductions_but_excludes_general_foot_yield() {
-    use sepika_design_jp::rc::time_history_column_mechanism_sum_my;
-
-    let mut terminal = fixture::column_with_opposing_head_girders(
-        column::column_model(false, 0.0),
-        ElementKind::Beam,
-    );
-    let Some(SectionShape::RcBeamRect { rebar, .. }) =
-        &mut terminal.sections[GIRDER_SECTION.index()].shape
-    else {
-        unreachable!();
-    };
-    rebar.top = vec![1];
-    rebar.bottom = vec![1];
-
-    let mut general_head =
-        fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
-    let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut general_head.sections[0].shape else {
-        unreachable!();
-    };
-    rebar.x = vec![4];
-    rebar.y = vec![4];
-
-    let mut general_foot =
-        fixture::column_with_reversible_girders(column::column_model(false, 0.0), 4, 1);
-
-    let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut general_foot.sections[0].shape else {
-        unreachable!();
-    };
-    // 通常検定は二方向の最大比を返すため、比較する強軸が支配する配筋にする。
-    rebar.y = vec![2];
-    for (mut model, edge, height_mm, bare_n, attached_n) in [
+fn qd1_excludes_slab_supported_girder_yield_without_changing_qd2() {
+    let forces = [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0];
+    for (continuous, height_mm, bare_n, slab_n) in [
         (
-            terminal,
-            [NodeId(1), NodeId(4)],
+            false,
             1700.0,
             156_178.120_903_194,
-            156_178.120_903_194,
+            reference::TERMINAL_SLAB_HEAD_QD1_N,
         ),
         (
-            general_head,
-            [NodeId(1), NodeId(6)],
+            true,
             1500.0,
             208_303.442_920_260,
-            208_303.442_920_260,
-        ),
-        (
-            general_foot,
-            [NodeId(0), NodeId(8)],
-            1500.0,
-            reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N,
-            227_114.990_935_399,
+            reference::CONTINUOUS_SLAB_HEAD_QD1_N,
         ),
     ] {
-        for (slab, expected_n) in [(false, bare_n), (true, attached_n)] {
-            if slab {
-                attach_slab_for_mechanism(&mut model, edge);
-            }
-            assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
-
-            let topology = ColumnMechanismTopology::new(&model);
-            let mechanism = time_history_column_mechanism_sum_my(
-                &model,
-                &topology,
+        let (mut model, edge) =
+            fixture::column_with_slab_sensitive_head(column::column_model(false, 0.0), continuous);
+        let time_history_mechanism = |model: &Model| {
+            time_history_column_mechanism_sum_my(
+                model,
+                &ColumnMechanismTopology::new(model),
                 &model.elements[COLUMN.index()],
                 [Some(-100_000.0); 2],
                 [Some(-100_000.0); 2],
             )
-            .unwrap();
-            assert_near(mechanism.qy.unwrap().unwrap() / height_mm, expected_n, 1e-6);
+            .unwrap()
+        };
+        let qd2 = |model: &Model| {
+            check_stations(
+                model,
+                QdMethod::Qd2,
+                Some(-100_000.0),
+                forces,
+                &[0.0, 0.5, 1.0],
+            )
+        };
+        let bare_qd2 = qd2(&model);
+        let bare_th = time_history_mechanism(&model);
+        assert_near(
+            *bare_th.qy.as_ref().unwrap().as_ref().unwrap() / height_mm,
+            bare_n,
+            1e-6,
+        );
+        assert_qd1_shear_ratio(&model, bare_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+        fixture::attach_slab(&mut model, edge);
+        assert_qd1_shear_ratio(&model, slab_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+        let slab_th = time_history_mechanism(&model);
+        assert_near(slab_th.qy.unwrap().unwrap() / height_mm, slab_n, 1e-6);
+        assert_eq!(slab_th.qz.unwrap(), bare_th.qz.unwrap());
+
+        for method in [QdMethod::Qd1, QdMethod::Min] {
+            let rows = check_stations(&model, method, Some(-100_000.0), forces, &[0.0, 0.5, 1.0]);
+            let [CheckOutcome::Checked(result)] = &rows[..] else {
+                panic!("{rows:?}");
+            };
+            let detail = &result
+                .components
+                .iter()
+                .find(|c| c.kind == CheckKind::Shear)
+                .unwrap()
+                .detail;
+            let adopted_n = if method == QdMethod::Qd1 {
+                slab_n
+            } else {
+                1500.0
+            };
+            assert!(
+                detail.contains("Qy方向の柱頭") && detail.contains("梁端降伏曲げを確認できない"),
+                "{detail}"
+            );
+            assert!(
+                detail.contains(&format!("採用した設計用せん断力 {adopted_n:.1} N")),
+                "{detail}"
+            );
+            assert!(!detail.contains("Qz方向"), "{detail}");
         }
+        assert_eq!(bare_qd2, qd2(&model));
+        let absent_end = check(&model, QdMethod::Qd1, Some(-100_000.0), forces);
+        assert!(
+            absent_end.iter().any(|outcome| matches!(
+                outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains("Qy方向") && reason.contains("柱端の重力参照軸力が不足")
+            )),
+            "{absent_end:?}"
+        );
+        let mut bending_ng = forces;
+        bending_ng[5] = 300e6;
+        let rows = check(&model, QdMethod::Qd1, Some(-100_000.0), bending_ng);
+        assert!(rows.iter().any(|outcome| matches!(
+            outcome, CheckOutcome::Checked(result)
+                if result.components.iter().any(|c| c.kind == CheckKind::AxialBending && c.ratio > 1.0)
+        )), "{rows:?}");
     }
 }
 
 #[test]
-fn qd1_does_not_use_a_slab_supported_girder_for_new_demand_reductions() {
-    for (column_bars, foot_bars, slab_edge, expected_n) in [
-        (3, 4, [NodeId(1), NodeId(2)], 227_114.990_935_399),
-        (4, 4, [NodeId(1), NodeId(2)], 208_303.442_920_260),
+fn qd1_excludes_each_girder_supporting_a_split_attached_floor_plate() {
+    let (mut model, edge) =
+        fixture::column_with_slab_sensitive_head(column::column_model(false, 0.0), false);
+    let [head, far] = edge;
+    let support = model
+        .elements
+        .iter()
+        .position(|elem| elem.nodes.contains(&head) && elem.nodes.contains(&far))
+        .unwrap();
+    let mut midpoint = model.nodes[far.index()].clone();
+    midpoint.id = NodeId(model.nodes.len() as u32);
+    midpoint.coord[0] = -2000.0;
+    let middle = midpoint.id;
+    model.nodes.push(midpoint);
+    let mut outer = model.elements[support].clone();
+    outer.id = ElemId(model.elements.len() as u32);
+    outer.nodes = [far, middle].into_iter().collect();
+    model.elements[support].nodes = [middle, head].into_iter().collect();
+    model.elements.push(outer);
+
+    fixture::attach_slab(&mut model, edge);
+    let mut attached = model.slabs.pop().unwrap();
+    let plate_section = attached.plate.section.take();
+    let time_history_qd1_n = |model: &Model| {
+        time_history_column_mechanism_sum_my(
+            model,
+            &ColumnMechanismTopology::new(model),
+            &model.elements[COLUMN.index()],
+            [Some(-100_000.0); 2],
+            [Some(-100_000.0); 2],
+        )
+        .unwrap()
+        .qy
+        .unwrap()
+        .unwrap()
+            / 1700.0
+    };
+    for (attach, section, expected_n) in [
+        (false, None, 156_178.120_903_194),
+        (true, None, 156_178.120_903_194),
+        (true, plate_section, reference::TERMINAL_SLAB_HEAD_QD1_N),
+    ] {
+        model.slabs.clear();
+        if attach {
+            attached.plate.section = section;
+            model.slabs.push(attached.clone());
+        }
+        assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+        assert_near(time_history_qd1_n(&model), expected_n, 1e-6);
+        let rows = check_stations(
+            &model,
+            QdMethod::Qd1,
+            Some(-100_000.0),
+            [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0],
+            &[0.0, 0.5, 1.0],
+        );
+        let [CheckOutcome::Checked(result)] = &rows[..] else {
+            panic!("{rows:?}");
+        };
+        let detail = &result
+            .components
+            .iter()
+            .find(|c| c.kind == CheckKind::Shear)
+            .unwrap()
+            .detail;
+        assert_eq!(
+            detail.contains("梁端降伏曲げを確認できない"),
+            section.is_some(),
+            "{detail}"
+        );
+    }
+}
+
+#[test]
+fn qd1_keeps_an_independent_girder_candidate_when_the_other_end_supports_a_slab() {
+    for (head_bars, foot_bars, slab_edge, expected_n) in [
         (
-            3,
+            2,
+            1,
+            [NodeId(1), NodeId(2)],
+            reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N,
+        ),
+        (4, 1, [NodeId(0), NodeId(8)], 227_114.990_935_399),
+        (
+            2,
             1,
             [NodeId(0), NodeId(7)],
             reference::TWO_HEAD_GIRDERS_HALF_QD1_N,
         ),
     ] {
-        let mut model =
-            fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, foot_bars);
-        let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut model.sections[0].shape else {
-            unreachable!();
+        let mut model = fixture::column_with_reversible_girders(
+            column::column_model(false, 0.0),
+            head_bars,
+            foot_bars,
+        );
+        let time_history_qd1_n = |model: &Model| {
+            time_history_column_mechanism_sum_my(
+                model,
+                &ColumnMechanismTopology::new(model),
+                &model.elements[COLUMN.index()],
+                [Some(-100_000.0); 2],
+                [Some(-100_000.0); 2],
+            )
+            .unwrap()
+            .qy
+            .unwrap()
+            .unwrap()
+                / 1500.0
         };
-        rebar.x = vec![column_bars];
-        rebar.y = vec![column_bars];
-        attach_slab_for_mechanism(&mut model, slab_edge);
+        assert_near(
+            time_history_qd1_n(&model),
+            reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N,
+            1e-6,
+        );
+        fixture::attach_slab(&mut model, slab_edge);
         assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+        assert_near(time_history_qd1_n(&model), expected_n, 1e-6);
     }
 }
 
@@ -406,7 +506,7 @@ fn qd1_new_head_yield_excludes_a_girder_connected_to_a_floor_shell_at_both_ends(
     for (column_bars, shares_both, expected_n) in [
         (3, true, 227_114.990_935_399),
         (3, false, reference::TWO_HEAD_GIRDERS_HALF_QD1_N),
-        (4, true, 208_303.442_920_260),
+        (4, true, 289_718.136_062_014),
     ] {
         let mut model =
             fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
@@ -435,11 +535,15 @@ fn qd1_new_head_yield_excludes_a_girder_connected_to_a_floor_shell_at_both_ends(
             model.nodes.push(independent);
             independent_id
         };
+        let mut other_edge_node = model.nodes[3].clone();
+        other_edge_node.id = NodeId(model.nodes.len() as u32);
+        let other_edge = other_edge_node.id;
+        model.nodes.push(other_edge_node);
         let mut shell = model.elements[fixture::GIRDER.index()].clone();
         shell.id = ElemId(model.elements.len() as u32);
         shell.kind = ElementKind::Shell;
         shell.section = Some(section);
-        shell.nodes = [beam_end, far_id, NodeId(3), NodeId(1)]
+        shell.nodes = [beam_end, far_id, other_edge, NodeId(1)]
             .into_iter()
             .collect();
         model.elements.push(shell);

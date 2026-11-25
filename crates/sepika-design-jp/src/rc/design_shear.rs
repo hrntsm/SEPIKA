@@ -62,6 +62,27 @@ pub(crate) fn column_design_shear(
     Ok(qd.method.resolve(qd1, qd2(ql, q_signed, qd.n_factor)))
 }
 
+pub(super) fn column_design_shear_with_confirmed_mechanism(
+    qd: &SeismicQd,
+    pos: f64,
+    q_signed: f64,
+    index: usize,
+    sum_mu: f64,
+) -> Result<f64, &'static str> {
+    let qd1 = mechanism_shear(qd, sum_mu)
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .ok_or("確認済みの候補から有限で正のQD1を算定できません")?;
+    if qd.method == QdMethod::Qd1 {
+        return Ok(qd1);
+    }
+    let ql = gravity_component(qd, pos, index).ok_or_else(|| gravity_shear_reason(index))?;
+    let qd2 = qd2(ql, q_signed, qd.n_factor);
+    if !qd2.is_finite() {
+        return Err("地震時応力に基づくQD2を有限な値で算定できません");
+    }
+    Ok(qd1.min(qd2))
+}
+
 fn mechanism_shear(qd: &SeismicQd, sum_mu: f64) -> Option<f64> {
     if qd.clear_length > 0.0 && sum_mu > 0.0 {
         let n_mech = if qd.n_mechanism > 0.0 {
