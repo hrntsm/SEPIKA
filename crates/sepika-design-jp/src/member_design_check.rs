@@ -384,6 +384,13 @@ pub fn run_member_design_checks(
     for (id, _) in member_forces {
         *force_rows.entry(*id).or_default() += 1;
     }
+    use steel_beam_span::GroupBending;
+    let mut grouped_beam_spans = steel_beam_span::grouped_bending_spans(
+        model,
+        member_forces,
+        &force_rows,
+        beam_span_loads.as_ref(),
+    );
     let route21_inputs = options
         .src_column_route21_shear
         .filter(|_| options.term == LoadTerm::Short);
@@ -442,9 +449,15 @@ pub fn run_member_design_checks(
                 .cloned(),
             ..Default::default()
         };
-        if steel_beam_span::requires_bending_span(sec, structure, &ctx)
-            && unavailable_beam_ids.insert(elem.id)
-        {
+        let needs_span = if group.is_some() || grouped_girders.contains(&elem.id) {
+            !matches!(
+                grouped_beam_spans.get(&elem.id),
+                Some(Ok(GroupBending::WithoutWholeSpan { .. }))
+            )
+        } else {
+            steel_beam_span::requires_bending_span(sec, structure, &ctx)
+        };
+        if needs_span && unavailable_beam_ids.insert(elem.id) {
             let reason = if row_count == 0 {
                 "鋼梁の解析断面力がありません"
             } else {
@@ -807,7 +820,32 @@ pub fn run_member_design_checks(
             steel_attr,
         };
 
-        let needs_beam_span = steel_beam_span::requires_bending_span(sec, structure, &ctx);
+        let grouped_steel_beam = structure == StructureKind::S
+            && kind == MemberKind::Girder
+            && crate::steel::is_symmetric_h_section(sec)
+            && (group.is_some() || grouped_girders.contains(elem_id));
+        let grouped_beam_span = grouped_steel_beam.then(|| {
+            grouped_beam_spans
+                .remove(elem_id)
+                .unwrap_or_else(|| Err("一本部材の構成要素が未確認です".into()))
+        });
+        let needs_beam_span = match &grouped_beam_span {
+            Some(Ok(GroupBending::WithoutWholeSpan { .. })) => false,
+            Some(_) => true,
+            None => steel_beam_span::requires_bending_span(sec, structure, &ctx),
+        };
+        if let Some(Ok(
+            GroupBending::WithoutWholeSpan {
+                length_mm: Some(length_mm),
+            }
+            | GroupBending::Whole { length_mm, .. },
+        )) = &grouped_beam_span
+        {
+            ctx.length = *length_mm;
+        }
+        if let Some(Ok(GroupBending::Whole { length_mm, .. })) = &grouped_beam_span {
+            ctx.lb = Some(*length_mm);
+        }
         let station_key = |xi: f64| if xi == 0.0 { 0 } else { xi.to_bits() };
         let repeated_stations: HashSet<_> = if needs_beam_span {
             let mut observed = HashSet::new();
@@ -825,19 +863,20 @@ pub fn run_member_design_checks(
                     "同一の評価位置で解析断面力が重複し、強軸曲げ分布を確認できません".into(),
                 );
             }
+            if let Some(grouped) = grouped_beam_span {
+                return grouped.map(|confirmed| match confirmed {
+                    GroupBending::Whole { span, .. } => span,
+                    GroupBending::WithoutWholeSpan { .. } => unreachable!(),
+                });
+            }
             beam_span_loads
                 .as_ref()
                 .map_err(|reason| (*reason).to_owned())
-                .and_then(|loads| {
-                    loads.bending_span(
-                        model,
-                        elem,
-                        mf,
-                        &ctx,
-                        group.is_some() || grouped_girders.contains(elem_id),
-                    )
-                })
+                .and_then(|loads| loads.bending_span(model, elem, mf, &ctx))
         });
+        if grouped_steel_beam && beam_span.as_ref().is_some_and(Result::is_err) {
+            ctx.steel_beam_moment_diagram = crate::steel::SteelBeamMomentDiagram::UnverifiedGroup;
+        }
         let beam_peaks = beam_span
             .as_ref()
             .and_then(|span| span.as_ref().ok())
@@ -847,7 +886,12 @@ pub fn run_member_design_checks(
             });
         let checker: Box<dyn DesignCheck> = checker_for(structure);
 
-        let positions = design_positions(elem, model, length);
+        let position_length = if grouped_steel_beam {
+            model.member_length(elem)
+        } else {
+            length
+        };
+        let positions = design_positions(elem, model, position_length);
         let route21_matches = ctx.src_column_route21_shear.as_ref().map(|_| {
             let mut counts = vec![0; positions.len()];
             let stations: Vec<_> = mf
@@ -914,7 +958,7 @@ pub fn run_member_design_checks(
         let sampled_j_face = elem
             .rigid_zone
             .face_j
-            .map(|face| (1.0 - face / length).clamp(0.5 + 1e-9, 1.0));
+            .map(|face| (1.0 - face / position_length).clamp(0.5 + 1e-9, 1.0));
         let section_forces = mf
             .at
             .iter()

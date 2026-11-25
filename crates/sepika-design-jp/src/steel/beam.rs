@@ -311,6 +311,18 @@ pub(crate) fn check_beam(
     let mut fb_label = "fb";
     let mut moment_parameters = None;
     let (fb_strong, lateral_length_mm) = match shape {
+        ShapeCategory::H
+            if ctx.steel_beam_moment_diagram == super::SteelBeamMomentDiagram::UnverifiedGroup =>
+        {
+            if forces.mz != 0.0 {
+                *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                    incomplete.take(),
+                    Some("一本部材の補剛区間を確認できず、横座屈を考慮した強軸曲げは未算定です"),
+                );
+                fb_label = "fb上限";
+            }
+            (ft_val, None)
+        }
         ShapeCategory::H => {
             let (lb, partial) = beam_lateral_buckling_length(ctx, forces.pos);
             let length_is_direct_or_braced = ctx.lb.is_some()

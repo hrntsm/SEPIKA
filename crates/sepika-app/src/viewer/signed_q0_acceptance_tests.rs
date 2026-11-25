@@ -55,6 +55,23 @@ fn peak_labels_with_confirmed_long_term(
                     nonlinear,
                     applied_long_term,
                     || (!confirmed_long_term).then_some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),
+                    || {
+                        Ok(app
+                            .core
+                            .scoped
+                            .results
+                            .as_ref()
+                            .and_then(|bundle| {
+                                bundle.combos.iter().find(|(name, _)| {
+                                    sepika_core::load_combo::is_gravity_combination(
+                                        name,
+                                        &app.core.model,
+                                    )
+                                })
+                            })
+                            .map(|(_, result)| result.member_forces.as_slice())
+                            .unwrap_or_default())
+                    },
                     &axis,
                 )
             },

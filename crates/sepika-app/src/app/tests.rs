@@ -12818,9 +12818,49 @@ fn lateral_bracing_gui_invalid_group_reference_keeps_bending_and_shear() {
             assert!(result.detail.contains("算定不能（group節点"));
             assert!(result.detail.contains("連続"));
             assert!(!result.detail.contains("（参考）n="));
+            assert!(result.components.iter().any(|component| {
+                component.kind == sepika_design_jp::CheckKind::Bending
+                    && component.detail.contains("lb=2500 mm")
+            }));
             assert_eq!(result.components.len(), 2);
         }
     }
+}
+
+#[test]
+fn lateral_bracing_gui_unknown_group_span_keeps_independent_shear_failure() {
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+    use sepika_design_jp::{CheckKind, CheckOutcome};
+
+    let mut model = lateral_bracing_fixture::frame(true);
+    model.girder_groups[0].swap(1, 2);
+    model.load_cases[0].member.push(MemberLoad::manual(
+        ElemId(0),
+        [0.0, 0.0, 1.0],
+        MemberLoadKind::Point {
+            a: 2_500.0,
+            p: -2_000_000.0,
+        },
+    ));
+    let mut app = App::default();
+    app.load_model(model);
+    app.run_linear_static(LoadCaseId(0));
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let rows = &app.core.scoped.results.as_ref().unwrap().member_checks;
+    let beam = rows.iter().find(|row| row.elem == ElemId(0)).unwrap();
+    assert!(beam.positions.iter().any(|row| matches!(&row.outcome,
+        CheckOutcome::Skipped { reason } if reason.contains("一本部材") && reason.contains("連続していません"))), "{beam:?}");
+    assert!(beam.positions.iter().any(|row| matches!(&row.outcome,
+        CheckOutcome::Checked(result) if result.components.iter().any(|c| c.kind == CheckKind::Shear && c.ratio > 1.0))), "{beam:?}");
+    assert!(
+        beam.positions.iter().all(|row| !matches!(&row.outcome,
+        CheckOutcome::Checked(result) if result.ok())),
+        "{beam:?}"
+    );
 }
 
 #[cfg(feature = "gui")]

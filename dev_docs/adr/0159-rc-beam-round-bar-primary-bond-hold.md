@@ -1,7 +1,7 @@
 # 丸鋼主筋を使うRC梁の一次付着は未算定とする
 
 - Status: accepted
-- Date: 2026-11-25
+- Date: 2026-11-26
 - Related: [#1956](https://github.com/hrntsm/SEPIKA/issues/1956), [#1802](https://github.com/hrntsm/SEPIKA/issues/1802)
 
 ## Context
