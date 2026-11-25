@@ -1278,6 +1278,85 @@ mod tests {
     }
 
     #[test]
+    fn rc_beam_above_fc60_draws_unchecked_bending_reason_and_independent_shear_ng() {
+        mod input {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../sepika-design-jp/tests/fixtures/rc_beam_asymmetric_model.rs"
+            ));
+        }
+        let mut app = App::default();
+        let mut model = input::model(false);
+        let concrete = model.sections[0].material.unwrap().index();
+        model.materials[concrete].fc = Some(60.0_f64.next_up());
+        model.load_cases[0].nodal[0].values[1] = 150_000.0;
+        assert!(app.load_model(model));
+        app.run_preparation();
+        app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+
+        let ctx = egui::Context::default();
+        let mut labels = Vec::new();
+        for _ in 0..2 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1600.0, 1000.0),
+                    )),
+                    events: vec![egui::Event::PointerMoved(egui::pos2(225.0, 300.0))],
+                    ..Default::default()
+                },
+                |ui| {
+                    draw_check_ratio(
+                        ui.painter(),
+                        &app,
+                        &app.core.model,
+                        &[egui::pos2(100.0, 300.0), egui::pos2(350.0, 300.0)],
+                        Default::default(),
+                    );
+                    show_check_tooltip(ui, &app, ElemId(0));
+                },
+            );
+            labels.extend(output.shapes.iter().filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            }));
+        }
+        assert!(
+            labels.iter().any(|label| label.contains("NG 1件")),
+            "{labels:?}"
+        );
+        assert!(
+            labels.iter().any(|label| label.contains("未検定あり")),
+            "{labels:?}"
+        );
+        assert!(
+            labels
+                .iter()
+                .any(|label| label.starts_with("検定不能（RC 梁曲げ")
+                    && label.contains("設計用ヤング係数比")
+                    && label.contains("60 N/mm²以下")),
+            "{labels:?}"
+        );
+        assert!(
+            labels.iter().any(|label| label == CheckKind::Shear.label()),
+            "{labels:?}"
+        );
+        assert!(labels.iter().any(|label| label == "NG"), "{labels:?}");
+        assert!(
+            !labels
+                .iter()
+                .any(|label| label == CheckKind::Bending.label() || label == "OK"),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
     fn rc_column_zero_capacity_is_drawn_as_unchecked_after_real_analysis() {
         mod input {
             include!(concat!(

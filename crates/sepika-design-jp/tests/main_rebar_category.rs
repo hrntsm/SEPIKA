@@ -121,6 +121,7 @@ fn checked_components(outcome: CheckOutcome) -> Vec<CheckComponent> {
 #[test]
 fn rc_allowable_uses_fc60_for_bending_and_retains_independent_shear_above_it() {
     let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1_000_000.0];
+    let requires_n = |kind| matches!(kind, CheckKind::Bending | CheckKind::AxialBending);
     for mut model in rc_members() {
         let concrete = model.sections[0].material.unwrap().index();
         model.materials[concrete].fc = Some(60.0);
@@ -128,29 +129,40 @@ fn rc_allowable_uses_fc60_for_bending_and_retains_independent_shear_above_it() {
         assert_eq!(boundary.len(), 1, "{boundary:?}");
         let at_boundary = checked_components(boundary.into_iter().next().unwrap().2);
         assert!(
-            at_boundary.iter().any(|row| {
-                matches!(row.kind, CheckKind::Bending | CheckKind::AxialBending)
-                    && row.ratio.is_finite()
-            }),
+            at_boundary
+                .iter()
+                .any(|row| requires_n(row.kind) && row.ratio.is_finite()),
             "{at_boundary:?}"
         );
 
         model.materials[concrete].fc = Some(60.0_f64.next_up());
         let above = allowable_checks_with_demand(&model, demand, &short_term());
         assert!(
-            above.iter().any(|(_, _, outcome)| matches!(
-                outcome, CheckOutcome::Skipped { reason } if reason.contains("Fcが60")
-            )),
+            above.iter().any(|(elem, xi, outcome)| *elem == ElemId(0)
+                && *xi == 0.5
+                && matches!(
+                    outcome, CheckOutcome::Skipped { reason }
+                        if reason.contains("設計用ヤング係数比") && reason.contains("60 N/mm²以下")
+                )),
             "{above:?}"
         );
-        assert!(above
-            .into_iter()
-            .filter_map(|(_, _, outcome)| match outcome {
-                CheckOutcome::Checked(result) => Some(result.components),
-                CheckOutcome::Skipped { .. } => None,
+        let mut components = above
+            .iter()
+            .filter_map(|(elem, xi, outcome)| match outcome {
+                CheckOutcome::Checked(result) if *elem == ElemId(0) && *xi == 0.5 => {
+                    Some(&result.components)
+                }
+                _ => None,
             })
-            .flatten()
-            .any(|row| row.kind == CheckKind::Shear && row.ratio > 1.0));
+            .flatten();
+        assert!(
+            components.clone().all(|row| !requires_n(row.kind)),
+            "{above:?}"
+        );
+        assert!(
+            components.any(|row| row.kind == CheckKind::Shear && row.ratio > 1.0),
+            "{above:?}"
+        );
     }
 }
 
