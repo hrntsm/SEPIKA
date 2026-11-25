@@ -117,12 +117,14 @@ pub(super) fn asymmetric_built_h_combination_reasons(
     .flatten()
 }
 
-pub(super) fn check_symmetric_h_tension_plate_slenderness(
+pub(super) fn check_symmetric_h_plate_slenderness(
     forces: &MemberForcesAt,
     sec: &Section,
     mat: &Material,
 ) -> Result<(), String> {
-    let shape = sec.shape.as_ref().expect("上下対称H形鋼の形状が必要");
+    let Some(shape) = &sec.shape else {
+        return Err("H形鋼柱の局部座屈の幅厚比照査に必要な断面形状がありません".into());
+    };
     let (height_mm, flange_width_mm, flange_thick_mm, web_thick_mm, root_r_mm) = match *shape {
         SectionShape::SteelH {
             height,
@@ -130,91 +132,69 @@ pub(super) fn check_symmetric_h_tension_plate_slenderness(
             flange_thick,
             web_thick,
             root_r,
-        } => (
-            height,
-            width,
-            flange_thick,
-            web_thick,
-            root_r.unwrap_or(0.0),
-        ),
+        } => (height, width, flange_thick, web_thick, root_r),
         SectionShape::SteelBuiltH {
             height,
             upper_width,
             upper_thick,
             web_thick,
             ..
-        } => (height, upper_width, upper_thick, web_thick, 0.0),
+        } => (height, upper_width, upper_thick, web_thick, Some(0.0)),
         _ => unreachable!("上下対称H形鋼だけを検定する"),
     };
-    let unresolved = "局部座屈の幅厚比照査に必要なH形断面の全断面性能を確定できません";
-    let area_mm2 = sec
-        .resolved_area()
-        .map_err(|reason| format!("{unresolved}。{reason}"))?;
-    let web_clear_mm = height_mm - 2.0 * flange_thick_mm;
+    let web_flat_mm = height_mm - 2.0 * flange_thick_mm - 2.0 * root_r_mm.unwrap_or(0.0);
     if sec.depth != height_mm
         || flange_width_mm < web_thick_mm
-        || [sec.property_basis.iy, sec.property_basis.depth].contains(&PropertyBasis::PendingShape)
-        || [
-            web_clear_mm,
-            flange_width_mm,
-            flange_thick_mm,
-            web_thick_mm,
-            area_mm2,
-            sec.iy,
-        ]
-        .iter()
-        .any(|&v| !v.is_finite() || v <= 0.0)
+        || [web_flat_mm, flange_width_mm, flange_thick_mm, web_thick_mm]
+            .iter()
+            .any(|&v| !v.is_finite() || v <= 0.0)
+        || root_r_mm.is_some_and(|r| r < 0.0)
     {
         return Err("局部座屈の幅厚比照査に必要なH形断面の寸法・全断面性能を確定できません".into());
     }
 
-    if sec.property_basis.iy == PropertyBasis::Shape {
-        let calculated_iy_mm4 = shape
-            .try_calc_iy()
-            .map_err(|reason| format!("{unresolved}。{reason}"))?;
-        let tolerance_mm4 = 8.0 * f64::EPSILON * sec.iy.max(calculated_iy_mm4);
-        if !calculated_iy_mm4.is_finite()
-            || calculated_iy_mm4 <= 0.0
-            || (sec.iy - calculated_iy_mm4).abs() > tolerance_mm4
-        {
-            return Err(format!(
-                "{unresolved}。強軸断面二次モーメントの記録値が現在の断面形状と一致しません"
-            ));
-        }
-    }
+    let (compressed_flange, compressed_web) = if forces.n > 0.0 {
+        tension_compressed_plates(forces, sec, shape, height_mm, web_flat_mm)?
+    } else {
+        (true, true)
+    };
 
-    let web_flat_mm = web_clear_mm - 2.0 * root_r_mm;
-    let tension_mpa = forces.n / area_mm2;
-    let gradient_mpa_per_mm = forces.mz.abs() / sec.iy;
-    let flange_bending_mpa = gradient_mpa_per_mm * (height_mm / 2.0);
-    let web_bending_mpa = gradient_mpa_per_mm * (web_flat_mm / 2.0);
-    if [tension_mpa, flange_bending_mpa, web_bending_mpa]
-        .iter()
-        .any(|v| !v.is_finite())
-    {
-        return Err("局部座屈の幅厚比照査に必要な合成応力度を有限値で算定できません".into());
-    }
-
-    let flange = if forces.mz > 0.0 {
+    let flange = if forces.n < 0.0 {
+        "上下フランジ b/t"
+    } else if forces.mz > 0.0 {
         "上フランジ b/t"
     } else {
         "下フランジ b/t"
     };
+    let web_limit_coefficient = |f_mpa: f64| {
+        Ok(if forces.n == 0.0 {
+            2.4
+        } else if forces.n < 0.0 && forces.mz != 0.0 && root_r_mm.is_some() {
+            let web_area_mm2 = web_flat_mm * web_thick_mm;
+            if !web_area_mm2.is_finite() || web_area_mm2 <= 0.0 {
+                return Err("局部座屈の幅厚比照査に必要なウェブ平板部の面積を確定できません");
+            }
+            let compression_ratio = -forces.n / web_area_mm2 / f_mpa;
+            (2.4 - 0.8 * compression_ratio).max(1.6)
+        } else {
+            1.6
+        })
+    };
     let mut reasons = Vec::new();
-    for (label, width_mm, thick_mm, coefficient, compressed) in [
+    for (label, width_mm, thick_mm, is_flange, compressed) in [
         (
             flange,
             flange_width_mm / 2.0,
             flange_thick_mm,
-            0.53,
-            flange_bending_mpa > tension_mpa,
+            true,
+            compressed_flange,
         ),
         (
             "ウェブ d/t",
             web_flat_mm,
             web_thick_mm,
-            1.6,
-            web_bending_mpa > tension_mpa,
+            false,
+            compressed_web,
         ),
     ] {
         if !compressed {
@@ -222,6 +202,11 @@ pub(super) fn check_symmetric_h_tension_plate_slenderness(
         }
         let f_mpa = resolve_steel_f(Some(mat), Some(thick_mm))
             .map_err(|reason| format!("{label} の幅厚比の限界値を算定できません。{reason}"))?;
+        let coefficient = if is_flange {
+            0.53
+        } else {
+            web_limit_coefficient(f_mpa)?
+        };
         let limit = coefficient * (mat.young / f_mpa).sqrt();
         let ratio = width_mm / thick_mm;
         if !ratio.is_finite() || !limit.is_finite() || limit <= 0.0 {
@@ -241,6 +226,56 @@ pub(super) fn check_symmetric_h_tension_plate_slenderness(
             reasons.join("、"),
         ))
     }
+}
+
+fn tension_compressed_plates(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    shape: &SectionShape,
+    height_mm: f64,
+    web_flat_mm: f64,
+) -> Result<(bool, bool), String> {
+    let unresolved = "局部座屈の幅厚比照査に必要なH形断面の全断面性能を確定できません";
+    let area_mm2 = sec
+        .resolved_area()
+        .map_err(|reason| format!("{unresolved}。{reason}"))?;
+    if [sec.property_basis.iy, sec.property_basis.depth].contains(&PropertyBasis::PendingShape)
+        || [area_mm2, sec.iy]
+            .iter()
+            .any(|&v| !v.is_finite() || v <= 0.0)
+    {
+        return Err(unresolved.into());
+    }
+
+    if sec.property_basis.iy == PropertyBasis::Shape {
+        let calculated_iy_mm4 = shape
+            .try_calc_iy()
+            .map_err(|reason| format!("{unresolved}。{reason}"))?;
+        let tolerance_mm4 = 8.0 * f64::EPSILON * sec.iy.max(calculated_iy_mm4);
+        if !calculated_iy_mm4.is_finite()
+            || calculated_iy_mm4 <= 0.0
+            || (sec.iy - calculated_iy_mm4).abs() > tolerance_mm4
+        {
+            return Err(format!(
+                "{unresolved}。強軸断面二次モーメントの記録値が現在の断面形状と一致しません"
+            ));
+        }
+    }
+
+    let tension_mpa = forces.n / area_mm2;
+    let gradient_mpa_per_mm = forces.mz.abs() / sec.iy;
+    let flange_bending_mpa = gradient_mpa_per_mm * (height_mm / 2.0);
+    let web_bending_mpa = gradient_mpa_per_mm * (web_flat_mm / 2.0);
+    if [tension_mpa, flange_bending_mpa, web_bending_mpa]
+        .iter()
+        .any(|v| !v.is_finite())
+    {
+        return Err("局部座屈の幅厚比照査に必要な合成応力度を有限値で算定できません".into());
+    }
+    Ok((
+        flange_bending_mpa > tension_mpa,
+        web_bending_mpa > tension_mpa,
+    ))
 }
 
 fn validate_built_h_plate_slenderness(

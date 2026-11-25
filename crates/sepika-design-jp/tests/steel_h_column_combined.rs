@@ -384,6 +384,212 @@ fn a_supplied_full_section_area_retains_the_independent_axial_failure() {
     );
 }
 
+#[test]
+fn issue_1931_applies_the_web_limit_for_each_loading() {
+    let model = issue_model();
+    let slender = rolled_h(200.0, 2.0, 0.0);
+    let intermediate = rolled_h(200.0, 6.0, 0.0);
+    let compact = &model.sections[0];
+    // 短期、d=374 mm、F=235、E=205000。中間断面の d/t は62.3333で、軸力によって緩和の成否が分かれる。
+    for (section, n, mz, rejected_by) in [
+        (&slender, 0.0, 100e6, Some("上限 70.8850")),
+        (&slender, 0.0, 1_000e6, Some("上限 70.8850")),
+        (&intermediate, 0.0, -100e6, None),
+        (&intermediate, -77_000.0, 0.0, Some("上限 47.2567")),
+        (compact, -77_000.0, 0.0, None),
+        (&intermediate, -77_000.0, 100e6, None),
+        (&intermediate, -190_850.0, 100e6, None),
+        (&intermediate, -190_864.0, 100e6, Some("ウェブ d/t=62.3333")),
+        (&intermediate, -300_000.0, 100e6, Some("上限 57.4430")),
+        (&intermediate, -600_000.0, 100e6, Some("上限 47.2567")),
+        (compact, -800_000.0, 20e6, None),
+    ] {
+        let forces = MemberForcesAt {
+            n,
+            mz,
+            qz: 0.0,
+            ..ISSUE_FORCES
+        };
+        let outcome = check(
+            &model,
+            section,
+            &forces,
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        if let Some(limit) = rejected_by {
+            assert!(
+                matches!(&outcome, CheckOutcome::Skipped { reason }
+                if reason.contains("ウェブ d/t") && reason.contains(limit)),
+                "{outcome:?}"
+            );
+        } else {
+            assert!(
+                matches!(&outcome, CheckOutcome::Checked(result)
+                if result.ok() && result.components[0].kind == CheckKind::AxialBending),
+                "{outcome:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn issue_1931_checks_the_flange_that_can_be_in_compression() {
+    let model = issue_model();
+    let section = rolled_h(500.0, 8.0, 0.0);
+    for (n, mz, flange) in [
+        (0.0, 100e6, "上フランジ"),
+        (0.0, -100e6, "下フランジ"),
+        (-77_000.0, 0.0, "上下フランジ"),
+        (-77_000.0, -100e6, "上下フランジ"),
+    ] {
+        let forces = MemberForcesAt {
+            n,
+            mz,
+            qz: 0.0,
+            ..ISSUE_FORCES
+        };
+        let outcome = check(
+            &model,
+            &section,
+            &forces,
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        assert!(
+            matches!(&outcome, CheckOutcome::Skipped { reason }
+            if reason.contains(&format!("{flange} b/t=19.2308（上限 15.6538）"))
+                && !reason.contains("ウェブ d/t")),
+            "{outcome:?}"
+        );
+    }
+}
+
+#[test]
+fn issue_1931_requires_known_flat_web_area_to_relax_the_compression_limit() {
+    let model = issue_model();
+    let with_fillet = rolled_h(200.0, 6.0, 16.0);
+    let mut unknown = with_fillet.clone();
+    unknown.property_basis.area = PropertyBasis::Supplied;
+    unknown.property_basis.iy = PropertyBasis::Supplied;
+    unknown.property_basis.iz = PropertyBasis::Supplied;
+    unknown.property_basis.j = PropertyBasis::Supplied;
+    let SectionShape::SteelH { root_r, .. } = unknown.shape.as_mut().unwrap() else {
+        unreachable!()
+    };
+    *root_r = None;
+    let forces = MemberForcesAt {
+        n: -77_000.0,
+        mz: 100e6,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    let known = check(
+        &model,
+        &with_fillet,
+        &forces,
+        LoadTerm::Short,
+        MemberKind::Column,
+    );
+    assert!(matches!(known, CheckOutcome::Checked(result) if result.ok()));
+    let unresolved = check(
+        &model,
+        &unknown,
+        &forces,
+        LoadTerm::Short,
+        MemberKind::Column,
+    );
+    assert!(
+        matches!(&unresolved, CheckOutcome::Skipped { reason }
+        if reason.contains("ウェブ d/t=62.3333（上限 47.2567）")),
+        "{unresolved:?}"
+    );
+    let pure_bending = check(
+        &model,
+        &unknown,
+        &MemberForcesAt { n: 0.0, ..forces },
+        LoadTerm::Short,
+        MemberKind::Column,
+    );
+    assert!(matches!(pure_bending, CheckOutcome::Checked(result) if result.ok()));
+}
+
+#[test]
+fn issue_1931_preserves_independent_compression_and_web_shear_failures() {
+    let model = issue_model();
+    let section = rolled_h(200.0, 2.0, 0.0);
+    let mut ctx = column_context(&model, LoadTerm::Short);
+    ctx.lk_z = Some(7_000.0);
+    for mz in [0.0, 100e6] {
+        // N/A=134.5 N/mm² は短期材料許容上限235以下だが、弱軸座屈を考慮したfcを超える。
+        let forces = MemberForcesAt {
+            n: -800_000.0,
+            mz,
+            qy: 200_000.0,
+            qz: 0.0,
+            ..ISSUE_FORCES
+        };
+        let outcomes: Vec<_> = SteelDesign
+            .check_outcomes(&forces, &section, &model.materials[0], &ctx)
+            .collect();
+        assert!(
+            matches!(outcomes.as_slice(), [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }]
+            if !result.ok()
+                && result.components.iter().map(|c| c.kind).eq([CheckKind::Axial, CheckKind::Shear])
+                && result.components[0].ratio > 1.0
+                && result.components[0].detail.contains("fc=")
+                && reason.contains("局部座屈")),
+            "{outcomes:?}"
+        );
+    }
+}
+
+#[test]
+fn issue_1931_keeps_the_statutory_slenderness_failure() {
+    let model = issue_model();
+    let section = rolled_h(200.0, 2.0, 0.0);
+    let mut ctx = column_context(&model, LoadTerm::Short);
+    ctx.lk_z = Some(20_000.0);
+    let forces = MemberForcesAt {
+        n: -77_000.0,
+        mz: 100e6,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    let outcomes: Vec<_> = SteelDesign
+        .check_outcomes(&forces, &section, &model.materials[0], &ctx)
+        .collect();
+    assert!(
+        matches!(outcomes.as_slice(), [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }]
+        if matches!(&result.components[..], [provision] if provision.kind == CheckKind::Provision && provision.ratio > 1.0)
+            && reason.contains("局部座屈")),
+        "{outcomes:?}"
+    );
+}
+
+#[test]
+fn issue_1931_keeps_an_independent_material_failure_if_buckling_length_is_unknown() {
+    let model = issue_model();
+    let section = rolled_h(200.0, 2.0, 0.0);
+    let mut ctx = column_context(&model, LoadTerm::Short);
+    ctx.lk_z = Some(f64::NAN);
+    let forces = MemberForcesAt {
+        n: -1_500_000.0,
+        mz: 100e6,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    let outcomes: Vec<_> = SteelDesign
+        .check_outcomes(&forces, &section, &model.materials[0], &ctx)
+        .collect();
+    assert!(
+        matches!(outcomes.as_slice(), [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }]
+        if matches!(&result.components[..], [axial] if axial.kind == CheckKind::Axial && axial.detail.contains("材料許容上限="))
+            && reason.contains("座屈長さ") && reason.contains("局部座屈")),
+        "{outcomes:?}"
+    );
+}
+
 fn issue_model() -> Model {
     input::cantilever(ISSUE_FORCES.n, ISSUE_FORCES.mz, ISSUE_FORCES.qz)
 }
