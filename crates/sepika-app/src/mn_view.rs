@@ -849,7 +849,7 @@ mod tests {
     fn src552_ovika_edit_reload_and_display_share_material_regions() {
         use sepika_core::ids::{MaterialId, SectionId};
         use sepika_core::model::{AnalysisKind, MaterialCategory};
-        use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
+        use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SrcHManufacture};
         use sepika_edit::{EditCommand, EditSectionShape};
         let shape = SectionShape::SrcColumnRect {
             b: 300.0,
@@ -870,7 +870,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 12.0,
-            steel_manufacture: Default::default(),
+            steel_manufacture: SrcHManufacture::BuiltUp,
         };
         let mut model = crate::sample::portal_frame();
         model.panel_zone = sepika_core::model::PanelZoneMode::None;
@@ -921,7 +921,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 12.0,
-            steel_manufacture: Default::default(),
+            steel_manufacture: SrcHManufacture::BuiltUp,
         };
         model.sections[1] = sepika_core::model::Section {
             id: SectionId(1),
