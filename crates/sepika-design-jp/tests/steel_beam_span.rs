@@ -327,11 +327,23 @@ fn uniform_load_checks_both_intervals_at_the_zero_shear_brace() {
         2
     );
 
-    let contradictory = report(0.0, Some(-1e-11));
-    for interval in ["[0.000, 4000.000]", "[4000.000, 8000.000]"] {
+    for (recovered, saved) in [
+        (0.0, -1e-11),
+        (-1e-11, 0.0),
+        (-1e-11, 1e-11),
+        (1e-11, -1e-11),
+    ] {
+        let contradictory = report(recovered, Some(saved));
+        for interval in ["[0.000, 4000.000]", "[4000.000, 8000.000]"] {
+            assert!(
+                contradictory.iter().any(|(xi, row)| *xi == 0.5
+                    && matches!(row, CheckOutcome::Skipped { reason } if reason.contains(interval))),
+                "{contradictory:?}"
+            );
+        }
         assert!(
-            contradictory.iter().any(|(xi, row)| *xi == 0.5
-                && matches!(row, CheckOutcome::Skipped { reason } if reason.contains(interval))),
+            !contradictory.iter().any(|(xi, row)| *xi == 0.5
+                && matches!(row, CheckOutcome::Checked(result) if result.ok())),
             "{contradictory:?}"
         );
     }

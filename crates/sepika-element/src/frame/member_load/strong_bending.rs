@@ -161,6 +161,13 @@ impl<'a> StrongBendingResponse<'a> {
             .map(|(_, observed)| observed[1])
     }
 
+    fn observed_shear_sign_matches(&self, x_mm: f64, jump_n: f64, recovered_n: f64) -> bool {
+        self.observed_shear_y(x_mm).is_none_or(|left| {
+            let observed_n = left + jump_n;
+            observed_n.is_finite() && observed_n.partial_cmp(&0.0) == recovered_n.partial_cmp(&0.0)
+        })
+    }
+
     fn span(
         &self,
         [span_lo, span_hi]: [f64; 2],
@@ -178,6 +185,11 @@ impl<'a> StrongBendingResponse<'a> {
         let response = self.response;
         let start = response.at_mm(span_lo)?;
         let end = response.at_mm(span_hi)?;
+        // 保存点は左極限なので、集中荷重を跨ぐ場合はそのままi端の区間内側と比較できない。
+        let i_jump_n = response.point_load_jump(span_lo)[1];
+        let boundary_shear_conflicts = include_ends
+            && !(self.observed_shear_sign_matches(span_lo, i_jump_n, start[1] + i_jump_n)
+                && self.observed_shear_sign_matches(span_hi, 0.0, end[1]));
         let mut candidates = vec![
             (demand_lo, response.at_mm(demand_lo)?),
             (demand_hi, response.at_mm(demand_hi)?),
@@ -208,14 +220,7 @@ impl<'a> StrongBendingResponse<'a> {
                 record_candidate(lo, false)?;
             }
             let width = hi - lo;
-            let shear_jump = response.point_load_jump(lo)[1];
-            let q0 = response.at_mm(lo)?[1] + shear_jump;
-            // 保存点は左極限なので、集中荷重を跨ぐ場合はそのままi端の区間内側と比較できない。
-            let start_zero_matches = !include_ends
-                || lo != span_lo
-                || self
-                    .observed_shear_y(lo)
-                    .is_none_or(|left| left + shear_jump == 0.0);
+            let q0 = response.at_mm(lo)?[1] + response.point_load_jump(lo)[1];
             let mut w_lo = 0.0;
             let mut w_hi = 0.0;
             for &load in &self.strong_loads {
@@ -236,14 +241,7 @@ impl<'a> StrongBendingResponse<'a> {
             }
             let scale = q0.abs().max(q1.abs()).max(q2.abs());
             if scale == 0.0 {
-                let end_zero_matches = !include_ends
-                    || hi != span_hi
-                    || self.observed_shear_y(hi).is_none_or(|left| left == 0.0);
-                if start_zero_matches && end_zero_matches {
-                    record_candidate(lo.midpoint(hi), true)?;
-                } else {
-                    uncertain_shear_sign = true;
-                }
+                record_candidate(lo.midpoint(hi), true)?;
                 lo = hi;
                 continue;
             }
@@ -271,8 +269,7 @@ impl<'a> StrongBendingResponse<'a> {
                     && q == 0.0
                     && hi == span_hi
                     && end[1] == 0.0
-                    && self.observed_shear_y(hi).is_none_or(|left| left == 0.0);
-                uncertain_shear_sign |= t == 0.0 && q == 0.0 && !start_zero_matches;
+                    && (include_ends || self.observed_shear_y(hi).is_none_or(|left| left == 0.0));
                 uncertain_shear_sign |= !confirmed_zero
                     && magnitude > 0.0
                     && q.abs() <= 64.0 * f64::EPSILON * magnitude;
@@ -331,8 +328,10 @@ impl<'a> StrongBendingResponse<'a> {
             .collect();
         Ok(FrameStrongBendingSpan {
             end_moments_nmm: [start[5], end[5]],
-            monotonic: !(uncertain_shear_sign || has_positive_shear && has_negative_shear),
-            interior_maximum,
+            monotonic: !(boundary_shear_conflicts
+                || uncertain_shear_sign
+                || has_positive_shear && has_negative_shear),
+            interior_maximum: !boundary_shear_conflicts && interior_maximum,
             demand_peaks,
         })
     }

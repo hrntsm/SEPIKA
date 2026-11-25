@@ -1690,7 +1690,8 @@ mod tests {
                         .shapes
                         .iter()
                         .filter(|shape| matches!(&shape.shape,
-                    egui::Shape::Text(text) if text.galley.job.text == "1.16"))
+                    egui::Shape::Text(text) if text.galley.job.text == "1.16"
+                            && text.pos.x > expected_position.x + 1.0))
                         .count(),
                     usize::from(ratio > 1.0)
                 );
