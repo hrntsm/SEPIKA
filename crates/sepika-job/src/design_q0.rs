@@ -168,6 +168,7 @@ where
 
 /// 選択重力termsのQD1専用Q0 `[N]`。RC 梁は端別の係数付き合成後に最大絶対値を採る。
 /// 空terms・参照不明ケースはRC結果なし。有効な無荷重・相殺・Qy直交は0を返す。
+/// 一本部材に指定したRC梁は結果に含めない。通常検定の全スパンQ0は [`rc_grouped_beam_q0_by_terms`] を使う。
 /// 算定対象の RC 梁で局所基底を解決できなければ、部材 ID と理由を含む `Err` を返す。
 pub fn simple_beam_q0_by_terms(
     model: &Model,
@@ -186,6 +187,7 @@ pub fn simple_beam_q0_by_terms(
 /// 1 荷重ケースの部材荷重から、単純梁支持の端部せん断 Q0 `[N]` を算定する。
 /// RC 梁は符号付き local Qy 端反力の最大絶対値とし、入力不足の部材は返さない。
 /// その他の部材は荷重の絶対値と材軸直交成分から算定する。
+/// 一本部材に指定したRC梁は結果に含めない。通常検定の全スパンQ0は [`rc_grouped_beam_q0_by_terms`] を使う。
 /// 算定対象の RC 梁で局所基底を解決できなければ、部材 ID と理由を含む `Err` を返す。
 pub fn simple_beam_q0_by_elem(
     model: &Model,
@@ -525,13 +527,15 @@ fn other_beam_q0_by_elem(model: &Model, lc: LoadCaseId) -> HashMap<ElemId, f64> 
 }
 
 /// 検定用G+PのQD1専用Q0 `[N]`。RC 梁は端別合成後に最大絶対値、他はケース別Q0の和。
+/// 一本部材に指定したRC梁は結果に含めない。通常検定の全スパンQ0は [`rc_grouped_beam_q0_by_terms`] を使う。
 /// 算定対象の RC 梁で局所基底を解決できなければ、部材 ID と理由を含む `Err` を返す。
 pub fn simple_beam_q0_by_gravity_cases(model: &Model) -> Result<HashMap<ElemId, f64>, String> {
     simple_beam_q0_by_terms(model, &design_gravity_unit_terms(model))
 }
 
 /// モデル内の指定RC梁について、検定用G+PのQD1専用Q0 `[N]` を返す。
-/// 入力不足は `None`、対象梁の局所基底を解決できない場合は理由付き `Err` を返す。
+/// 一本部材に指定したRC梁と入力不足の場合は `None`。対象梁の局所基底が不明なら理由付き `Err` を返す。
+/// 通常検定の全スパンQ0は [`rc_grouped_beam_q0_by_terms`] を使う。
 pub fn rc_beam_q0_for_gravity_cases(
     model: &Model,
     elem: &ElementData,
