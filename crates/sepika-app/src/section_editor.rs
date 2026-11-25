@@ -10,7 +10,7 @@ use sepika_core::ids::SectionId;
 use sepika_core::model::{FrameSectionUse, Section};
 use sepika_core::section_shape::{
     BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, RebarSize,
-    RectColumnHoop, SectionShape, StandardRebar,
+    RectColumnHoop, SectionShape, SrcHManufacture, StandardRebar,
 };
 use sepika_edit::{
     AddCatalogSection, AddSectionShape, EditSectionShape, SectionField, SetSectionField,
@@ -36,6 +36,7 @@ pub struct SectionEditorDraft {
     pub b: f64,
     pub tw: f64,
     pub tf: f64,
+    pub src_h_manufacture: SrcHManufacture,
     pub t: f64,
     pub horizontal_thick: f64,
     /// H のフィレット半径、角形鋼管・角形 CFT の角R `[mm]`。None は未知。
@@ -91,6 +92,7 @@ impl Default for SectionEditorDraft {
             b: 200.0,
             tw: 8.0,
             tf: 12.0,
+            src_h_manufacture: SrcHManufacture::Unknown,
             t: 12.0,
             horizontal_thick: 12.0,
             r: None,
@@ -494,6 +496,13 @@ pub fn section_editor_panel(ui: &mut egui::Ui, app: &mut App) {
                     rc_rect_column_fields(ui, draft);
                 }
                 ui.horizontal(|ui| {
+                    egui::ComboBox::from_id_salt("src_h_manufacture")
+                        .selected_text(draft.src_h_manufacture.label())
+                        .show_ui(ui, |ui| {
+                            for manufacture in [SrcHManufacture::Unknown, SrcHManufacture::Rolled, SrcHManufacture::BuiltUp] {
+                                ui.selectable_value(&mut draft.src_h_manufacture, manufacture, manufacture.label());
+                            }
+                        });
                     ui.label("内蔵H形鋼 [mm]");
                     for (label, value) in [("H", &mut draft.h), ("B", &mut draft.b), ("tw", &mut draft.tw), ("tf", &mut draft.tf)] {
                         ui.label(label);
@@ -1229,6 +1238,7 @@ fn sync_concrete_shape(draft: &mut SectionEditorDraft, shape: &SectionShape) -> 
         steel_width,
         steel_web_thick,
         steel_flange_thick,
+        steel_manufacture,
         ..
     }
     | SectionShape::SrcColumnRect {
@@ -1236,9 +1246,11 @@ fn sync_concrete_shape(draft: &mut SectionEditorDraft, shape: &SectionShape) -> 
         steel_width,
         steel_web_thick,
         steel_flange_thick,
+        steel_manufacture,
         ..
     } = shape
     {
+        draft.src_h_manufacture = *steel_manufacture;
         (draft.h, draft.b, draft.tw, draft.tf) = (
             *steel_height,
             *steel_width,
@@ -1326,6 +1338,7 @@ fn build_shape(d: &SectionEditorDraft) -> SectionShape {
                     steel_width: d.b,
                     steel_web_thick: d.tw,
                     steel_flange_thick: d.tf,
+                    steel_manufacture: d.src_h_manufacture,
                 }
             } else {
                 SectionShape::RcBeamRect {
@@ -1357,6 +1370,7 @@ fn build_shape(d: &SectionEditorDraft) -> SectionShape {
                     steel_width: d.b,
                     steel_web_thick: d.tw,
                     steel_flange_thick: d.tf,
+                    steel_manufacture: d.src_h_manufacture,
                 }
             } else {
                 SectionShape::RcColumnRect {
@@ -1517,6 +1531,28 @@ mod tests {
                 modifiers: Default::default(),
             },
         ]
+    }
+
+    #[test]
+    fn src_section_editor_retains_the_selected_steel_manufacture() {
+        for kind in [ShapeKind::SrcBeamRect, ShapeKind::SrcColumnRect] {
+            for manufacture in [
+                SrcHManufacture::BuiltUp,
+                SrcHManufacture::Rolled,
+                SrcHManufacture::Unknown,
+            ] {
+                let draft = SectionEditorDraft {
+                    kind,
+                    src_h_manufacture: manufacture,
+                    ..Default::default()
+                };
+                let shape = build_shape(&draft);
+                let mut reopened = SectionEditorDraft::default();
+                assert!(sync_concrete_shape(&mut reopened, &shape));
+                assert_eq!(reopened.src_h_manufacture, manufacture);
+                assert_eq!(build_shape(&reopened), shape);
+            }
+        }
     }
 
     #[test]

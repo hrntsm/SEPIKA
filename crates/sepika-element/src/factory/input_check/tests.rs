@@ -13,7 +13,7 @@ fn steel_material() -> Material {
         strength_factor: None,
         concrete_class: Default::default(),
         id: MaterialId(0),
-        name: "SN400".into(),
+        name: "SN400B".into(),
         category: MaterialCategory::Steel,
         young: 205000.0,
         poisson: 0.3,
@@ -445,6 +445,7 @@ fn src_section_bare() -> Section {
         steel_width: 150.0,
         steel_web_thick: 6.5,
         steel_flange_thick: 9.0,
+        steel_manufacture: sepika_core::section_shape::SrcHManufacture::BuiltUp,
     }
     .to_section(SectionId(0), "SRC".into())
 }

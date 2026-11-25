@@ -494,6 +494,7 @@ fn resolve_column(
             steel_width: w,
             steel_web_thick: tw,
             steel_flange_thick: tf,
+            ..
         },
     ) = model.element_section(column).and_then(|s| s.shape.as_ref())
     else {

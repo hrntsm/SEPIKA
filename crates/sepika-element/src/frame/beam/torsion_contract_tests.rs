@@ -137,6 +137,7 @@ fn src_beam_and_column_use_adopted_gc_with_fixed_steel_contribution() {
             steel_width: 200.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 12.0,
+            steel_manufacture: Default::default(),
         },
         SectionShape::SrcColumnRect {
             b: 300.0,
@@ -157,6 +158,7 @@ fn src_beam_and_column_use_adopted_gc_with_fixed_steel_contribution() {
             steel_width: 200.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 12.0,
+            steel_manufacture: Default::default(),
         },
     ] {
         let mut m = model(shape, true);

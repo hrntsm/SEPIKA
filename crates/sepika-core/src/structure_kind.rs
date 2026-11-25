@@ -316,6 +316,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 13.0,
+            steel_manufacture: Default::default(),
         };
         let m = model_with(Some(src), MaterialCategory::Steel);
         assert_eq!(

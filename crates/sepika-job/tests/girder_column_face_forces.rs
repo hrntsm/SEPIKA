@@ -201,6 +201,7 @@ fn 非正方柱の方位とコンクリート外周から実柱面力を取得�
                 steel_width: 200.0,
                 steel_web_thick: 10.0,
                 steel_flange_thick: 16.0,
+                steel_manufacture: Default::default(),
             },
             true,
         ),

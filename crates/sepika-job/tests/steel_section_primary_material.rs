@@ -280,6 +280,7 @@ fn rcとsrcの断面の配筋に鉄筋を割り当てると解析できる() {
         steel_width: 150.0,
         steel_web_thick: 6.5,
         steel_flange_thick: 9.0,
+        steel_manufacture: Default::default(),
     };
     // 0.4 m × 0.6 m × 3 m、入力密度 2.4 t/m³ と重力加速度 9.80665 m/s² による自重の半分。
     let self_weight_at_top_n = 8_472.945_6;

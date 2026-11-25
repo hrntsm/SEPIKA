@@ -6,7 +6,7 @@ use sepika_core::model::{
 };
 use sepika_core::section_shape::{
     BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar, RcRectColumnRebar, RebarSize,
-    RectColumnHoop, SectionShape,
+    RectColumnHoop, SectionShape, SrcHManufacture,
 };
 use sepika_math::solver::SolveError;
 use sepika_solver::common::constraint::Reducer;
@@ -64,6 +64,7 @@ fn restrained_member(frame_use: FrameSectionUse, web_mm: f64, flange_mm: f64) ->
             steel_width: 150.0,
             steel_web_thick: web_mm,
             steel_flange_thick: flange_mm,
+            steel_manufacture: SrcHManufacture::BuiltUp,
         }
     } else {
         SectionShape::SrcColumnRect {
@@ -85,6 +86,7 @@ fn restrained_member(frame_use: FrameSectionUse, web_mm: f64, flange_mm: f64) ->
             steel_width: 150.0,
             steel_web_thick: web_mm,
             steel_flange_thick: flange_mm,
+            steel_manufacture: SrcHManufacture::BuiltUp,
         }
     };
     restrained_member_with_shape(frame_use, shape, Some(MaterialId(3)))
@@ -520,7 +522,7 @@ fn src_pushover_reports_why_internal_fiber_steel_cannot_be_used() {
                 Some("独自H"),
                 None,
                 MaterialCategory::Steel,
-                "明示 fy も未入力",
+                "適用根拠が未確定",
             ),
             (
                 Some("SN400B"),
@@ -560,12 +562,8 @@ fn src_pushover_requires_strength_of_the_explicitly_assigned_internal_steel() {
         ..model.materials[3].clone()
     });
     model.sections[0].steel_material = Some(MaterialId(4));
-    let assigned = run(&mut model, SeismicDir::X, 1_000.0).unwrap();
-    assert!((assigned.member_response[0].shear_strong - 1_000.0).abs() < 1.0);
-    assert!(assigned.shear_yields.is_empty());
-    model.materials[4].fy = None;
     let error = run(&mut model, SeismicDir::X, 1_000.0).unwrap_err();
-    for expected in ["部材 ID 0", "内蔵鉄骨", "独自H", "明示 fy も未入力"] {
+    for expected in ["部材 ID 0", "内蔵鉄骨", "独自H", "適用根拠が未確定"] {
         assert!(error.contains(expected), "{error}");
     }
 }
@@ -611,25 +609,86 @@ fn time_history_accepts_src_member_without_using_shear_reinforcement_strength() 
 }
 
 #[test]
-fn src_time_history_reports_invalid_fiber_steel_fy() {
+fn src_nonlinear_analysis_identifies_unconfirmed_manufacture_and_plate_thickness() {
     for frame_use in [FrameSectionUse::Column, FrameSectionUse::Girder] {
-        for (fy, reason) in [
-            (None, "未入力"),
-            (Some(0.0), "正の有限値"),
-            (Some(f64::INFINITY), "正の有限値"),
+        for (manufacture, web_mm, flange_mm, reason) in [
+            (SrcHManufacture::Unknown, 10.0, 12.0, "製造区分が不明"),
+            (
+                SrcHManufacture::Rolled,
+                10.0,
+                12.0,
+                "圧延H形鋼のウェブ・フランジに適用する降伏強度の根拠が未確認",
+            ),
+            (SrcHManufacture::BuiltUp, 5.0, 12.0, "ウェブの実板厚 5 mm"),
+            (
+                SrcHManufacture::BuiltUp,
+                10.0,
+                101.0,
+                "フランジ: 鋼材「SN400B」の実板厚 101 mm",
+            ),
         ] {
-            let mut model = restrained_member(frame_use, 10.0, 12.0);
-            model.materials[0].fy = Some(235.0);
-            model.materials[3].name = "独自H".into();
-            model.materials[3].fy = fy;
-            let Err(SolveError::InvalidInput(error)) = run_time_history(&mut model) else {
-                panic!("内蔵鉄骨の fy を解決できないときは入力エラーが必要です");
+            let mut model = restrained_member(frame_use, web_mm, flange_mm);
+            match model.sections[0].shape.as_mut().unwrap() {
+                SectionShape::SrcBeamRect {
+                    steel_manufacture, ..
+                }
+                | SectionShape::SrcColumnRect {
+                    steel_manufacture, ..
+                } => *steel_manufacture = manufacture,
+                _ => unreachable!(),
+            }
+            model.materials[3].fy = Some(235.0);
+            let Err(SolveError::InvalidInput(error)) = run_time_history(&mut model.clone()) else {
+                panic!("適用条件を確認できないSRC断面は入力エラーが必要です");
             };
-            for expected in ["部材 ID 0", "内蔵鉄骨", "独自H", "降伏強度 fy", reason] {
-                assert!(error.contains(expected), "{frame_use:?}: {error}");
+            let pushover_error = run(&mut model, SeismicDir::Y, 1_000.0).unwrap_err();
+            for error in [error, pushover_error] {
+                for expected in ["部材 ID 0", "内蔵鉄骨", "SN400B", reason] {
+                    assert!(error.contains(expected), "{frame_use:?}: {error}");
+                }
             }
         }
     }
+}
+
+#[test]
+fn rigid_diaphragm_src_girder_keeps_auto_spring_but_explicit_fiber_requires_manufacture() {
+    use sepika_core::model::Constraint;
+
+    let mut model = restrained_member(FrameSectionUse::Girder, 10.0, 13.0);
+    model.elements[0].kind = ElementKind::Beam;
+    model
+        .constraints
+        .push(Constraint::rigid_diaphragm(StoryId(1), NodeId(1), vec![]));
+    let Some(SectionShape::SrcBeamRect {
+        steel_manufacture, ..
+    }) = model.sections[0].shape.as_mut()
+    else {
+        unreachable!();
+    };
+    *steel_manufacture = SrcHManufacture::Unknown;
+
+    let result = run(&mut model, SeismicDir::Y, 1_000.0).unwrap();
+    assert!((result.member_response[0].shear_strong - 1_000.0).abs() < 1.0);
+    assert!(result.fiber_states.is_empty());
+
+    model.elements[0].force_regime = ForceRegime::AxialBendingInteract;
+    let error = run(&mut model, SeismicDir::Y, 1_000.0).unwrap_err();
+    assert!(
+        error.contains("部材 ID 0") && error.contains("製造区分が不明"),
+        "{error}"
+    );
+}
+
+#[test]
+fn src_material_strength_rejects_factor_above_the_notice_limit() {
+    let mut model = restrained_member(FrameSectionUse::Column, 45.0, 13.0);
+    model.materials[3].strength_factor = Some(1.11);
+    let error = run(&mut model, SeismicDir::Y, 1_000.0).unwrap_err();
+    for expected in ["部材 ID 0", "内蔵鉄骨", "材料強度割増 1.11", "1.1以下"] {
+        assert!(error.contains(expected), "{error}");
+    }
+    assert!(run_time_history(&mut model).is_ok());
 }
 
 #[test]
@@ -672,7 +731,7 @@ fn src_time_history_rejects_nonsteel_fiber_materials() {
 fn src_time_history_accepts_assigned_fiber_steel_fy() {
     for frame_use in [FrameSectionUse::Column, FrameSectionUse::Girder] {
         for (name, fy, web_mm, flange_mm) in [
-            ("独自H", Some(235.0), 10.0, 12.0),
+            ("SN400B", Some(80.0), 10.0, 45.0),
             ("SN400B", None, 10.0, 12.0),
             ("SN400B", None, 45.0, 13.0),
         ] {
@@ -689,90 +748,105 @@ fn src_time_history_accepts_assigned_fiber_steel_fy() {
 }
 
 #[test]
-fn src_fiber_reports_uniform_steel_reference_in_axial_and_bending_responses() {
+fn src_fiber_response_uses_each_plate_strength_for_axial_and_bending() {
     use sepika_core::model::AnalysisKind;
     use sepika_element::behavior::{Ctx, LocalVec};
     use sepika_element::factory::{
         build_nonlinear_behavior, ensure_nonlinear_input_with_basis, StrengthBasis,
     };
 
-    for (basis, kind, factor, name, explicit_fy, reference_fy, axial_kn, bending_k_nm) in [
-        (
-            StrengthBasis::Nominal,
-            AnalysisKind::TimeHistory,
-            1.0,
-            "SN400B",
-            80.0,
-            235.0,
-            5_906.276,
-            1_060.586,
-        ),
-        (
-            StrengthBasis::Nominal,
-            AnalysisKind::TimeHistory,
-            1.0,
-            "独自H",
-            215.0,
-            215.0,
-            5_591.872,
-            1_032.806,
-        ),
+    for (basis, kind, factor) in [
+        (StrengthBasis::Nominal, AnalysisKind::TimeHistory, 1.0),
         (
             StrengthBasis::MaterialStrength,
             AnalysisKind::Incremental,
             1.1,
-            "SN400B",
-            80.0,
-            258.5,
-            6_496.903,
-            1_133.786,
         ),
     ] {
-        let mut model = restrained_member(FrameSectionUse::Column, 45.0, 13.0);
-        model.nodes[1].coord[2] = 3_000.0;
-        model.materials[3].name = name.into();
-        model.materials[3].fy = Some(explicit_fy);
-        let context = Ctx { model: &model };
-        model.validate_local_frames().unwrap();
-        ensure_nonlinear_input_with_basis(&model, kind, basis).unwrap();
+        for (
+            web_mm,
+            flange_mm,
+            expected_fy,
+            expected_area_mm2,
+            expected_plastic_axial_n,
+            expected_plastic_moment_n_mm,
+        ) in [
+            (
+                45.0,
+                13.0,
+                [215.0, 235.0],
+                [12_330.0, 3_900.0],
+                3_567_450.0,
+                313_107_825.0,
+            ),
+            (
+                10.0,
+                45.0,
+                [235.0, 215.0],
+                [2_100.0, 13_500.0],
+                3_396_000.0,
+                395_977_500.0,
+            ),
+            (
+                10.0,
+                40.0,
+                [235.0, 235.0],
+                [2_200.0, 12_000.0],
+                3_337_000.0,
+                395_035_000.0,
+            ),
+        ] {
+            let mut model = restrained_member(FrameSectionUse::Column, web_mm, flange_mm);
+            model.nodes[1].coord[2] = 3_000.0;
+            model.materials[3].fy = Some(80.0);
+            let context = Ctx { model: &model };
+            model.validate_local_frames().unwrap();
+            ensure_nonlinear_input_with_basis(&model, kind, basis).unwrap();
 
-        let mut axial = LocalVec {
-            data: smallvec::smallvec![0.0; 12],
-        };
-        axial.data[8] = 3_000.0 * 225.0 * factor / 205_000.0;
-        let mut bending = LocalVec {
-            data: smallvec::smallvec![0.0; 12],
-        };
-        bending.data[4] = 0.02;
-        bending.data[10] = -0.02;
+            let mut axial = LocalVec {
+                data: smallvec::smallvec![0.0; 12],
+            };
+            axial.data[8] = 3_000.0 * 225.0 * factor / 205_000.0;
+            let mut bending = LocalVec {
+                data: smallvec::smallvec![0.0; 12],
+            };
+            bending.data[4] = 0.02;
+            bending.data[10] = -0.02;
 
-        for (displacement, force_index, force_divisor, expected) in
-            [(axial, 8, 1e3, axial_kn), (bending, 4, 1e6, bending_k_nm)]
-        {
-            let mut member =
-                build_nonlinear_behavior(&model.elements[0], &model, basis, kind, None);
-            member.update_state(&displacement, true, &context).unwrap();
-            let response = member.internal_force(&context).data[force_index] / force_divisor;
-            assert!(
-                (response - expected).abs() < 1.0,
-                "{name} {basis:?}: {response}"
-            );
+            for (displacement, force_index) in [(axial, 8), (bending, 4)] {
+                let mut member =
+                    build_nonlinear_behavior(&model.elements[0], &model, basis, kind, None);
+                member.update_state(&displacement, true, &context).unwrap();
+                let response = member.internal_force(&context).data[force_index];
+                assert!(response.is_finite() && response.abs() > 1.0, "{response}");
 
-            for section in member.fiber_section_states().unwrap() {
-                let mut area_mm2 = [0.0; 2];
-                let mut max_yield_ratio = [0.0_f64; 2];
-                for fiber in section.fibers.iter().filter(|fiber| fiber.material == 2) {
-                    let plate = usize::from(fiber.y.abs() > 137.0);
-                    area_mm2[plate] += fiber.area;
-                    max_yield_ratio[plate] = max_yield_ratio[plate].max(fiber.yield_ratio);
-                    if fiber.strain.abs() > 1e-12 {
-                        let fy = 205_000.0 * fiber.strain.abs() / fiber.yield_ratio;
-                        assert!((fy - reference_fy).abs() < 1e-8, "{fiber:?}");
+                for section in member.fiber_section_states().unwrap() {
+                    let mut area_mm2 = [0.0; 2];
+                    let mut plastic_axial_n = 0.0;
+                    let mut plastic_moment_n_mm = 0.0;
+                    for fiber in section.fibers.iter().filter(|fiber| fiber.material == 2) {
+                        let plate = usize::from(fiber.y.abs() > 150.0 - flange_mm);
+                        area_mm2[plate] += fiber.area;
+                        let fy = if fiber.strain.abs() > 1e-12 {
+                            205_000.0 * fiber.strain.abs() / fiber.yield_ratio
+                        } else {
+                            assert_eq!(force_index, 4);
+                            assert_eq!(fiber.y, 0.0);
+                            expected_fy[plate] * factor
+                        };
+                        assert!((fy - expected_fy[plate] * factor).abs() < 1e-8, "{fiber:?}");
+                        plastic_axial_n += fy * fiber.area;
+                        plastic_moment_n_mm += fy * fiber.area * fiber.y.abs();
                     }
+                    for i in 0..2 {
+                        assert!((area_mm2[i] - expected_area_mm2[i]).abs() < 1e-8);
+                    }
+                    assert!((plastic_axial_n / factor - expected_plastic_axial_n).abs() < 1.0);
+                    assert!(
+                        (plastic_moment_n_mm / factor / expected_plastic_moment_n_mm - 1.0).abs()
+                            < 0.002
+                    );
                 }
-                assert!((area_mm2[0] - 12_330.0).abs() < 1e-8);
-                assert!((area_mm2[1] - 3_900.0).abs() < 1e-8);
-                assert!(max_yield_ratio.into_iter().all(|ratio| ratio > 1.0));
             }
         }
     }

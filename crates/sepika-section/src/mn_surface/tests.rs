@@ -330,6 +330,7 @@ fn src552_shape() -> SectionShape {
         steel_width: 200.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: Default::default(),
     }
 }
 
@@ -551,6 +552,7 @@ fn src552_rebar_strength_overlap_and_outside_are_rejected() {
         steel_width: 200.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: Default::default(),
     };
     let strength = StrengthParams {
         rebar_fy: f64::NAN,

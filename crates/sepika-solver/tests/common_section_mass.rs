@@ -4,7 +4,7 @@ use sepika_core::model::{
     AnalysisKind, ElementKind, EndCondition, LoadCase, LoadCaseKind, MassMethod, MaterialCategory,
     Model, Node,
 };
-use sepika_core::section_shape::SectionShape;
+use sepika_core::section_shape::{SectionShape, SrcHManufacture};
 use sepika_element::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
 use sepika_element::factory::StrengthBasis;
 use sepika_element::frame::{
@@ -310,8 +310,8 @@ fn wall_connection_gate_accepts_ordinary_frames_and_rejects_steel_walls() {
     }
 }
 
-fn src(count: u32, steel_height: f64) -> SectionShape {
-    SectionShape::SrcColumnRect {
+fn src_fixture(count: u32, steel_height: f64) -> Model {
+    let shape = SectionShape::SrcColumnRect {
         b: 300.0,
         d: 600.0,
         rebar: rebar(count),
@@ -319,7 +319,11 @@ fn src(count: u32, steel_height: f64) -> SectionShape {
         steel_width: 100.0,
         steel_web_thick: 6.0,
         steel_flange_thick: 9.0,
-    }
+        steel_manufacture: SrcHManufacture::BuiltUp,
+    };
+    let mut model = fixture(Some(shape), MaterialCategory::Concrete);
+    model.materials[2].name = "SS400".into();
+    model
 }
 
 fn assert_mass(matrix: &LocalMat, expected_t: f64, opt: MassOption) {
@@ -406,7 +410,7 @@ fn geometry_and_adopted_density_are_independent_mass_oracles_for_all_frame_forms
         MaterialCategory::Concrete,
     );
     verify_direct_and_public(&rc, 180000.0 * 24.0 / 9.80665e9 * LENGTH_MM);
-    let src = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+    let src = src_fixture(0, 400.0);
     verify_direct_and_public(&src, SRC_MASS_T);
     assert!((SRC_MASS_T - 1.296).abs() > 0.01);
     assert!((SRC_MASS_T - 1.3522176).abs() > 0.01);
@@ -443,17 +447,14 @@ fn reinforcement_and_src_steel_area_do_not_change_inclusive_mass() {
         );
         verify_direct_and_public(&rc, 180000.0 * 24.0 / 9.80665e9 * LENGTH_MM);
         for h in [200.0, 400.0] {
-            verify_direct_and_public(
-                &fixture(Some(src(count, h)), MaterialCategory::Concrete),
-                SRC_MASS_T,
-            );
+            verify_direct_and_public(&src_fixture(count, h), SRC_MASS_T);
         }
     }
 }
 
 #[test]
 fn fiber_gauss_points_tangents_history_and_missing_mesh_do_not_supply_mass() {
-    let model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+    let model = src_fixture(0, 400.0);
     let data = &model.elements[0];
     let mut fiber = FiberBeam::with_plastic_zone(
         data,
@@ -512,7 +513,7 @@ fn fiber_gauss_points_tangents_history_and_missing_mesh_do_not_supply_mass() {
 
 #[test]
 fn global_mass_projects_fixed_dofs_and_adds_node_mass() {
-    let mut model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+    let mut model = src_fixture(0, 400.0);
     model.nodes[0].restraint = Dof6Mask::FIXED;
     model.nodes[1].mass = Some([0.1, 0.2, 0.3, 0.0, 0.0, 0.0]);
     let dofmap = DofMap::build(&model);
@@ -663,7 +664,7 @@ fn assert_public_dynamic_mass_error(model: &Model) {
 
 #[test]
 fn angled_rotated_rigid_and_released_members_preserve_geometry_mass() {
-    let mut model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+    let mut model = src_fixture(0, 400.0);
     model.nodes[1].coord = [1000.0, 2000.0, 2000.0];
     model.elements[0].local_axis.ref_vector = [0.2, 0.7, -0.3];
     model.elements[0].rigid_zone.length_i = 200.0;
@@ -680,7 +681,7 @@ fn angled_rotated_rigid_and_released_members_preserve_geometry_mass() {
 
 #[test]
 fn direct_mass_api_retains_errors_instead_of_density_or_zero_fallbacks() {
-    let mut model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+    let mut model = src_fixture(0, 400.0);
     model.materials[0].density = f64::NAN;
     let data = &model.elements[0];
     let beam = BeamElement::try_new(data, &model).unwrap();
@@ -830,7 +831,7 @@ fn beam_delegates_share_both_mass_forms_and_reject_the_same_resolver_failure() {
     use sepika_element::wall::side_column::{InPlaneReleasedColumn, ReleaseAxis};
     use sepika_material::uniaxial::Bilinear;
     for invalid in [false, true] {
-        let mut model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+        let mut model = src_fixture(0, 400.0);
         if invalid {
             model.materials[0].density = f64::NAN;
         }
@@ -879,7 +880,7 @@ fn src_physical_self_weight_shares_inertial_mass_while_design_dl_distribution_is
         ElementKind::Fiber,
         ElementKind::MultiSpring,
     ] {
-        let mut model = fixture(Some(src(0, 400.0)), MaterialCategory::Concrete);
+        let mut model = src_fixture(0, 400.0);
         model.elements[0].kind = kind;
         let (nodal, member) =
             sepika_load::self_weight::self_weight_case_content(&model, &LoadCfg::default())

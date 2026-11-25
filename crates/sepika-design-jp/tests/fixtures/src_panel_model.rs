@@ -30,6 +30,7 @@ pub fn input_model() -> Model {
         steel_width: 200.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 13.0,
+        steel_manufacture: Default::default(),
     };
     let beam = SectionShape::RcBeamRect {
         b: 300.0,
@@ -219,6 +220,7 @@ pub fn short_model(beam: ShortBeam) -> Model {
                 steel_width: 150.0,
                 steel_web_thick: 8.0,
                 steel_flange_thick: 13.0,
+                steel_manufacture: Default::default(),
             };
             *beam_section = Section {
                 frame_use: beam_section.frame_use,

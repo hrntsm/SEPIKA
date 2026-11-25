@@ -25,10 +25,11 @@ fn direct_input_main_rebar_strength_is_used_by_fiber_ms_and_mn_surface() {
         b,
         d,
         rebar: rebar.clone(),
-        steel_height: 400.0,
-        steel_width: 200.0,
-        steel_web_thick: 8.0,
+        steel_height: 300.0,
+        steel_width: 150.0,
+        steel_web_thick: 45.0,
         steel_flange_thick: 13.0,
+        steel_manufacture: sepika_core::section_shape::SrcHManufacture::BuiltUp,
     });
     src.sections[0].steel_material = Some(MaterialId(3));
     src.materials.push(Material {
@@ -39,9 +40,9 @@ fn direct_input_main_rebar_strength_is_used_by_fiber_ms_and_mn_surface() {
         strength_factor: Some(1.05),
         ..rc.materials[1].clone()
     });
-    let src_steel_area_mm2 = 8192.0;
+    let src_steel_plastic_axial_n = 3_567_450.0;
 
-    for (mut model, steel_area_mm2) in [(rc, 0.0), (src, src_steel_area_mm2)] {
+    for (mut model, steel_plastic_axial_n) in [(rc, 0.0), (src, src_steel_plastic_axial_n)] {
         for (element_kind, view_kind) in [
             (ElementKind::Fiber, AnalysisHingeModel::Fiber),
             (ElementKind::MultiSpring, AnalysisHingeModel::MultiSpring),
@@ -128,12 +129,12 @@ fn direct_input_main_rebar_strength_is_used_by_fiber_ms_and_mn_surface() {
                 let view = build_hinge_view(data, &model, basis, kind, 0.0, 8, 8).unwrap();
                 assert_eq!(view.model, view_kind);
                 let n_tens = view.mn_surface.unwrap().n_tens;
-                let steel_fy = match basis {
-                    StrengthBasis::MaterialStrength => 246.75,
-                    StrengthBasis::Nominal => 235.0,
+                let steel_factor = match basis {
+                    StrengthBasis::MaterialStrength => 1.05,
+                    StrengthBasis::Nominal => 1.0,
                 };
                 let expected_n_tens =
-                    rebar.total_main_area() * expected_fy + steel_area_mm2 * steel_fy;
+                    rebar.total_main_area() * expected_fy + steel_plastic_axial_n * steel_factor;
                 assert!((n_tens - expected_n_tens).abs() < 1e-6, "{element_kind:?} {name} {concrete_factor:?} {rebar_factor:?} {basis:?}: {n_tens} != {expected_n_tens}");
             }
         }

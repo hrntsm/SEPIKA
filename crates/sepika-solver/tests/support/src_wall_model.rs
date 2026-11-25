@@ -24,6 +24,7 @@ pub fn input_model(embedded: bool) -> Model {
         steel_width: 150.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: sepika_core::section_shape::SrcHManufacture::BuiltUp,
     });
     column.steel_material = Some(MaterialId(3));
     let beam = &mut model.sections[1];
@@ -38,6 +39,7 @@ pub fn input_model(embedded: bool) -> Model {
         steel_width: 150.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: sepika_core::section_shape::SrcHManufacture::BuiltUp,
     });
     beam.steel_material = Some(MaterialId(3));
     model.sections[2].shape = Some(SectionShape::RcWall {

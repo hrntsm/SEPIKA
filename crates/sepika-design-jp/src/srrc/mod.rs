@@ -533,6 +533,7 @@ impl SrcDesign {
                 steel_width,
                 steel_web_thick,
                 steel_flange_thick,
+                ..
             } => {
                 if ctx.kind == MemberKind::Column {
                     return Err(
@@ -571,6 +572,7 @@ impl SrcDesign {
                 steel_width,
                 steel_web_thick,
                 steel_flange_thick,
+                ..
             } => {
                 if matches!(ctx.kind, MemberKind::Girder | MemberKind::Brace) {
                     return Err(

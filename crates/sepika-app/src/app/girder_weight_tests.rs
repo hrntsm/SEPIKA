@@ -641,6 +641,7 @@ fn girder_overlap_only_applies_to_rectangular_rc_src_girders() {
         steel_width: 150.,
         steel_web_thick: 8.,
         steel_flange_thick: 12.,
+        steel_manufacture: Default::default(),
     });
     src.sections[1].steel_material = Some(MaterialId(0));
     assert!((weight(&src) - 31680.).abs() < 1e-6);

@@ -75,6 +75,7 @@ pub(crate) fn src_rect_shape(
         steel_width,
         steel_web_thick,
         steel_flange_thick,
+        steel_manufacture: Default::default(),
     }
 }
 
@@ -120,6 +121,7 @@ pub(crate) fn src_beam_rect_shape(
         steel_width,
         steel_web_thick,
         steel_flange_thick,
+        steel_manufacture: Default::default(),
     }
 }
 
@@ -160,6 +162,7 @@ pub(crate) fn src_column_rect_shape(
         steel_width,
         steel_web_thick,
         steel_flange_thick,
+        steel_manufacture: Default::default(),
     }
 }
 

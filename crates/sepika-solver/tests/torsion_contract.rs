@@ -183,6 +183,7 @@ fn public_src_analysis_uses_gc_of_concrete_assigned_to_section() {
             steel_width: 200.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 12.0,
+            steel_manufacture: Default::default(),
         },
         ElementKind::Beam,
     );

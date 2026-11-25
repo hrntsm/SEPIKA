@@ -143,7 +143,7 @@ fn mesh_h_plates(
     web_thick: f64,
     flange_thick: f64,
     target: f64,
-    mat: FiberMat,
+    [mat, web_mat]: [FiberMat; 2],
 ) {
     let hw = height - 2.0 * flange_thick;
     mesh_rect(
@@ -162,7 +162,7 @@ fn mesh_h_plates(
         target,
         mat,
     );
-    mesh_rect(fibers, [0.0, 0.0], web_thick, hw, target, mat);
+    mesh_rect(fibers, [0.0, 0.0], web_thick, hw, target, web_mat);
 }
 
 fn mesh_src_concrete(
@@ -577,6 +577,20 @@ pub fn plastic_fibers_at(
         young: strength.steel_e,
         region: FiberRegion::Steel,
     };
+    let src_web = if let Some(fy) = strength.src_web_fy {
+        if !fy.is_finite() || fy <= 0.0 {
+            return Err(RebarGeometryError::SectionGeometry(
+                "SRCウェブの降伏強度は正の有限値が必要です".into(),
+            ));
+        }
+        FiberMat {
+            sigma_t: fy,
+            sigma_c: -fy,
+            ..steel
+        }
+    } else {
+        steel
+    };
     let conc = FiberMat {
         sigma_t: 0.0,
         sigma_c: -fc,
@@ -600,7 +614,7 @@ pub fn plastic_fibers_at(
                 web_thick,
                 flange_thick,
                 target,
-                steel,
+                [steel, steel],
             );
             mesh_root_fillets(
                 &mut fibers,
@@ -853,6 +867,7 @@ pub fn plastic_fibers_at(
             steel_width,
             steel_web_thick,
             steel_flange_thick,
+            ..
         } => {
             mesh_src_concrete(
                 &mut fibers,
@@ -881,7 +896,7 @@ pub fn plastic_fibers_at(
                 steel_web_thick,
                 steel_flange_thick,
                 target,
-                steel,
+                [steel, src_web],
             );
         }
         SectionShape::SrcColumnRect {
@@ -892,6 +907,7 @@ pub fn plastic_fibers_at(
             steel_width,
             steel_web_thick,
             steel_flange_thick,
+            ..
         } => {
             mesh_src_concrete(
                 &mut fibers,
@@ -920,7 +936,7 @@ pub fn plastic_fibers_at(
                 steel_web_thick,
                 steel_flange_thick,
                 target,
-                steel,
+                [steel, src_web],
             );
         }
         SectionShape::CftBox {
@@ -1309,7 +1325,10 @@ mod rounded_tests {
                         }
                     }
                 }
-                eprintln!("{shape:?}, divisions={divisions}, fibers={}, max_I={max_i_error:.9e}, capacity_signed=[{min_error:.9e},{max_error:.9e}]", fibers.len());
+                eprintln!(
+                    "{shape:?}, divisions={divisions}, fibers={}, max_I={max_i_error:.9e}, capacity_signed=[{min_error:.9e},{max_error:.9e}]",
+                    fibers.len()
+                );
             }
         }
     }

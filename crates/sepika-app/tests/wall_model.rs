@@ -699,6 +699,7 @@ fn rotated_src_and_cft_side_columns_run_linear_analysis() {
                 steel_width: 250.0,
                 steel_web_thick: 12.0,
                 steel_flange_thick: 20.0,
+                steel_manufacture: Default::default(),
             }
         };
         let old = app.core.model.sections[3].clone();

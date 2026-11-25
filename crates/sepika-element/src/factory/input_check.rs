@@ -787,11 +787,13 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                 SectionShape::SrcBeamRect {
                     steel_web_thick,
                     steel_flange_thick,
+                    steel_manufacture,
                     ..
                 }
                 | SectionShape::SrcColumnRect {
                     steel_web_thick,
                     steel_flange_thick,
+                    steel_manufacture,
                     ..
                 } => {
                     if data.kind != ElementKind::Beam
@@ -802,6 +804,7 @@ pub(crate) fn member_strength_issue(data: &ElementData, model: &Model) -> Option
                     {
                         return crate::frame::fiber::resolve_src_fiber_fy(
                             steel_mat,
+                            *steel_manufacture,
                             *steel_web_thick,
                             *steel_flange_thick,
                         )

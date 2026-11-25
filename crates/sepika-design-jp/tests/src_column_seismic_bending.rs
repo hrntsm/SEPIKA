@@ -46,6 +46,7 @@ fn section() -> Section {
         steel_width: 200.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 13.0,
+        steel_manufacture: Default::default(),
     }
     .to_section(SectionId(0), "SRC 600角".into())
 }

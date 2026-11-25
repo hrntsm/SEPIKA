@@ -46,5 +46,5 @@ pub use shear::{
 };
 pub use types::{
     one_bar_area, BeamStirrup, CircleColumnHoop, RcBeamRebar, RcCircleColumnRebar,
-    RcRectColumnRebar, RebarPoint, RectColumnHoop, SectionShape,
+    RcRectColumnRebar, RebarPoint, RectColumnHoop, SectionShape, SrcHManufacture,
 };

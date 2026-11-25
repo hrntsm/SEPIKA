@@ -271,14 +271,21 @@ pub(crate) fn analysis_plastic_fibers(
             .fibers
             .iter()
             .zip(mats.iter())
-            .map(|(f, mat)| to_plastic_fiber(f, &strength, mat.probe(0.0).1))
+            .map(|(f, mat)| {
+                to_plastic_fiber(f, &strength, mat.probe(0.0).1, mat.reference_stress())
+            })
             .collect(),
     ))
 }
 
 /// ファイバの材料区分タグ（0=コンクリート／1=主筋／2=鋼材）から全塑性計算用の
 /// 限界応力・弾性係数・領域区分を決める。
-fn to_plastic_fiber(f: &Fiber, strength: &StrengthParams, concrete_e: f64) -> PlasticFiber {
+fn to_plastic_fiber(
+    f: &Fiber,
+    strength: &StrengthParams,
+    concrete_e: f64,
+    reference_stress: f64,
+) -> PlasticFiber {
     match f.material {
         1 => PlasticFiber {
             y: f.y,
@@ -293,8 +300,8 @@ fn to_plastic_fiber(f: &Fiber, strength: &StrengthParams, concrete_e: f64) -> Pl
             y: f.y,
             z: f.z,
             area: f.area,
-            sigma_t: strength.steel_fy,
-            sigma_c: -strength.steel_fy,
+            sigma_t: reference_stress,
+            sigma_c: -reference_stress,
             young: strength.steel_e,
             region: FiberRegion::Steel,
         },
@@ -475,6 +482,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 9.0,
             steel_flange_thick: 12.0,
+            steel_manufacture: sepika_core::section_shape::SrcHManufacture::BuiltUp,
         }
     }
 
@@ -819,7 +827,7 @@ mod tests {
             strength_factor: None,
             concrete_class: Default::default(),
             id: MaterialId(2),
-            name: "SN490".into(),
+            name: "SN490B".into(),
             category: MaterialCategory::Steel,
             young: 198_000.0,
             poisson: 0.3,
@@ -1094,6 +1102,7 @@ mod tests {
                 thick: 100.001,
             },
         ] {
+            let is_src = matches!(shape, SectionShape::SrcColumnRect { .. });
             let mut model = make_model(Some(shape), Some(24.0));
             model.materials[0].category = MaterialCategory::Concrete;
             model.materials[0].fy = Some(999.0);
@@ -1123,7 +1132,12 @@ mod tests {
                     )
                     .is_none());
                     let reason = crate::factory::ensure_nonlinear_input(&model).unwrap_err();
-                    assert!(reason.contains("適用範囲"), "{reason}");
+                    let expected = if is_src && name == "SM520" {
+                        "種類記号が不完全"
+                    } else {
+                        "適用範囲"
+                    };
+                    assert!(reason.contains(expected), "{reason}");
                     assert!(analysis_plastic_fibers(
                         &data,
                         &model,
@@ -1139,8 +1153,14 @@ mod tests {
             model.materials[1].name = "任意鋼材".into();
             for fy in [177.0, 235.0, 335.0, 999.0] {
                 model.materials[1].fy = Some(fy);
-                assert_eq!(resolve_fiber_yield(&model, &data).steel, Some(fy));
-                assert!(crate::factory::ensure_nonlinear_input(&model).is_ok());
+                assert_eq!(
+                    resolve_fiber_yield(&model, &data).steel,
+                    (!is_src).then_some(fy)
+                );
+                assert_eq!(
+                    crate::factory::ensure_nonlinear_input(&model).is_ok(),
+                    !is_src
+                );
             }
         }
     }

@@ -100,6 +100,7 @@ fn test_beam_new_src_cft_composite_props() {
         steel_width: 200.0,
         steel_web_thick: 9.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: Default::default(),
     };
     let cft_shape = SectionShape::CftBox {
         corner_r: Some(0.0),
@@ -1038,6 +1039,7 @@ fn test_src_beam_slab_stiffness_falls_back_to_one() {
         steel_width: 200.0,
         steel_web_thick: 9.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: Default::default(),
     });
     let got = stiffness_breakdown(&m_plated, &e).unwrap();
     assert!(

@@ -1472,6 +1472,7 @@ fn secondary_rectangular_and_steel_paths_are_preserved() {
             steel_width: 100.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 10.0,
+            steel_manufacture: Default::default(),
         },
     ] {
         model.sections[0] = with_rc_materials(shape.to_section(SectionId(0), "矩形".into()));
@@ -3247,6 +3248,7 @@ fn 梁の実材軸と床の独立した鉛直偏心から接触上下端を求�
                         steel_width: 200.0,
                         steel_web_thick: 10.0,
                         steel_flange_thick: 20.0,
+                        steel_manufacture: Default::default(),
                     }
                     .to_section(SectionId(0), "SRC梁".into()),
                 );

@@ -1113,6 +1113,7 @@ mod tests {
                 steel_width: 200.0,
                 steel_web_thick: 10.0,
                 steel_flange_thick: 20.0,
+                steel_manufacture: Default::default(),
             }
         } else {
             SectionShape::RcBeamRect {

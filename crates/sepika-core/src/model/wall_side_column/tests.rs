@@ -432,6 +432,7 @@ fn src_shape() -> SectionShape {
         steel_width: 200.,
         steel_web_thick: 8.,
         steel_flange_thick: 12.,
+        steel_manufacture: Default::default(),
     }
 }
 
@@ -466,6 +467,7 @@ fn c13_c14_src_is_recognized_for_symmetric_and_one_sided_frames() {
                 steel_width: 200.,
                 steel_web_thick: 8.,
                 steel_flange_thick: 12.,
+                steel_manufacture: Default::default(),
             });
             model.sections[1].steel_material = Some(MaterialId(1));
         }

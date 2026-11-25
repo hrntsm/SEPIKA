@@ -1401,6 +1401,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 10.0,
             steel_flange_thick: 16.0,
+            steel_manufacture: Default::default(),
         }
         .to_section(SectionId(0), "役割別SRC柱".into());
         for (id, name, category, fc, fy) in [

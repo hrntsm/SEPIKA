@@ -194,6 +194,7 @@ mod tests {
                         steel_width,
                         steel_web_thick,
                         steel_flange_thick: 14.0,
+                        steel_manufacture: Default::default(),
                     },
                     frame_use: Some(sepika_core::model::FrameSectionUse::Column),
                 })

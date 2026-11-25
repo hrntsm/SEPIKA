@@ -42,6 +42,7 @@ fn section() -> Section {
         steel_width: 200.0,
         steel_web_thick: 9.0,
         steel_flange_thick: 14.0,
+        steel_manufacture: Default::default(),
     }
     .to_section(SectionId(0), "SRC柱".into())
 }

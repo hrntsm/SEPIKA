@@ -9595,6 +9595,7 @@ fn test_preparation_rejects_src_without_fc() {
         steel_width: 200.0,
         steel_web_thick: 9.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: Default::default(),
     };
 
     let mut model = crate::sample::portal_frame();
@@ -10499,6 +10500,7 @@ fn test_wall_has_src_boundary_column() {
         steel_width: 300.0,
         steel_web_thick: 10.0,
         steel_flange_thick: 15.0,
+        steel_manufacture: Default::default(),
     };
     let rc_shape = SectionShape::RcColumnRect {
         b: 600.0,
@@ -11373,6 +11375,7 @@ fn src_loaded_and_edited_materials_never_use_provisional_analysis_properties() {
         steel_width: 200.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: Default::default(),
     };
     let mut model = crate::sample::portal_frame();
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
