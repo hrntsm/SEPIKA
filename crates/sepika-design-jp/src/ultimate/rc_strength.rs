@@ -61,50 +61,42 @@ pub(super) fn member_shear_strength(
     props: &RcBarProps,
     fc: f64,
     axial_n: f64,
-    l_clear: f64,
     moment_nmm: f64,
-    shear_n: Option<f64>,
+    shear_n: f64,
     shear_rebar: Option<&Material>,
 ) -> Result<f64, &'static str> {
-    let shear_n = shear_n.ok_or("せん断スパン比の算定には確定総応答のMとQが必要です")?;
     if !props.at.is_finite() || props.at <= 0.0 || !props.d_eff.is_finite() || props.d_eff <= 0.0 {
         return Err("荒川mean式に必要な引張鉄筋面積または有効せいを確認できません");
     }
-    let pw = if props.shear_legs > 0 && props.shear_dia.designation_or_diameter_mm() > 0.0 {
-        if !props.shear_pitch.is_finite() || props.shear_pitch <= 0.0 {
-            return Err("荒川mean式に必要なせん断補強筋の間隔は正の有限値としてください");
-        }
-        if !props.pw.is_finite() || props.pw <= 0.0 {
-            return Err("せん断補強筋比を確認できません");
-        }
-        props.pw
+    if props.shear_legs == 0 || props.shear_dia.designation_or_diameter_mm() <= 0.0 {
+        return Err("検討方向のせん断補強筋を確認できません");
+    }
+    if !props.shear_pitch.is_finite() || props.shear_pitch <= 0.0 {
+        return Err("荒川mean式に必要なせん断補強筋の間隔は正の有限値としてください");
+    }
+    if !props.pw.is_finite() || props.pw <= 0.0 {
+        return Err("せん断補強筋比を確認できません");
+    }
+    let material = shear_rebar.ok_or("せん断補強筋の降伏強度を確認できません")?;
+    let fy = shear_rebar_yield_strength(Some(material))
+        .filter(|fy| fy.is_finite())
+        .ok_or("せん断補強筋の降伏強度を確認できません")?;
+    let grade = material.name.trim();
+    let nominal_fy = rebar_f_value(grade).ok_or("せん断補強筋の基準強度を確認できません")?;
+    let limit = if grade.starts_with("SR") {
+        295.0
     } else {
-        0.0
+        490.0
     };
-    let sigma_wy = if pw == 0.0 {
-        0.0
-    } else {
-        let material = shear_rebar.ok_or("せん断補強筋の降伏強度を確認できません")?;
-        let fy = shear_rebar_yield_strength(Some(material))
-            .filter(|fy| fy.is_finite())
-            .ok_or("せん断補強筋の降伏強度を確認できません")?;
-        let grade = material.name.trim();
-        let nominal_fy = rebar_f_value(grade).ok_or("せん断補強筋の基準強度を確認できません")?;
-        let limit = if grade.starts_with("SR") {
-            295.0
-        } else {
-            490.0
-        };
-        if fy > limit {
-            return Err(
-                "荒川mean式のせん断補強筋の強度上限（丸鋼295・異形490 N/mm²）を超えています",
-            );
-        }
-        if fy > nominal_fy {
-            return Err("荒川mean式に用いるせん断補強筋の降伏強度が材種の基準強度を超えています");
-        }
-        fy
-    };
+    if fy > limit {
+        return Err("荒川mean式のせん断補強筋の強度上限（丸鋼295・異形490 N/mm²）を超えています");
+    }
+    if fy > nominal_fy {
+        return Err("荒川mean式に用いるせん断補強筋の降伏強度が材種の基準強度を超えています");
+    }
+    if fy < nominal_fy {
+        return Err("荒川mean式に用いるせん断補強筋の降伏強度が材種の基準強度を下回っています");
+    }
     let shear_span_ratio = if shear_n == 0.0 {
         if moment_nmm == 0.0 {
             return Err("確定総応答のMとQがともにゼロのためせん断スパン比を定められません");
@@ -120,9 +112,9 @@ pub(super) fn member_shear_strength(
         at: props.at,
         sigma_y: 0.0,
         fc,
-        pw,
-        sigma_wy,
-        clear_span: l_clear,
+        pw: props.pw,
+        sigma_wy: nominal_fy,
+        clear_span: 0.0,
         sigma_0: axial_n / (props.b_dir * props.d_dir),
     };
     let qsu = sepika_core::rc_capacity::rc_qsu_arakawa_mean(&input, shear_span_ratio);

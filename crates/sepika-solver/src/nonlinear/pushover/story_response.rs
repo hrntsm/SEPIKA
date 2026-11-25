@@ -1023,7 +1023,6 @@ mod tests {
         let member = |id| PushoverMemberResponse {
             elem: ElemId(id),
             axial: 0.0,
-            min_axial_for_shear_n: None,
             m_strong: 0.0,
             m_weak: 0.0,
             shear_strong: 0.0,
@@ -1031,6 +1030,7 @@ mod tests {
             rp: 0.0,
             horizontal_force: 0.0,
             wall_shear_signed: None,
+            rc_ultimate_shear: None,
         };
         let mut invalid = member(17);
         invalid.axial = f64::NAN;

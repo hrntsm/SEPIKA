@@ -257,9 +257,6 @@ pub struct PushoverMemberResponse {
     pub shear_weak: f64,
     /// 部材軸力 `[N]`（**圧縮正**、両端のうち圧縮側の代表値）。
     pub axial: f64,
-    /// 材端断面力で区間の極値を確定できる場合の最小軸力 [N]（圧縮正）。
-    #[serde(default)]
-    pub min_axial_for_shear_n: Option<f64>,
     /// 終局時の部材変形角 Rp `[rad]`（弦回転角＝層間変形角相当の近似）。
     pub rp: f64,
     /// 終局時に部材が負担する**加力方向の水平力** `[N]`（材端力の載荷方向成分の
@@ -268,6 +265,9 @@ pub struct PushoverMemberResponse {
     pub horizontal_force: f64,
     /// 壁下辺a→bを正とする壁の面内せん断力 `[N]`。壁以外はNone。
     pub wall_shear_signed: Option<f64>,
+    /// 荷重のない内法区間で確認したRC終局せん断検定用内力。区間を確認できなければ `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rc_ultimate_shear: Option<sepika_core::rc_capacity::RcUltimateShearActions>,
 }
 
 /// ヒンジ詳細図用の部材応答履歴（1 部材分）。結果サイズを抑えるため、ヒンジまたは

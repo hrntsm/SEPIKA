@@ -169,15 +169,7 @@ pub fn beam_qd1_clear_span(
     }) {
         return Err("QD1用にハンチ付きの梁の端部断面を確定できません".into());
     }
-    if model.beam_has_attached_slab(elem)
-        || model.floor_assignment_regions.regions.iter().any(|region| {
-            region.assignment.plate().is_some()
-                && region
-                    .boundary
-                    .iter()
-                    .any(|edge| edge.support == SupportMemberId::Primary(elem.id))
-        })
-    {
+    if beam_supports_slab(model, elem) {
         return Err("QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません".into());
     }
     if !elem.kind.is_primary_frame_support() {
@@ -258,6 +250,18 @@ pub fn beam_qd1_clear_span(
         return Err("QD1に必要な有限で正の内法長さが成立しません".into());
     }
     Ok(span_mm)
+}
+
+/// 部材の一部でも、実際に割り当てられた床板を支持する場合に true。
+pub(crate) fn beam_supports_slab(model: &Model, elem: &ElementData) -> bool {
+    model.beam_has_attached_slab(elem)
+        || model.floor_assignment_regions.regions.iter().any(|region| {
+            region.assignment.plate().is_some()
+                && region
+                    .boundary
+                    .iter()
+                    .any(|edge| edge.support == SupportMemberId::Primary(elem.id))
+        })
 }
 
 fn transmits_bending(condition: EndCondition) -> bool {

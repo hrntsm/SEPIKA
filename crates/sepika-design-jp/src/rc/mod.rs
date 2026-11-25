@@ -24,6 +24,7 @@ pub(crate) mod section_props;
 mod shear_capacity;
 
 pub use beam::beam_qd1_clear_span;
+pub(crate) use beam::beam_supports_slab;
 pub use bond::{rc_beam_bond_check_1991, Bond1991Result, BondCheckResult};
 pub(crate) use bond::{rc_beam_bond_check_1991_with_rebar, rc_beam_bond_check_with_rebar};
 pub use clear_span::{rc_member_clear_span, RcClearSpanError};

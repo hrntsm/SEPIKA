@@ -1680,7 +1680,7 @@ fn test_effective_clear_span_falls_back_when_non_positive() {
 
 /// RC矩形断面 + 配筋情報を持つ要素モデル（剛域テスト共通）。
 /// 節点間距離3000mm、`rigid_zone` は呼び出し側で差し替える。
-fn rc_column_model_with_rigid_zone(
+pub(super) fn rc_column_model_with_rigid_zone(
     rigid_zone: RigidZone,
 ) -> (
     Model,

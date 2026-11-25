@@ -316,7 +316,7 @@ fn ultimate_withholds_shear_and_bond_and_keeps_independent_moment_and_axial_capa
             );
             assert!(partial.qsu.is_nan() && partial.shear_margin.is_nan());
             assert!(partial.bond_stress.is_none() && partial.bond_margin.is_nan());
-            assert!(partial.biaxial_shear_margin.is_none());
+            assert!(partial.weak_shear_margin.is_none());
             assert_eq!(partial.mu, normal.mu);
             assert_eq!(
                 partial.biaxial_bending_margin,
@@ -387,7 +387,7 @@ fn ultimate_requires_finite_positive_shear_rebar_fy() {
             } else {
                 assert_eq!(partial.bond_margin, normal.bond_margin);
             }
-            assert!(partial.biaxial_shear_margin.is_none());
+            assert!(partial.weak_shear_margin.is_none());
             assert_eq!(partial.mu, normal.mu);
             assert_eq!(
                 partial.biaxial_bending_margin,
@@ -444,10 +444,7 @@ fn arakawa_mean_uses_unamplified_shear_rebar_strength_and_checks_its_limits() {
             model.materials[material].strength_factor = Some(1.1);
             let not_amplified = ultimate(&model, demand, &opts);
             assert_eq!(not_amplified.qsu, baseline.qsu);
-            assert_eq!(
-                not_amplified.biaxial_shear_margin,
-                baseline.biaxial_shear_margin
-            );
+            assert_eq!(not_amplified.weak_shear_margin, baseline.weak_shear_margin);
 
             model.materials[material].fy = Some(nominal.next_up());
             let above = ultimate(&model, demand, &opts);
@@ -455,7 +452,7 @@ fn arakawa_mean_uses_unamplified_shear_rebar_strength_and_checks_its_limits() {
                 above.qsu.is_nan() && above.shear_margin.is_nan(),
                 "{above:?}"
             );
-            assert_eq!(above.biaxial_shear_margin, None);
+            assert_eq!(above.weak_shear_margin, None);
             assert!(
                 above
                     .unchecked_reason
@@ -557,7 +554,7 @@ fn allowable_shear_uses_the_supported_grade_table_with_infinite_fy() {
 }
 
 #[test]
-fn ultimate_retains_confirmed_shear_failure_without_reinforcement_contribution() {
+fn ultimate_is_unchecked_without_shear_reinforcement() {
     for (mut model, member) in rc_members().into_iter().take(2) {
         set_ultimate_input(&mut model);
         match model.sections[0].shape.as_mut().unwrap() {
@@ -579,10 +576,11 @@ fn ultimate_retains_confirmed_shear_failure_without_reinforcement_contribution()
         };
         let baseline = ultimate(&normal, demand, &opts);
         let partial = ultimate(&model, demand, &opts);
-        assert_eq!(partial.qsu, baseline.qsu);
-        assert_eq!(partial.shear_margin, baseline.shear_margin);
-        assert!(partial.shear_margin < 1.0, "{partial:?}");
-        assert!(!partial.ok && partial.unchecked_reason.is_none());
+        for check in [&baseline, &partial] {
+            assert!(check.qsu.is_nan() && check.shear_margin.is_nan());
+            assert!(!check.ok && check.unchecked_reason.is_some());
+            assert!(check.detail.contains("せん断補強筋を確認できません"));
+        }
         assert!(partial.bond_stress.is_none() && baseline.bond_stress.is_none());
         assert!(partial.bond_margin.is_nan() && baseline.bond_margin.is_nan());
         assert_diagnostic(&partial.detail, &model, member, MaterialCategory::Concrete);
@@ -590,7 +588,7 @@ fn ultimate_retains_confirmed_shear_failure_without_reinforcement_contribution()
 }
 
 #[test]
-fn ultimate_retains_weak_axis_failure_if_only_its_shear_capacity_is_independent() {
+fn ultimate_is_unchecked_without_weak_axis_shear_reinforcement() {
     let mut model = rc_column::column_model(false, 0.0);
     model.load_cases = default_load_cases();
     model.combinations = default_combinations();
@@ -615,10 +613,12 @@ fn ultimate_retains_weak_axis_failure_if_only_its_shear_capacity_is_independent(
         &opts,
     );
     assert!(damage.shear_margin.is_nan());
-    assert!(damage.biaxial_shear_margin.is_none());
-    assert!(!damage.ok && damage.unchecked_reason.is_none());
+    assert!(damage.weak_shear_margin.is_none());
+    assert!(!damage.ok && damage.unchecked_reason.is_some());
     assert!(
-        damage.detail.contains("弱軸せん断耐力を超えます"),
+        damage
+            .detail
+            .contains("弱軸せん断は未算定（検討方向のせん断補強筋を確認できません"),
         "{damage:?}"
     );
     assert_diagnostic(&damage.detail, &model, "RC柱", MaterialCategory::Steel);

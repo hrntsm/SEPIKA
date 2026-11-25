@@ -439,8 +439,8 @@ fn actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallbac
         close(d.rp.unwrap(), r.rp);
         check_app(&mut app, cft, 150000.0, d.shear);
         if !cft {
-            close(r.min_axial_for_shear_n.unwrap(), 150000.0);
-            close(d.min_axial_for_shear_n.unwrap(), 150000.0);
+            close(r.rc_ultimate_shear.unwrap().axial_range_n[0], 150000.0);
+            assert_eq!(d.rc_ultimate_shear, r.rc_ultimate_shear);
             close(d.shear.unwrap(), 39_694.589_12);
             #[cfg(feature = "gui")]
             {
@@ -457,7 +457,10 @@ fn actual_rc_cft_confirmed_run_reaches_app_checks_without_ql_addition_or_fallbac
                 .as_deref()
                 .unwrap()
                 .contains("終局付着を未算定"));
-            assert!(check.biaxial_shear_margin.unwrap() < check.shear_margin);
+            assert!(check.weak_shear_margin.unwrap() > 0.0);
+            assert!(check
+                .detail
+                .contains("二軸同時作用に対する終局せん断は未算定"));
             close(check.qmu, d.shear.unwrap().abs());
         }
         let accepted = app.core.scoped.results.clone().unwrap();
@@ -1206,7 +1209,8 @@ fn actual_rc_beam_with_verified_zero_axial_force_displays_arakawa_mean_capacity(
         .iter()
         .find(|member| member.elem == ElemId(1))
         .unwrap();
-    assert_eq!(member.min_axial_for_shear_n, Some(0.0), "{member:?}");
+    let actions = member.rc_ultimate_shear.unwrap();
+    assert_eq!(actions.axial_range_n, [0.0; 2]);
     po.capacity_evaluation = Some(
         po.evaluation_point(
             EvaluationPurpose::HoldingCapacity,
@@ -1219,7 +1223,7 @@ fn actual_rc_beam_with_verified_zero_axial_force_displays_arakawa_mean_capacity(
 
     let demands = app.ultimate_demand_by_elem().unwrap();
     let demand = &demands.iter().find(|(id, _)| *id == ElemId(1)).unwrap().1;
-    assert_eq!(demand.min_axial_for_shear_n, Some(0.0));
+    assert_eq!(demand.rc_ultimate_shear, Some(actions));
     let checks = app.compute_ultimate_checks().unwrap();
     let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
     // Fc24・400×600、主筋4-D22相当、補強筋2-D10相当@100、N=0、M/(Qd)の上限3。
@@ -1233,6 +1237,216 @@ fn actual_rc_beam_with_verified_zero_axial_force_displays_arakawa_mean_capacity(
             assert!(labels.iter().any(|label| label == text), "{labels:?}");
         }
     }
+
+    for has_shear_evidence in [true, false] {
+        if !has_shear_evidence {
+            let po = app
+                .core
+                .scoped
+                .results
+                .as_mut()
+                .unwrap()
+                .pushover_y
+                .as_mut()
+                .unwrap();
+            for response in po.confirmed_history.as_mut().unwrap() {
+                for member in &mut response.members {
+                    member.rc_ultimate_shear = None;
+                }
+            }
+        }
+        let path = std::env::temp_dir().join(format!(
+            "sepika1873-face-{has_shear_evidence}-{}.ovika",
+            std::process::id()
+        ));
+        app.save_project_to(path.clone());
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let mut loaded = App::default();
+        loaded.open_project_from(path.clone());
+        std::fs::remove_file(path).unwrap();
+        assert!(
+            loaded.core.scoped.last_error.is_none(),
+            "{:?}",
+            loaded.core.scoped.last_error
+        );
+        loaded.core.ultimate_use_pushover = true;
+        let checks = loaded.compute_ultimate_checks().unwrap();
+        let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
+        close(beam.qmu, 10_000.0);
+        if has_shear_evidence {
+            close(beam.qsu, 332_617.813_860_871_25);
+            close(beam.shear_margin, 33.261_781_386_087_13);
+        } else {
+            assert!(beam.qsu.is_nan() && beam.shear_margin.is_nan());
+            assert!(
+                beam.mu.is_finite() && beam.detail.contains("増分解析を再実行してください"),
+                "{beam:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn actual_rc_beam_shear_uses_a_valid_physical_span_even_if_legacy_span_is_negative() {
+    use sepika_core::dof::{Dof, Dof6Mask};
+    use sepika_core::model::{ForceRegime, PanelZoneMode, RcBeamReference, RigidZone, ZoneSource};
+    use sepika_core::section_shape::{RebarSize, StandardRebar};
+
+    let mut model = beam_model(&[3], &[3]);
+    model.panel_zone = PanelZoneMode::None;
+    model.nodes[3].coord[0] = 1_500.0;
+    model.nodes[3].restraint = Dof6Mask::FIXED;
+    model.nodes[3].restraint.set_free(Dof::Uz);
+    let SectionShape::RcBeamRect { rebar, .. } = model.sections[1].shape.clone().unwrap() else {
+        unreachable!()
+    };
+    let mut rebar = rebar;
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D19);
+    rebar.stirrup.dia = RebarSize::Standard(StandardRebar::D10);
+    let mut section = SectionShape::RcBeamRect {
+        b: 250.0,
+        d: 350.0,
+        rebar,
+    }
+    .to_section(SectionId(1), "検定梁".into());
+    section.frame_use = Some(FrameSectionUse::Girder);
+    section.material = Some(MaterialId(0));
+    section.rebar_material = Some(MaterialId(1));
+    section.shear_rebar_material = Some(MaterialId(1));
+    model.sections[1] = section;
+    model.elements[1].force_regime = ForceRegime::UniaxialBendingShear;
+    model.set_member_rc_beam_reference(
+        ElemId(1),
+        Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
+    );
+
+    let mut support = model.sections[0].clone();
+    let SectionShape::RcColumnRect { rebar, .. } = support.shape.take().unwrap() else {
+        unreachable!()
+    };
+    let mut rebar = rebar;
+    rebar.x = vec![4];
+    rebar.y = vec![10];
+    let mut section = SectionShape::RcColumnRect {
+        b: 400.0,
+        d: 2_000.0,
+        rebar,
+    }
+    .to_section(SectionId(2), "幅側で支持する柱".into());
+    section.frame_use = Some(FrameSectionUse::Column);
+    section.material = support.material;
+    section.rebar_material = support.rebar_material;
+    section.shear_rebar_material = support.shear_rebar_material;
+    model.sections.push(section);
+    for i in 0..2_u32 {
+        let mut base = model.nodes[2 + i as usize].clone();
+        base.id = NodeId(4 + i);
+        base.coord[2] = 0.0;
+        model.nodes.push(base);
+        let mut column = model.elements[0].clone();
+        column.id = ElemId(2 + i);
+        column.nodes = [NodeId(4 + i), NodeId(2 + i)].into_iter().collect();
+        column.section = Some(SectionId(2));
+        column.local_axis.ref_vector = [0.0, 1.0, 0.0];
+        model.elements.push(column);
+    }
+    for elem in &mut model.elements {
+        elem.rigid_zone = RigidZone {
+            source_i: ZoneSource::Manual,
+            source_j: ZoneSource::Manual,
+            ..Default::default()
+        };
+    }
+    model.load_cases[0].nodal.push(NodalLoad::manual(
+        NodeId(3),
+        [0.0, 0.0, -10_000.0, 0.0, 0.0, 0.0],
+    ));
+    let mut app = solve_beam_model(model);
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::Y);
+    app.core.analysis_cfg.push_dir = SeismicDir::Y;
+    app.core.analysis_cfg.push_steps = 3;
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.core.ultimate_use_pushover = true;
+    let po = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .pushover_y
+        .as_mut()
+        .unwrap();
+    let response = &po.confirmed_history.as_ref().unwrap()[1];
+    let actions = response
+        .members
+        .iter()
+        .find(|member| member.elem == ElemId(1))
+        .unwrap()
+        .rc_ultimate_shear
+        .unwrap();
+    assert_eq!(actions.axial_range_n, [0.0; 2]);
+    assert_eq!(actions.max_mq[1], (0.0, 0.0));
+    // 等断面・両端回転拘束で両端の実柱面まで200 mm。材端から200 mmの最外曲げはQ×550 mm。
+    close(actions.max_mq[0].0, 5_500_000.0);
+    close(actions.max_mq[0].1, 10_000.0);
+    po.capacity_evaluation = Some(
+        po.evaluation_point(
+            EvaluationPurpose::HoldingCapacity,
+            SeismicDir::Y,
+            response.step,
+            "実柱面間の単軸応答".into(),
+        )
+        .unwrap(),
+    );
+
+    let model = &app.core.model;
+    assert!(
+        sepika_design_jp::rc::rc_member_clear_span(&model.elements[1], model)
+            .unwrap_err()
+            .to_string()
+            .contains("正の内法長さが成立しません")
+    );
+    let checks = app.compute_ultimate_checks().unwrap();
+    let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
+    assert!(beam.mu.is_nan() && beam.bond_stress.is_none(), "{beam:?}");
+    assert!(beam
+        .unchecked_reason
+        .as_deref()
+        .unwrap()
+        .contains("ultimate_clear_span_invalid"));
+    close(beam.qmu, 10_000.0);
+    close(beam.qsu, 163_789.083_862_271);
+    close(beam.shear_margin, 16.378_908_386_227);
+
+    let saved = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .pushover_y
+        .as_mut()
+        .unwrap();
+    let selected = &mut saved.confirmed_history.as_mut().unwrap()[1];
+    selected
+        .members
+        .iter_mut()
+        .find(|member| member.elem == ElemId(1))
+        .unwrap()
+        .rc_ultimate_shear = None;
+    let checks = app.compute_ultimate_checks().unwrap();
+    let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
+    assert!(beam.qsu.is_nan() && beam.shear_margin.is_nan(), "{beam:?}");
 }
 
 #[test]
@@ -1286,7 +1500,7 @@ fn actual_rc_beam_with_member_load_displays_unavailable_capacity_and_reference_m
         .unwrap();
     let shear = member.shear_strong.abs();
     assert!(shear > 0.0);
-    assert_eq!(member.min_axial_for_shear_n, None);
+    assert_eq!(member.rc_ultimate_shear, None);
     po.capacity_evaluation = Some(
         po.evaluation_point(
             EvaluationPurpose::HoldingCapacity,

@@ -351,9 +351,12 @@ fn oblique_girder_does_not_establish_qd1_support_or_a_physical_face() {
 }
 
 #[test]
-fn a_slab_assigned_to_part_of_the_beam_blocks_only_qd1_dependent_demand() {
+fn a_slab_assigned_to_part_of_the_beam_blocks_qd1_and_rectangular_ultimate_shear() {
     use sepika_core::ids::{NodeId, SectionId, SlabId};
     use sepika_core::model::{PlateAssignment, Slab, SlabPlate, SlabShape, SupportMemberId};
+    use sepika_design_jp::ultimate::{
+        collect_rc_ultimate_checks, MemberDemand, UltimateShearOptions,
+    };
 
     let mut model = model();
     for (index, coord) in [
@@ -385,10 +388,35 @@ fn a_slab_assigned_to_part_of_the_beam_blocks_only_qd1_dependent_demand() {
             && matches!(edge.span, [0.25, 0.75] | [0.75, 0.25])
     }));
     let rows = [(0.5, [0.0, 30_000.0, 0.0, 0.0, 0.0, 10e6])];
+    model.ultimate_gravity_combination = Some(0);
+    let ultimate = |model: &Model| {
+        let demands: Vec<_> = model
+            .elements
+            .iter()
+            .map(|elem| {
+                (
+                    elem.id,
+                    MemberDemand {
+                        min_axial_for_shear_n: Some(0.0),
+                        ..MemberDemand::from_pushover(0.0, 10e6, 0.0, 30_000.0, 0.0, 0.0)
+                    },
+                )
+            })
+            .collect();
+        let opts = UltimateShearOptions {
+            include_bond: false,
+            ..Default::default()
+        };
+        collect_rc_ultimate_checks(model, &demands, &opts)
+            .unwrap()
+            .remove(0)
+    };
     for assignment in [PlateAssignment::Unset, PlateAssignment::NoPlate] {
         model.floor_assignment_regions.regions[0].assignment = assignment;
         let qd1 = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
         assert_shear_n(&qd1[0].2, 73_390.556_25);
+        let result = ultimate(&model);
+        assert!(result.ok && result.qsu.is_finite(), "{result:?}");
     }
 
     let slab_id = SlabId(0);
@@ -418,4 +446,10 @@ fn a_slab_assigned_to_part_of_the_beam_blocks_only_qd1_dependent_demand() {
     }
     let qd2 = check(&model, QdMethod::Qd2, None, &rows, -10_000.0);
     assert_shear_n(&qd2[0].2, 70_000.0);
+    let result = ultimate(&model);
+    assert!(
+        !result.ok && result.qsu.is_nan() && result.shear_margin.is_nan(),
+        "{result:?}"
+    );
+    assert!(result.unchecked_reason.unwrap().contains("スラブ付きRC梁"));
 }

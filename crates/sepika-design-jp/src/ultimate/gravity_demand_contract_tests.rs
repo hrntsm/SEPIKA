@@ -98,7 +98,7 @@ fn static_biaxial_shear_keeps_independently_failed_bending_check() {
     let check = &checks[0];
     assert!(!check.ok);
     assert_eq!(check.unchecked_reason, None);
-    assert_eq!(check.biaxial_shear_margin, None);
+    assert_eq!(check.weak_shear_margin, None);
     assert!(check.shear_margin.is_nan());
     assert!(check.biaxial_bending_margin.unwrap() < 1.0);
 }
@@ -127,7 +127,10 @@ fn direct_rc_total_uses_total_q_once_and_rejects_nonunit_amplification_and_added
     let column = &forward[0];
     assert_eq!(column.qmu, 92000.0);
     assert!((column.shear_margin - column.qsu / 92000.0).abs() < 1e-12);
-    assert!(column.biaxial_shear_margin.unwrap() < column.shear_margin);
+    assert!(column.weak_shear_margin.unwrap() > 0.0);
+    assert!(column
+        .detail
+        .contains("二軸同時作用に対する終局せん断は未算定"));
     assert_eq!(forward[1].qmu, 92000.0);
     assert!(forward[1].qsu.is_nan() && forward[1].unchecked_reason.is_some());
     for (_, d) in &mut demand {

@@ -904,7 +904,7 @@ fn arakawa_mean_distinguishes_invalid_pitch_from_absent_reinforcement() {
     };
     let demand = MemberDemand {
         min_axial_for_shear_n: Some(0.0),
-        ..MemberDemand::from_pushover(0.0, 107_800_000.0, 107_800_000.0, 100_000.0, 100_000.0, 0.0)
+        ..MemberDemand::from_pushover(0.0, 107_800_000.0, 0.0, 100_000.0, 0.0, 0.0)
     };
     for (base, width, depth, beam) in [
         (beam_rect_shape(), 400.0, 600.0, true),
@@ -936,7 +936,7 @@ fn arakawa_mean_distinguishes_invalid_pitch_from_absent_reinforcement() {
             let result = collect_rc_ultimate_checks(&model, &[(ElemId(0), demand)], &opts)
                 .unwrap()
                 .remove(0);
-            if legs == 0 || pitch == 100.0 {
+            if pitch == 100.0 {
                 assert!(
                     result.qsu.is_finite() && result.qsu > 0.0 && result.ok,
                     "{result:?}"
@@ -948,7 +948,11 @@ fn arakawa_mean_distinguishes_invalid_pitch_from_absent_reinforcement() {
                 );
                 let reason = result.unchecked_reason.as_deref().unwrap();
                 assert!(
-                    reason.contains("間隔") || reason.contains("pitch_nonfinite"),
+                    if legs == 0 {
+                        reason.contains("せん断補強筋を確認できません")
+                    } else {
+                        reason.contains("間隔")
+                    },
                     "{reason}"
                 );
             }
@@ -957,7 +961,7 @@ fn arakawa_mean_distinguishes_invalid_pitch_from_absent_reinforcement() {
 }
 
 #[test]
-fn biaxial_ultimate_shear_distinguishes_zero_demand_and_unresolved_shear_span() {
+fn independent_axes_distinguish_zero_shear_from_unresolved_shear_span() {
     let model = single_shape_model(column_rect_shape(), 600.0, 700.0, false);
     let opts = UltimateShearOptions {
         include_bond: false,
@@ -978,12 +982,12 @@ fn biaxial_ultimate_shear_distinguishes_zero_demand_and_unresolved_shear_span() 
     };
     let pure_bending = check(10_000_000.0);
     assert!(pure_bending.qsu.is_finite() && pure_bending.qsu > 0.0);
-    assert_eq!(pure_bending.biaxial_shear_margin, Some(f64::INFINITY));
-    assert!(pure_bending.ok);
+    assert_eq!(pure_bending.weak_shear_margin, Some(f64::INFINITY));
+    assert!(!pure_bending.ok && pure_bending.detail.contains("二軸同時作用"));
 
     let zero_response = check(0.0);
     assert!(zero_response.qsu.is_nan() && zero_response.shear_margin.is_nan());
-    assert_eq!(zero_response.biaxial_shear_margin, None);
+    assert_eq!(zero_response.weak_shear_margin, None);
     assert!(
         !zero_response.ok
             && zero_response
@@ -994,15 +998,14 @@ fn biaxial_ultimate_shear_distinguishes_zero_demand_and_unresolved_shear_span() 
     );
     let strong_axis_ng = check_demand(MemberDemand {
         min_axial_for_shear_n: Some(0.0),
-        ..MemberDemand::from_pushover(0.0, 100e6, 0.0, 5_000_000.0, 0.0, 0.0)
+        ..MemberDemand::from_pushover(0.0, 100e6, 25e6, 5_000_000.0, 10_000.0, 0.0)
     });
     assert!(
         !strong_axis_ng.ok
             && strong_axis_ng.unchecked_reason.is_none()
             && strong_axis_ng.shear_margin < 1.0
-            && strong_axis_ng.biaxial_shear_margin.is_none()
-            && strong_axis_ng.detail.contains("弱軸せん断は未算定")
-            && strong_axis_ng.detail.contains("MとQがともにゼロ"),
+            && strong_axis_ng.weak_shear_margin.unwrap() > 1.0
+            && strong_axis_ng.detail.contains("二軸同時作用"),
         "{strong_axis_ng:?}"
     );
 }
@@ -1267,7 +1270,7 @@ fn ultimate_bond_uses_yield_stress_and_keeps_an_independent_cutoff_length_failur
         min_axial_for_shear_n: Some(0.0),
         ..MemberDemand::from_pushover(0.0, 10e6, 0.0, 1000.0, 0.0, 0.0)
     };
-    let check_pair = |bond| {
+    let check_pair_with = |bond, include_bond| {
         collect_rc_ultimate_checks(
             &model,
             &[(
@@ -1277,11 +1280,15 @@ fn ultimate_bond_uses_yield_stress_and_keeps_an_independent_cutoff_length_failur
                     ..pair_demand
                 },
             )],
-            &UltimateShearOptions::default(),
+            &UltimateShearOptions {
+                include_bond,
+                ..Default::default()
+            },
         )
         .unwrap()
         .remove(0)
     };
+    let check_pair = |bond| check_pair_with(bond, true);
     for (distribution, l_prime, expected_stress) in [
         (
             RcUltimateBondMomentDistribution::NearAntisymmetric,
@@ -1330,7 +1337,34 @@ fn ultimate_bond_uses_yield_stress_and_keeps_an_independent_cutoff_length_failur
         let result = combined(cutoff(3500.0, l_prime, low_cutoff_stress));
         assert!((result.bond_stress.unwrap().demand_mpa - expected_stress).abs() < 1e-12);
         assert_eq!(result.bond_development_length_ok, Some(true));
-        assert_eq!(result.ok, expected_stress < 0.5, "{result:?}");
+        assert!(
+            !result.ok && result.qsu.is_nan() && result.shear_margin.is_nan(),
+            "{result:?}"
+        );
+        assert_eq!(
+            result.unchecked_reason.is_some(),
+            expected_stress < 0.5,
+            "{result:?}"
+        );
+        assert!(result.detail.contains("一様な配筋を確認できません"));
+        for bond in [
+            RcUltimateBondDemand::Single(through),
+            RcUltimateBondDemand::Single(cutoff(3500.0, l_prime, low_cutoff_stress)),
+            RcUltimateBondDemand::ThroughAndCutoff {
+                through,
+                cutoff: cutoff(3500.0, l_prime, low_cutoff_stress),
+            },
+        ] {
+            let result = check_pair_with(bond, false);
+            assert!(
+                !result.ok && result.qsu.is_nan() && result.shear_margin.is_nan(),
+                "{result:?}"
+            );
+            assert!(result
+                .unchecked_reason
+                .unwrap()
+                .contains("一様な配筋を確認できません"));
+        }
         let cutoff_governs = combined(cutoff(
             3000.0,
             l_prime,

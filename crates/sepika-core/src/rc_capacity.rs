@@ -1,5 +1,14 @@
 //! RC 矩形断面の簡易終局耐力算定（部材ランク判定・プッシュオーバーせん断降伏判定用）。
 
+/// 同一ステップの RC 終局せん断検定用の内力範囲。
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RcUltimateShearActions {
+    /// 内法区間の最小・最大軸力 `[N]`、圧縮正。
+    pub axial_range_n: [f64; 2],
+    /// 内法区間の最大絶対値 `(M [N·mm], Q [N])`、強軸・弱軸の順。
+    pub max_mq: [(f64, f64); 2],
+}
+
 /// RC 矩形断面の簡易終局耐力算定用の入力一式。
 #[derive(Clone, Copy, Debug)]
 pub struct RcCapacityInput {
