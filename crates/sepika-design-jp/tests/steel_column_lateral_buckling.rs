@@ -28,6 +28,40 @@ fn checks(model: &Model, mz_nmm: f64) -> Result<Vec<CheckOutcome>, String> {
 }
 
 #[test]
+fn short_term_h_column_bending_changes_verdict_across_the_elastic_limit() {
+    let mut model = input::column(0.0, false);
+    let material = &mut model.materials[0];
+    material.name = "SN400B".into();
+    material.fy = None;
+    material.shear = Some(79_000.0);
+    // 独立計算の弾性断面係数 1 148 243.41333 mm³ に 97.6 N/mm² を作用させる。
+    let mz_nmm = 112_068_557.141_333;
+    for (length_mm, expected_ratio, expected_ok) in [
+        (8_050.059_931, 0.999_274_400, true),
+        (8_055.338_211, 1.001_544_366, false),
+    ] {
+        model.nodes[1].coord[2] = length_mm;
+        let outcomes = checks(&model, mz_nmm).unwrap();
+        assert_eq!(outcomes.len(), 3);
+        for outcome in outcomes {
+            let CheckOutcome::Checked(result) = outcome else {
+                panic!("{outcome:?}");
+            };
+            let axial_bending = result
+                .components
+                .iter()
+                .find(|component| component.kind == CheckKind::AxialBending)
+                .unwrap();
+            assert!(
+                (axial_bending.ratio - expected_ratio).abs() < 1e-8,
+                "{result:?}"
+            );
+            assert_eq!(result.ok(), expected_ok, "{result:?}");
+        }
+    }
+}
+
+#[test]
 fn confirmed_end_supports_use_the_eccentric_physical_length() {
     for (offset_mm, lb_mm, expected, ok) in [
         (0.0, 3000, 0.973_267_775_687, true),
