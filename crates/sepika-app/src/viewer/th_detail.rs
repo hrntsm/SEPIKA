@@ -1186,6 +1186,10 @@ fn draw_labeled_outcome_row(
 mod signed_q0_acceptance_tests;
 
 #[cfg(test)]
+#[path = "steel_time_history_c_tests.rs"]
+mod steel_time_history_c_tests;
+
+#[cfg(test)]
 #[path = "../../../sepika-design-jp/tests/fixtures/steel_column_lateral_buckling_model.rs"]
 mod steel_column_lateral_buckling_input;
 
