@@ -384,10 +384,13 @@ pub fn run_member_design_checks(
     for (id, _) in member_forces {
         *force_rows.entry(*id).or_default() += 1;
     }
-    let mut grouped_beam_spans = beam_span_loads
-        .as_ref()
-        .ok()
-        .map(|loads| loads.grouped_bending_spans(model, member_forces, &force_rows));
+    use steel_beam_span::GroupBending;
+    let mut grouped_beam_spans = steel_beam_span::grouped_bending_spans(
+        model,
+        member_forces,
+        &force_rows,
+        beam_span_loads.as_ref(),
+    );
     let route21_inputs = options
         .src_column_route21_shear
         .filter(|_| options.term == LoadTerm::Short);
@@ -446,11 +449,15 @@ pub fn run_member_design_checks(
                 .cloned(),
             ..Default::default()
         };
-        if (group.is_some()
-            || grouped_girders.contains(&elem.id)
-            || steel_beam_span::requires_bending_span(sec, structure, &ctx))
-            && unavailable_beam_ids.insert(elem.id)
-        {
+        let needs_span = if group.is_some() || grouped_girders.contains(&elem.id) {
+            !matches!(
+                grouped_beam_spans.get(&elem.id),
+                Some(Ok(GroupBending::WithoutWholeSpan { .. }))
+            )
+        } else {
+            steel_beam_span::requires_bending_span(sec, structure, &ctx)
+        };
+        if needs_span && unavailable_beam_ids.insert(elem.id) {
             let reason = if row_count == 0 {
                 "鋼梁の解析断面力がありません"
             } else {
@@ -817,8 +824,28 @@ pub fn run_member_design_checks(
             && kind == MemberKind::Girder
             && crate::steel::is_symmetric_h_section(sec)
             && (group.is_some() || grouped_girders.contains(elem_id));
-        let needs_beam_span =
-            grouped_steel_beam || steel_beam_span::requires_bending_span(sec, structure, &ctx);
+        let grouped_beam_span = grouped_steel_beam.then(|| {
+            grouped_beam_spans
+                .remove(elem_id)
+                .unwrap_or_else(|| Err("一本部材の構成要素が未確認です".into()))
+        });
+        let needs_beam_span = match &grouped_beam_span {
+            Some(Ok(GroupBending::WithoutWholeSpan { .. })) => false,
+            Some(_) => true,
+            None => steel_beam_span::requires_bending_span(sec, structure, &ctx),
+        };
+        if let Some(Ok(
+            GroupBending::WithoutWholeSpan {
+                length_mm: Some(length_mm),
+            }
+            | GroupBending::Whole { length_mm, .. },
+        )) = &grouped_beam_span
+        {
+            ctx.length = *length_mm;
+        }
+        if let Some(Ok(GroupBending::Whole { length_mm, .. })) = &grouped_beam_span {
+            ctx.lb = Some(*length_mm);
+        }
         let station_key = |xi: f64| if xi == 0.0 { 0 } else { xi.to_bits() };
         let repeated_stations: HashSet<_> = if needs_beam_span {
             let mut observed = HashSet::new();
@@ -836,19 +863,16 @@ pub fn run_member_design_checks(
                     "同一の評価位置で解析断面力が重複し、強軸曲げ分布を確認できません".into(),
                 );
             }
+            if let Some(grouped) = grouped_beam_span {
+                return grouped.map(|confirmed| match confirmed {
+                    GroupBending::Whole { span, .. } => span,
+                    GroupBending::WithoutWholeSpan { .. } => unreachable!(),
+                });
+            }
             beam_span_loads
                 .as_ref()
                 .map_err(|reason| (*reason).to_owned())
-                .and_then(|loads| {
-                    if grouped_steel_beam {
-                        grouped_beam_spans
-                            .as_mut()
-                            .and_then(|spans| spans.remove(elem_id))
-                            .unwrap_or_else(|| Err("一本部材の構成要素が未確認です".into()))
-                    } else {
-                        loads.bending_span(model, elem, mf, &ctx)
-                    }
-                })
+                .and_then(|loads| loads.bending_span(model, elem, mf, &ctx))
         });
         if grouped_steel_beam && beam_span.as_ref().is_some_and(Result::is_err) {
             ctx.steel_beam_moment_diagram = crate::steel::SteelBeamMomentDiagram::UnverifiedGroup;

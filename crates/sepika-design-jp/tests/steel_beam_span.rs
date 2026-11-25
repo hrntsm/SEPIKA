@@ -29,23 +29,32 @@ fn check_member(
     member: ElemId,
 ) -> Vec<(f64, CheckOutcome)> {
     let groups = girder_group_overrides(model, &solved.member_forces);
-    run_member_design_checks(
+    checked_member(
         model,
-        &solved.member_forces,
-        &solved.panel_moments,
+        solved,
         &MemberDesignCheckOptions {
             term,
             steel_beam_span_load_terms: terms,
             girder_group_overrides: Some(&groups),
             ..Default::default()
         },
+        member,
     )
-    .unwrap()
-    .member_checks
-    .into_iter()
-    .filter(|(id, _, _)| *id == member)
-    .map(|(_, pos, result)| (pos, result))
-    .collect()
+}
+
+fn checked_member(
+    model: &Model,
+    solved: &StaticOnce,
+    options: &MemberDesignCheckOptions<'_>,
+    member: ElemId,
+) -> Vec<(f64, CheckOutcome)> {
+    run_member_design_checks(model, &solved.member_forces, &solved.panel_moments, options)
+        .unwrap()
+        .member_checks
+        .into_iter()
+        .filter(|(id, _, _)| *id == member)
+        .map(|(_, pos, result)| (pos, result))
+        .collect()
 }
 
 fn at(outcomes: &[(f64, CheckOutcome)], xi: f64) -> &CheckResult {
@@ -694,4 +703,93 @@ fn split_distributed_load_finds_the_maximum_on_the_later_element() {
     // 自由端側の荷重合力が釣り合う位置は全長比 1−√0.4。
     let xi_local = ((1.0 - 0.4_f64.sqrt()) * input::LENGTH_MM - split_mm) / 6_400.0;
     check_bending(at(&later, xi_local), 0.597_609_997, "fb=98.3121");
+}
+
+#[test]
+fn verified_full_span_uses_its_own_length_with_or_without_caller_group_override() {
+    let model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let mut groups = girder_group_overrides(&model, &solved.member_forces);
+    for group in groups.values_mut() {
+        group.length = 9_000.0;
+    }
+    for override_length in [None, Some(&groups)] {
+        let results = checked_member(
+            &model,
+            &solved,
+            &MemberDesignCheckOptions {
+                term: LoadTerm::Short,
+                steel_beam_span_load_terms: Some(&[(input::DEAD, 1.0)]),
+                girder_group_overrides: override_length,
+                ..Default::default()
+            },
+            input::BEAM,
+        );
+        let start = at(&results, 0.0);
+        check_bending(start, 0.381_705_817, "採用横座屈長さ lb=8000 mm");
+        check_bending(start, 0.381_705_817, "C=2.1333, 塑性限界細長比=0.7000");
+    }
+}
+
+#[test]
+fn split_girder_keeps_explicit_zero_and_positive_partial_bracing_without_a_full_span_diagram() {
+    let model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    for (direct, count, ratio, fb, lb) in [
+        (
+            Some((0.0, 0.0, 0.0)),
+            None,
+            0.277_945_366,
+            "fb=235.0000",
+            "lb=0 mm",
+        ),
+        (
+            Some((4_000.0, 4_000.0, 4_000.0)),
+            None,
+            0.387_510_162,
+            "fb=168.5560",
+            "lb=4000 mm",
+        ),
+        (None, Some(1), 0.387_510_162, "fb=168.5560", "lb=4000 mm"),
+    ] {
+        let mut model = model.clone();
+        for attr in &mut model.steel_design_attrs {
+            attr.lb_direct = direct;
+            attr.lateral_brace_count = count;
+        }
+        let results = check(&model, &solved, LoadTerm::Short, None);
+        let start = at(&results, 0.0);
+        check_bending(start, ratio, fb);
+        check_bending(start, ratio, lb);
+        assert!(!results
+            .iter()
+            .any(|(_, outcome)| matches!(outcome, CheckOutcome::Skipped { .. })));
+    }
+}
+
+#[test]
+fn a_single_elements_partial_bracing_does_not_verify_the_unset_part_of_the_girder() {
+    let mut model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
+    model.steel_design_attrs[0].lb_direct = None;
+    model.steel_design_attrs[0].lateral_brace_count = Some(1);
+    model.steel_design_attrs.pop();
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let first = check(&model, &solved, LoadTerm::Short, None);
+    check_bending(at(&first, 0.0), 0.387_510_162, "lb=4000 mm");
+    let second = check_member(&model, &solved, LoadTerm::Short, None, SECOND_BEAM);
+    assert!(second.iter().any(|(_, outcome)| matches!(outcome,
+        CheckOutcome::Skipped { reason } if reason.contains("共通の単一補剛区間が指定されていません"))));
+    assert!(
+        second.iter().all(|(_, outcome)| !matches!(outcome,
+        CheckOutcome::Checked(row) if row.components.iter().any(|c| c.kind == CheckKind::Bending)))
+    );
 }
