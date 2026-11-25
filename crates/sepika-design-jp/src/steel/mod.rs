@@ -424,7 +424,15 @@ fn axial_material_limit_failure(
     term: crate::LoadTerm,
     f: f64,
 ) -> Option<CheckComponent> {
-    let limit_mpa = steel_ft(f, term);
+    axial_limit_failure(axial_n, area_mm2, steel_ft(f, term), "材料許容上限")
+}
+
+fn axial_limit_failure(
+    axial_n: f64,
+    area_mm2: f64,
+    limit_mpa: f64,
+    limit_label: &str,
+) -> Option<CheckComponent> {
     if ![area_mm2, limit_mpa]
         .iter()
         .all(|v| v.is_finite() && *v > 0.0)
@@ -437,7 +445,7 @@ fn axial_material_limit_failure(
         kind: CheckKind::Axial,
         ratio,
         detail: format!(
-            "N={axial_n:.4} N, A={area_mm2:.4} mm², |N|/A={stress_mpa:.4} N/mm², 材料許容上限={limit_mpa:.4} N/mm²",
+            "N={axial_n:.4} N, A={area_mm2:.4} mm², |N|/A={stress_mpa:.4} N/mm², {limit_label}={limit_mpa:.4} N/mm²",
         ),
     })
 }
@@ -753,6 +761,14 @@ impl SteelDesign {
             .filter(|_| ctx.kind == MemberKind::Column && forces.n <= 0.0 && forces.mz != 0.0);
         let asymmetric_girder =
             asymmetric_built_h.filter(|_| ctx.kind == MemberKind::Girder && forces.mz != 0.0);
+        let plate_slenderness_reason = (!secondary_post
+            && ctx.kind == MemberKind::Column
+            && torsion_reason.is_none()
+            && symmetric_h_web(sec).is_some()
+            && forces.my == 0.0
+            && (forces.n < 0.0 || forces.mz != 0.0))
+            .then(|| column::check_symmetric_h_plate_slenderness(forces, sec, mat).err())
+            .flatten();
         let lambda =
             match check_compression_slenderness(forces, sec, ctx, torsion_reason, secondary_post) {
                 Ok(Some(lambda)) if !secondary_post => lambda,
@@ -775,6 +791,7 @@ impl SteelDesign {
                         .filter(|_| forces.n <= 0.0)
                         .into_iter()
                         .chain(built_h_shear_reasons.into_iter().flatten())
+                        .chain(plate_slenderness_reason.as_deref())
                     {
                         match &mut outcome {
                             CheckOutcome::Checked(_) => {
@@ -809,10 +826,25 @@ impl SteelDesign {
                             result.basis.push_str(reason);
                         }
                     }
-                    if let Some(component) = independent_h_web_shear_failure(forces, sec, mat, ctx)
-                    {
+                    let independent_axial = match (&outcome, &plate_slenderness_reason) {
+                        (CheckOutcome::Skipped { .. }, Some(_)) => sec
+                            .resolved_area()
+                            .ok()
+                            .zip(crate::material_strength::section_steel_f(sec, Some(mat)).ok())
+                            .and_then(|(area_mm2, f)| {
+                                axial_material_limit_failure(forces.n, area_mm2, ctx.term, f)
+                            }),
+                        _ => None,
+                    };
+                    let independent_checks: Vec<_> = independent_axial
+                        .into_iter()
+                        .chain(independent_h_web_shear_failure(forces, sec, mat, ctx))
+                        .collect();
+                    if !independent_checks.is_empty() {
                         match &mut outcome {
-                            CheckOutcome::Checked(result) => result.components.push(component),
+                            CheckOutcome::Checked(result) => {
+                                result.components.extend(independent_checks)
+                            }
                             CheckOutcome::Skipped { reason } => {
                                 *incomplete =
                                     crate::member_design_check::combine_incomplete_reasons(
@@ -820,9 +852,9 @@ impl SteelDesign {
                                         Some(reason),
                                     );
                                 outcome = CheckOutcome::Checked(CheckResult {
-                                    basis: "鋼構造許容応力度設計規準 H形鋼のウェブせん断".into(),
+                                    basis: "鋼構造許容応力度設計規準 H形鋼の独立照査".into(),
                                     detail: String::new(),
-                                    components: vec![component],
+                                    components: independent_checks,
                                 });
                             }
                         }
@@ -957,12 +989,6 @@ impl SteelDesign {
         }
         let combined_and_shear = built_h_shear_unavailable.then(built_h_unavailable_reasons);
         let h_combined_reason = combined_and_shear.as_deref().or(h_combined_reason);
-        let plate_slenderness_reason = (!secondary_post
-            && ctx.kind == MemberKind::Column
-            && forces.mz != 0.0
-            && strong_axis_h_tension(forces, sec))
-        .then(|| column::check_symmetric_h_tension_plate_slenderness(forces, sec, mat).err())
-        .flatten();
         if let Some(reason) = plate_slenderness_reason {
             *incomplete = crate::member_design_check::combine_incomplete_reasons(
                 incomplete.take(),
@@ -971,7 +997,15 @@ impl SteelDesign {
             let components: Vec<_> = sec
                 .resolved_area()
                 .ok()
-                .and_then(|area_mm2| axial_material_limit_failure(forces.n, area_mm2, term, f))
+                .and_then(|area_mm2| {
+                    if forces.n < 0.0 {
+                        // 局部座屈で有効面積が減っても、全断面で算定する許容圧縮応力度は変わらない。
+                        let fc_mpa = steel_fc(f, mat.young, lambda, term);
+                        axial_limit_failure(forces.n, area_mm2, fc_mpa, "fc")
+                    } else {
+                        axial_material_limit_failure(forces.n, area_mm2, term, f)
+                    }
+                })
                 .into_iter()
                 .chain(independent_h_web_shear_failure(forces, sec, mat, ctx))
                 .collect();
