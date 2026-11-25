@@ -349,6 +349,18 @@ fn draw_th_detail_content_at(
         th_nonlinear,
         th_applied_long_term,
         || damage_control_gravity_issue(app, view, &display, th_result),
+        || {
+            if !view.spatial_case_id(app).is_some_and(|id| {
+                app.require_result_input(crate::app::ResultInputKey::TimeHistory(id))
+                    .is_ok()
+            }) {
+                return Err("時刻歴結果の生成入力を確認できないため、初期載荷を照合できません");
+            }
+            matching_gravity_member_forces(&display, app, |name| {
+                app.require_result_input(crate::app::ResultInputKey::Combo(name.to_owned()))
+                    .is_ok()
+            })
+        },
         &axis,
     );
     app.ui.view.th_detail_axis_z = axis_z;
@@ -602,7 +614,9 @@ fn damage_control_gravity_issue(
     if loaded_kinds.peek().is_none() {
         Some("RC損傷制御用せん断に必要な固定・架構用積載荷重の初期載荷がありません")
     } else if loaded_kinds.any(|kind| !matches!(kind, LoadCaseKind::Dead | LoadCaseKind::Live)) {
-        Some("初期載荷に固定・架構用積載以外（積雪または種別未指定）の荷重を含むため、RC損傷制御用せん断は未算定です")
+        Some(
+            "初期載荷に固定・架構用積載以外（積雪または種別未指定）の荷重を含むため、RC損傷制御用せん断は未算定です",
+        )
     } else if ![LoadCaseKind::Dead, LoadCaseKind::Live]
         .into_iter()
         .all(|kind| {
@@ -618,8 +632,84 @@ fn damage_control_gravity_issue(
     }
 }
 
+fn matching_gravity_member_forces<'a>(
+    analyzed_model: &sepika_core::model::Model,
+    app: &'a App,
+    is_current: impl Fn(&str) -> bool,
+) -> Result<&'a [(ElemId, MemberForces)], &'static str> {
+    use sepika_core::load_combo::{effective_combination_terms, is_gravity_combination};
+    use sepika_core::model::LoadCaseKind;
+
+    let has_load =
+        |case: &sepika_core::model::LoadCase| !case.nodal.is_empty() || !case.member.is_empty();
+    let long_term = analyzed_model
+        .load_cases
+        .iter()
+        .filter(|case| case.kind.is_long_term());
+    if long_term.clone().any(|case| {
+        analyzed_model
+            .load_cases
+            .iter()
+            .filter(|other| other.id == case.id)
+            .nth(1)
+            .is_some()
+    }) {
+        return Err(
+            "初期載荷に関わる荷重ケースIDが重複しているため、静的組合せと荷重条件を照合できません",
+        );
+    }
+    let initial: Vec<_> = long_term.filter(|case| has_load(case)).collect();
+    if initial.is_empty() {
+        return Err("長期荷重を初期載荷する設定ですが、初期載荷の荷重項目がありません");
+    }
+    if initial
+        .iter()
+        .any(|case| !matches!(case.kind, LoadCaseKind::Dead | LoadCaseKind::Live))
+    {
+        return Err(
+            "初期載荷に積雪または種別未指定の荷重を含むため、常時重力組合せと荷重条件が一致しません",
+        );
+    }
+
+    let model = &app.core.model;
+    let matches_initial = |name: &str| {
+        if !is_gravity_combination(name, model) {
+            return false;
+        }
+        let Some(combo) = model.combinations.iter().find(|combo| combo.name == name) else {
+            return false;
+        };
+        effective_combination_terms(combo, &model.load_cases).is_ok_and(|terms| {
+            initial.iter().all(|case| terms.contains(&(case.id, 1.0)))
+                && terms.iter().all(|&(id, factor)| {
+                    factor == 0.0
+                        || initial.iter().any(|case| case.id == id && factor == 1.0)
+                        || analyzed_model
+                            .load_cases
+                            .iter()
+                            .any(|case| case.id == id && !has_load(case))
+                })
+        })
+    };
+    let Some(results) = &app.core.scoped.results else {
+        return Err("初期載荷と荷重ケース・係数が一致する保存済みの常時重力組合せがありません");
+    };
+    let mut reason = "初期載荷と荷重ケース・係数が一致する保存済みの常時重力組合せがありません";
+    for (name, result) in results
+        .combos
+        .iter()
+        .filter(|(name, _)| matches_initial(name))
+    {
+        if is_current(name) {
+            return Ok(&result.member_forces);
+        }
+        reason = "初期載荷と荷重条件が一致する常時重力組合せの生成入力を確認できません";
+    }
+    Err(reason)
+}
+
 #[allow(clippy::too_many_arguments)]
-fn draw_peak_check(
+fn draw_peak_check<'a>(
     ui: &mut egui::Ui,
     app: &App,
     elem: &ElementData,
@@ -628,6 +718,7 @@ fn draw_peak_check(
     th_nonlinear: bool,
     th_applied_long_term: bool,
     damage_control_gravity_issue: impl FnOnce() -> Option<&'static str>,
+    gravity_reference: impl FnOnce() -> Result<&'a [(ElemId, MemberForces)], &'static str>,
     axis: &super::MemberAxisEndpoints,
 ) {
     let model = &app.core.model;
@@ -738,7 +829,15 @@ fn draw_peak_check(
     let gravity_issue = rc_damage_control
         .then(damage_control_gravity_issue)
         .flatten();
-    if th_applied_long_term && gravity_issue.is_some() {
+    let qd_method = app.core.analysis_cfg.qd_method;
+    let wire_qd = wire_qd
+        && matches!(
+            structure,
+            StructureKind::Rc | StructureKind::Src | StructureKind::Cft
+        );
+    let gravity_reference = wire_qd.then(gravity_reference);
+    let gravity_reference_issue = gravity_reference.and_then(Result::err);
+    if th_applied_long_term && (gravity_issue.is_some() || gravity_reference_issue.is_some()) {
         ui.label("長期荷重を初期載荷する設定です。");
     } else {
         draw_long_term_note(ui, th_nonlinear, th_applied_long_term);
@@ -761,25 +860,13 @@ fn draw_peak_check(
             ui.colored_label(theme::WARN_TEXT, "RCせん断の損傷制御は未算定です（せん断を照査できる確定ステップの抽出記録がありません）。");
         }
     }
-    let qd_method = app.core.analysis_cfg.qd_method;
     let rebar_material = model.element_rebar_material(elem);
     let wrong_main_rebar = rebar_material
         .is_some_and(|material| material.category != sepika_core::model::MaterialCategory::Rebar);
     let shear_rebar_material = model.element_shear_rebar_material(elem);
     let wrong_shear_rebar = shear_rebar_material
         .is_some_and(|material| material.category != sepika_core::model::MaterialCategory::Rebar);
-    let long_mf = wire_qd
-        .then(|| {
-            app.core.scoped.results.as_ref().and_then(|r| {
-                r.combos
-                    .iter()
-                    .find(|(n, _)| {
-                        sepika_core::load_combo::is_gravity_combination(n, &app.core.model)
-                    })
-                    .map(|(_, st)| &st.member_forces)
-            })
-        })
-        .flatten();
+    let long_mf = gravity_reference.and_then(Result::ok);
     let (rc_beam_qd1, q_simple) =
         if wire_qd && rc_beam && kind != MemberKind::Column && qd_method != QdMethod::Qd2 {
             match sepika_job::design_q0::rc_beam_q0_for_gravity_cases(model, elem) {
@@ -844,6 +931,7 @@ fn draw_peak_check(
                 Some(&reason),
                 torsion_reason,
                 cft_qd2,
+                gravity_reference_issue,
             );
             return;
         }
@@ -858,6 +946,12 @@ fn draw_peak_check(
         }
     }
 
+    let gravity_reference_issue = gravity_reference_issue.filter(|_| {
+        rc_beam
+            || rc_column
+            || structure == StructureKind::Src
+            || (structure == StructureKind::Cft && qd_method != QdMethod::Qd1)
+    });
     let column_mechanism_topology =
         (rc_column && kind == MemberKind::Column && wire_qd && qd_method != QdMethod::Qd2)
             .then(|| sepika_design_jp::rc::ColumnMechanismTopology::new(model));
@@ -966,6 +1060,15 @@ fn draw_peak_check(
                 }
                 let mfa = MemberForcesAt::from_local(pos, f);
                 let mut draw_outcome = |outcome: &CheckOutcome| {
+                    let with_reference_reason = match (outcome, gravity_reference_issue) {
+                        (CheckOutcome::Skipped { reason }, Some(reference_reason)) => {
+                            Some(CheckOutcome::Skipped {
+                                reason: format!("{reason}。{reference_reason}"),
+                            })
+                        }
+                        _ => None,
+                    };
+                    let outcome = with_reference_reason.as_ref().unwrap_or(outcome);
                     if let Some((snapshot, component)) = selected {
                         let side = match component {
                             PeakComponent::Axial if mfa.n < 0.0 => "圧縮側",
@@ -1142,6 +1245,7 @@ fn draw_peak_precheck(
     reason: Option<&str>,
     torsion_reason: impl Fn(&MemberForcesAt) -> Option<&'static str>,
     cft_qd2: Option<&sepika_design_jp::SeismicQd>,
+    gravity_reference_issue: Option<&str>,
 ) {
     let draw = |ui: &mut egui::Ui, label: &str, pos: f64, torsion: Option<&str>| {
         let gravity = cft_qd2.and_then(|qd| sepika_design_jp::cft::qd2_reference_issue(qd, pos));
@@ -1149,6 +1253,7 @@ fn draw_peak_precheck(
             .into_iter()
             .chain(torsion)
             .chain(gravity.as_deref())
+            .chain(gravity_reference_issue.filter(|_| gravity.is_some()))
             .collect();
         if !reasons.is_empty() {
             let skipped = CheckOutcome::Skipped {
@@ -1479,6 +1584,7 @@ mod tests {
                     with_gravity,
                     with_gravity,
                     || (!with_gravity).then_some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),
+                    || matching_gravity_member_forces(&app.core.model, app, |_| true),
                     &axis,
                 )
             })
@@ -1571,6 +1677,230 @@ mod tests {
         };
         let i = super::rc_column_mechanism_input::COLUMN.index();
         peak_recording_text(app, &app.core.model.elements[i], i, &recording, true)
+    }
+
+    fn time_history_gravity_model(snow: bool) -> sepika_core::model::Model {
+        use crate::app::rc_column_boundary_tests::input;
+        use sepika_core::ids::{LoadCaseId, NodeId};
+        use sepika_core::model::{LoadCase, LoadCaseKind, LoadCombination, NodalLoad};
+
+        let mut model = input::column_model(false, 50_000.0);
+        let dead = model.load_cases[0].id;
+        let live = LoadCaseId(1);
+        let extra_live = LoadCaseId(2);
+        model.load_cases[0].nodal = vec![NodalLoad::manual(
+            NodeId(1),
+            [0.0, 10_000.0, -50_000.0, 0.0, 0.0, 0.0],
+        )];
+        model.load_cases.extend([
+            LoadCase {
+                origin: Default::default(),
+                id: live,
+                name: "架構用積載".into(),
+                kind: LoadCaseKind::Live,
+                nodal: Vec::new(),
+                member: Vec::new(),
+            },
+            LoadCase {
+                origin: Default::default(),
+                id: extra_live,
+                name: "架構用積載追加".into(),
+                kind: LoadCaseKind::Live,
+                nodal: vec![NodalLoad::manual(
+                    NodeId(1),
+                    [0.0, 20_000.0, 0.0, 0.0, 0.0, 0.0],
+                )],
+                member: Vec::new(),
+            },
+        ]);
+        model.combinations.extend([
+            LoadCombination {
+                name: "積載の一部がない常時重力".into(),
+                terms: vec![(dead, 1.0), (live, 1.0)],
+            },
+            LoadCombination {
+                name: "初期載荷と一致する常時重力".into(),
+                terms: vec![
+                    (extra_live, 0.5),
+                    (dead, 1.0),
+                    (live, 1.0),
+                    (extra_live, 0.5),
+                ],
+            },
+        ]);
+        if snow {
+            model.load_cases.push(LoadCase {
+                origin: Default::default(),
+                id: LoadCaseId(3),
+                name: "積雪".into(),
+                kind: LoadCaseKind::Snow,
+                nodal: vec![NodalLoad::manual(
+                    NodeId(1),
+                    [0.0, 5_000.0, -30_000.0, 0.0, 0.0, 0.0],
+                )],
+                member: Vec::new(),
+            });
+        }
+        model
+    }
+
+    #[test]
+    fn time_history_shear_rejects_snow_reference_mismatch_but_checks_without_initial_load() {
+        let mut app = App::default();
+        assert!(app.load_model(time_history_gravity_model(true)));
+        app.core.analysis_cfg.rc_damage_control = false;
+        app.core.analysis_cfg.qd_method = QdMethod::Qd2;
+        app.core.analysis_cfg.th_nonlinear = true;
+        app.core.analysis_cfg.th_record_every = 1;
+        app.run_combination(1);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+
+        for apply in [true, false] {
+            app.core.analysis_cfg.th_apply_long_term = apply;
+            app.run_time_history(sepika_solver::dynamic::timehistory::GroundMotion {
+                dt: 0.02,
+                accel_x: vec![0.0, 50.0, -50.0, 0.0],
+                accel_y: None,
+                accel_theta: None,
+            });
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            let text = time_history_detail_labels(&mut app);
+            if apply {
+                assert!(
+                    text.contains("初期載荷に積雪または種別未指定の荷重を含む"),
+                    "{text}"
+                );
+                assert!(text.contains("ξ=0.00:\n検定不能"), "{text}");
+                assert!(!text.contains("(OK)"), "{text}");
+            } else {
+                assert!(text.contains("長期荷重を含まない"), "{text}");
+                assert!(text.contains("せん断 ") && text.contains("(OK)"), "{text}");
+                assert!(!text.contains("初期載荷に積雪"), "{text}");
+            }
+        }
+    }
+
+    #[test]
+    fn time_history_shear_rejects_duplicate_initial_case_id() {
+        let mut model = time_history_gravity_model(false);
+        model.load_cases[2].id = model.load_cases[0].id;
+        model.combinations.truncate(1);
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        app.core.analysis_cfg.rc_damage_control = false;
+        app.core.analysis_cfg.qd_method = QdMethod::Qd2;
+        app.core.analysis_cfg.th_nonlinear = true;
+        app.core.analysis_cfg.th_apply_long_term = true;
+        app.core.analysis_cfg.th_record_every = 1;
+        app.run_combination(0);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let reference = &app.current_static().unwrap().member_forces[0].1.at[0].1;
+        assert!((reference[1].hypot(reference[2]) - 10_000.0).abs() < 1e-3);
+        app.run_time_history(sepika_solver::dynamic::timehistory::GroundMotion {
+            dt: 0.02,
+            accel_x: vec![0.0, 50.0, -50.0, 0.0],
+            accel_y: None,
+            accel_theta: None,
+        });
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let rec = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .time_history
+            .as_ref()
+            .unwrap()
+            .recording
+            .as_ref()
+            .unwrap();
+        assert_eq!(rec.frame_time[0], 0.0);
+        let initial = &rec.member_forces[0][0].as_ref().unwrap().at[0].1;
+        assert!(
+            (initial[1].hypot(initial[2]) - 30_000.0).abs() < 1.0,
+            "{initial:?}"
+        );
+
+        let text = time_history_detail_labels(&mut app);
+        assert!(
+            text.contains("初期載荷に関わる荷重ケースIDが重複"),
+            "{text}"
+        );
+        assert!(
+            text.contains("ξ=0.00:\n検定不能") && !text.contains("(OK)"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn time_history_shear_uses_only_matching_current_cases_independent_of_save_order() {
+        let mut app = App::default();
+        assert!(app.load_model(time_history_gravity_model(false)));
+        app.core.analysis_cfg.rc_damage_control = false;
+        app.core.analysis_cfg.qd_method = QdMethod::Qd2;
+        app.core.analysis_cfg.th_nonlinear = true;
+        app.core.analysis_cfg.th_apply_long_term = true;
+        app.core.analysis_cfg.th_record_every = 1;
+        app.run_combination(0);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.run_combination(1);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        app.run_time_history(sepika_solver::dynamic::timehistory::GroundMotion {
+            dt: 0.02,
+            accel_x: vec![0.0, 50.0, -50.0, 0.0],
+            accel_y: None,
+            accel_theta: None,
+        });
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+
+        let text = time_history_detail_labels(&mut app);
+        assert!(text.contains("せん断 ") && text.contains("(OK)"), "{text}");
+        assert!(!text.contains("検定不能"), "{text}");
+        app.core.scoped.results.as_mut().unwrap().combos.reverse();
+        assert_eq!(time_history_detail_labels(&mut app), text);
+
+        let bundle = app.core.scoped.results.as_mut().unwrap();
+        bundle.input_records.retain(|(key, _)| {
+            !matches!(key, crate::app::ResultInputKey::Combo(name) if name == "初期載荷と一致する常時重力")
+        });
+        let text = time_history_detail_labels(&mut app);
+        assert!(
+            text.contains("常時重力組合せの生成入力を確認できません"),
+            "{text}"
+        );
+        assert!(
+            text.contains("検定不能") && !text.contains("(OK)"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -2041,7 +2371,7 @@ mod tests {
         restored.open_project_from(path.clone());
         std::fs::remove_file(path).unwrap();
 
-        let text = asymmetric_history_labels(&mut restored);
+        let text = time_history_detail_labels(&mut restored);
         assert!(text.contains("時刻歴の簡易検定（短期）"), "{text}");
         assert!(!text.contains("最大応力に対する検定"), "{text}");
         assert!(!text.contains("地震時 QD / 柱メカニズム"), "{text}");
@@ -2069,7 +2399,7 @@ mod tests {
         th.nonlinear = true;
         th.applied_long_term = true;
         bundle.upsert_time_history(case_id, th);
-        let text = asymmetric_history_labels(&mut restored);
+        let text = time_history_detail_labels(&mut restored);
         assert!(!text.contains("地震時 QD / 柱メカニズム"), "{text}");
         assert!(
             text.contains("長期荷重を初期状態として含む結果です"),
@@ -2102,7 +2432,7 @@ mod tests {
                 "{:?}",
                 app.core.scoped.last_error
             );
-            let text = asymmetric_history_labels(&mut app);
+            let text = time_history_detail_labels(&mut app);
             assert!(text.contains("全確定時刻の断面単独照査"), "{text}");
             assert!(text.contains("断面の検定比の下限"), "{text}");
             assert!(text.contains("曲げねじり座屈"), "{text}");
@@ -2125,7 +2455,7 @@ mod tests {
             let mut restored = App::default();
             restored.open_project_from(path.clone());
             std::fs::remove_file(path).unwrap();
-            assert_eq!(asymmetric_history_labels(&mut restored), text);
+            assert_eq!(time_history_detail_labels(&mut restored), text);
         }
     }
 
@@ -2162,7 +2492,7 @@ mod tests {
             }),
             ..Default::default()
         });
-        let text = asymmetric_history_labels(&mut app);
+        let text = time_history_detail_labels(&mut app);
         assert!(text.contains("長期荷重を含まない"), "{text}");
         assert!(
             text.contains("全確定時刻の断面照査の記録を取得できません"),
@@ -2186,7 +2516,7 @@ mod tests {
             .as_mut()
             .unwrap();
         rec.strong_axis_moment_peaks.clear();
-        let text = asymmetric_history_labels(&mut app);
+        let text = time_history_detail_labels(&mut app);
         assert!(text.contains("極値記録が不足しています"), "{text}");
         assert!(text.contains("解析を再実行してください"), "{text}");
         assert!(text.contains("圧縮側 t=0.000000 s"), "{text}");
@@ -2236,7 +2566,7 @@ mod tests {
         }
     }
 
-    fn asymmetric_history_labels(app: &mut App) -> String {
+    fn time_history_detail_labels(app: &mut App) -> String {
         let mut view = super::super::ViewportState::default();
         view.capture_result_sources(app);
         egui::Context::default()
@@ -2506,6 +2836,7 @@ mod tests {
                     false,
                     false,
                     || Some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),
+                    || unreachable!(),
                     &axis,
                 )
             });
