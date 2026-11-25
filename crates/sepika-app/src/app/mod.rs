@@ -591,6 +591,9 @@ pub struct ResultsBundle {
     /// 生成時の検定契約版。解析とは独立して完全一致を要求する。
     #[serde(default)]
     pub design_contract_version: Option<u32>,
+    /// 通常の短期RC柱検定に付記する靱性推奨の比較結果。
+    #[serde(default)]
+    pub rc_column_ductility_advisories: Vec<sepika_design_jp::RcColumnDuctilityAdvisory>,
 }
 
 impl ResultsBundle {
@@ -2581,6 +2584,8 @@ pub(crate) mod cft_column_buckling_tests;
 mod rc_beam_asymmetric_tests;
 #[cfg(test)]
 pub(crate) mod rc_column_boundary_tests;
+#[cfg(test)]
+mod rc_column_ductility_tests;
 #[cfg(test)]
 pub(crate) mod steel_beam_span_tests;
 #[cfg(test)]

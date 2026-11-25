@@ -176,6 +176,9 @@ impl App {
                                 .cloned()
                                 .collect(),
                             member_checks: bundle.member_checks.clone(),
+                            rc_column_ductility_advisories: bundle
+                                .rc_column_ductility_advisories
+                                .clone(),
                             joint_checks: bundle.joint_checks.clone(),
                             wall_checks: bundle.wall_checks.clone(),
                             beam_checks: bundle.beam_checks.clone(),

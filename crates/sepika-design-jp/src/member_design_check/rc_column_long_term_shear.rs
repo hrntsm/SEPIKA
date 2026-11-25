@@ -11,7 +11,6 @@ use sepika_core::model::{
     WallSideColumnIndex,
 };
 use sepika_core::section_shape::SectionShape;
-use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::frame::member_load::{frame_shear_envelope, FrameShearEnvelope};
 use sepika_element::transform::LocalFrame;
@@ -30,20 +29,6 @@ pub(super) enum ColumnShearLoads<'a> {
         panel_nodes: HashSet<NodeId>,
         frame_index: NodeAdjacency,
     },
-}
-
-pub(super) fn is_target(model: &Model, elem: &ElementData) -> bool {
-    elem.kind.is_primary_frame_support()
-        && model.element_section(elem).is_some_and(|sec| {
-            sec.frame_use == Some(FrameSectionUse::Column)
-                && matches!(
-                    sec.shape,
-                    Some(SectionShape::RcColumnRect { .. } | SectionShape::RcColumnCircle { .. })
-                )
-                && model.element_material(elem).is_some_and(|material| {
-                    structure_kind_of(Some(sec), Some(material.category)) == StructureKind::Rc
-                })
-        })
 }
 
 pub(super) fn missing_design_positions(required: &[f64], forces: &MemberForces) -> Vec<f64> {

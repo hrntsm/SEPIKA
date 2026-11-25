@@ -229,6 +229,7 @@ impl ResultsBundle {
 
     pub(super) fn has_design_results(&self) -> bool {
         !self.member_checks.is_empty()
+            || !self.rc_column_ductility_advisories.is_empty()
             || !self.joint_checks.is_empty()
             || !self.wall_checks.is_empty()
             || !self.beam_checks.is_empty()
@@ -237,6 +238,7 @@ impl ResultsBundle {
 
     pub(super) fn clear_design_results(&mut self) {
         self.member_checks.clear();
+        self.rc_column_ductility_advisories.clear();
         self.joint_checks.clear();
         self.wall_checks.clear();
         self.beam_checks.clear();
