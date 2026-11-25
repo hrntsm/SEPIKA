@@ -1,7 +1,9 @@
 use approx::assert_abs_diff_eq;
 use sepika_core::dof::{Dof, Dof6Mask};
 use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
-use sepika_core::model::{FrameSectionUse, MaterialCategory, MemberLoad, Model, NodalLoad};
+use sepika_core::model::{
+    FrameSectionUse, MaterialCategory, MemberLoad, Model, NodalLoad, SteelDesignAttr,
+};
 use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, LoadTerm, MemberDesignCheckOptions,
@@ -56,6 +58,18 @@ fn girder(steel: bool, fixed: bool, m_i_knm: f64, m_j_knm: f64) -> Model {
         section.frame_use = Some(FrameSectionUse::Girder);
         section.material = Some(MaterialId(0));
         model.sections[0] = section;
+        model.steel_design_attrs.push(SteelDesignAttr {
+            elem: ElemId(0),
+            lateral_brace_count: Some(1),
+            column_lateral_buckling_end_supports: None,
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: None,
+            lk_y_direct: None,
+            lk_z_direct: None,
+            c_direct: None,
+        });
     } else if let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape {
         rebar.top = vec![4];
         rebar.bottom = vec![4];

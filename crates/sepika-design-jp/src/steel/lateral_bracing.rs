@@ -690,6 +690,19 @@ mod tests {
     #[test]
     fn reference_shared_check_entry_preserves_bending_shear_and_lb() {
         let mut m = model(true);
+        m.steel_design_attrs
+            .push(sepika_core::model::SteelDesignAttr {
+                elem: ElemId(0),
+                lateral_brace_count: Some(1),
+                column_lateral_buckling_end_supports: None,
+                joint_flange_loss: 0.0,
+                joint_web_loss: 0.0,
+                scallop_web_loss: 0.0,
+                lb_direct: None,
+                lk_y_direct: None,
+                lk_z_direct: None,
+                c_direct: None,
+            });
         let forces = vec![(
             ElemId(0),
             MemberForces {
@@ -710,6 +723,7 @@ mod tests {
         let checked: Vec<_> = report
             .member_checks
             .iter()
+            .filter(|(id, _, _)| *id == ElemId(0))
             .map(|(_, _, o)| {
                 if let CheckOutcome::Checked(r) = o {
                     assert!(r.detail.contains("（参考）n=2"));
@@ -726,7 +740,12 @@ mod tests {
         let unavailable_report =
             run_member_design_checks(&m, &forces, &[], &MemberDesignCheckOptions::default())
                 .unwrap();
-        for ((_, _, outcome), ratios) in unavailable_report.member_checks.iter().zip(checked) {
+        for ((_, _, outcome), ratios) in unavailable_report
+            .member_checks
+            .iter()
+            .filter(|(id, _, _)| *id == ElemId(0))
+            .zip(checked)
+        {
             let CheckOutcome::Checked(result) = outcome else {
                 panic!("{outcome:?}")
             };
@@ -749,19 +768,7 @@ mod tests {
                 ..
             }
         ));
-        m.steel_design_attrs
-            .push(sepika_core::model::SteelDesignAttr {
-                elem: ElemId(0),
-                lateral_brace_count: Some(100),
-                column_lateral_buckling_end_supports: None,
-                joint_flange_loss: 0.0,
-                joint_web_loss: 0.0,
-                scallop_web_loss: 0.0,
-                lb_direct: None,
-                lk_y_direct: None,
-                lk_z_direct: None,
-                c_direct: None,
-            });
+        m.steel_design_attrs[0].lateral_brace_count = Some(100);
         assert_eq!(resolve_lateral_bracing_reference(&m, ElemId(0)), reference);
         m.steel_design_attrs[0].lb_direct = Some((100.0, 200.0, 300.0));
         assert_eq!(resolve_lateral_bracing_reference(&m, ElemId(0)), reference);

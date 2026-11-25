@@ -12,8 +12,8 @@ use sepika_core::model::{Material, PropertyBasis, Section};
 use sepika_core::section_shape::SectionShape;
 
 use super::section::{
-    built_h_strong_axis_moduli, resolve_lb, steel_c_factor, steel_fb_h_asd2019,
-    steel_h_z_with_loss, steel_p_lambda_b, steel_warping_constant,
+    built_h_strong_axis_moduli, resolve_lb, steel_beam_lateral_parameters, steel_c_factor,
+    steel_fb_h_asd2019, steel_h_z_with_loss, steel_warping_constant,
 };
 use super::{
     has_section_loss, nonzero, safe_denom, section_modulus, shape_of, shear_component,
@@ -247,18 +247,29 @@ pub(super) fn check_asymmetric_built_h(
     }
 }
 
-/// 鉄骨造梁の断面検定。
-///
-/// 軸力・曲げと適用範囲内の独立せん断の検定比を返す。
+pub(crate) fn beam_lateral_buckling_length(ctx: &DesignCtx, pos: f64) -> (f64, bool) {
+    let specified = ctx.lb.or_else(|| {
+        let attr = ctx.steel_attr.as_ref()?;
+        let brace_count = attr.lateral_brace_count.filter(|&n| n > 0);
+        (attr.lb_direct.is_some() || brace_count.is_some())
+            .then(|| resolve_lb(pos, ctx.length, attr.lb_direct, brace_count))
+    });
+    let lb = specified.unwrap_or_else(|| ctx.node_span_mm.unwrap_or(ctx.length));
+    let partial = specified.is_some_and(|lb| lb < ctx.length - 1e-9);
+    (lb, partial)
+}
+
+/// 鉄骨造梁の軸力・曲げと適用範囲内の独立せん断の検定比を返す。
 pub(crate) fn check_beam(
     forces: &MemberForcesAt,
     sec: &Section,
     mat: &Material,
     ctx: &DesignCtx,
     f: f64,
-    term: LoadTerm,
     lambda: f64,
+    incomplete: &mut Option<String>,
 ) -> Result<CheckResult, String> {
+    let term = ctx.term;
     let h = sec.depth;
     let b = sec.width;
     let area = nonzero(sec.area);
@@ -297,33 +308,44 @@ pub(crate) fn check_beam(
     let fc_val = steel_fc(f, mat.young, lambda, term);
 
     let fb_weak = ft_val;
+    let mut fb_label = "fb";
+    let mut moment_parameters = None;
     let (fb_strong, lateral_length_mm) = match shape {
         ShapeCategory::H => {
-            let specified_lb = ctx.lb.or_else(|| {
-                let attr = ctx.steel_attr.as_ref()?;
-                let brace_count = attr.lateral_brace_count.filter(|&n| n > 0);
-                (attr.lb_direct.is_some() || brace_count.is_some())
-                    .then(|| resolve_lb(forces.pos, ctx.length, attr.lb_direct, brace_count))
-            });
-            let lb = specified_lb.unwrap_or_else(|| ctx.node_span_mm.unwrap_or(ctx.length));
-            if specified_lb.is_none() && ctx.node_span_mm.is_some() && lb <= 0.0 {
+            let (lb, partial) = beam_lateral_buckling_length(ctx, forces.pos);
+            let length_is_direct_or_braced = ctx.lb.is_some()
+                || ctx.steel_attr.as_ref().is_some_and(|attr| {
+                    attr.lb_direct.is_some() || attr.lateral_brace_count.is_some_and(|n| n > 0)
+                });
+            if !length_is_direct_or_braced && ctx.node_span_mm.is_some() && lb <= 0.0 {
                 return Err("節点間距離が正でないため横座屈長さを確定できません".into());
             }
             if !lb.is_finite() || lb < 0.0 {
                 return Err("横座屈長さが負または非有限です".into());
             }
-            let lb_is_partial = specified_lb.is_some_and(|lb| lb < ctx.length - 1e-9);
-            let c = steel_c_factor(ctx, lb_is_partial);
             let stress = if lb <= 1e-9 {
                 ft_val
+            } else if let Some((c, p_lambda_b)) = if partial {
+                Some((steel_c_factor(ctx, true), 0.3))
             } else {
+                steel_beam_lateral_parameters(ctx)
+            } {
+                moment_parameters = Some((c, p_lambda_b));
                 let iz = sec.iz;
                 let iw = steel_warping_constant(sec, tf);
                 let j = sec.resolved_j()?;
                 let e = mat.young;
                 let g = mat.shear.unwrap_or(e / (2.0 * (1.0 + mat.poisson)));
-                let p_lambda_b = steel_p_lambda_b(ctx, lb_is_partial);
                 steel_fb_h_asd2019(f, term, lb, iz, iw, j, e, g, z_strong, c, p_lambda_b)
+            } else {
+                if forces.mz != 0.0 {
+                    *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                        incomplete.take(),
+                        Some("単一補剛区間の強軸曲げ分布を確認できず、横座屈を考慮した強軸曲げは未算定です"),
+                    );
+                    fb_label = "fb上限";
+                }
+                ft_val
             };
             (stress, Some(lb))
         }
@@ -373,12 +395,15 @@ pub(crate) fn check_beam(
         term_label, axial_basis
     );
     let mut bending_detail = format!(
-        "σax={:.4} N/mm², σby={:.4} N/mm², σbz={:.4} N/mm², fc={:.4} N/mm², fb={:.4} N/mm², \
+        "σax={:.4} N/mm², σby={:.4} N/mm², σbz={:.4} N/mm², fc={:.4} N/mm², {fb_label}={:.4} N/mm², \
 組合せ比={:.4}",
         sigma_ax, sigma_by, sigma_bz, fc_val, fb_strong, ratio_comb
     );
     if let Some(lb) = lateral_length_mm {
         bending_detail.push_str(&format!(", 採用横座屈長さ lb={lb} mm"));
+    }
+    if let Some((c, p_lambda_b)) = moment_parameters {
+        bending_detail.push_str(&format!(", C={c:.4}, 塑性限界細長比={p_lambda_b:.4}"));
     }
     let ratio = if tension_with_strong_bending {
         ratio_comb
@@ -403,8 +428,9 @@ pub(crate) fn check_beam(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::steel::section::steel_p_lambda_b;
     use crate::steel::test_support::{h_section, mat, rect_section};
-    use crate::steel::SteelDesign;
+    use crate::steel::{SteelBeamMomentDiagram, SteelDesign};
     use crate::{DesignCheck, MemberKind};
 
     #[test]
@@ -416,6 +442,7 @@ mod tests {
         let forces = MemberForcesAt::from_local(0.5, [0.0, 0.0, 0.0, 0.0, 0.0, 100e6]);
         let mut ctx = DesignCtx {
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 3500.0,
             node_span_mm: Some(3000.0),
             ..Default::default()
@@ -472,6 +499,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             term: LoadTerm::Short,
             length: 3000.0,
             ..Default::default()
@@ -512,6 +540,7 @@ mod tests {
         };
         let ctx = DesignCtx {
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 4000.0,
             ..Default::default()
         };
@@ -549,6 +578,7 @@ mod tests {
         };
         let ctx_base = DesignCtx {
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 4000.0,
             ..Default::default()
         };
@@ -557,6 +587,7 @@ mod tests {
             .unwrap_checked();
         let ctx_loss = DesignCtx {
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 4000.0,
             steel_attr: Some(SteelDesignAttr {
                 elem: ElemId(0),
@@ -600,6 +631,7 @@ mod tests {
         };
         let ctx_no_brace = DesignCtx {
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 12_000.0,
             ..Default::default()
         };
@@ -608,6 +640,7 @@ mod tests {
             .unwrap_checked();
         let ctx_braced = DesignCtx {
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 12_000.0,
             steel_attr: Some(SteelDesignAttr {
                 elem: ElemId(0),
@@ -656,7 +689,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
             length: 6000.0,
-            end_moments_z: Some((1.0, -1.0)),
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::Monotonic([100e6, -100e6]),
             ..Default::default()
         };
         let auto = SteelDesign
@@ -667,7 +700,7 @@ mod tests {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
             length: 6000.0,
-            end_moments_z: Some((1.0, -1.0)),
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::Monotonic([100e6, -100e6]),
             steel_attr: Some(SteelDesignAttr {
                 elem: ElemId(0),
                 joint_flange_loss: 0.0,
@@ -773,9 +806,7 @@ mod tests {
         );
     }
 
-    /// c_direct ≤ 0 は無効な入力として無視され、自動算定（この場合は
-    /// end_moments_z が None のため C=1.0）にフォールバックすることを
-    /// 確認する。
+    /// c_direct ≤ 0 は無効な入力として無視し、内点最大の自動算定に戻す。
     #[test]
     fn test_check_beam_c_direct_non_positive_falls_back_to_auto() {
         use sepika_core::ids::ElemId;
@@ -794,6 +825,7 @@ mod tests {
         let ctx = DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 6000.0,
             steel_attr: Some(SteelDesignAttr {
                 elem: ElemId(0),
@@ -948,6 +980,7 @@ mod tests {
         let ctx = DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 4000.0,
             lk_y: Some(4000.0),
             lk_z: Some(4000.0),
@@ -997,6 +1030,7 @@ mod tests {
         let ctx = DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 4000.0,
             ..Default::default()
         };
@@ -1086,6 +1120,7 @@ mod tests {
         let ctx = DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 6000.0,
             ..Default::default()
         };
@@ -1134,6 +1169,7 @@ mod tests {
         let ctx = DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 300.0,
             ..Default::default()
         };
@@ -1304,16 +1340,13 @@ mod tests {
         );
     }
 
-    /// 座屈区間中央の曲げが両端部より大きい場合は安全側 pλb=0.3。
     #[test]
-    fn test_p_lambda_b_mid_moment_dominant_is_0_3() {
+    fn beam_peak_at_any_interior_section_sets_the_interior_maximum_coefficients() {
         let ctx = DesignCtx {
-            end_moments_z: Some((50.0, 50.0)),
-            mid_moment_z: Some(200.0),
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             ..Default::default()
         };
-        let p = steel_p_lambda_b(&ctx, false);
-        assert!((p - 0.3).abs() < 1e-9, "p={}", p);
+        assert_eq!(steel_beam_lateral_parameters(&ctx), Some((1.0, 0.3)));
     }
 
     /// 単曲率・等曲げ（M2/M1=−1）→ pλb=0.6−0.3=0.3。
@@ -1338,15 +1371,14 @@ mod tests {
         assert!((p - 0.9).abs() < 1e-9, "p={}", p);
     }
 
-    /// end_moments_z が None の場合は安全側 pλb=0.3。
     #[test]
-    fn test_p_lambda_b_none_end_moments_is_0_3() {
+    fn end_and_center_samples_alone_do_not_verify_beam_coefficients() {
         let ctx = DesignCtx {
-            end_moments_z: None,
+            end_moments_z: Some((100.0, -100.0)),
+            mid_moment_z: Some(0.0),
             ..Default::default()
         };
-        let p = steel_p_lambda_b(&ctx, false);
-        assert!((p - 0.3).abs() < 1e-9, "p={}", p);
+        assert_eq!(steel_beam_lateral_parameters(&ctx), None);
     }
 
     /// 部分補剛区間では、全長区間と同じ端部モーメントを与えても pλb=0.3 とする。
@@ -1380,6 +1412,7 @@ mod tests {
         let ctx = DesignCtx {
             term: LoadTerm::Long,
             kind: MemberKind::Girder,
+            steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
             length: 9000.0,
             ..Default::default()
         };

@@ -8,10 +8,14 @@ use sepika_core::model::{MemberLoad, MemberLoadKind};
 
 mod shear_envelope;
 mod shear_span;
+mod strong_bending;
 pub use shear_envelope::{
     frame_shear_envelope, FrameShearEnvelope, FrameShearFace, FrameShearPeak, SectionSide,
 };
 pub(super) use shear_span::ShearSpan;
+pub use strong_bending::{
+    frame_strong_bending_span, FrameStrongBendingPeak, FrameStrongBendingSpan,
+};
 
 #[derive(Clone, Copy, Debug)]
 enum Comp {

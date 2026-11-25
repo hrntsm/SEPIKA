@@ -386,7 +386,9 @@ fn ovika_old_analysis_is_unavailable_until_explicit_reanalysis() {
 fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_mark_fresh_restamping(
 ) {
     let mut app = App::default();
-    app.load_model(super::tests::lateral_bracing_fixture::frame(true));
+    app.load_model(
+        super::tests::lateral_bracing_fixture::frame_with_independent_section_bracing(true),
+    );
     app.run_linear_static(LoadCaseId(0));
     assert!(app.core.scoped.last_error.is_none());
     let checks = &mut app.core.scoped.results.as_mut().unwrap().member_checks;

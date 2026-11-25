@@ -2583,4 +2583,6 @@ mod rc_beam_asymmetric_tests;
 #[cfg(test)]
 pub(crate) mod rc_column_boundary_tests;
 #[cfg(test)]
+pub(crate) mod steel_beam_span_tests;
+#[cfg(test)]
 pub(crate) mod steel_column_k_tests;

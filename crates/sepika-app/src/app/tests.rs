@@ -12689,6 +12689,14 @@ pub(super) mod lateral_bracing_fixture {
         env!("CARGO_MANIFEST_DIR"),
         "/../sepika-design-jp/tests/fixtures/lateral_bracing_model.rs"
     ));
+
+    pub fn frame_with_independent_section_bracing(split: bool) -> Model {
+        let mut model = frame(split);
+        for attr in &mut model.steel_design_attrs {
+            attr.lb_direct = Some((2_500.0, 2_500.0, 2_500.0));
+        }
+        model
+    }
 }
 
 #[test]
@@ -12699,7 +12707,7 @@ fn lateral_bracing_gui_entry_uses_column_span_for_panel_on_off_and_keeps_existin
     };
     for split in [false, true] {
         for panel in [PanelZoneMode::None, PanelZoneMode::Model] {
-            let mut model = lateral_bracing_fixture::frame(split);
+            let mut model = lateral_bracing_fixture::frame_with_independent_section_bracing(split);
             model.panel_zone = panel;
             let mut app = App::default();
             app.load_model(model);
@@ -12773,7 +12781,7 @@ fn lateral_bracing_gui_entry_uses_column_span_for_panel_on_off_and_keeps_existin
 
 #[test]
 fn lateral_bracing_gui_invalid_group_reference_keeps_bending_and_shear() {
-    let model = lateral_bracing_fixture::frame(true);
+    let model = lateral_bracing_fixture::frame_with_independent_section_bracing(true);
     let mut app = App::default();
     app.load_model(model);
     app.run_linear_static(LoadCaseId(0));

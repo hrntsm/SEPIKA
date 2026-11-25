@@ -20,6 +20,7 @@ fn context(kind: MemberKind) -> DesignCtx {
         kind,
         term: LoadTerm::Long,
         length: 6000.0,
+        steel_beam_moment_diagram: SteelBeamMomentDiagram::InteriorMaximum,
         lk_y: Some(6000.0),
         lk_z: Some(6000.0),
         column_lateral_buckling_length: Some(Ok(6000.0)),

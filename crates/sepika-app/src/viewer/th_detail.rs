@@ -950,9 +950,15 @@ fn draw_peak_check(
                         draw_outcome(&outcome);
                     }
                 } else if structure == StructureKind::S {
-                    for outcome in
-                        sepika_design_jp::SteelDesign.check_outcomes(&mfa, sec, mat, &ctx)
-                    {
+                    let outcomes = if selected.is_none() {
+                        sepika_design_jp::SteelDesign
+                            .check_time_history_envelope_outcomes(&mfa, sec, mat, &mut ctx)
+                    } else {
+                        sepika_design_jp::SteelDesign
+                            .check_outcomes(&mfa, sec, mat, &ctx)
+                            .collect()
+                    };
+                    for outcome in outcomes {
                         draw_outcome(&outcome);
                     }
                 } else {
@@ -2147,6 +2153,30 @@ mod tests {
                 assert!(text.contains("検定比"), "{text}");
             }
         }
+    }
+
+    #[test]
+    fn steel_beam_time_history_without_a_verified_moment_diagram_keeps_independent_ng() {
+        use crate::app::steel_beam_span_tests::input;
+        let mut app = App::default();
+        assert!(app.load_model(input::cantilever(0.0, 0.0, None)));
+        let recording = ThRecording {
+            peak_member_forces: vec![Some(MemberForces {
+                at: vec![
+                    (0.0, [0.0, 0.0, 0.0, 0.0, 0.0, 400e6]),
+                    (1.0, [1_400_000.0, 0.0, 0.0, 0.0, 0.0, -130e6]),
+                ],
+            })],
+            ..Default::default()
+        };
+        let text = peak_recording_text(&app, &app.core.model.elements[0], 0, &recording, false);
+        assert!(
+            text.contains("検定不能: 単一補剛区間の強軸曲げ分布を確認できず"),
+            "{text}"
+        );
+        assert!(text.contains("検定比 1.482 (NG)"), "{text}");
+        assert_eq!(text.matches("(NG)").count(), 1, "{text}");
+        assert!(!text.contains("(OK)"), "{text}");
     }
 
     #[test]
