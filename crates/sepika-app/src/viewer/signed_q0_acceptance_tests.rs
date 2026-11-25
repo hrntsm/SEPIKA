@@ -16,6 +16,24 @@ fn peak_labels(
     nonlinear: bool,
     applied_long_term: bool,
 ) -> String {
+    peak_labels_with_confirmed_long_term(
+        app,
+        rec,
+        index,
+        nonlinear,
+        applied_long_term,
+        applied_long_term,
+    )
+}
+
+fn peak_labels_with_confirmed_long_term(
+    app: &App,
+    rec: &ThRecording,
+    index: usize,
+    nonlinear: bool,
+    applied_long_term: bool,
+    confirmed_long_term: bool,
+) -> String {
     let elem = &app.core.model.elements[index];
     let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
     egui::Context::default()
@@ -36,6 +54,7 @@ fn peak_labels(
                     rec,
                     nonlinear,
                     applied_long_term,
+                    || confirmed_long_term,
                     &axis,
                 )
             },
@@ -53,6 +72,7 @@ fn peak_labels(
 #[test]
 fn signed_q0_th_detail_missing_repaired_missing_does_not_render_ordinary_check() {
     let mut app = App::default();
+    app.core.analysis_cfg.rc_damage_control = false;
     app.load_model(fixture::model());
     app.core.analysis_cfg.qd_method = sepika_design_jp::QdMethod::Qd1;
     app.run_combination(0);
@@ -113,6 +133,7 @@ fn signed_q0_th_detail_local_axis_error_affects_only_beam_that_needs_q0() {
     }
 
     let mut app = App::default();
+    app.core.analysis_cfg.rc_damage_control = false;
     assert!(app.load_model(model));
     app.run_combination(0);
     let peak = &app.current_static().unwrap().member_forces;
@@ -453,6 +474,7 @@ fn concrete_beam_th_detail_keeps_bending_ng_and_shear_rebar_diagnostic_without_g
         serde_json::from_str(include_str!("../../tests/fixtures/src_ql_contract.json")).unwrap();
     for (model, member) in [(fixture::model(), "RC梁"), (src_model, "SRC梁")] {
         let mut app = App::default();
+        app.core.analysis_cfg.rc_damage_control = false;
         assert!(app.load_model(model));
         app.core.analysis_cfg.qd_method = QdMethod::Qd1;
         let model = &mut app.core.model;
@@ -509,6 +531,7 @@ fn rc_beam_th_detail_uses_available_gravity_to_keep_an_independent_bond_failure(
     use sepika_core::model::MaterialCategory;
 
     let mut app = App::default();
+    app.core.analysis_cfg.rc_damage_control = false;
     assert!(app.load_model(fixture::model()));
     app.run_combination(1);
     app.core.analysis_cfg.qd_method = QdMethod::Qd2;
@@ -617,6 +640,7 @@ fn time_history_gravity_gaps_are_scoped_to_each_position_and_required_component(
 
     let load = |model: Model| {
         let mut app = App::default();
+        app.core.analysis_cfg.rc_damage_control = false;
         assert!(app.load_model(model));
         app.core.analysis_cfg.qd_method = QdMethod::Qd2;
         app
@@ -767,6 +791,7 @@ fn time_history_rc_qd1_uses_end_axial_and_retains_connected_girder_diagnostics()
     use sepika_design_jp::QdMethod;
 
     let mut app = App::default();
+    app.core.analysis_cfg.rc_damage_control = false;
     assert!(app.load_model(input::column_with_girder(rc::column_model(false, 0.0))));
     let response = [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0];
     let rec = gravity_test_record(response, response);
@@ -922,6 +947,7 @@ fn signed_q0_th_detail_released_beam_keeps_independent_bending_failure() {
     use sepika_core::model::EndCondition;
 
     let mut app = App::default();
+    app.core.analysis_cfg.rc_damage_control = false;
     app.load_model(fixture::model());
     app.run_combination(0);
     let mut peak = app.core.scoped.results.as_ref().unwrap().member_forces[0]
@@ -951,4 +977,98 @@ fn signed_q0_th_detail_released_beam_keeps_independent_bending_failure() {
             );
         }
     }
+}
+
+#[test]
+fn time_history_damage_control_uses_the_combined_committed_force_and_not_the_envelope() {
+    use sepika_design_jp::QdMethod;
+    let mut app = App::default();
+    assert!(app.load_model(fixture::model()));
+    app.core.analysis_cfg.rc_damage_control = true;
+    let rec = gravity_test_record(
+        [0.0, 900_000.0, 0.0, 0.0, 0.0, 100e6],
+        [-50_000.0, -200_000.0, 0.0, 0.0, 0.0, 30e6],
+    );
+    for method in [QdMethod::Qd1, QdMethod::Qd2, QdMethod::Min] {
+        app.core.analysis_cfg.qd_method = method;
+        let text = peak_labels_with_confirmed_long_term(&app, &rec, 0, true, true, true);
+        // Fc24・SD345、b=300 mm、d=539 mm、α=2、2-φ10@100 の許容値は285.551 kN。
+        assert_eq!(text.matches("せん断 ").count(), 1, "{text}");
+        assert!(text.contains("せん断 0.70"), "{text}");
+        assert!(
+            text.contains("異なる時刻の内力包絡では算定しません"),
+            "{text}"
+        );
+        assert!(text.contains("全時刻の適否は未判定"), "{text}");
+        assert!(!text.contains("地震時 QD / 柱メカニズム"), "{text}");
+    }
+    for (nonlinear, apply) in [(false, false), (true, false), (true, true)] {
+        let text = peak_labels_with_confirmed_long_term(&app, &rec, 0, nonlinear, apply, false);
+        assert!(!text.contains("せん断 "), "{text}");
+        assert!(
+            text.contains("長期荷重を含む応答を確認できません"),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn time_history_damage_control_requires_current_generation_input_and_nonempty_long_term_loads() {
+    use sepika_solver::dynamic::timehistory::{GroundMotion, ResponseResult};
+    let make_app = |has_load: bool| {
+        let mut app = App::default();
+        let mut model = fixture::model();
+        if !has_load {
+            for case in &mut model.load_cases {
+                case.member.clear();
+                case.nodal.clear();
+            }
+        }
+        assert!(app.load_model(model));
+        app.core.analysis_cfg.th_nonlinear = true;
+        app.core.analysis_cfg.th_apply_long_term = true;
+        let input = app
+            .time_history_input(
+                GroundMotion {
+                    dt: 0.02,
+                    accel_x: vec![0.0, 0.0],
+                    accel_y: None,
+                    accel_theta: None,
+                },
+                "損傷制御の試験波".into(),
+            )
+            .unwrap();
+        app.apply_time_history_result(
+            Ok(ResponseResult {
+                wall_capacities: vec![],
+                rc_wall_shear_method: Default::default(),
+                time: vec![0.0, 0.02],
+                peak_disp: vec![],
+                story_drift_angle: vec![],
+                history: Default::default(),
+                recording: None,
+                nonlinear: true,
+                applied_long_term: true,
+                non_converged_steps: 0,
+            }),
+            input.source,
+        );
+        app
+    };
+    let confirmed = |app: &App| {
+        let view = &app.ui.view;
+        let result = view.spatial_result(app).unwrap();
+        confirmed_time_history_long_term(app, view, &app.core.model, result)
+    };
+    let mut app = make_app(true);
+    assert!(confirmed(&app));
+    app.core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .input_records
+        .clear();
+    assert!(!confirmed(&app));
+    assert!(!confirmed(&make_app(false)));
 }

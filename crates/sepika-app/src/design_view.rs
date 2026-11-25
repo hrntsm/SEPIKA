@@ -305,7 +305,9 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
             let mut changed = false;
             changed |= ui
                 .checkbox(&mut cfg.rc_damage_control, "RC短期せん断: 損傷制御")
-                .on_hover_text("ON: 損傷制御のための検討（2/3・α・fs）、OFF: 安全確保のための検討")
+                .on_hover_text(
+                    "ON: 損傷制御（長期＋水平、割増しなし）。OFF: 安全確保（地震時はQD方式を使用）",
+                )
                 .changed();
             ui.label("QD:");
             for (m, label) in [
@@ -316,8 +318,8 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                 if ui
                     .selectable_label(cfg.qd_method == m, label)
                     .on_hover_text(
-                        "地震時短期の設計用せん断力の決定方法（QD1=終局曲げベース、\
-                     QD2=QL+n・QE。長期組合せ(G+P)を先に解析している場合のみ有効）",
+                        "地震時短期の設計用せん断力の決定方法。RC梁・柱の損傷制御には適用しません。\
+                     QD1は降伏曲げに基づき、QD2はQL+n・QEで算定します。",
                     )
                     .clicked()
                 {

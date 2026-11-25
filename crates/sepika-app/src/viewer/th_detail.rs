@@ -348,6 +348,7 @@ fn draw_th_detail_content_at(
         recording,
         th_nonlinear,
         th_applied_long_term,
+        || confirmed_time_history_long_term(app, view, &display, th_result),
         &axis,
     );
     app.ui.view.th_detail_axis_z = axis_z;
@@ -571,6 +572,23 @@ fn end_moments(mf: &MemberForces, axis_z: bool) -> Option<(f64, f64)> {
     Some((-i_at.1[idx], j_at.1[idx]))
 }
 
+fn confirmed_time_history_long_term(
+    app: &App,
+    view: &super::ViewportState,
+    analyzed_model: &sepika_core::model::Model,
+    result: &sepika_solver::dynamic::timehistory::ResponseResult,
+) -> bool {
+    result.nonlinear
+        && result.applied_long_term
+        && analyzed_model.load_cases.iter().any(|case| {
+            case.kind.is_long_term() && (!case.nodal.is_empty() || !case.member.is_empty())
+        })
+        && view.spatial_case_id(app).is_some_and(|id| {
+            app.require_result_input(crate::app::ResultInputKey::TimeHistory(id))
+                .is_ok()
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_peak_check(
     ui: &mut egui::Ui,
@@ -580,6 +598,7 @@ fn draw_peak_check(
     rec: &ThRecording,
     th_nonlinear: bool,
     th_applied_long_term: bool,
+    confirmed_long_term: impl FnOnce() -> bool,
     axis: &super::MemberAxisEndpoints,
 ) {
     let model = &app.core.model;
@@ -589,7 +608,6 @@ fn draw_peak_check(
     } else {
         "最大応力に対する検定（短期）"
     });
-    draw_long_term_note(ui, th_nonlinear, th_applied_long_term);
     ui.label(
         egui::RichText::new(
             "簡易検定です。S部材とSRC柱の座屈長さは軸別の直接入力を優先し、空欄では節点間距離の柱1.2倍、梁・ブレース1.0倍とします。CFT柱は両軸の直接入力が必要です。\
@@ -600,16 +618,6 @@ fn draw_peak_check(
         .size(11.0)
         .color(theme::GRAY_600),
     );
-    if !signed_bending {
-        ui.label(
-            egui::RichText::new(
-                "非線形時刻歴で長期を重ねた解析のときのみ、地震時 QD / 柱メカニズムを配線します\
-                 （線形時刻歴や長期未重畳では、包絡ピークと静的長期の合成が危険側になり得るため無効です）。",
-            )
-            .size(11.0)
-            .color(theme::GRAY_600),
-        );
-    }
 
     if signed_bending {
         draw_asymmetric_column_section_history(ui, rec, elem_idx);
@@ -696,6 +704,32 @@ fn draw_peak_check(
         );
     let rc_beam = structure == StructureKind::Rc
         && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }));
+    let rc_damage_control = (rc_beam || rc_column) && app.core.analysis_cfg.rc_damage_control;
+    let wire_qd = wire_qd && !rc_damage_control;
+    let confirmed_long_term = rc_damage_control && confirmed_long_term();
+    if rc_damage_control && th_applied_long_term && !confirmed_long_term {
+        ui.label("長期荷重を含む設定ですが、実際の初期載荷は確認できません。");
+    } else {
+        draw_long_term_note(ui, th_nonlinear, th_applied_long_term);
+    }
+    if !signed_bending && !rc_damage_control {
+        ui.label(
+            egui::RichText::new(
+                "非線形時刻歴で長期を重ねた解析のときのみ、地震時 QD / 柱メカニズムを配線します\
+                 （線形時刻歴や長期未重畳では、包絡ピークと静的長期の合成が危険側になり得るため無効です）。",
+            )
+            .size(11.0)
+            .color(theme::GRAY_600),
+        );
+    }
+    if rc_damage_control {
+        ui.label("RCせん断の損傷制御（15.4式）は長期荷重を含む確定ステップに限ります。抽出時刻の確認であり、全時刻の適否は未判定です。");
+        if !confirmed_long_term {
+            ui.colored_label(theme::WARN_TEXT, "RCせん断の損傷制御は未算定です（長期荷重を含む非線形時刻歴の応答を確認できません）。");
+        } else if axial_peaks.is_none_or(|peaks| peaks.snapshots.is_empty()) {
+            ui.colored_label(theme::WARN_TEXT, "RCせん断の損傷制御は未算定です（せん断を照査できる確定ステップの抽出記録がありません）。");
+        }
+    }
     let qd_method = app.core.analysis_cfg.qd_method;
     let rebar_material = model.element_rebar_material(elem);
     let wrong_main_rebar = rebar_material
@@ -868,7 +902,15 @@ fn draw_peak_check(
                     .at
                     .iter()
                     .map(|(_, f)| (f[moment].abs(), f[shear].abs()))
-                    .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+                    .max_by(|a, b| {
+                        if rc_damage_control {
+                            b.0.is_finite()
+                                .cmp(&a.0.is_finite())
+                                .then_with(|| a.0.total_cmp(&b.0))
+                        } else {
+                            a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+                        }
+                    })
             };
             ctx.shear_span = shear_span(5, 1);
             ctx.shear_span_y = shear_span(4, 2);
@@ -904,7 +946,7 @@ fn draw_peak_check(
                             ui,
                             &format!("{side} t={:.6} s  ξ={pos:.2}:", snapshot.time),
                             outcome,
-                            signed_bending,
+                            signed_bending || rc_damage_control,
                         );
                     } else {
                         draw_outcome_row(ui, pos, outcome);
@@ -932,7 +974,16 @@ fn draw_peak_check(
                         draw_outcome(&outcome);
                     }
                 } else if structure == StructureKind::Rc {
-                    for outcome in sepika_design_jp::RcDesign.check_outcomes(
+                    let shear_issue = if !rc_damage_control {
+                        None
+                    } else if !confirmed_long_term {
+                        Some("RC損傷制御用せん断に必要な長期荷重を含む応答を確認できません")
+                    } else if selected.is_none() {
+                        Some("RC損傷制御用せん断は異なる時刻の内力包絡では算定しません")
+                    } else {
+                        None
+                    };
+                    for outcome in sepika_design_jp::RcDesign.check_time_history(
                         &mfa,
                         sec,
                         mat,
@@ -941,6 +992,7 @@ fn draw_peak_check(
                             && !rc_column
                             && missing_gravity
                             && (wrong_shear_rebar || wrong_main_rebar),
+                        shear_issue,
                     ) {
                         draw_outcome(&outcome);
                     }
@@ -1383,7 +1435,17 @@ mod tests {
         let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
         egui::Context::default()
             .run_ui(egui::RawInput::default(), |ui| {
-                draw_peak_check(ui, app, elem, index, rec, with_gravity, with_gravity, &axis)
+                draw_peak_check(
+                    ui,
+                    app,
+                    elem,
+                    index,
+                    rec,
+                    with_gravity,
+                    with_gravity,
+                    || with_gravity,
+                    &axis,
+                )
             })
             .shapes
             .iter()
@@ -1432,6 +1494,7 @@ mod tests {
         use sepika_solver::statics::linear::StaticOnce;
 
         let mut app = App::default();
+        app.core.analysis_cfg.rc_damage_control = false;
         assert!(app.load_model(model));
         app.core.analysis_cfg.qd_method = method;
         app.core.scoped.results = Some(crate::app::ResultsBundle {
@@ -2397,7 +2460,7 @@ mod tests {
             let elem = &app.core.model.elements[0];
             let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
             let output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
-                draw_peak_check(ui, &app, elem, 0, &rec, false, false, &axis)
+                draw_peak_check(ui, &app, elem, 0, &rec, false, false, || false, &axis)
             });
             let text = output
                 .shapes

@@ -423,6 +423,7 @@ fn direct_rc_entry_preserves_qd2_failure_without_axial_force_and_rejects_unknown
                 length: 3000.0,
                 rebar_material: Some(model.materials[1].clone()),
                 shear_rebar_material: Some(model.materials[1].clone()),
+                rc_damage_control: false,
                 seismic_qd: Some(SeismicQd {
                     method,
                     long_at: vec![(0.5, [0.0; 6])],
@@ -454,6 +455,69 @@ fn direct_rc_entry_preserves_qd2_failure_without_axial_force_and_rejects_unknown
                     if reason.contains("軸力Nが非有限") && reason.contains("QD1の代替算定")),
                     "{outcomes:?}"
                 );
+            }
+        }
+    }
+}
+
+#[test]
+fn damage_control_columns_use_combined_shear_in_each_direction_without_qd_selection() {
+    for circle in [false, true] {
+        let model = input::column_model(circle, 0.0);
+        for (index, gravity_n, combined_n, expected_n, capacity_prefix) in [
+            (1, 50_000.0, 200_000.0, 200_000.0, "QAy="),
+            (2, 50_000.0, -100_000.0, 100_000.0, "QAz="),
+        ] {
+            let mut forces = [-100_000.0, 0.0, 0.0, 0.0, 15e6, 20e6];
+            forces[index] = combined_n;
+            let mut gravity_forces = [-90_000.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+            gravity_forces[index] = gravity_n;
+            let gravity = [(
+                ElemId(0),
+                MemberForces {
+                    at: vec![(0.5, gravity_forces)],
+                },
+            )];
+            for method in [QdMethod::Qd1, QdMethod::Qd2, QdMethod::Min] {
+                for long_member_forces in [Some(gravity.as_slice()), Some(&[][..]), None] {
+                    let rows = check_column(
+                        &model,
+                        [0.0, 0.5, 1.0].map(|pos| (pos, forces)).to_vec(),
+                        MemberDesignCheckOptions {
+                            term: LoadTerm::Short,
+                            rc_damage_control: true,
+                            qd_method: method,
+                            long_member_forces,
+                            ..Default::default()
+                        },
+                    );
+                    assert_eq!(rows.len(), 3);
+                    for (_, _, outcome) in rows {
+                        let CheckOutcome::Checked(result) = outcome else {
+                            panic!("{outcome:?}")
+                        };
+                        let shear = result
+                            .components
+                            .iter()
+                            .find(|c| c.kind == CheckKind::Shear)
+                            .unwrap();
+                        let displayed_qa: f64 = shear
+                            .detail
+                            .split_once(capacity_prefix)
+                            .unwrap()
+                            .1
+                            .split_whitespace()
+                            .next()
+                            .unwrap()
+                            .parse()
+                            .unwrap();
+                        let demand_n = displayed_qa * shear.ratio;
+                        assert!(
+                            (demand_n - expected_n).abs() < 0.2,
+                            "{demand_n} != {expected_n}"
+                        );
+                    }
+                }
             }
         }
     }

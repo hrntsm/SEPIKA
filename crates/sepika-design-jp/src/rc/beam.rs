@@ -430,7 +430,10 @@ pub(crate) fn beam_check(
     let valid_tension_props = [props.b, props.d, props.j, props.at, fc_raw]
         .into_iter()
         .all(|value| value.is_finite() && value > 0.0);
-    let seismic_qd = ctx.seismic_qd.as_ref().filter(|_| !long_term);
+    let seismic_qd = ctx
+        .seismic_qd
+        .as_ref()
+        .filter(|_| !long_term && !ctx.rc_damage_control);
     let uses_qd1 = seismic_qd.is_some_and(|qd| qd.method != QdMethod::Qd2);
     let q_design = if !shear_reference_valid {
         None
@@ -498,12 +501,13 @@ pub(crate) fn beam_check(
         .zip(qa)
         .filter(|&(_, qa)| qa.is_finite() && qa > 0.0)
     {
+        let demand_label = if seismic_qd.is_some() { "QD" } else { "|Q|" };
         components.push(CheckComponent {
             kind: CheckKind::Shear,
             ratio: q_design / qa,
             detail: format!(
-                "QA={:.1} N, |qy|={:.1} N, α={:.3}, pw={:.5}",
-                qa, forces.qy, alpha, props.pw,
+                "QA={:.1} N, {demand_label}={:.1} N, α={:.3}, pw={:.5}",
+                qa, q_design, alpha, props.pw,
             ),
         });
     }
@@ -698,6 +702,7 @@ mod tests {
             term: LoadTerm::Short,
             kind: crate::MemberKind::Girder,
             length: 6000.0,
+            rc_damage_control: false,
             ..Default::default()
         };
         let base = checked_beam(&forces, &mat, &ctx_plain, &shape);
@@ -705,6 +710,7 @@ mod tests {
             term: LoadTerm::Short,
             kind: crate::MemberKind::Girder,
             length: 6000.0,
+            rc_damage_control: false,
             seismic_qd: Some(SeismicQd {
                 long_at: vec![(0.0, [0.0, 20_000.0, 0.0, 0.0, 0.0, 0.0])],
                 n_factor: 1.5,

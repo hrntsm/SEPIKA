@@ -83,7 +83,7 @@ pub struct MemberDesignCheckOptions<'a> {
     /// 設計者が判断したRC柱ごとの短期圧縮靱性推奨の適用。未指定の柱は判別不能とする。
     pub rc_column_ductility_applicability:
         Option<&'a HashMap<ElemId, RcColumnDuctilityApplicability>>,
-    /// RC 短期許容せん断力で損傷制御式（2/3·α）を使うか。
+    /// RC短期せん断を損傷制御で検定する場合はtrue。断面力には長期・水平荷重を同じ位置で合算して渡す。
     pub rc_damage_control: bool,
     /// RC 梁付着検定の方式（既定は 1999）。
     pub bond_method: BondMethod,
@@ -137,6 +137,11 @@ pub struct MemberDesignCheckReport {
 impl MemberDesignCheckReport {
     /// 荷重状態・必要応力が不足する場合、全検定を理由付き未検定にする。
     pub fn skip_for_load_state(&mut self, reason: &str) {
+        self.skip_except_members(reason, |_| false);
+    }
+
+    /// 荷重状態・必要応力が不足する場合、独立に照査できる指定部材の断面検定以外を未検定にする。
+    pub fn skip_except_members(&mut self, reason: &str, mut preserve: impl FnMut(ElemId) -> bool) {
         let skipped = || CheckOutcome::Skipped {
             reason: reason.into(),
         };
@@ -148,7 +153,10 @@ impl MemberDesignCheckReport {
         for (_, detail) in &mut self.steel_deflection_references {
             *detail = format!("たわみ参考 未算定（{reason}）");
         }
-        for (_, _, outcome) in &mut self.member_checks {
+        for (elem, _, outcome) in &mut self.member_checks {
+            if preserve(*elem) {
+                continue;
+            }
             match outcome {
                 CheckOutcome::Checked(_) => *outcome = skipped(),
                 CheckOutcome::Skipped { reason: prior } => prior.push_str(&format!("。{reason}")),
@@ -528,10 +536,10 @@ pub fn run_member_design_checks(
             lateral_bracing_references.push((*elem_id, reference.clone()));
         }
         let kind = MemberKind::of_element(elem, model);
-        let rc_column_damage_control = structure == StructureKind::Rc
-            && kind == MemberKind::Column
+        let rc_damage_control = structure == StructureKind::Rc
             && options.term == LoadTerm::Short
             && options.rc_damage_control;
+        let rc_column_damage_control = rc_damage_control && kind == MemberKind::Column;
         let shear_span = |moment: usize, shear: usize| {
             mf.at
                 .iter()
@@ -622,7 +630,8 @@ pub fn run_member_design_checks(
             None => length,
         };
 
-        let rc_beam_qd1 = (structure == StructureKind::Rc
+        let rc_beam_qd1 = (!rc_damage_control
+            && structure == StructureKind::Rc
             && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }))
             && options.term == LoadTerm::Short
             && options.long_member_forces.is_some()
@@ -635,6 +644,7 @@ pub fn run_member_design_checks(
             });
         let seismic_qd = long_mf_by_id
             .as_ref()
+            .filter(|_| !rc_damage_control)
             .and_then(|map| map.get(elem_id))
             .map(|mf_long| SeismicQd {
                 long_at: mf_long.at.clone(),
@@ -928,7 +938,8 @@ pub fn run_member_design_checks(
             .chain(peak_sections);
         for (pos, forces, cut_side) in section_forces {
             let mfa = MemberForcesAt::from_local(pos, forces);
-            let missing_gravity = options.long_member_forces.is_some()
+            let missing_gravity = !rc_damage_control
+                && options.long_member_forces.is_some()
                 && ctx.seismic_qd.is_none()
                 && (options.term == LoadTerm::Short
                     && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }))
@@ -958,7 +969,8 @@ pub fn run_member_design_checks(
                 check_incomplete = incomplete;
                 outcome
             } else if structure == StructureKind::Rc {
-                let column_without_gravity = kind == MemberKind::Column
+                let column_without_gravity = !rc_damage_control
+                    && kind == MemberKind::Column
                     && options.long_member_forces.is_some()
                     && ctx.seismic_qd.is_none();
                 let missing_column_reference =

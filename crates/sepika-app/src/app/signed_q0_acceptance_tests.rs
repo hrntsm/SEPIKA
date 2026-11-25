@@ -5,6 +5,7 @@ pub(crate) mod fixture;
 fn app() -> App {
     let mut app = App::default();
     app.load_model(fixture::model());
+    app.core.analysis_cfg.rc_damage_control = false;
     app.core.analysis_cfg.qd_method = sepika_design_jp::QdMethod::Qd1;
     app.core.analysis_cfg.threads = 1;
     app
@@ -107,4 +108,39 @@ fn signed_q0_gui_invalid_direction_repaired_invalid_never_revives_saved_success(
             assert!(!crate::summary::build_report_csv(&app).contains(",OK"));
         }
     }
+}
+
+#[test]
+fn damage_control_uses_the_saved_seismic_combination_without_a_separate_gravity_result() {
+    let mut app = app();
+    app.core.analysis_cfg.rc_damage_control = true;
+    app.core.model.combinations.truncate(1);
+    app.run_combination(0);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    // 左端の支点反力は固定・積載の部材荷重各1 kNと先端の地震荷重10 kNの和。
+    assert!((shear_demand(&app) - 12_000.0).abs() < 0.1);
+
+    app.core.scoped.results.as_mut().unwrap().member_forces[0]
+        .1
+        .at[0]
+        .1[1] = 0.0;
+    app.run_design_check();
+    let positions = &app.current_design_results().unwrap().member_checks[0].positions;
+    assert!(!positions.is_empty());
+    assert!(positions.iter().all(|position| {
+        matches!(&position.outcome, sepika_design_jp::CheckOutcome::Skipped { reason } if reason.contains("保存応答が一致しません"))
+    }));
+
+    app.run_linear_static(LoadCaseId(2));
+    app.run_design_check();
+    let results = app.current_design_results().unwrap();
+    let positions = &results.member_checks[0].positions;
+    assert!(!positions.is_empty());
+    assert!(positions.iter().all(|position| {
+        matches!(&position.outcome, sepika_design_jp::CheckOutcome::Skipped { reason } if reason.contains("G+P"))
+    }));
 }
