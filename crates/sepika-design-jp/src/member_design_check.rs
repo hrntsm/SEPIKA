@@ -75,7 +75,7 @@ pub struct MemberDesignCheckOptions<'a> {
     /// 同じ応力バッチを生成した荷重terms。ケース文字列からは推定しない。
     /// None では大梁の長期たわみは未算定とし、壁は全荷重ケースの未対応部材荷重を検査する。
     pub load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
-    /// 全長を単一補剛区間とする鋼梁の解析に用いた荷重ケースID・係数。モデルは解析に用いた部材荷重を持つこと。
+    /// 鋼梁の補剛区間の曲げを照合する、解析に用いた荷重ケースID・係数。モデルは解析時の部材荷重を持つこと。
     /// 不明ならNoneとし、強軸曲げ分布は未確認とする。
     pub steel_beam_span_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
     /// 通常の長期RC柱検定に渡す線形静的解析結果の由来。
@@ -410,7 +410,7 @@ pub fn run_member_design_checks(
     for (id, _) in member_forces {
         *force_rows.entry(*id).or_default() += 1;
     }
-    use steel_beam_span::GroupBending;
+    use steel_beam_span::{GroupBending, RecoveredBending};
     let mut grouped_beam_spans = steel_beam_span::grouped_bending_spans(
         model,
         member_forces,
@@ -478,7 +478,7 @@ pub fn run_member_design_checks(
         let needs_span = if group.is_some() || grouped_girders.contains(&elem.id) {
             !matches!(
                 grouped_beam_spans.get(&elem.id),
-                Some(Ok(GroupBending::WithoutWholeSpan { .. }))
+                Some(Ok(GroupBending::WithoutWholeSpan { length_mm: None }))
             )
         } else {
             steel_beam_span::requires_bending_span(sec, structure, &ctx)
@@ -874,8 +874,13 @@ pub fn run_member_design_checks(
                 .remove(elem_id)
                 .unwrap_or_else(|| Err("一本部材の構成要素が未確認です".into()))
         });
+        let grouped_partial = matches!(
+            grouped_beam_span,
+            Some(Ok(GroupBending::WithoutWholeSpan { length_mm: Some(_) }))
+        );
         let needs_beam_span = match &grouped_beam_span {
-            Some(Ok(GroupBending::WithoutWholeSpan { .. })) => false,
+            Some(Ok(GroupBending::WithoutWholeSpan { length_mm: None })) => false,
+            Some(Ok(GroupBending::WithoutWholeSpan { length_mm: Some(_) })) => true,
             Some(_) => true,
             None => steel_beam_span::requires_bending_span(sec, structure, &ctx),
         };
@@ -909,26 +914,51 @@ pub fn run_member_design_checks(
                 );
             }
             if let Some(grouped) = grouped_beam_span {
-                return grouped.map(|confirmed| match confirmed {
-                    GroupBending::Whole { span, .. } => span,
-                    GroupBending::WithoutWholeSpan { .. } => unreachable!(),
-                });
+                return match grouped? {
+                    GroupBending::Whole { span, .. } => Ok(RecoveredBending::Single(span)),
+                    GroupBending::WithoutWholeSpan { .. } => {
+                        Err("一本部材に指定した横座屈長さから補剛端の位置を確認できません".into())
+                    }
+                };
             }
             beam_span_loads
                 .as_ref()
                 .map_err(|reason| (*reason).to_owned())
                 .and_then(|loads| loads.bending_span(model, elem, mf, &ctx))
         });
-        if grouped_steel_beam && beam_span.as_ref().is_some_and(Result::is_err) {
-            ctx.steel_beam_moment_diagram = crate::steel::SteelBeamMomentDiagram::UnverifiedGroup;
-        }
-        let beam_peaks = beam_span
-            .as_ref()
-            .and_then(|span| span.as_ref().ok())
-            .map_or(&[][..], |span| {
+        let middle_bracing = steel_beam_span::has_middle_bracing(&ctx);
+        let mut beam_peaks = Vec::new();
+        let mut intervals = &[][..];
+        match &beam_span {
+            Some(Ok(RecoveredBending::Single(span))) => {
                 ctx.steel_beam_moment_diagram = span.diagram;
-                span.demand_peaks.as_slice()
-            });
+                beam_peaks.extend(
+                    span.demand_peaks
+                        .iter()
+                        .filter(|peak| peak.left[5] != 0.0)
+                        .map(|peak| (peak, None)),
+                );
+            }
+            Some(Ok(RecoveredBending::Multiple(spans))) => {
+                intervals = spans;
+                beam_peaks.extend(spans.iter().flat_map(|interval| {
+                    interval
+                        .span
+                        .demand_peaks
+                        .iter()
+                        .map(move |peak| (peak, Some(interval)))
+                }));
+            }
+            Some(Err(_)) if grouped_steel_beam && !grouped_partial => {
+                ctx.steel_beam_moment_diagram =
+                    crate::steel::SteelBeamMomentDiagram::UnverifiedGroup;
+            }
+            Some(Err(_)) if middle_bracing || grouped_partial => {
+                ctx.steel_beam_moment_diagram =
+                    crate::steel::SteelBeamMomentDiagram::UnverifiedBracing;
+            }
+            _ => {}
+        }
         let checker: Box<dyn DesignCheck> = checker_for(structure);
 
         let position_length = if grouped_steel_beam || checks_grouped_rc_qd1 {
@@ -973,18 +1003,15 @@ pub fn run_member_design_checks(
         let mut has_long_shear_row = false;
 
         let first_row = member_checks.len();
-        let has_two_cuts = |peak: &sepika_element::frame::member_load::FrameStrongBendingPeak| {
-            peak.left[5] != 0.0 && !matches!(peak.right, Ok(None))
-        };
         let mut peak_sections = Vec::new();
-        for peak in beam_peaks.iter().filter(|peak| peak.left[5] != 0.0) {
-            if has_two_cuts(peak) {
+        for &(peak, interval) in &beam_peaks {
+            if !matches!(peak.right, Ok(None)) {
                 if !peak.is_i_face {
-                    peak_sections.push((peak.xi, peak.left, Some("集中荷重の左側")));
+                    peak_sections.push((peak.xi, peak.left, Some("集中荷重の左側"), interval));
                 }
                 match &peak.right {
                     Ok(Some(right)) => {
-                        peak_sections.push((peak.xi, *right, Some("集中荷重の右側")))
+                        peak_sections.push((peak.xi, *right, Some("集中荷重の右側"), interval))
                     }
                     Ok(None) => unreachable!(),
                     Err(reason) => member_checks.push((
@@ -996,7 +1023,7 @@ pub fn run_member_design_checks(
                     )),
                 }
             } else {
-                peak_sections.push((peak.xi, peak.left, None));
+                peak_sections.push((peak.xi, peak.left, None, interval));
             }
         }
         // 既定のjフェースのξと、物理座標から求めるξは演算順序の違いで一致しない場合がある。
@@ -1015,17 +1042,33 @@ pub fn run_member_design_checks(
                 };
                 selected_position
                     && !repeated_stations.contains(&station_key(*pos))
-                    && !beam_peaks.iter().any(|peak| {
-                        peak.left[5] != 0.0
-                            && (peak.xi == *pos
-                                || (peak.is_j_face
-                                    && sampled_j_face == Some(*pos)
-                                    && (peak.xi - pos).abs() <= f64::EPSILON))
+                    && !beam_peaks.iter().any(|(peak, _)| {
+                        peak.xi == *pos
+                            || (peak.is_j_face
+                                && sampled_j_face == Some(*pos)
+                                && (peak.xi - pos).abs() <= f64::EPSILON)
                     })
             })
-            .map(|(_, &(pos, forces))| (pos, forces, None))
+            .map(|(_, &(pos, forces))| {
+                let interval = if intervals.is_empty() {
+                    None
+                } else {
+                    let index = intervals.partition_point(|interval| interval.bounds_xi[1] < pos);
+                    intervals.get(index.min(intervals.len() - 1))
+                };
+                (pos, forces, None, interval)
+            })
             .chain(peak_sections);
-        for (pos, forces, cut_side) in section_forces {
+        for (pos, forces, cut_side, interval) in section_forces {
+            if let Some(interval) = interval {
+                ctx.lb = Some(interval.length_mm);
+                ctx.steel_beam_moment_diagram =
+                    if interval.span.diagram == crate::steel::SteelBeamMomentDiagram::Unverified {
+                        crate::steel::SteelBeamMomentDiagram::UnverifiedBracing
+                    } else {
+                        interval.span.diagram
+                    };
+            }
             let mfa = MemberForcesAt::from_local(pos, forces);
             let missing_gravity = !rc_damage_control
                 && options.long_member_forces.is_some()
@@ -1180,6 +1223,19 @@ pub fn run_member_design_checks(
                     _ => {}
                 }
             }
+            if let Some(interval) = interval {
+                let [lo, hi] = interval.bounds_mm;
+                let label = format!("補剛区間 [{lo:.3}, {hi:.3}] mm");
+                match &mut outcome {
+                    CheckOutcome::Checked(result) => result.detail.push_str(&format!(", {label}")),
+                    CheckOutcome::Skipped { reason } => {
+                        reason.insert_str(0, &format!("{label}。"));
+                    }
+                }
+                if let Some(reason) = &mut incomplete {
+                    reason.insert_str(0, &format!("{label}。"));
+                }
+            }
             if let Some(side) = cut_side {
                 match &mut outcome {
                     CheckOutcome::Checked(result) => result.detail.push_str(&format!(", {side}")),
@@ -1201,11 +1257,15 @@ pub fn run_member_design_checks(
         if let Some(span) = beam_span {
             let issue = match span {
                 Err(reason) => Some(reason),
-                Ok(span) if span.diagram == crate::steel::SteelBeamMomentDiagram::Unverified => {
+                Ok(RecoveredBending::Single(span)) if span.diagram == crate::steel::SteelBeamMomentDiagram::Unverified => {
                     Some(
                         "符号付き強軸曲げの単調性または区間内部の絶対値最大を確認できません".into(),
                     )
                 }
+                Ok(RecoveredBending::Multiple(spans)) => spans.iter().find_map(|interval| {
+                    (interval.span.diagram == crate::steel::SteelBeamMomentDiagram::Unverified)
+                        .then_some("符号付き強軸曲げの単調性または区間内部の絶対値最大を確認できない補剛区間があります".into())
+                }),
                 Ok(_) => None,
             };
             if let Some(reason) = issue {
@@ -1213,7 +1273,11 @@ pub fn run_member_design_checks(
                     *elem_id,
                     0.5,
                     CheckOutcome::Skipped {
-                        reason: format!("単一補剛区間の強軸曲げ・横座屈は未算定です。{reason}"),
+                        reason: if middle_bracing || grouped_partial {
+                            format!("各補剛区間の強軸曲げ・横座屈は未算定です。{reason}")
+                        } else {
+                            format!("単一補剛区間の強軸曲げ・横座屈は未算定です。{reason}")
+                        },
                     },
                 ));
             }

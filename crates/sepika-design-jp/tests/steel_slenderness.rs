@@ -473,7 +473,7 @@ fn girder_and_brace_keep_direct_axes_independent_of_eccentricity() {
 }
 
 #[test]
-fn girder_group_keeps_direct_lateral_length() {
+fn girder_group_direct_lateral_length_does_not_establish_brace_positions() {
     use sepika_element::frame::beam::MemberForces;
     let mut model = model();
     model.steel_design_attrs[0].lk_y_direct = None;
@@ -508,7 +508,6 @@ fn girder_group_keeps_direct_lateral_length() {
             mid_moment_z: None,
         },
     )]);
-    let mut ratios = Vec::new();
     for mid_lb_mm in [700.0, 4500.0] {
         model.steel_design_attrs[0].lb_direct = Some((600.0, mid_lb_mm, 800.0));
         let report = sepika_design_jp::run_member_design_checks(
@@ -526,11 +525,6 @@ fn girder_group_keeps_direct_lateral_length() {
             .into_iter()
             .find(|(id, _, _)| *id == ElemId(0))
             .unwrap();
-        let result = result(outcome);
-        assert!(result.components[0]
-            .detail
-            .contains(&format!("lb={mid_lb_mm} mm")));
-        ratios.push(result.components[0].ratio);
+        assert!(matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("補剛区間")));
     }
-    assert!(ratios[1] > ratios[0], "{ratios:?}");
 }

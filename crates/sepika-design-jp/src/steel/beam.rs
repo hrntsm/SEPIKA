@@ -335,12 +335,16 @@ pub(crate) fn check_beam(
             if !lb.is_finite() || lb < 0.0 {
                 return Err("横座屈長さが負または非有限です".into());
             }
-            let stress = if lb <= 1e-9 {
+            let unverified_bracing =
+                ctx.steel_beam_moment_diagram == super::SteelBeamMomentDiagram::UnverifiedBracing;
+            let stress = if lb == 0.0 || !unverified_bracing && lb <= 1e-9 {
                 ft_val
-            } else if let Some((c, p_lambda_b)) = if partial {
-                Some((steel_c_factor(ctx, true), 0.3))
-            } else {
-                steel_beam_lateral_parameters(ctx)
+            } else if let Some((c, p_lambda_b)) = match ctx.steel_beam_moment_diagram {
+                super::SteelBeamMomentDiagram::UnverifiedBracing => None,
+                super::SteelBeamMomentDiagram::Unverified if partial => {
+                    Some((steel_c_factor(ctx, true), 0.3))
+                }
+                _ => steel_beam_lateral_parameters(ctx),
             } {
                 moment_parameters = Some((c, p_lambda_b));
                 let iz = sec.iz;
@@ -351,15 +355,23 @@ pub(crate) fn check_beam(
                 steel_fb_h_asd2019(f, term, lb, iz, iw, j, e, g, z_strong, c, p_lambda_b)
             } else {
                 if forces.mz != 0.0 {
+                    let reason = if unverified_bracing {
+                        "各補剛区間の強軸曲げ分布を確認できず、横座屈を考慮した強軸曲げは未算定です"
+                    } else {
+                        "単一補剛区間の強軸曲げ分布を確認できず、横座屈を考慮した強軸曲げは未算定です"
+                    };
                     *incomplete = crate::member_design_check::combine_incomplete_reasons(
                         incomplete.take(),
-                        Some("単一補剛区間の強軸曲げ分布を確認できず、横座屈を考慮した強軸曲げは未算定です"),
+                        Some(reason),
                     );
                     fb_label = "fb上限";
                 }
                 ft_val
             };
-            (stress, Some(lb))
+            (
+                stress,
+                (!unverified_bracing || fb_label != "fb上限").then_some(lb),
+            )
         }
         _ => (ft_val, None),
     };

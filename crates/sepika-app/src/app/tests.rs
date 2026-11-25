@@ -12693,7 +12693,7 @@ pub(super) mod lateral_bracing_fixture {
     pub fn frame_with_independent_section_bracing(split: bool) -> Model {
         let mut model = frame(split);
         for attr in &mut model.steel_design_attrs {
-            attr.lb_direct = Some((2_500.0, 2_500.0, 2_500.0));
+            attr.lb_direct = Some((0.0, 0.0, 0.0));
         }
         model
     }
@@ -12820,7 +12820,7 @@ fn lateral_bracing_gui_invalid_group_reference_keeps_bending_and_shear() {
             assert!(!result.detail.contains("（参考）n="));
             assert!(result.components.iter().any(|component| {
                 component.kind == sepika_design_jp::CheckKind::Bending
-                    && component.detail.contains("lb=2500 mm")
+                    && component.detail.contains("lb=0 mm")
             }));
             assert_eq!(result.components.len(), 2);
         }
