@@ -926,3 +926,41 @@ fn later_element_verifies_saved_cut_before_rounding_into_global_coordinates() {
         .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
         if reason.contains("釣合いを確認できません"))));
 }
+
+#[test]
+fn invalid_group_does_not_override_independent_local_direct_bracing() {
+    let mut model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    model.girder_groups[0].reverse();
+    for attr in &mut model.steel_design_attrs {
+        attr.lb_direct = Some((2_000.0, 2_000.0, 2_000.0));
+    }
+    let independent = check(&model, &solved, LoadTerm::Short, None);
+    let start = at(&independent, 0.0);
+    check_bending(start, 0.300_217_044, "fb=217.5665");
+    check_bending(start, 0.300_217_044, "lb=2000 mm");
+    assert!(independent
+        .iter()
+        .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))));
+
+    for (direct, count) in [
+        (None, None),
+        (None, Some(1)),
+        (Some((SPLIT_MM, SPLIT_MM, SPLIT_MM)), None),
+    ] {
+        for attr in &mut model.steel_design_attrs {
+            attr.lb_direct = direct;
+            attr.lateral_brace_count = count;
+        }
+        let unverified = check(&model, &solved, LoadTerm::Short, None);
+        assert!(unverified.iter().any(|(_, row)| matches!(row,
+            CheckOutcome::Skipped { reason } if reason.contains("連続していません"))));
+        assert!(unverified
+            .iter()
+            .all(|(_, row)| !matches!(row, CheckOutcome::Checked(known)
+            if known.components.iter().any(|c| c.kind == CheckKind::Bending))));
+    }
+}

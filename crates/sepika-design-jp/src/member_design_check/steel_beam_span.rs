@@ -166,11 +166,35 @@ pub(super) fn grouped_bending_spans(
         };
         if let Err(reason) = result {
             for &id in group {
-                spans.entry(id).or_insert_with(|| Err(reason.clone()));
+                spans.entry(id).or_insert_with(|| {
+                    independently_specified_partial_span(model, id).ok_or_else(|| reason.clone())
+                });
             }
         }
     }
     spans
+}
+
+fn independently_specified_partial_span(model: &Model, id: ElemId) -> Option<GroupBending> {
+    let elem = model.element(id)?;
+    let mut attrs = model
+        .steel_design_attrs
+        .iter()
+        .filter(|attr| attr.elem == id);
+    let (i, mid, j) = attrs.next()?.lb_direct?;
+    if attrs.next().is_some() {
+        return None;
+    }
+    let [start, end] = model.primary_frame_axis_ends(elem).ok()??;
+    let length_mm = dist(start, end);
+    (length_mm.is_finite()
+        && length_mm > 1e-9
+        && [i, mid, j]
+            .into_iter()
+            .all(|lb| lb.is_finite() && (lb == 0.0 || lb > 0.0 && lb < length_mm - 1e-9)))
+    .then_some(GroupBending::WithoutWholeSpan {
+        length_mm: Some(length_mm),
+    })
 }
 
 fn grouped_bending_span(
