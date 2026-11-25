@@ -237,11 +237,43 @@ impl RcDesign {
             }
         };
         let incomplete = if let Some(mechanism) = column::qd1_mechanism(ctx) {
-            [&mechanism.qy, &mechanism.qz]
+            let incomplete = [&mechanism.qy, &mechanism.qz]
                 .into_iter()
                 .filter_map(|direction| direction.as_ref().err())
                 .fold(incomplete, |reason, axis_reason| {
                     combine_incomplete_reasons(reason, Some(axis_reason))
+                });
+            if mechanism.floor_yield_holds.iter().all(Option::is_none) {
+                return (outcome, incomplete);
+            }
+            let torsion = crate::member_design_check::concrete_member_torsion_reason(
+                sepika_core::structure_kind::StructureKind::Rc,
+                forces,
+            );
+            let shear_detail = match &outcome {
+                CheckOutcome::Checked(result) if incomplete.is_none() && torsion.is_none() => {
+                    result
+                        .components
+                        .iter()
+                        .find(|c| c.kind == crate::CheckKind::Shear)
+                        .map(|c| c.detail.as_str())
+                }
+                _ => None,
+            };
+            mechanism
+                .floor_yield_holds
+                .iter()
+                .flatten()
+                .fold(incomplete, |reason, hold| {
+                    if shear_detail.is_some_and(|detail| detail.contains(hold))
+                        || reason
+                            .as_deref()
+                            .is_some_and(|reason| reason.contains(hold))
+                    {
+                        reason
+                    } else {
+                        combine_incomplete_reasons(reason, Some(hold))
+                    }
                 })
         } else {
             incomplete

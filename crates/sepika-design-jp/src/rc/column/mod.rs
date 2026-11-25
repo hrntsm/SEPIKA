@@ -387,18 +387,13 @@ pub(super) fn column_check(
                 .any(|index| super::column_qd2_reference_issue(qd, forces.pos, index).is_some())
                 || qd1_mechanism(ctx).is_some_and(|m| m.missing_gravity_axial))
     });
-    let floor_mechanism_issue = qd1_mechanism(ctx).is_some_and(|m| {
-        [&m.qy, &m.qz]
-            .into_iter()
-            .zip(&m.floor_yield_holds)
-            .any(|(direction, hold)| hold.is_some() && direction.is_err())
-    });
+    let floor_yield_held =
+        qd1_mechanism(ctx).is_some_and(|m| m.floor_yield_holds.iter().any(Option::is_some));
     let finish_bending = |bending_issue: Option<String>, incomplete: &mut Option<String>| {
         if let Some(reason) = bending_issue {
             if !(ordinary
                 || short_force_issue
-                || strict_gravity
-                    && (missing_gravity || floor_mechanism_issue || incomplete.is_some()))
+                || strict_gravity && (missing_gravity || floor_yield_held || incomplete.is_some()))
             {
                 return Err(CheckOutcome::Skipped { reason });
             }
@@ -428,7 +423,7 @@ pub(super) fn column_check(
         } else {
             0.0
         };
-        if (ordinary || short_force_issue) && bending_unchecked {
+        if (ordinary || short_force_issue || floor_yield_held) && bending_unchecked {
             if let Some(axial_ng) = column_axial_overload(n_design, na, nt) {
                 components.push(axial_ng);
                 // 有限曲げ成分の下限に、単独で記録した軸力比を重ねない。
