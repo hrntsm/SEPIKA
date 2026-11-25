@@ -17,8 +17,9 @@ pub mod panel_zone;
 pub(crate) use crate::ratio_or_large;
 pub(crate) use crate::rc::{shear_alpha, AxisProps as SrcAxisProps};
 pub use column::{
-    SrcColumnHeadLimit, SrcColumnSeismicBending, SrcColumnSeismicBendingAxis,
-    SrcColumnSeismicBendingEnd,
+    SrcColumnHeadLimit, SrcColumnRoute21RcShear, SrcColumnRoute21Shear, SrcColumnRoute21ShearAxis,
+    SrcColumnSeismicBending, SrcColumnSeismicBendingAxis, SrcColumnSeismicBendingEnd,
+    SrcColumnSeismicSense,
 };
 
 /// 内蔵鋼材の断面積・断面係数を [`SectionShape`] の断面性能計算を借りて
@@ -100,7 +101,7 @@ fn beam_tension_is_top(forces: &MemberForcesAt, d_full: f64, rebar: &RcBeamRebar
 
 struct SrcShearResult {
     ratio: f64,
-    s_q: f64,
+    s_q: Option<f64>,
     r_q: Option<f64>,
     s_qa: f64,
     r_qa: Option<f64>,
@@ -108,7 +109,7 @@ struct SrcShearResult {
 
 #[derive(Clone, Copy)]
 struct SrcShortShearDemand {
-    steel_n: f64,
+    steel_n: Option<f64>,
     rc_n: Option<f64>,
 }
 
@@ -156,7 +157,7 @@ fn src_column_shear_check(
         let ratio = ratio_or_large(q, qa);
         return Some(SrcShearResult {
             ratio,
-            s_q: 0.0,
+            s_q: None,
             r_q: Some(q),
             s_qa: steel_shear_area * s_fs,
             r_qa: Some(qa),
@@ -180,7 +181,7 @@ fn src_column_shear_check(
         r_qa1.min(r_qa2)
     });
 
-    let ratio_s = if s_qa > 1e-9 { s_q / s_qa } else { 0.0 };
+    let ratio_s = s_q.filter(|_| s_qa > 1e-9).map_or(0.0, |q| q / s_qa);
     let ratio_r = r_q
         .zip(r_qa)
         .filter(|(_, qa)| *qa > 1e-9)
@@ -193,6 +194,15 @@ fn src_column_shear_check(
         s_qa,
         r_qa,
     })
+}
+
+const MISSING_MAIN_REBAR: &str = "主筋の材料が未割当（断面タブで主筋の材料を割り当ててください）";
+
+fn uses_explicit_route21_column(sec: &Section, ctx: &DesignCtx) -> bool {
+    ctx.term == LoadTerm::Short
+        && ctx.kind == MemberKind::Column
+        && ctx.src_column_route21_shear.is_some()
+        && matches!(sec.shape, Some(SectionShape::SrcColumnRect { .. }))
 }
 
 /// 矩形SRC梁・柱の断面検定（`SectionShape::SrcBeamRect`・`SrcColumnRect` を対象とする）。
@@ -277,6 +287,7 @@ impl SrcDesign {
         );
         if matches!(outcome, CheckOutcome::Skipped { .. })
             && ctx.term == LoadTerm::Short
+            && ctx.src_column_route21_shear.is_none()
             && ctx.kind == MemberKind::Column
             && matches!(sec.shape, Some(SectionShape::SrcColumnRect { .. }))
         {
@@ -323,6 +334,10 @@ impl SrcDesign {
                     format!("主筋材料「{grade}」はSRC規準の異形主筋に対応する材種ではありません")
                 })
             })
+            .or_else(|| {
+                (main_rebar.is_none() && uses_explicit_route21_column(sec, ctx))
+                    .then(|| MISSING_MAIN_REBAR.to_owned())
+            })
             .map(|reason| format!("SRC検定: 断面「{}」の{reason}", sec.name));
         let shear_material = ctx.shear_rebar_material.as_ref();
         let uses_shear_rebar = ordinary_shear_issue.is_none()
@@ -334,7 +349,7 @@ impl SrcDesign {
                             || (!missing_gravity && ctx.seismic_qd.is_none()))
                 }
                 Some(SectionShape::SrcColumnRect { rebar, .. }) if ctx.term == LoadTerm::Short => {
-                    let seismic = missing_gravity || ctx.seismic_qd.is_some();
+                    let seismic = column::is_short_seismic(ctx, missing_gravity);
                     (rebar.aw_x_mm2() > 0.0 && (seismic || forces.qy != 0.0))
                         || (rebar.aw_y_mm2() > 0.0 && (seismic || forces.qz != 0.0))
                 }
@@ -428,11 +443,8 @@ impl SrcDesign {
             return Err(format!("{member}検定: 主筋はD13〜D41の異形鉄筋が対象です"));
         }
 
-        if ctx.rebar_material.is_none() {
-            return Err(
-                "SRC検定: 主筋の材料が未割当（断面タブで主筋の材料を割り当ててください）"
-                    .to_string(),
-            );
+        if ctx.rebar_material.is_none() && !uses_explicit_route21_column(sec, ctx) {
+            return Err(format!("SRC検定: {MISSING_MAIN_REBAR}"));
         }
         if let Err(reason) = shape.validate_rebar_size_materials(
             ctx.rebar_material.as_ref().filter(|_| main_rebar_valid),
@@ -542,8 +554,8 @@ impl SrcDesign {
                         "SRC検定: 柱用断面を梁部材に割り当てています（用途不一致）".to_string()
                     );
                 }
-                if ctx.term == LoadTerm::Short && (missing_gravity || ctx.seismic_qd.is_some()) {
-                    if !forces.n.is_finite() {
+                if column::is_short_seismic(ctx, missing_gravity) {
+                    if !forces.n.is_finite() && ctx.src_column_route21_shear.is_none() {
                         return Err("SRC柱検定: 組合せの軸力Nが非有限です".into());
                     }
                     if !fc_raw.is_finite() {
@@ -553,7 +565,9 @@ impl SrcDesign {
                 if rebar.is_unset() {
                     return Err("SRC検定: 配筋が未入力です".to_string());
                 }
-                if !forces.n.is_finite() {
+                if !forces.n.is_finite()
+                    && (ctx.term != LoadTerm::Short || ctx.src_column_route21_shear.is_none())
+                {
                     return Err("SRC柱検定: 設計軸力Nが非有限です".into());
                 }
                 let props_z = column_axis_props(*b, *d, rebar, true);

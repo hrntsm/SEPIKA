@@ -400,6 +400,10 @@ OS100%/150%別の全代表操作・可読性/性能の条件と最終HEADの全C
 
 [原典・現行仕様・独立数値](SRC柱累加耐力_Issue953_原典照合.md)でAIJ SRC第6版と2025年版を照合。🔶（有限Verification）。設計せん断の多段配筋・軸力境界・端部条件、部材種別の強軸固定・材料・耐力定義に適用制限を記録した。原典の方式と公開入口の出力を分け、全規準・実験Validationは未確認。
 
+## SRC柱のルート2-1設計用せん断（#1612）
+
+[独立値と共通部材検定の確認](SRC柱ルート2-1設計用せん断_Issue1612_確認記録.md)で、方向別の曲げと代替式を原典・独立数値と照合。🔶（限定Verification）。GUI入力、実架構の崩壊機構と実験Validationは未確認。
+
 ## SRC部材の靭性・終局耐力・仕口パネル（#886）
 
 [原画像・独立値・公開入口対応](SRC靭性終局仕口_Issue886_原典照合.md)は2025年第2版第1刷の付録1-4.1 pp.758–759、1-4.2 pp.764–768/770を有限照合する。状態は🔶。原典終局式の算術、現行rank比4点・許容パネル境界12点・SRC終局collector除外1点のVerificationを分離する。終局せん断累加/格子・ラチス/終局パネルは未対応。付録のN0/M0とrank用の同名値は異義で、SRC柱の軸力分担・端部条件との採用関係、引張ゼロ化・強軸比は#953で継続する。許容仕口パネルの根拠は#949で追跡する。未知F235の是正は[#912確認記録](SRC内蔵鉄骨材料_Issue912_確認記録.md)、必須細則・未評価成分とSRC表不在は原典照合リストで記録、#489/#745の閉鎖を維持する。#671/#552を再検証済みとせず、専門家サインオフ・実験Validation・手動GUIは未確認。
@@ -669,6 +673,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [DsQu採用条件_Issue872_確認記録.md](DsQu採用条件_Issue872_確認記録.md) | Ds/Qu採用11条件の不足理由、公開合否保留・識別維持 | 🔶（限定Verification、採用証拠・Validation未） |
 | [SRC耐震ルート_Issue885_原典照合.md](SRC耐震ルート_Issue885_原典照合.md) | SRCルート資格・柱区分境界・Ds適用と他種表代用の条件付き過小値 | 🔶（有限Verification。SRC表選択・適用条件は未対応、App通し実行・Validation未確認） |
 | [SRC柱累加耐力_Issue953_原典照合.md](SRC柱累加耐力_Issue953_原典照合.md) | SRC柱の設計せん断・終局N–M・部材種別と断面・材料・方向の条件 | 🔶（原典・現行比較と独立有限Verification） |
+| [SRC柱ルート2-1設計用せん断_Issue1612_確認記録.md](SRC柱ルート2-1設計用せん断_Issue1612_確認記録.md) | 確認済み入力による曲げ方式・代替式の材料別せん断と未算定 | 🔶（共通部材検定での独立有限Verification、GUI入力・実験Validationは対象外） |
 | [SRC柱部材種別材料_Issue1417_確認記録.md](SRC柱部材種別材料_Issue1417_確認記録.md) | 内蔵H形鋼の材種・実板厚による両比と保存runからの未評価理由 | 🔶（材料契約Verification、候補耐力と破壊状況の適用判断は継続） |
 | [SRC柱部材種別の断面幾何_Issue1613_確認記録.md](SRC柱部材種別の断面幾何_Issue1613_確認記録.md) | 内蔵H形鋼の幾何条件、境界の独立比、準備計算から自動判定までの停止 | 🔶（幾何・診断のVerification、規準細則・耐力定義・Ds適用と実験Validation未） |
 | [SRC柱短期地震時の曲げ方式_Issue1416_確認記録.md](SRC柱短期地震時の曲げ方式_Issue1416_確認記録.md) | SRC柱の短期地震時の設計用せん断力、成立した0・正値と理由付き未算定 | 🔶（両端・両方向の独立値、共通検定とGUI/MCPを確認。自動算定と実験Validationは未対応） |
@@ -1096,7 +1101,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 1276 | 基礎梁の型枠対象面・幅ハンチ | sepika-design-jp | quantity/{mod,member}.rs、tests/foundation_formwork.rs | [独立追算と公開入口](基礎梁型枠_Issue1276_確認記録.md#独立追算と公開入口) | 数量 | 🔶（現行値の有限Verification。施工面の入力・実施工Validation未） |
 | 27b | 鋼材名の自動強度割増認識 | sepika-core / sepika-element / sepika-solver / sepika-app | material_grade.rs・factory/hinge_view.rs・pushover/tests.rs・result_contract_tests.rs | [Issue599の独立閾値・実入口](鋼材名の厳密な強度割増認識_Issue599_2026-10.md#独立期待値と実入口) | 横断 | 🔶（直接Verification、freshレビュー・最終CIは後続） |
 | 1274 | SRC柱の地震時重力参照不足 | sepika-design-jp / sepika-app / sepika-mcp | srrc/mod.rs・member_design_check.rs、app/src_ql_acceptance_tests.rs、job/signed_q0_acceptance_tests.rs | [独立算術と公開入口](SRC柱重力参照不足_確認記録.md#恒久回帰と確認範囲)、tests/src_column_gravity.rs | 一次設計・入出力 | 🔶（入力不足拒否・代表算術Verification、採用式Validation未） |
-| 1416 | SRC柱短期地震時の曲げ方式 | sepika-design-jp / sepika-app / sepika-mcp | srrc/column.rs・member_design_check.rs、app/src_ql_acceptance_tests.rs、job/signed_q0_acceptance_tests.rs | [独立値と公開検定](SRC柱短期地震時の曲げ方式_Issue1416_確認記録.md)、tests/src_column_seismic_bending.rs、tests/src_column_gravity.rs | 一次設計 | 🔶（確定需要と不足を区別。自動算定は[#1612](https://github.com/hrntsm/SEPIKA/issues/1612)、実験Validation未） |
+| 1416 | SRC柱短期地震時の曲げ方式 | sepika-design-jp / sepika-app / sepika-mcp | srrc/column.rs・member_design_check.rs、app/src_ql_acceptance_tests.rs、job/signed_q0_acceptance_tests.rs | [独立値と公開検定](SRC柱短期地震時の曲げ方式_Issue1416_確認記録.md)、tests/src_column_seismic_bending.rs、tests/src_column_gravity.rs | 一次設計 | 🔶（確定需要と不足を区別。共通部材検定・代替式は[#1612](SRC柱ルート2-1設計用せん断_Issue1612_確認記録.md)、実験Validation未） |
 | 912 | SRC梁柱の内蔵鉄骨材料解決 | sepika-design-jp / sepika-app | srrc/{mod,beam,column,tests}.rs、app/src_ql_acceptance_tests.rs | [独立耐力・境界と保存経路](SRC内蔵鉄骨材料_Issue912_確認記録.md#要素から製品経路への証拠索引) | 一次設計・入出力 | 🔶（材料契約Verification、全規準・Validation未） |
 | 871 | Ds条件不足の保留 | sepika-app / sepika-design-jp | actions/design/holding・holding_conditions、member_rank、tests/vnv_rigid_zone_mechanism | [実入口と観測契約](Ds条件不足の保留_Issue871_確認記録.md#実入口と観測契約) | 二次設計 | 🔶（条件不足の保留Verification、全規準・Validation未） |
 | 872 | Ds/Qu採用条件 | sepika-app | actions/design/holding_adoption.rs・holding.rs、summary.rs | [公開入口の要素→試験索引](DsQu採用条件_Issue872_確認記録.md#要素試験索引) | 二次設計 | 🔶（採用保留Verification、証拠保存・Validation未） |

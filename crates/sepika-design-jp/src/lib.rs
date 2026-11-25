@@ -45,8 +45,9 @@ pub use member_design_check::{
 };
 pub use rc::RcDesign;
 pub use srrc::{
-    SrcColumnHeadLimit, SrcColumnSeismicBending, SrcColumnSeismicBendingAxis,
-    SrcColumnSeismicBendingEnd, SrcDesign,
+    SrcColumnHeadLimit, SrcColumnRoute21RcShear, SrcColumnRoute21Shear, SrcColumnRoute21ShearAxis,
+    SrcColumnSeismicBending, SrcColumnSeismicBendingAxis, SrcColumnSeismicBendingEnd,
+    SrcColumnSeismicSense, SrcDesign,
 };
 pub use steel::SteelDesign;
 
@@ -382,6 +383,9 @@ pub struct DesignCtx {
     /// SRC柱の短期地震時Qd1に適用できることを呼出側が確認した材料別曲げ耐力。
     /// 未指定時、SRC柱の短期地震時Qd1は未算定となる。
     pub src_column_seismic_bending: Option<SrcColumnSeismicBending>,
+    /// SRC柱ルート2-1の確認済み入力。指定時は共通の地震時せん断方式・重力参照を用いない。
+    /// Errは指定を要する条件で入力を確定できない理由。
+    pub src_column_route21_shear: Option<Result<SrcColumnRoute21Shear, &'static str>>,
     /// RC 柱の方向別メカニズム ΣMy [N·mm]。適用できる算定値が未指定の方向は
     /// 検定位置軸力の `2·Mu` で代替する。材料区分の不適合は QD1 に伝える。
     pub column_sum_my: Option<rc::ColumnMechanism>,
@@ -420,6 +424,7 @@ impl Default for DesignCtx {
             steel_beam_moment_diagram: steel::SteelBeamMomentDiagram::Unverified,
             seismic_qd: None,
             src_column_seismic_bending: None,
+            src_column_route21_shear: None,
             column_sum_my: None,
             beam_has_slab: false,
             rc_beam_qd1_issue: None,
