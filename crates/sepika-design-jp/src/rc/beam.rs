@@ -264,7 +264,7 @@ pub(crate) fn beam_supports_slab(model: &Model, elem: &ElementData) -> bool {
         })
 }
 
-fn transmits_bending(condition: EndCondition) -> bool {
+pub(super) fn transmits_bending(condition: EndCondition) -> bool {
     match condition {
         EndCondition::Fixed => true,
         EndCondition::Pinned => false,
@@ -272,7 +272,7 @@ fn transmits_bending(condition: EndCondition) -> bool {
     }
 }
 
-fn restrains_direction(node: &Node, direction: [f64; 3], dofs: [Dof; 3]) -> bool {
+pub(super) fn restrains_direction(node: &Node, direction: [f64; 3], dofs: [Dof; 3]) -> bool {
     direction.into_iter().zip(dofs).all(|(component, dof)| {
         component.abs() < 1e-9
             || node.restraint.is_fixed(dof)
@@ -283,7 +283,7 @@ fn restrains_direction(node: &Node, direction: [f64; 3], dofs: [Dof; 3]) -> bool
     })
 }
 
-fn column_transmits_bending(
+pub(super) fn column_transmits_bending(
     model: &Model,
     column: &ElementData,
     near: &Node,

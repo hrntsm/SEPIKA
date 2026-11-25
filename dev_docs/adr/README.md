@@ -214,6 +214,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0148](0148-steel-calculation-sources.md) | accepted | S造・SRC造の算定根拠を指定の5資料にそろえる |
 | [0149](0149-src-shear-wall-scope.md) | accepted | SRC耐震壁は両側SRC柱付きの壁を対象にする |
 | [0150](0150-rc-beam-directional-bond-stress.md) | accepted | 非降伏RC梁の大地震時付着照査は確認済みの方向別応力度から行う |
+| [0151](0151-rc-column-qd1-mechanism-comparison.md) | accepted | 一般階のRC柱のQD1は適用条件を満たす片側梁降伏を係数適用後に比較する |
 
 ## 規約
 

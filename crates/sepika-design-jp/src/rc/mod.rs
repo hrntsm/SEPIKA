@@ -29,9 +29,8 @@ pub use bond::{rc_beam_bond_check_1991, Bond1991Result, BondCheckResult};
 pub(crate) use bond::{rc_beam_bond_check_1991_with_rebar, rc_beam_bond_check_with_rebar};
 pub use clear_span::{rc_member_clear_span, RcClearSpanError};
 pub use column_mechanism::{
-    compute_column_mechanism_sum_my, design_axial_for_mechanism, resolve_column_end_hinge,
-    sum_my_from_end_hinges, time_history_column_mechanism_sum_my, ColumnEndHinge, ColumnMechanism,
-    ColumnMechanismTopology,
+    compute_column_mechanism_sum_my, design_axial_for_mechanism,
+    time_history_column_mechanism_sum_my, ColumnMechanism, ColumnMechanismTopology,
 };
 pub use wall_nonlinear::{
     wall_shear_beta_s, wall_shear_crack, wall_shear_trilinear, wall_shear_ultimate,
