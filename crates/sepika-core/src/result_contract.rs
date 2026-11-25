@@ -3,4 +3,4 @@
 /// 解析式・解析準備・公開 solver の適用条件・解析結果の契約を変更したときに更新する。
 pub const ANALYSIS_CONTRACT_VERSION: u32 = 114;
 /// 検定式・検定の適用条件・保存検定結果の契約を変更したときに更新する。
-pub const DESIGN_CONTRACT_VERSION: u32 = 121;
+pub const DESIGN_CONTRACT_VERSION: u32 = 122;

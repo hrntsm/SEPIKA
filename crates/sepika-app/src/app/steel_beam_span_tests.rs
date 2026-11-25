@@ -85,3 +85,120 @@ fn steel_beam_span_short_ng_survives_save_and_old_design_recheck_without_reanaly
         );
     }
 }
+
+#[test]
+fn steel_beam_middle_brace_preserves_distinct_checks_at_the_same_position_after_old_design_recheck()
+{
+    let mut app = App::default();
+    assert!(app.load_model(input::simply_supported_with_middle_brace(
+        2_000.0, 150_000.0
+    )));
+    app.run_linear_static(input::DEAD);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let assert_bending = |app: &App| {
+        let member = app
+            .current_design_results()
+            .unwrap()
+            .member_checks
+            .iter()
+            .find(|member| member.elem == input::BEAM)
+            .unwrap();
+        let ratios = |xi: f64| {
+            let mut ratios: Vec<_> = member
+                .positions
+                .iter()
+                .filter(|position| position.xi == xi)
+                .filter_map(|p| match &p.outcome {
+                    CheckOutcome::Checked(check) => check
+                        .components
+                        .iter()
+                        .find(|c| c.kind == CheckKind::Bending)
+                        .map(|c| c.ratio),
+                    _ => None,
+                })
+                .collect();
+            ratios.sort_by(f64::total_cmp);
+            ratios
+        };
+        let at_point = ratios(0.25);
+        let at_brace = ratios(0.5);
+        assert_eq!(at_point.len(), 2, "{member:?}");
+        assert_eq!(at_brace.len(), 2, "{member:?}");
+        assert!((at_point[0] - 1.743_795_729).abs() < 1e-8, "{at_point:?}");
+        assert!((at_brace[0] - 0.903_524_681).abs() < 1e-8, "{at_brace:?}");
+        assert!((at_brace[1] - 1.162_530_486).abs() < 1e-8, "{at_brace:?}");
+    };
+    assert_bending(&app);
+
+    for version in [DESIGN_CONTRACT_VERSION - 1, DESIGN_CONTRACT_VERSION] {
+        let (mut loaded, path) = super::result_contract_tests::restore(
+            &app,
+            Some(ANALYSIS_CONTRACT_VERSION),
+            Some(version),
+            &format!("steel-beam-middle-brace-{version}"),
+        );
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(
+            loaded.core.scoped.results.as_ref().unwrap().member_forces,
+            app.core.scoped.results.as_ref().unwrap().member_forces
+        );
+        if version != DESIGN_CONTRACT_VERSION {
+            assert!(loaded.current_design_results().is_none());
+            loaded.run_design_check();
+            assert!(
+                loaded.core.scoped.last_error.is_none(),
+                "{:?}",
+                loaded.core.scoped.last_error
+            );
+        }
+        assert_bending(&loaded);
+        assert_eq!(
+            loaded
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
+        );
+    }
+}
+
+#[test]
+fn steel_beam_span_without_brace_positions_is_not_shown_as_passing() {
+    let mut model = input::simply_supported_with_middle_brace(2_000.0, 150_000.0);
+    model.steel_design_attrs[0].lateral_brace_count = None;
+    model.steel_design_attrs[0].lb_direct = Some((4_000.0, 4_000.0, 4_000.0));
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.run_linear_static(input::DEAD);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let results = app.current_design_results().unwrap();
+    let rows = &results
+        .member_checks
+        .iter()
+        .find(|member| member.elem == input::BEAM)
+        .unwrap()
+        .positions;
+    assert!(
+        rows.iter().any(
+            |row| matches!(&row.outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("補剛端の位置を確認できません"))
+        ),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter()
+            .all(|row| row.xi != 0.5 || matches!(row.outcome, CheckOutcome::Skipped { .. })),
+        "{rows:?}"
+    );
+}

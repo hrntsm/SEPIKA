@@ -18,7 +18,7 @@
 //! 未検定位置を含む部材は、他位置の適合値へ集約せずグレーで表示する。
 //! 確認済みのNGがある場合は、そのNGと未検定位置の存在を表示する。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::app::{App, MemberChecks, PositionCheck};
 use crate::theme;
@@ -150,6 +150,29 @@ fn max_ratio_by_elem<I: IntoIterator<Item = (ElemId, Option<(f64, bool)>)>>(
     items: I,
 ) -> HashMap<ElemId, (f64, bool)> {
     max_ratio_by_key(items)
+}
+
+fn position_marker_ratios(
+    positions: &[PositionCheck],
+    filter: CheckRatioFilter,
+) -> impl Iterator<Item = (f64, f64)> {
+    let mut by_position = BTreeMap::<u64, f64>::new();
+    for p in positions {
+        if !(0.0..=1.0).contains(&p.xi) {
+            continue;
+        }
+        let Some((ratio, _)) = ratio_for_filter(&p.outcome, filter) else {
+            continue;
+        };
+        let key = if p.xi == 0.0 { 0 } else { p.xi.to_bits() };
+        by_position
+            .entry(key)
+            .and_modify(|max| *max = f64::max(*max, ratio))
+            .or_insert(ratio);
+    }
+    by_position
+        .into_iter()
+        .map(|(xi, ratio)| (f64::from_bits(xi), ratio))
 }
 
 fn has_unrated_positions(positions: &[PositionCheck]) -> bool {
@@ -578,11 +601,7 @@ pub(super) fn draw_check_ratio_with_view(
             .unwrap_or(&[]);
 
         if markers {
-            for p in positions {
-                let Some((r, _)) = ratio_for_filter(&p.outcome, filter) else {
-                    continue;
-                };
-                let xi = p.xi;
+            for (xi, r) in position_marker_ratios(positions, filter) {
                 let mx = p0.x + (p1.x - p0.x) * xi as f32;
                 let my = p0.y + (p1.y - p0.y) * xi as f32;
                 let mcolor = theme::check_ratio_color(r);
@@ -1574,6 +1593,110 @@ mod tests {
         });
         assert!(hinges[0].distance(expected[0].lerp(expected[1], 0.1)) < 1e-3);
         assert!(hinges[1].distance(expected[0].lerp(expected[1], 0.9)) < 1e-3);
+    }
+
+    #[test]
+    fn shared_brace_marker_uses_the_filtered_maximum_in_either_row_order() {
+        let mut app = crate::app::design_input_tests::pure_bending();
+        let rows = [(1.16253, 0.2), (0.90352, 0.6)].map(|(bending, shear)| PositionCheck {
+            xi: 0.5,
+            outcome: checked(
+                bending,
+                vec![
+                    CheckComponent {
+                        kind: CheckKind::Bending,
+                        ratio: bending,
+                        detail: String::new(),
+                    },
+                    CheckComponent {
+                        kind: CheckKind::Shear,
+                        ratio: shear,
+                        detail: String::new(),
+                    },
+                ],
+            ),
+        });
+        let camera = super::super::CameraState::default();
+        let proj = super::super::Projector::new([3000.0, 0.0, 0.0], &camera, 0.1, [400.0, 300.0]);
+        let pts = app
+            .core
+            .model
+            .nodes
+            .iter()
+            .map(|n| proj.project(n.coord))
+            .collect::<Vec<_>>();
+        let [i, j] = super::super::primary_screen_ends(
+            &app.core.model,
+            &app.core.model.elements[0],
+            &pts,
+            &proj,
+        )
+        .unwrap();
+        let expected_position = i.lerp(j, 0.5);
+        let ctx = egui::Context::default();
+
+        for reverse in [false, true] {
+            let mut positions = rows.to_vec();
+            if reverse {
+                positions.reverse();
+            }
+            app.core.scoped.results.as_mut().unwrap().member_checks = vec![MemberChecks {
+                elem: ElemId(0),
+                positions,
+            }];
+            let positions = elem_check_positions(
+                &app.current_design_results().unwrap().member_checks,
+                ElemId(0),
+            );
+            assert_eq!(build_tooltip_rows(positions).1.len(), 2);
+            for (filter, ratio) in [
+                (CheckRatioFilter::Max, 1.16253),
+                (CheckRatioFilter::Kind(CheckKind::Bending), 1.16253),
+                (CheckRatioFilter::Kind(CheckKind::Shear), 0.6),
+            ] {
+                let view = crate::viewer::ViewportState {
+                    check_ratio_filter: filter,
+                    check_ratio_markers: true,
+                    ..Default::default()
+                };
+                let output = ctx.run_ui(Default::default(), |ui| {
+                    draw_check_ratio_with_view(
+                        &view,
+                        ui.painter(),
+                        &app,
+                        &app.core.model,
+                        &pts,
+                        &proj,
+                        Default::default(),
+                    );
+                });
+                let fills = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(r)
+                            if r.rect.center().distance(expected_position) < 1e-3
+                                && r.rect.width() == 7.0
+                                && r.fill != egui::Color32::TRANSPARENT =>
+                        {
+                            Some(r.fill)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(fills, [theme::check_ratio_color(ratio)]);
+                assert_eq!(
+                    output
+                        .shapes
+                        .iter()
+                        .filter(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.job.text == "1.16"
+                            && text.pos.x > expected_position.x + 1.0))
+                        .count(),
+                    usize::from(ratio > 1.0)
+                );
+            }
+        }
     }
 
     #[test]

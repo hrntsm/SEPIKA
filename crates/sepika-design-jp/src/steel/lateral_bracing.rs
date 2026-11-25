@@ -693,12 +693,12 @@ mod tests {
         m.steel_design_attrs
             .push(sepika_core::model::SteelDesignAttr {
                 elem: ElemId(0),
-                lateral_brace_count: Some(1),
+                lateral_brace_count: None,
                 column_lateral_buckling_end_supports: None,
                 joint_flange_loss: 0.0,
                 joint_web_loss: 0.0,
                 scallop_web_loss: 0.0,
-                lb_direct: None,
+                lb_direct: Some((0.0, 0.0, 0.0)),
                 lk_y_direct: None,
                 lk_z_direct: None,
                 c_direct: None,
