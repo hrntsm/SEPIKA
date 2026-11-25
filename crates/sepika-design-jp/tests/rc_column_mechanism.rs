@@ -236,6 +236,11 @@ fn qd1_excludes_slab_supported_girder_yield_without_changing_qd2() {
         };
         let bare_qd2 = qd2(&model);
         let bare_th = time_history_mechanism(&model);
+        assert_near(
+            *bare_th.qy.as_ref().unwrap().as_ref().unwrap() / height_mm,
+            bare_n,
+            1e-6,
+        );
         assert_qd1_shear_ratio(&model, bare_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
         fixture::attach_slab(&mut model, edge);
         assert_qd1_shear_ratio(&model, slab_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
@@ -310,8 +315,28 @@ fn qd1_keeps_an_independent_girder_candidate_when_the_other_end_supports_a_slab(
             head_bars,
             foot_bars,
         );
+        let time_history_qd1_n = |model: &Model| {
+            time_history_column_mechanism_sum_my(
+                model,
+                &ColumnMechanismTopology::new(model),
+                &model.elements[COLUMN.index()],
+                [Some(-100_000.0); 2],
+                [Some(-100_000.0); 2],
+            )
+            .unwrap()
+            .qy
+            .unwrap()
+            .unwrap()
+                / 1500.0
+        };
+        assert_near(
+            time_history_qd1_n(&model),
+            reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N,
+            1e-6,
+        );
         fixture::attach_slab(&mut model, slab_edge);
         assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+        assert_near(time_history_qd1_n(&model), expected_n, 1e-6);
     }
 }
 
