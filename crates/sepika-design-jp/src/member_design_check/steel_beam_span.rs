@@ -181,7 +181,7 @@ fn grouped_bending_span(
     loads: Result<&BeamSpanLoads<'_>, &&'static str>,
     spans: &mut HashMap<ElemId, Result<GroupBending, String>>,
 ) -> Result<(), String> {
-    if group.len() < 2 {
+    if group.is_empty() {
         return Err("一本部材を構成する梁要素が不足しています".into());
     }
     let attrs = group
@@ -301,6 +301,9 @@ fn grouped_bending_span(
     }
     if group.iter().any(|id| spans.contains_key(id)) {
         return Err("一本部材の全要素に共通の単一補剛区間が指定されていません".into());
+    }
+    if group.len() < 2 {
+        return Err("一本部材を構成する梁要素が不足しています".into());
     }
     let beam_loads = loads.map_err(|reason| (**reason).to_owned())?;
     let mut previous_end: Option<[f64; 6]> = None;
