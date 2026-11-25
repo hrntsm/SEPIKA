@@ -14,7 +14,7 @@ use super::section::{
 };
 use super::{
     has_section_loss, nonzero, safe_denom, section_modulus, shape_of, shear_component,
-    strong_axis_h_tension, strong_axis_tension_bending_ratio, ShapeCategory,
+    strong_axis_h_tension, strong_axis_tension_bending_ratios, ShapeCategory,
 };
 
 pub(super) fn asymmetric_built_h_section_reason(
@@ -432,6 +432,9 @@ pub(super) fn check_column(
         };
 
     let sigma_b_pipe = (forces.mz.powi(2) + forces.my.powi(2)).sqrt() / z_strong;
+    let sigma_t = forces.n / area;
+    let tension_bending = strong_axis_h_tension(forces, sec)
+        .then(|| strong_axis_tension_bending_ratios(sigma_t, sigma_bx, ft_val, fb_strong));
 
     let (axial_stress, ratio_axial_bend, axial_basis) = if forces.n < 0.0 {
         let sigma_c = forces.n.abs() / area;
@@ -446,15 +449,17 @@ pub(super) fn check_column(
             }
         };
         (sigma_c, ratio, "圧縮+曲げ: σc/fc(座屈考慮)+ΣσB/fb")
-    } else if strong_axis_h_tension(forces, sec) {
-        let sigma_t = forces.n / area;
+    } else if let Some(ratios) = &tension_bending {
         (
             sigma_t,
-            strong_axis_tension_bending_ratio(sigma_t, sigma_bx, ft_val, fb_strong),
-            "引張+強軸曲げ: 式(6.3)・(6.4)",
+            ratios.governing(),
+            if forces.mz == 0.0 {
+                "引張: σt/ft"
+            } else {
+                "引張+強軸曲げ: 式(6.3)・(6.4)"
+            },
         )
     } else {
-        let sigma_t = forces.n / area;
         let ratio = match shape {
             ShapeCategory::Pipe => {
                 sigma_t / safe_denom(ft_val) + sigma_b_pipe / safe_denom(fb_strong)
@@ -508,11 +513,32 @@ pub(super) fn check_column(
     let axial_bending = CheckComponent {
         kind: CheckKind::AxialBending,
         ratio: ratio_axial_bend,
-        detail: format!(
-            "σax={:.4} N/mm², σbX={:.4} N/mm², σbY={:.4} N/mm², fc={:.4} N/mm², {fb_strong_detail}, \
+        detail: if let Some(ratios) = tension_bending {
+            if forces.mz == 0.0 {
+                format!(
+                    "A_N={area:.4} mm², σt={sigma_t:.4} N/mm², ft={ft_val:.4} N/mm², \
+                     {ratio_label}={ratio_axial_bend:.4}"
+                )
+            } else {
+                let compression_detail = match lateral_buckling {
+                    ColumnLateralBuckling::Unconfirmed(_) => "未算定".to_owned(),
+                    _ => format!("{:.4}", ratios.compression),
+                };
+                format!(
+                    "A_N={area:.4} mm², Zt=Zc={z_strong:.4} mm³, σt={sigma_t:.4} N/mm², \
+                     σbt=σbc={sigma_bx:.4} N/mm², ft={ft_val:.4} N/mm², {fb_strong_detail}, \
+                     式(6.3) 引張側={:.4}, 式(6.4) 曲げ圧縮側={compression_detail}, \
+                     {ratio_label}={ratio_axial_bend:.4}",
+                    ratios.tension,
+                )
+            }
+        } else {
+            format!(
+                "σax={:.4} N/mm², σbX={:.4} N/mm², σbY={:.4} N/mm², fc={:.4} N/mm², {fb_strong_detail}, \
 fbY={:.4} N/mm², λ={:.3}, {ratio_label}={:.4}",
-            axial_stress, sigma_bx, sigma_by, fc_val, fb_weak, lambda, ratio_axial_bend,
-        ),
+                axial_stress, sigma_bx, sigma_by, fc_val, fb_weak, lambda, ratio_axial_bend,
+            )
+        },
     };
     let mut components = vec![axial_bending];
     components.extend(shear_component(forces, sec, ctx, fs_val));

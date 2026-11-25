@@ -17,7 +17,7 @@ use super::section::{
 };
 use super::{
     has_section_loss, nonzero, safe_denom, section_modulus, shape_of, shear_component,
-    strong_axis_h_tension, strong_axis_tension_bending_ratio, ShapeCategory,
+    strong_axis_h_tension, strong_axis_tension_bending_ratios, ShapeCategory,
 };
 
 pub(super) fn asymmetric_built_h_combination_reasons(
@@ -367,7 +367,7 @@ pub(crate) fn check_beam(
         (ratio, "圧縮+曲げ: σc/fc(座屈考慮)+ΣσB/fb")
     } else if tension_with_strong_bending {
         (
-            strong_axis_tension_bending_ratio(sigma_ax, sigma_by, ft_val, fb_strong),
+            strong_axis_tension_bending_ratios(sigma_ax, sigma_by, ft_val, fb_strong).governing(),
             "引張+強軸曲げ: 式(6.3)・(6.4)",
         )
     } else {

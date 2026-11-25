@@ -1395,6 +1395,34 @@ mod tests {
             .join("\n")
     }
 
+    #[test]
+    fn h_column_checks_tension_and_strong_bending_at_the_same_axial_peak_step() {
+        let mut app = App::default();
+        assert!(app.load_model(combined_column::cantilever(77_000.0, 215e6, 0.0)));
+        let recording = ThRecording {
+            peak_member_forces: vec![Some(MemberForces {
+                at: vec![(0.5, [77_000.0, 0.0, 0.0, 0.0, 0.0, 250e6])],
+            })],
+            axial_force_peaks: vec![AxialForcePeaks {
+                snapshots: vec![ForcePeakSnapshot {
+                    time: 1.0,
+                    forces: MemberForces {
+                        at: vec![(0.5, [77_000.0, 0.0, 0.0, 0.0, 0.0, 215e6])],
+                    },
+                    positions: vec![0],
+                }],
+            }],
+            ..Default::default()
+        };
+        let text = peak_recording_text(&app, &app.core.model.elements[0], 0, &recording, false);
+        assert!(
+            text.lines()
+                .zip(text.lines().skip(1))
+                .any(|row| row == ("引張側 t=1.000000 s  ξ=0.50:", "検定比 0.924 (OK)")),
+            "{text}"
+        );
+    }
+
     fn rc_column_peak_check_app(
         model: sepika_core::model::Model,
         method: sepika_design_jp::QdMethod,

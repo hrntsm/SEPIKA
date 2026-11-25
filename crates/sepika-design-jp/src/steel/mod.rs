@@ -136,8 +136,27 @@ fn strong_axis_h_tension(forces: &MemberForcesAt, sec: &Section) -> bool {
     symmetric_h_web(sec).is_some() && forces.n > 0.0 && forces.my == 0.0
 }
 
-fn strong_axis_tension_bending_ratio(sigma_t: f64, sigma_b: f64, ft: f64, fb: f64) -> f64 {
-    ((sigma_t + sigma_b) / safe_denom(ft)).max((sigma_b - sigma_t).max(0.0) / safe_denom(fb))
+struct StrongAxisTensionBendingRatios {
+    tension: f64,
+    compression: f64,
+}
+
+impl StrongAxisTensionBendingRatios {
+    fn governing(&self) -> f64 {
+        self.tension.max(self.compression.max(0.0))
+    }
+}
+
+fn strong_axis_tension_bending_ratios(
+    sigma_t_mpa: f64,
+    sigma_b_mpa: f64,
+    ft_mpa: f64,
+    fb_mpa: f64,
+) -> StrongAxisTensionBendingRatios {
+    StrongAxisTensionBendingRatios {
+        tension: (sigma_t_mpa + sigma_b_mpa) / safe_denom(ft_mpa),
+        compression: (sigma_b_mpa - sigma_t_mpa) / safe_denom(fb_mpa),
+    }
 }
 
 pub(crate) const INVALID_NODE_SPAN_FOR_LATERAL_BUCKLING: &str =
