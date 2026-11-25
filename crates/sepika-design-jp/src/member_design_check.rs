@@ -97,6 +97,9 @@ pub struct MemberDesignCheckOptions<'a> {
     pub long_member_forces: Option<&'a [(ElemId, MemberForces)]>,
     /// RC 梁 QD1 用の単純梁せん断 Q0 `[N]`（部材 ID → 絶対値）。RC梁のQD1で不足すれば未検定。
     pub q_simple_by_elem: Option<&'a HashMap<ElemId, f64>>,
+    /// 一本部材として指定したRC矩形梁のスパン全体のQ0 [N] または未算定理由（全区間の要素IDで参照）。
+    /// 不足時は区間のQ0を代用しない。
+    pub rc_grouped_beam_q0: Option<&'a HashMap<ElemId, Result<f64, String>>>,
     /// 一本部材グループの検定文脈上書き（梁のみ適用）。None なら部材単体の値を用いる。
     pub girder_group_overrides: Option<&'a HashMap<ElemId, GirderGroupContextOverride>>,
 }
@@ -357,6 +360,29 @@ pub fn run_member_design_checks(
     let mut steel_deflection_references = Vec::new();
     let mut standalone_deflection_checks = Vec::new();
     let grouped_girders: HashSet<_> = model.girder_groups.iter().flatten().copied().collect();
+    let mut grouped_rc_qd1 = HashMap::new();
+    if options.term == LoadTerm::Short
+        && options.long_member_forces.is_some()
+        && options.qd_method != QdMethod::Qd2
+        && !options.rc_damage_control
+    {
+        let adjacency = sepika_core::adjacency::NodeAdjacency::primary_frame(model);
+        for group in &model.girder_groups {
+            let Some(id) = group.first() else { continue };
+            let Some(q0) = options.rc_grouped_beam_q0.and_then(|q0| q0.get(id)) else {
+                continue;
+            };
+            let value = crate::rc::grouped_beam_qd1_mechanism(model, &adjacency, group).and_then(
+                |(span_mm, sum_my_nmm)| {
+                    q0.clone()
+                        .map(|q0_n| (span_mm, Some(sum_my_nmm), Some(q0_n)))
+                },
+            );
+            for id in group {
+                grouped_rc_qd1.insert(*id, value.clone());
+            }
+        }
+    }
     let column_shear_loads = (options.term == LoadTerm::Long
         && model
             .elements
@@ -650,29 +676,44 @@ pub fn run_member_design_checks(
             && options.long_member_forces.is_some()
             && options.qd_method != QdMethod::Qd2)
             .then(|| {
+                if grouped_girders.contains(elem_id) {
+                    return grouped_rc_qd1.get(elem_id).cloned().unwrap_or_else(|| {
+                        Err("QD1用の一本部材全スパンの重力反力を確認できません".into())
+                    });
+                }
                 let adjacency = rc_beam_adjacency.get_or_insert_with(|| {
                     sepika_core::adjacency::NodeAdjacency::primary_frame(model)
                 });
-                crate::rc::beam_qd1_clear_span(model, adjacency, elem)
+                crate::rc::beam_qd1_clear_span(model, adjacency, elem).map(|span_mm| {
+                    let q0_n = options
+                        .q_simple_by_elem
+                        .and_then(|m| m.get(elem_id).copied());
+                    (span_mm, None, q0_n)
+                })
             });
-        let seismic_qd = long_mf_by_id
+        let mf_long = long_mf_by_id
             .as_ref()
             .filter(|_| !rc_damage_control)
-            .and_then(|map| map.get(elem_id))
-            .map(|mf_long| SeismicQd {
-                long_at: mf_long.at.clone(),
-                n_factor: 1.5,
-                n_mechanism: 1.0,
-                q_simple: options
+            .and_then(|map| map.get(elem_id));
+        let checks_grouped_rc_qd1 = grouped_girders.contains(elem_id) && rc_beam_qd1.is_some();
+        let seismic_qd = (mf_long.is_some() || checks_grouped_rc_qd1).then(|| SeismicQd {
+            long_at: mf_long.map_or_else(Vec::new, |mf| mf.at.clone()),
+            n_factor: 1.5,
+            n_mechanism: 1.0,
+            q_simple: match &rc_beam_qd1 {
+                Some(Ok((_, _, q0))) => *q0,
+                Some(Err(_)) if grouped_girders.contains(elem_id) => None,
+                _ => options
                     .q_simple_by_elem
                     .and_then(|m| m.get(elem_id).copied()),
-                clear_length: match &rc_beam_qd1 {
-                    Some(Ok(span)) => *span,
-                    Some(Err(_)) => f64::NAN,
-                    None => clear_span,
-                },
-                method: options.qd_method,
-            });
+            },
+            clear_length: match &rc_beam_qd1 {
+                Some(Ok((span_mm, _, _))) => *span_mm,
+                Some(Err(_)) => f64::NAN,
+                None => clear_span,
+            },
+            method: options.qd_method,
+        });
 
         let rebar_material = model.element_rebar_material(elem);
         let wrong_main_rebar = rebar_material.is_some_and(|material| {
@@ -816,6 +857,10 @@ pub fn run_member_design_checks(
                 }),
             column_sum_my,
             beam_has_slab: kind == MemberKind::Girder && beam_has_attached_slab(model, elem),
+            rc_grouped_beam_qd1_sum_my_nmm: rc_beam_qd1
+                .as_ref()
+                .and_then(|value| value.as_ref().ok())
+                .and_then(|(_, sum_my, _)| *sum_my),
             rc_beam_qd1_issue: rc_beam_qd1.and_then(Result::err),
             steel_attr,
         };
@@ -916,7 +961,7 @@ pub fn run_member_design_checks(
         }
         let checker: Box<dyn DesignCheck> = checker_for(structure);
 
-        let position_length = if grouped_steel_beam {
+        let position_length = if grouped_steel_beam || checks_grouped_rc_qd1 {
             model.member_length(elem)
         } else {
             length

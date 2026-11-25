@@ -144,3 +144,80 @@ fn damage_control_uses_the_saved_seismic_combination_without_a_separate_gravity_
         matches!(&position.outcome, sepika_design_jp::CheckOutcome::Skipped { reason } if reason.contains("G+P"))
     }));
 }
+
+pub(crate) fn grouped_rc_qd1_model(split: bool) -> sepika_core::model::Model {
+    use sepika_core::dof::Dof6Mask;
+    use sepika_core::ids::{ElemId, NodeId};
+    use sepika_core::model::MemberLoad;
+
+    let mut model = fixture::model();
+    model.nodes[1].coord[0] = 4000.0;
+    model.nodes[1].restraint = Dof6Mask::FIXED;
+    model.load_cases[0].member = vec![MemberLoad::full_length_uniform(
+        ElemId(0),
+        [0.0, 0.0, -1.0],
+        4000.0,
+        10.0,
+    )];
+    model.load_cases[1].member.clear();
+    if split {
+        let mut middle = model.nodes[0].clone();
+        middle.id = NodeId(2);
+        middle.coord[0] = 2000.0;
+        middle.restraint = Dof6Mask::FREE;
+        model.nodes.push(middle);
+        let mut right = model.elements[0].clone();
+        right.id = ElemId(1);
+        right.nodes[0] = NodeId(2);
+        model.elements[0].nodes[1] = NodeId(2);
+        model.elements.push(right);
+        model.girder_groups = vec![vec![ElemId(0), ElemId(1)]];
+        model.load_cases[0].member = [ElemId(0), ElemId(1)]
+            .map(|id| MemberLoad::full_length_uniform(id, [0.0, 0.0, -1.0], 2000.0, 10.0))
+            .into();
+    }
+    model
+}
+
+#[test]
+fn grouped_rc_qd1_static_selected_combination_preserves_whole_span_demand() {
+    let mut app = app();
+    let my_nmm = 0.9 * (3.0 * std::f64::consts::PI * 22.0_f64.powi(2) / 4.0) * 345.0 * 539.0;
+    let expected_n = 20_000.0 + 2.0 * my_nmm / 4000.0;
+    for split in [false, true] {
+        assert!(app.load_model(grouped_rc_qd1_model(split)));
+        app.run_combination(0);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let results = app.current_design_results().unwrap();
+        assert_eq!(results.member_checks.len(), if split { 2 } else { 1 });
+        for member in &results.member_checks {
+            let shear_components: Vec<_> = member
+                .positions
+                .iter()
+                .filter_map(|pos| match &pos.outcome {
+                    sepika_design_jp::CheckOutcome::Checked(result) => Some(&result.components),
+                    _ => None,
+                })
+                .flatten()
+                .filter(|c| c.kind == sepika_design_jp::CheckKind::Shear)
+                .collect();
+            assert!(!shear_components.is_empty(), "{:?}", member.positions);
+            for shear in shear_components {
+                let qa_n = shear
+                    .detail
+                    .strip_prefix("QA=")
+                    .unwrap()
+                    .split_whitespace()
+                    .next()
+                    .unwrap()
+                    .parse::<f64>()
+                    .unwrap();
+                assert!((qa_n * shear.ratio - expected_n).abs() < 0.1, "{shear:?}");
+            }
+        }
+    }
+}
