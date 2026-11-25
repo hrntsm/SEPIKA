@@ -33,6 +33,23 @@ pub(super) fn qd1_mechanism(ctx: &DesignCtx) -> Option<&ColumnMechanism> {
     .flatten()
 }
 
+fn floor_yield_note(ctx: &DesignCtx, demand_n: [Option<f64>; 2]) -> String {
+    let mut detail = String::new();
+    if let Some(mechanism) = qd1_mechanism(ctx) {
+        for (reason, demand_n) in mechanism.floor_yield_holds.iter().zip(demand_n) {
+            if let (Some(reason), Some(demand_n)) = (reason, demand_n.filter(|q| q.is_finite())) {
+                use std::fmt::Write;
+                write!(
+                    detail,
+                    "。{reason}（採用した設計用せん断力 {demand_n:.1} N）"
+                )
+                .unwrap();
+            }
+        }
+    }
+    detail
+}
+
 fn gravity_shear_reference_issue(
     ctx: &DesignCtx,
     pos: f64,
@@ -87,7 +104,27 @@ fn seismic_column_design_shear(
 ) -> (Option<f64>, Option<f64>) {
     let qd = ctx.seismic_qd.as_ref().expect("設計用せん断力を使う条件");
     let mechanism = qd1_mechanism(ctx);
-    let mut demand = |q_signed, q_index, sum_my: Option<&Result<Option<f64>, String>>, fallback| {
+    let mut demand = |q_signed,
+                      q_index: usize,
+                      sum_my: Option<&Result<Option<f64>, String>>,
+                      fallback| {
+        if let Some(hold) = mechanism.and_then(|m| m.floor_yield_holds[q_index - 1].as_deref()) {
+            let Some(Ok(Some(sum_my))) = sum_my else {
+                return None;
+            };
+            return match super::design_shear::column_design_shear_with_confirmed_mechanism(
+                qd, forces.pos, q_signed, q_index, *sum_my,
+            ) {
+                Ok(value) => Some(value),
+                Err(reason) => {
+                    *incomplete = combine_incomplete_reasons(
+                        incomplete.take(),
+                        Some(&format!("{hold}。{reason}")),
+                    );
+                    None
+                }
+            };
+        }
         if !strict_gravity
             && !boundary_shear_only
             && !shear_rebar_valid
@@ -350,11 +387,18 @@ pub(super) fn column_check(
                 .any(|index| super::column_qd2_reference_issue(qd, forces.pos, index).is_some())
                 || qd1_mechanism(ctx).is_some_and(|m| m.missing_gravity_axial))
     });
+    let floor_mechanism_issue = qd1_mechanism(ctx).is_some_and(|m| {
+        [&m.qy, &m.qz]
+            .into_iter()
+            .zip(&m.floor_yield_holds)
+            .any(|(direction, hold)| hold.is_some() && direction.is_err())
+    });
     let finish_bending = |bending_issue: Option<String>, incomplete: &mut Option<String>| {
         if let Some(reason) = bending_issue {
             if !(ordinary
                 || short_force_issue
-                || strict_gravity && (missing_gravity || incomplete.is_some()))
+                || strict_gravity
+                    && (missing_gravity || floor_mechanism_issue || incomplete.is_some()))
             {
                 return Err(CheckOutcome::Skipped { reason });
             }
@@ -614,13 +658,14 @@ pub(super) fn column_check(
                 kind: CheckKind::Shear,
                 ratio,
                 detail: format!(
-                    "QAy={}, QAz={}, αy={}, αz={}, pw={:.5}{}",
+                    "QAy={}, QAz={}, αy={}, αz={}, pw={:.5}{}{}",
                     capacity(qay),
                     capacity(qaz),
                     alpha_y,
                     alpha_z,
                     props.pw,
                     shear_ratio_note(lower_bound),
+                    floor_yield_note(ctx, [q_design_y, q_design_z]),
                 ),
             });
         }
@@ -776,7 +821,7 @@ pub(super) fn column_check(
                 kind: CheckKind::Shear,
                 ratio,
                 detail: format!(
-                    "QAy={}, QAz={}, αy={}, αz={}, pw_z={:.5}, pw_y={:.5}{}",
+                    "QAy={}, QAz={}, αy={}, αz={}, pw_z={:.5}, pw_y={:.5}{}{}",
                     capacity(qay),
                     capacity(qaz),
                     alpha_y,
@@ -784,6 +829,7 @@ pub(super) fn column_check(
                     props_z.pw,
                     props_y.pw,
                     shear_ratio_note(lower_bound),
+                    floor_yield_note(ctx, [q_design_y, q_design_z]),
                 ),
             });
         }
@@ -1127,6 +1173,7 @@ mod tests {
             qy: Ok(None),
             qz: Ok(None),
             missing_gravity_axial: false,
+            floor_yield_holds: [None, None],
         });
 
         let design = crate::rc::RcDesign;

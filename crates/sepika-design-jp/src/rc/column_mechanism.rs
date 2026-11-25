@@ -7,7 +7,7 @@ use num_traits::Zero;
 use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::dof::{Dof, Dof6Mask};
 use sepika_core::geom::vec3::{norm, sub};
-use sepika_core::ids::NodeId;
+use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::{
     Constraint, ElementData, ElementKind, EndCondition, Material, MaterialCategory, Model,
 };
@@ -46,7 +46,7 @@ fn has_concrete_material(model: &Model, member: &ElementData) -> bool {
 
 fn mechanism_moment(
     [foot_my, head_my]: [f64; 2],
-    [foot_beams, head_beams]: [f64; 2],
+    [foot_beams, head_beams]: [Option<f64>; 2],
     head: ColumnHead,
     allow_new_head_yield: impl FnOnce() -> bool,
     allow_foot_yield: impl FnOnce() -> bool,
@@ -54,6 +54,11 @@ fn mechanism_moment(
     let both_columns = foot_my + head_my;
     if head != ColumnHead::Continuous {
         // 上階に続かない場合は、一般階の上下反転で従来の採否を置き換えられない。
+        // 柱頭で梁降伏しないことを確認できなければ、柱脚を置換する条件も確定しない。
+        let Some(head_beams) = head_beams else {
+            return both_columns;
+        };
+        let foot_beams = foot_beams.unwrap_or(0.0);
         return if beam_yield_is_lower(head_beams, head_my) {
             match head {
                 ColumnHead::Terminal => foot_my + head_beams,
@@ -67,13 +72,14 @@ fn mechanism_moment(
     }
 
     let mut moment = both_columns;
+    let head_beams = head_beams.unwrap_or(0.0);
     let head_beam_my = 0.5 * head_beams;
     if beam_yield_is_lower(head_beam_my, head_my)
         && (beam_yield_is_lower(head_beams, head_my) || allow_new_head_yield())
     {
         moment = moment.min(foot_my + head_beam_my);
     }
-    let foot_beam_my = 0.5 * foot_beams;
+    let foot_beam_my = 0.5 * foot_beams.unwrap_or(0.0);
     if beam_yield_is_lower(foot_beam_my, foot_my) && allow_foot_yield() {
         moment = moment.min(head_my + foot_beam_my);
     }
@@ -257,11 +263,12 @@ fn node_pair(i: NodeId, j: NodeId) -> [NodeId; 2] {
 struct GirderMoments<'a> {
     sum_my: f64,
     girders: SmallVec<[&'a ElementData; 2]>,
+    floor_girders: SmallVec<[ElemId; 2]>,
 }
 
 fn sum_beam_my_at_node<'a>(
     model: &'a Model,
-    adjacency: &'a NodeAdjacency,
+    topology: &'a ColumnMechanismTopology,
     node: NodeId,
     load_h: [f64; 2],
     peer_h: [f64; 2],
@@ -269,7 +276,7 @@ fn sum_beam_my_at_node<'a>(
     column_bending_axis: Option<[f64; 2]>,
 ) -> Result<Option<GirderMoments<'a>>, String> {
     let mut sum = Some(GirderMoments::default());
-    for other in adjacency.elements_at(model, node) {
+    for other in topology.frame.elements_at(model, node) {
         let (Some(n0), Some(n1)) = (
             other.nodes.first().and_then(|n| model.nodes.get(n.index())),
             other.nodes.get(1).and_then(|n| model.nodes.get(n.index())),
@@ -345,6 +352,13 @@ fn sum_beam_my_at_node<'a>(
                 "大梁 ID {} の断面「{}」の{reason}",
                 other.id.0, sec.name
             ));
+        }
+        if topology.has_attached_floor(model, other) {
+            if let Some(sum) = &mut sum {
+                sum.floor_girders.push(other.id);
+                sum.girders.push(other);
+            }
+            continue;
         }
         sum = sum
             .zip(beam_my_simple(shape, material))
@@ -449,8 +463,14 @@ impl ColumnMechanismTopology {
         }
     }
 
+    fn has_attached_floor(&self, model: &Model, girder: &ElementData) -> bool {
+        beam_supports_slab(model, girder)
+            || self
+                .shell_node_pairs
+                .contains(&node_pair(girder.nodes[0], girder.nodes[1]))
+    }
+
     fn allows_new_head_yield(
-        &self,
         model: &Model,
         girders: &[&ElementData],
         bending_axis: Option<[f64; 2]>,
@@ -460,10 +480,6 @@ impl ColumnMechanismTopology {
         };
         girders.iter().all(|girder| {
             has_concrete_material(model, girder)
-                && !beam_supports_slab(model, girder)
-                && !self
-                    .shell_node_pairs
-                    .contains(&node_pair(girder.nodes[0], girder.nodes[1]))
                 && girder_strong_axis_is_parallel(model, girder, bending_axis)
         })
     }
@@ -566,7 +582,6 @@ impl ColumnMechanismTopology {
             if opposing[side]
                 || !has_far_support
                 || !has_concrete_material(model, girder)
-                || beam_supports_slab(model, girder)
                 || !girder_strong_axis_is_parallel(model, girder, [bx, by])
                 || !rigid_arm_is_parallel([node.coord, far.coord], [[0.0; 3]; 2], shear_axis)
             {
@@ -587,6 +602,7 @@ pub struct ColumnMechanism {
     /// Qz（弱軸）方向。
     pub qz: Result<Option<f64>, String>,
     pub(crate) missing_gravity_axial: bool,
+    pub(crate) floor_yield_holds: [Option<String>; 2],
 }
 
 /// 柱のメカニズム ΣMy [N·mm]。方向別に算定値または材料区分の不適合を返す。
@@ -726,72 +742,122 @@ fn column_mechanism_sum_my(
                    load_h: [f64; 2],
                    peer_h: [f64; 2],
                    bending_axis: Option<[f64; 2]>| {
-        let beam_sum = |node| {
-            sum_beam_my_at_node(
-                model,
-                &topology.frame,
-                node,
-                load_h,
-                peer_h,
-                strong,
-                bending_axis,
+        let beam_sum =
+            |node| sum_beam_my_at_node(model, topology, node, load_h, peer_h, strong, bending_axis);
+        let beam_ends = beam_sum(ni).and_then(|bi| beam_sum(nj).map(|bj| (bi, bj)));
+        let axis = if strong { "Qy" } else { "Qz" };
+        let with_context = |reason| {
+            format!(
+                "RC柱 ID {} の {axis} 方向のせん断検定: {reason}",
+                column.id.0
             )
         };
-        let beam_ends = beam_sum(ni).and_then(|bi| beam_sum(nj).map(|bj| (bi, bj)));
-        let (n, beams) = match (&design_n, beam_ends) {
-            (Ok(n), Ok(beams)) => (*n, beams),
-            (n, beams) => {
-                let axis = if strong { "Qy" } else { "Qz" };
-                let reason =
-                    combine_incomplete_reasons(beams.err(), n.as_ref().err().map(String::as_str))
-                        .expect("検定に必要な梁または柱端軸力を取得できない");
-                return Err(format!(
-                    "RC柱 ID {} の {axis} 方向のせん断検定: {reason}",
-                    column.id.0
-                ));
+        let (bi, bj) = match beam_ends {
+            Ok(beams) => beams,
+            Err(reason) => {
+                let reason = combine_incomplete_reasons(
+                    Some(reason),
+                    design_n.as_ref().err().map(String::as_str),
+                )
+                .expect("接続大梁の未算定理由");
+                return (Err(with_context(reason)), None);
             }
         };
-        let (Some(col_i), Some(col_j)) = (
-            column_my_at_n(model, column, n[0], strong),
-            column_my_at_n(model, column, n[1], strong),
-        ) else {
-            return Ok(None);
+        let (foot_beams, head_beams) = if i_is_bottom { (bi, bj) } else { (bj, bi) };
+        let allow_foot_yield = || {
+            continuous_rc_joint_pair
+                && foot_beams.as_ref().is_some_and(|beams| {
+                    topology.has_opposing_foot_girders(model, foot, &beams.girders, bending_axis)
+                })
         };
-        match beams {
-            (Some(bi), Some(bj)) if column.end_offsets_mm == [[0.0; 3]; 2] => {
-                let (column_my, beams) = if i_is_bottom {
-                    ([col_i, col_j], [bi, bj])
+        let mut hold = None;
+        if column.end_offsets_mm == [[0.0; 3]; 2] && foot_beams.is_some() && head_beams.is_some() {
+            for (end, beams) in [
+                ("柱頭", head_beams.as_ref()),
+                (
+                    "柱脚",
+                    foot_beams.as_ref().filter(|beams| {
+                        column_head != ColumnHead::Continuous
+                            || !beams.floor_girders.is_empty() && allow_foot_yield()
+                    }),
+                ),
+            ] {
+                if let Some(beams) = beams.filter(|beams| !beams.floor_girders.is_empty()) {
+                    let ids = beams
+                        .floor_girders
+                        .iter()
+                        .map(|id| id.0.to_string())
+                        .collect::<Vec<_>>()
+                        .join("、");
+                    hold = combine_incomplete_reasons(
+                        hold,
+                        Some(&format!("{axis}方向の{end}: 床板が取り付く大梁 ID {ids} の床板筋の寄与を含む梁端降伏曲げを確認できないため、梁降伏の候補を除外")),
+                    );
+                }
+            }
+        }
+        let direction = (|| -> Result<Option<f64>, String> {
+            let n = design_n.as_ref().map_err(Clone::clone)?;
+            let (Some(col_i), Some(col_j)) = (
+                column_my_at_n(model, column, n[0], strong),
+                column_my_at_n(model, column, n[1], strong),
+            ) else {
+                return if hold.is_some() {
+                    Err("両柱端の降伏曲げを確認できないため、設計用せん断力を算定できません".into())
                 } else {
-                    ([col_j, col_i], [bj, bi])
+                    Ok(None)
                 };
-                let [foot_beams, head_beams] = beams;
-                let allow_new_head_yield =
-                    || topology.allows_new_head_yield(model, &head_beams.girders, bending_axis);
-                let allow_foot_yield = || {
-                    continuous_rc_joint_pair
-                        && topology.has_opposing_foot_girders(
-                            model,
-                            foot,
-                            &foot_beams.girders,
-                            bending_axis,
-                        )
-                };
-                Ok(Some(mechanism_moment(
-                    column_my,
-                    [foot_beams.sum_my, head_beams.sum_my],
-                    column_head,
-                    allow_new_head_yield,
-                    allow_foot_yield,
-                )))
+            };
+            let (foot_my, head_my) = if i_is_bottom {
+                (col_i, col_j)
+            } else {
+                (col_j, col_i)
+            };
+            let moment = match (&foot_beams, &head_beams) {
+                (Some(foot_beams), Some(head_beams)) if column.end_offsets_mm == [[0.0; 3]; 2] => {
+                    let confirmed_sum = |beams: &GirderMoments<'_>| {
+                        beams.floor_girders.is_empty().then_some(beams.sum_my)
+                    };
+                    mechanism_moment(
+                        [foot_my, head_my],
+                        [confirmed_sum(foot_beams), confirmed_sum(head_beams)],
+                        column_head,
+                        || {
+                            ColumnMechanismTopology::allows_new_head_yield(
+                                model,
+                                &head_beams.girders,
+                                bending_axis,
+                            )
+                        },
+                        allow_foot_yield,
+                    )
+                }
+                _ => col_i + col_j,
+            };
+            if hold.is_some() && !(moment.is_finite() && moment > 0.0) {
+                return Err(
+                    "降伏曲げの和が正の有限な値でないため、設計用せん断力を算定できません".into(),
+                );
             }
-            _ => Ok(Some(col_i + col_j)),
+            Ok(Some(moment))
+        })();
+        match direction {
+            Err(reason) => (
+                Err(with_context(
+                    combine_incomplete_reasons(Some(reason), hold.as_deref()).expect("未算定理由"),
+                )),
+                hold,
+            ),
+            Ok(moment) => (Ok(moment), hold),
         }
     };
-
+    let (qy, hold_y) = sum_for(true, load_strong, load_weak, bending_z);
+    let (qz, hold_z) = sum_for(false, load_weak, load_strong, bending_y);
     Some(ColumnMechanism {
-        qy: sum_for(true, load_strong, load_weak, bending_z),
-        qz: sum_for(false, load_weak, load_strong, bending_y),
+        qy,
+        qz,
         missing_gravity_axial,
+        floor_yield_holds: [hold_y, hold_z],
     })
 }
 

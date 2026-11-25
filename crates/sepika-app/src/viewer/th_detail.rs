@@ -1530,6 +1530,37 @@ mod tests {
     }
 
     #[test]
+    fn rc_column_peak_qd1_does_not_reduce_demand_for_a_slab_supported_girder() {
+        use super::rc_column_mechanism_input as input;
+        use super::rc_column_mechanism_reference::{
+            COLUMN_ALLOWABLE_SHEAR_N, CONTINUOUS_SLAB_HEAD_QD1_N, TERMINAL_SLAB_HEAD_QD1_N,
+        };
+        use crate::app::rc_column_boundary_tests::input as column;
+        use sepika_design_jp::QdMethod;
+
+        for (continuous, demand_n) in [
+            (false, TERMINAL_SLAB_HEAD_QD1_N),
+            (true, CONTINUOUS_SLAB_HEAD_QD1_N),
+        ] {
+            let (mut model, edge) = input::column_with_slab_sensitive_head(
+                column::column_model(false, 0.0),
+                continuous,
+            );
+            let qd2 = rc_column_peak_check_app(model.clone(), QdMethod::Qd2, -100_000.0);
+            let bare_qd2 = rc_column_peak_check_text(&qd2, -100_000.0);
+            input::attach_slab(&mut model, edge);
+
+            let qd2 = rc_column_peak_check_app(model.clone(), QdMethod::Qd2, -100_000.0);
+            assert_eq!(bare_qd2, rc_column_peak_check_text(&qd2, -100_000.0));
+
+            let app = rc_column_peak_check_app(model, QdMethod::Qd1, -100_000.0);
+            let text = rc_column_peak_check_text(&app, -100_000.0);
+            let ratio = demand_n / COLUMN_ALLOWABLE_SHEAR_N;
+            assert!(text.contains(&format!("せん断 {ratio:.2}")), "{text}");
+        }
+    }
+
+    #[test]
     fn rc_column_peak_qd1_uses_the_lower_confirmed_single_end_girder_mechanism() {
         use super::rc_column_mechanism_input as input;
         use super::rc_column_mechanism_reference::{
