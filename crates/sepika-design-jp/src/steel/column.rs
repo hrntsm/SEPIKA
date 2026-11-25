@@ -122,9 +122,7 @@ pub(super) fn check_symmetric_h_plate_slenderness(
     sec: &Section,
     mat: &Material,
 ) -> Result<(), String> {
-    let Some(shape) = &sec.shape else {
-        return Err("H形鋼柱の局部座屈の幅厚比照査に必要な断面形状がありません".into());
-    };
+    let shape = sec.shape.as_ref().expect("上下対称H形鋼の形状が必要");
     let (height_mm, flange_width_mm, flange_thick_mm, web_thick_mm, root_r_mm) = match *shape {
         SectionShape::SteelH {
             height,

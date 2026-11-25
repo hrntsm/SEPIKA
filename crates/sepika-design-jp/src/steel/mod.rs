@@ -764,14 +764,11 @@ impl SteelDesign {
         let plate_slenderness_reason = (!secondary_post
             && ctx.kind == MemberKind::Column
             && torsion_reason.is_none()
+            && symmetric_h_web(sec).is_some()
             && forces.my == 0.0
-            && if forces.n <= 0.0 {
-                is_symmetric_h_section(sec) && (forces.n < 0.0 || forces.mz != 0.0)
-            } else {
-                forces.mz != 0.0 && strong_axis_h_tension(forces, sec)
-            })
-        .then(|| column::check_symmetric_h_plate_slenderness(forces, sec, mat).err())
-        .flatten();
+            && (forces.n < 0.0 || forces.mz != 0.0))
+            .then(|| column::check_symmetric_h_plate_slenderness(forces, sec, mat).err())
+            .flatten();
         let lambda =
             match check_compression_slenderness(forces, sec, ctx, torsion_reason, secondary_post) {
                 Ok(Some(lambda)) if !secondary_post => lambda,
