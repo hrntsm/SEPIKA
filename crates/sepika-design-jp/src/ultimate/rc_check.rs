@@ -60,6 +60,8 @@ pub struct UltimateCheck {
     /// 確認できた組のうち付着余裕度が最小の応力度と許容値 [N/mm²]。他の組の未算定時も保持する。
     /// 無効、併用条件の不整合、または算定できる組がない場合は None。
     pub bond_stress: Option<RcUltimateBondStress>,
+    /// 付着応力度の未算定理由。一部を算定できる場合や独立した不適合がある場合も保持する。
+    pub bond_unchecked_reason: Option<String>,
     /// 方向別入力に対する非降伏RC梁の照査。付着無効または方向別入力なしでは None。
     pub beam_bond: Option<RcUltimateBeamBondChecks>,
     /// 両端曲げ降伏の方向別せん断需要。入力なしは None。従来の需要・耐力・適否には反映しない。
@@ -67,6 +69,8 @@ pub struct UltimateCheck {
     /// 応力度とは独立したカットオフ筋の必要延長の適否。対象外または適否未確認は None。
     /// 個別に確認できた延長不足は Some(false)。方向別照査では全対象の適否を確認した場合だけ Some(true)。
     pub bond_development_length_ok: Option<bool>,
+    /// 照査入力でカットオフ筋なしを確認できた場合だけ true。
+    pub bond_cutoff_absent: bool,
     /// 確定総応答の強軸せん断余裕度。耐力が算定済みで需要が 0 の場合は無限大。
     /// 未算定値は、他項目の不適合にかかわらず NaN。
     pub shear_margin: f64,
@@ -157,9 +161,11 @@ fn unchecked_member(elem: ElemId, kind: MemberKind, reason: &str) -> UltimateChe
         qsu: f64::NAN,
         weak_shear_n: None,
         bond_stress: None,
+        bond_unchecked_reason: None,
         beam_bond: None,
         beam_hinge_shear: None,
         bond_development_length_ok: None,
+        bond_cutoff_absent: false,
         shear_margin: f64::NAN,
         weak_shear_margin: None,
         biaxial_bending_margin: None,
@@ -353,8 +359,13 @@ fn check_member(
         if !opts.include_bond {
             "τD=無効, Kfb=無効, 付着余裕度=無効".into()
         } else if let Some(stress) = stress {
+            let status = if margin < 1.0 {
+                "（応力度NG）"
+            } else {
+                ""
+            };
             format!(
-                "τD={:.3} N/mm², Kfb={:.3} N/mm², 付着余裕度={margin:.3}",
+                "τD={:.3} N/mm², Kfb={:.3} N/mm², 付着余裕度={margin:.3}{status}",
                 stress.demand_mpa, stress.capacity_mpa
             )
         } else {
@@ -364,6 +375,7 @@ fn check_member(
     let unavailable_bond_detail = || bond_detail(None, f64::NAN);
     let unchecked_without_bond_values = |reason: &str| {
         let mut check = unchecked_member(elem.id, kind, reason);
+        check.bond_unchecked_reason = opts.include_bond.then(|| reason.to_owned());
         check
             .detail
             .push_str(&format!("。{}", unavailable_bond_detail()));
@@ -488,7 +500,9 @@ fn check_member(
     let supports_slab = || beam_supports_slab(model, elem);
     let has_section_haunch = || has_haunch(model, elem.id);
     let check_bond_input = |input: RcUltimateBondInput,
-                            section: Option<RcUltimateBeamBondSection>| {
+                            section: Option<RcUltimateBeamBondSection>,
+                            shared_side: bool,
+                            is_pair: bool| {
         let l_clear = *l_clear
             .as_ref()
             .map_err(|_| "付着照査の内法長さを確認できません")?;
@@ -519,20 +533,70 @@ fn check_member(
         )
         .ok_or("付着照査の検討方向の配筋を確認できません")?;
         let matches_depth = |depth: f64| (input.effective_depth_mm - depth).abs() <= depth * 1e-9;
-        if !matches_depth(props.d_eff)
-            || (section.is_none()
-                && !rc_bar_props(shape, direction, false)
-                    .is_some_and(|other| matches_depth(other.d_eff)))
-        {
-            return Err("付着照査の有効せいが検討方向の配筋と一致しません");
+        let depth_mismatch = "付着照査の有効せいが検討方向の配筋と一致しません";
+        if !matches_depth(props.d_eff) {
+            return Err(depth_mismatch);
         }
+        let opposite_at_zero_moment = section
+            .filter(|s| s.long_term_mz_nmm == 0.0 && s.lateral_mz_nmm == 0.0 && props.n_tension > 0)
+            .and_then(|s| {
+                rc_bar_props(
+                    shape,
+                    direction,
+                    s.tension_side == RcUltimateBeamBondTensionSide::Bottom,
+                )
+            })
+            .filter(|other| other.n_tension > 0 && matches_depth(other.d_eff));
+        let (model_depth_mm, model_tension_count) = if section.is_some() {
+            opposite_at_zero_moment.map_or((props.d_eff, props.n_tension), |other| {
+                (
+                    props.d_eff.max(other.d_eff),
+                    props.n_tension.min(other.n_tension),
+                )
+            })
+        } else {
+            let opposite = rc_bar_props(shape, direction, false)
+                .filter(|other| matches_depth(other.d_eff))
+                .ok_or(depth_mismatch)?;
+            (
+                props.d_eff.max(opposite.d_eff),
+                props.n_tension.min(opposite.n_tension),
+            )
+        };
         if (input.clear_span_mm() - l_clear).abs() > l_clear * 1e-9 {
             return Err("付着照査の内法長さが部材の内法長さと一致しません");
         }
         if input.bar_designation_mm != props.main_dia.designation_or_diameter_mm() {
             return Err("付着照査の鉄筋呼び名がモデルと一致しません");
         }
-        let mut check = input.check(fc, mat.concrete_class)?;
+        let mut check = input.check(fc, mat.concrete_class, model_depth_mm)?;
+        if is_pair && model_tension_count < 2 {
+            let reason = "引張側の主筋が2本未満のため、通し筋とカットオフ筋を別々に確認できません";
+            check.stress = Err(reason);
+            check.development_length_ok = check.development_length_ok.filter(|&ok| !ok);
+            check.length_unchecked_reason = Some(reason);
+            check.through_tension_side_confirmed = None;
+            return Ok(check);
+        }
+        let elastic_stress = input.bar.elastic_stress();
+        let tension_side_confirmed = match section {
+            Some(section) => elastic_stress
+                .and_then(|stress| stress.verified_lateral_factor())
+                .is_some_and(|factor| {
+                    section.design_tension_side(factor) == Some(section.tension_side)
+                }),
+            None => !is_beam || elastic_stress.is_none(),
+        };
+        let common_side_confirmed =
+            section.is_some_and(|s| s.common_tension_side() == Some(s.tension_side));
+        check.through_tension_side_confirmed = check
+            .through_tension_side_confirmed
+            .filter(|_| model_tension_count > 0)
+            .map(|_| tension_side_confirmed || common_side_confirmed);
+        check.cutoff_absent &= props.n_tension > 0
+            && matches!(props.main_dia, RebarSize::Standard(_))
+            && main_rebar_issue.is_none()
+            && (tension_side_confirmed || common_side_confirmed);
         if concrete_type_issue.is_some() {
             check.stress = Err("終局付着照査に必要な主材料のコンクリート区分を確認できません");
         } else if sigma_y.is_none() {
@@ -550,13 +614,15 @@ fn check_member(
             .is_some_and(|design| sigma_y.is_some_and(|nominal| design < nominal))
         {
             check.stress = Err("付着照査の設計用降伏応力度が主筋の規格降伏強度を下回っています");
+        } else if let (Some(section), Some(stress), Some(yield_mpa)) =
+            (section, elastic_stress, input.design_yield_stress_mpa)
+        {
+            check.yield_before_amplification = check.positive_effective_length
+                && stress.reaches_yield_before_amplification(yield_mpa)
+                && section.check_stress_conditions(stress).is_ok();
         }
         if check.stress.is_ok() && is_beam {
-            check.stress = match (
-                section,
-                input.bar.elastic_stress(),
-                input.design_yield_stress_mpa,
-            ) {
+            check.stress = match (section, elastic_stress, input.design_yield_stress_mpa) {
                 (Some(section), Some(stress), Some(yield_mpa)) => {
                     section.check_stress(stress, yield_mpa).and(check.stress)
                 }
@@ -567,14 +633,31 @@ fn check_member(
                 (None, None, _) => check.stress,
             };
         }
+        let length_side_confirmed = tension_side_confirmed
+            || shared_side
+            || opposite_at_zero_moment.is_some()
+            || common_side_confirmed;
+        if section.is_some() && !length_side_confirmed && check.development_length_ok == Some(true)
+        {
+            check.development_length_ok = None;
+            let reason =
+                "カットオフ筋の採用主筋と設計曲げの引張側の一致を確認できないため、必要延長は未算定です";
+            check.length_unchecked_reason = Some(reason);
+            check.stress = check.stress.and(Err(reason));
+        }
         Ok(check)
     };
     let check_legacy_bond = |bond| {
-        RcUltimateBeamBondDirectionCheck::from_bars(bond, None, None, |bar| {
-            check_bond_input(bar, None)
-        })
+        RcUltimateBeamBondDirectionCheck::from_bars(
+            bond,
+            None,
+            None,
+            |bar, shared_side, is_pair| check_bond_input(bar, None, shared_side, is_pair),
+        )
     };
     let mut beam_bond = None;
+    let mut legacy_length_reason = None;
+    let mut bond_cutoff_absent = false;
     let (bond_stress, bond_issue, bond_development_length_ok) = if !opts.include_bond {
         (None, None, None)
     } else if let Some(reason) = &round_bond_reason {
@@ -622,13 +705,18 @@ fn check_member(
                 };
             }
             let conflict = conflict.or(hinge_conflict.then_some(BOND_HINGE_CONFLICT));
-            let mut result =
-                RcUltimateBeamBondDirectionCheck::from_bars(input.bars, section, conflict, |bar| {
-                    check_bond_input(bar, section)
-                });
+            let mut result = RcUltimateBeamBondDirectionCheck::from_bars(
+                input.bars,
+                section,
+                conflict,
+                |bar, shared_side, is_pair| check_bond_input(bar, section, shared_side, is_pair),
+            );
             if !input.represents_all_bond_checks {
                 result.unchecked_reason.get_or_insert(
                     "指定断面・主筋でこの方向に必要な付着照査を代表できるか確認できません",
+                );
+                result.length_unchecked_reason.get_or_insert(
+                    "必要延長の全体判定に必要な、この方向の指定断面・主筋の代表性を確認できません",
                 );
             }
             result
@@ -644,26 +732,32 @@ fn check_member(
             .into_iter()
             .flatten()
             .min_by(|a, b| a.margin().total_cmp(&b.margin()));
-        let direction_lengths = [
-            (by_direction.positive, positive.development_length_ok),
-            (by_direction.negative, negative.development_length_ok),
-        ];
+        let directions = [positive, negative];
+        let all_directions_represented = conflict.is_none()
+            && !positive_conflict
+            && !negative_conflict
+            && [by_direction.positive, by_direction.negative]
+                .into_iter()
+                .all(|input| input.is_some_and(|input| input.represents_all_bond_checks));
+        bond_cutoff_absent = scope_issue.is_none()
+            && all_directions_represented
+            && directions.iter().all(|direction| direction.cutoff_absent);
         let legacy_length_ng = scope_issue.is_none()
             && demand
                 .bond
                 .is_some_and(|bond| check_legacy_bond(bond).development_length_ok == Some(false));
         let developmental = if legacy_length_ng
-            || direction_lengths.iter().any(|(_, ok)| *ok == Some(false))
+            || directions
+                .iter()
+                .any(|direction| direction.development_length_ok == Some(false))
         {
             Some(false)
-        } else if conflict.is_none()
-            && !positive_conflict
-            && !negative_conflict
-            && direction_lengths.iter().any(|(_, ok)| *ok == Some(true))
-            && direction_lengths.iter().all(|(input, ok)| {
-                input.is_some_and(|input| {
-                    input.represents_all_bond_checks && (!input.bars.has_cutoff() || ok.is_some())
-                })
+        } else if all_directions_represented
+            && directions
+                .iter()
+                .any(|direction| direction.development_length_ok == Some(true))
+            && directions.iter().all(|direction| {
+                direction.cutoff_absent || direction.development_length_ok == Some(true)
             })
         {
             Some(true)
@@ -677,6 +771,10 @@ fn check_member(
         (stress, issue, developmental)
     } else if let Some(bond) = demand.bond {
         let result = check_legacy_bond(bond);
+        legacy_length_reason = result
+            .length_unchecked_reason
+            .filter(|&reason| Some(reason) != result.unchecked_reason);
+        bond_cutoff_absent = result.cutoff_absent;
         (
             result.stress,
             result.unchecked_reason,
@@ -700,6 +798,8 @@ fn check_member(
         let detail = bond_detail(stress, margin);
         if let Some(by_direction) = &directional_detail {
             format!("{detail}。{by_direction}")
+        } else if let Some(reason) = legacy_length_reason {
+            format!("{detail}。{reason}")
         } else {
             detail
         }
@@ -714,8 +814,10 @@ fn check_member(
     let bond_ng = bond_margin < 1.0 || bond_length_issue.is_some();
     let set_bond_result = |check: &mut UltimateCheck| {
         check.bond_stress = bond_stress;
+        check.bond_unchecked_reason = bond_issue.map(str::to_owned);
         check.beam_bond = beam_bond;
         check.bond_development_length_ok = bond_development_length_ok;
+        check.bond_cutoff_absent = bond_cutoff_absent;
         check.bond_margin = bond_margin;
         check
             .detail
@@ -987,8 +1089,10 @@ fn check_member(
             mu,
             qsu,
             bond_stress,
+            bond_unchecked_reason: bond_issue.map(str::to_owned),
             beam_bond,
             bond_development_length_ok,
+            bond_cutoff_absent,
             bond_margin,
             unchecked_reason: (!bond_ng).then(|| reason.clone()),
             detail: format!("Qmu=未算定, {shear_symbol}=未算定, {bond_detail}。{reason}"),
@@ -1225,8 +1329,10 @@ fn check_member(
         weak_shear_n,
         beam_hinge_shear: None,
         bond_stress,
+        bond_unchecked_reason: bond_issue.map(str::to_owned),
         beam_bond,
         bond_development_length_ok,
+        bond_cutoff_absent,
         shear_margin,
         weak_shear_margin,
         biaxial_bending_margin,
