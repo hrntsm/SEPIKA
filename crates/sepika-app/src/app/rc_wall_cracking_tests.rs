@@ -61,9 +61,7 @@ fn gui_design_crack_points_match_independent_fixture_and_saved_component() {
 }
 
 #[cfg(feature = "gui")]
-#[test]
-fn gui_wall_check_draws_crack_force_and_both_reference_axes() {
-    let app = crack_ready();
+fn wall_checks_text(checks: &[sepika_design_jp::wall_check::WallCheck]) -> String {
     let context = egui::Context::default();
     let mut text = String::new();
     for _ in 0..3 {
@@ -75,12 +73,7 @@ fn gui_wall_check_draws_crack_force_and_both_reference_axes() {
                 )),
                 ..Default::default()
             },
-            |ui| {
-                crate::design_view::wall_checks_ui(
-                    ui,
-                    &app.current_design_results().unwrap().wall_checks,
-                )
-            },
+            |ui| crate::design_view::wall_checks_ui(ui, checks),
         );
         text.push_str(
             &output
@@ -94,8 +87,17 @@ fn gui_wall_check_draws_crack_force_and_both_reference_axes() {
                 .join("\n"),
         );
     }
+    text
+}
+
+#[cfg(feature = "gui")]
+#[test]
+fn gui_wall_check_draws_crack_force_displacement_and_both_reference_axes() {
+    let app = crack_ready();
+    let text = wall_checks_text(&app.current_design_results().unwrap().wall_checks);
     for expected in [
         "Qc=920.2 kN",
+        "δc=0.9202 mm",
         "Qc用Aw=840000.0 mm²",
         "120700.627 N/mm",
         "純せん断変位 δ [mm]",
@@ -311,6 +313,19 @@ fn opening_edit_crack_invalidates_saved_reference_and_recalculation_keeps_reason
     );
     assert_eq!(reference.skip_kind, Some(WallSkipKind::NotImplemented));
     assert!(reference.reference_skeleton.is_none());
+    #[cfg(feature = "gui")]
+    {
+        let text = wall_checks_text(std::slice::from_ref(reference));
+        assert!(
+            text.lines().any(|line| {
+                line.contains("せん断参考骨格")
+                    && line.contains("未検定")
+                    && line.contains("Qc用開口低減率が未確定")
+            }),
+            "{text}"
+        );
+        assert!(!text.contains("Q–δ・Q–γ参考骨格"), "{text}");
+    }
     let path = std::env::temp_dir().join(format!("sepika534-opening-{}.ovika", std::process::id()));
     app.save_project_to(path.clone());
     let mut loaded = App::default();
@@ -351,7 +366,8 @@ fn crack_fc_edit_retains_axial_applicability_limit_after_reanalysis() {
         .find(|w| w.kind == sepika_design_jp::wall_check::WallCheckKind::ReferenceSkeleton)
         .unwrap();
     assert!(
-        matches!(&check.outcome, sepika_design_jp::CheckOutcome::Skipped { reason } if reason.contains("圧縮正N/A") && reason.contains("適用範囲外"))
+        matches!(&check.outcome, sepika_design_jp::CheckOutcome::Skipped { reason } if reason.contains("圧縮正N/Aが適用範囲外") && reason.contains("8.368 N/mm²") && reason.contains("0〜0.4Fc = 8.000 N/mm²")),
+        "{check:?}"
     );
     assert!(check.reference_skeleton.is_none());
 }

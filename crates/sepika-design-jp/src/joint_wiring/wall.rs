@@ -386,9 +386,14 @@ fn check_walls_selected(
                 }
             }
         }
-        if nonlinear_issue.is_none() && column_geometry[0].is_some() != column_geometry[1].is_some()
-        {
-            nonlinear_issue = Some("片側のみ側柱がある非対称な参考骨格は未対応です".into());
+        if nonlinear_issue.is_none() {
+            nonlinear_issue = match column_geometry {
+                [None, None] => Some("両側柱付き壁が参考骨格の適用範囲です（側柱なし）".into()),
+                [Some(_), None] | [None, Some(_)] => {
+                    Some("片側のみ側柱がある非対称な参考骨格は未対応です".into())
+                }
+                [Some(_), Some(_)] => None,
+            };
         }
         let l_clear = (l - sum_col_depth / 2.0).max(0.1 * l);
         let q_design = forces
@@ -562,7 +567,10 @@ fn check_walls_selected(
                     elem.nodes[0],
                     "耐震壁(RC)せん断非線形".into(),
                     CheckOutcome::Skipped {
-                        reason: format!("壁 ID {}: 壁脚faceの圧縮正N/Aが適用範囲外です", elem.id.0),
+                        reason: format!(
+                            "壁 ID {}: 壁脚faceの圧縮正N/Aが適用範囲外です（{:.3} N/mm²、適用範囲は0〜0.4Fc = {:.3} N/mm²）",
+                            elem.id.0, sigma_0, 0.4 * fc
+                        ),
                     },
                 ));
                 continue;
@@ -674,7 +682,7 @@ fn check_walls_selected(
                 "耐震壁(RC)せん断非線形".into(),
                 CheckOutcome::Skipped {
                     reason: format!(
-                        "耐震壁 ID {} の側柱主筋量または有効断面が不足し、Qc/Qu を算定できません",
+                        "耐震壁 ID {} の側柱主筋量または有効断面が不足し、参考骨格を算定できません",
                         elem.id.0
                     ),
                 },
