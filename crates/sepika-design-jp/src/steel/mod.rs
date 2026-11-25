@@ -415,21 +415,29 @@ fn independent_axial_failure(
         return None;
     }
     let area_mm2 = sec.shape.as_ref()?.try_calc_area().ok()?;
-    let limit_mpa = steel_ft(f, ctx.term);
+    axial_material_limit_failure(forces.n, area_mm2, ctx.term, f)
+}
+
+fn axial_material_limit_failure(
+    axial_n: f64,
+    area_mm2: f64,
+    term: crate::LoadTerm,
+    f: f64,
+) -> Option<CheckComponent> {
+    let limit_mpa = steel_ft(f, term);
     if ![area_mm2, limit_mpa]
         .iter()
         .all(|v| v.is_finite() && *v > 0.0)
     {
         return None;
     }
-    let stress_mpa = forces.n.abs() / area_mm2;
+    let stress_mpa = axial_n.abs() / area_mm2;
     let ratio = stress_mpa / limit_mpa;
     (ratio.is_finite() && ratio > 1.0).then(|| CheckComponent {
         kind: CheckKind::Axial,
         ratio,
         detail: format!(
-            "N={:.4} N, A={area_mm2:.4} mm², |N|/A={stress_mpa:.4} N/mm², 材料許容上限={limit_mpa:.4} N/mm²",
-            forces.n
+            "N={axial_n:.4} N, A={area_mm2:.4} mm², |N|/A={stress_mpa:.4} N/mm², 材料許容上限={limit_mpa:.4} N/mm²",
         ),
     })
 }
@@ -949,6 +957,37 @@ impl SteelDesign {
         }
         let combined_and_shear = built_h_shear_unavailable.then(built_h_unavailable_reasons);
         let h_combined_reason = combined_and_shear.as_deref().or(h_combined_reason);
+        let plate_slenderness_reason = (!secondary_post
+            && ctx.kind == MemberKind::Column
+            && forces.mz != 0.0
+            && strong_axis_h_tension(forces, sec))
+        .then(|| column::check_symmetric_h_tension_plate_slenderness(forces, sec, mat).err())
+        .flatten();
+        if let Some(reason) = plate_slenderness_reason {
+            *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                incomplete.take(),
+                h_combined_reason,
+            );
+            let components: Vec<_> = sec
+                .resolved_area()
+                .ok()
+                .and_then(|area_mm2| axial_material_limit_failure(forces.n, area_mm2, term, f))
+                .into_iter()
+                .chain(independent_h_web_shear_failure(forces, sec, mat, ctx))
+                .collect();
+            if components.is_empty() {
+                return CheckOutcome::Skipped { reason };
+            }
+            *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                incomplete.take(),
+                Some(&reason),
+            );
+            return CheckOutcome::Checked(CheckResult {
+                basis: "鋼構造許容応力度設計規準 H形鋼柱の独立照査".into(),
+                detail: String::new(),
+                components,
+            });
+        }
         let cr = match ctx.kind {
             MemberKind::Girder => beam::check_beam(forces, sec, mat, ctx, f, lambda, incomplete)
                 .map(CheckOutcome::Checked),

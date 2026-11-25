@@ -92,6 +92,298 @@ fn issue_1484_uses_the_larger_of_tension_and_lateral_buckling_checks() {
     }
 }
 
+fn rolled_h(width: f64, web_thick: f64, root_r: f64) -> Section {
+    SectionShape::SteelH {
+        height: 400.0,
+        width,
+        web_thick,
+        flange_thick: 13.0,
+        root_r: Some(root_r),
+    }
+    .to_section(SectionId(0), "圧延H形鋼".into())
+}
+
+#[test]
+fn issue_1912_gates_both_full_section_ratios_on_the_compressed_web() {
+    let model = issue_model();
+    let section = rolled_h(200.0, 2.0, 0.0);
+    for sign in [1.0, -1.0] {
+        let forces = MemberForcesAt {
+            mz: sign * 100e6,
+            qz: 0.0,
+            ..ISSUE_FORCES
+        };
+        let outcome = check(
+            &model,
+            &section,
+            &forces,
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("局部座屈") && reason.contains("ウェブ d/t=187.0000（上限 47.2567）")));
+
+        let control = check(
+            &model,
+            &model.sections[0],
+            &forces,
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        let CheckOutcome::Checked(result) = control else {
+            panic!("{control:?}");
+        };
+        assert!(result.ok(), "{result:?}");
+        // A=8192 mm²、Z=1148243.413333333 mm³、短期 ft=235、fb=192.3854186252 N/mm²。
+        let axial_bending = &result.components[0];
+        assert_eq!(axial_bending.kind, CheckKind::AxialBending);
+        assert!(
+            (axial_bending.ratio - 0.410_591_328_440_000_8).abs() < 1e-12,
+            "{result:?}"
+        );
+        assert!(axial_bending.detail.contains("式(6.3) 引張側=0.4106"));
+        assert!(axial_bending.detail.contains("式(6.4) 曲げ圧縮側=0.4038"));
+    }
+}
+
+#[test]
+fn a_slender_plate_is_checked_only_if_it_has_compression() {
+    let model = issue_model();
+    let web_slender = rolled_h(200.0, 2.0, 0.0);
+    let flange_slender = rolled_h(500.0, 10.0, 0.0);
+
+    // 曲げ勾配 1/8 N/mm³ に対し、ウェブ端 y=187 mm とフランジ端 y=200 mm が応力度ゼロの境界。
+    for (section, boundary_stress_mpa, compressed_plate) in [
+        (&web_slender, 23.375, "ウェブ d/t=187.0000"),
+        (&flange_slender, 25.0, "下フランジ b/t=19.2308"),
+    ] {
+        for (offset_mpa, has_compression) in [(-0.125, true), (0.0, false), (0.125, false)] {
+            let forces = MemberForcesAt {
+                n: section.area * (boundary_stress_mpa + offset_mpa),
+                mz: -section.iy / 8.0,
+                qz: 0.0,
+                ..ISSUE_FORCES
+            };
+            let outcome = check(
+                &model,
+                section,
+                &forces,
+                LoadTerm::Short,
+                MemberKind::Column,
+            );
+            if has_compression {
+                assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains(compressed_plate)));
+            } else {
+                assert!(matches!(outcome, CheckOutcome::Checked(result) if result.ok()));
+            }
+        }
+    }
+}
+
+#[test]
+fn rolled_and_welded_h_use_different_web_widths() {
+    let model = issue_model();
+    let rolled = rolled_h(200.0, 7.5, 16.0);
+    let built = SectionShape::SteelBuiltH {
+        height: 400.0,
+        upper_width: 200.0,
+        upper_thick: 13.0,
+        lower_width: 200.0,
+        lower_thick: 13.0,
+        web_thick: 7.5,
+    }
+    .to_section(SectionId(0), "溶接組立H形鋼".into());
+    let forces = MemberForcesAt {
+        mz: 100e6,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    // 圧延材はフィレット先端間342 mm、溶接組立材は内法374 mm。
+    let rolled_result = check(
+        &model,
+        &rolled,
+        &forces,
+        LoadTerm::Short,
+        MemberKind::Column,
+    );
+    assert!(matches!(rolled_result, CheckOutcome::Checked(result) if result.ok()));
+    let built_result = check(&model, &built, &forces, LoadTerm::Short, MemberKind::Column);
+    assert!(matches!(built_result, CheckOutcome::Skipped { reason }
+        if reason.contains("ウェブ d/t=49.8667（上限 47.2567）")));
+}
+
+#[test]
+fn a_rolled_section_with_supplied_properties_can_use_the_web_clear_depth() {
+    let model = issue_model();
+    let mut section = rolled_h(200.0, 7.5, 16.0);
+    section.property_basis.area = PropertyBasis::Supplied;
+    section.property_basis.iy = PropertyBasis::Supplied;
+    section.property_basis.iz = PropertyBasis::Supplied;
+    section.property_basis.j = PropertyBasis::Supplied;
+    let SectionShape::SteelH { root_r, .. } = section.shape.as_mut().unwrap() else {
+        unreachable!()
+    };
+    *root_r = None;
+    let forces = MemberForcesAt {
+        mz: 100e6,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    let outcome = check(
+        &model,
+        &section,
+        &forces,
+        LoadTerm::Short,
+        MemberKind::Column,
+    );
+    assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("ウェブ d/t=49.8667（上限 47.2567）")));
+
+    let mut section = model.sections[0].clone();
+    section.property_basis.area = PropertyBasis::Supplied;
+    section.property_basis.iy = PropertyBasis::Supplied;
+    section.property_basis.iz = PropertyBasis::Supplied;
+    section.property_basis.j = PropertyBasis::Supplied;
+    let SectionShape::SteelH { root_r, .. } = section.shape.as_mut().unwrap() else {
+        unreachable!()
+    };
+    *root_r = None;
+    let outcome = check(
+        &model,
+        &section,
+        &forces,
+        LoadTerm::Short,
+        MemberKind::Column,
+    );
+    assert!(matches!(outcome, CheckOutcome::Checked(result) if result.ok()));
+    for (area, iy) in [
+        (PropertyBasis::Shape, PropertyBasis::Supplied),
+        (PropertyBasis::Supplied, PropertyBasis::Shape),
+    ] {
+        section.property_basis.area = area;
+        section.property_basis.iy = iy;
+        let outcome = check(
+            &model,
+            &section,
+            &forces,
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("フィレット半径が未知") && reason.contains("全断面性能を確定できません")));
+    }
+    section.property_basis.iy = PropertyBasis::PendingShape;
+    assert!(
+        matches!(check(&model, &section, &forces, LoadTerm::Short, MemberKind::Column),
+        CheckOutcome::Skipped { reason } if reason.contains("全断面性能を確定できません"))
+    );
+}
+
+#[test]
+fn inconsistent_shape_derived_properties_cannot_establish_plate_compression() {
+    let model = issue_model();
+    let section = rolled_h(200.0, 8.0, 16.0);
+    let forces = MemberForcesAt {
+        mz: 100e6,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    for (area_factor, iy_factor) in [(1.01, 1.0), (1.0, 1.01)] {
+        let mut section = section.clone();
+        section.area *= area_factor;
+        section.iy *= iy_factor;
+        let outcome = check(
+            &model,
+            &section,
+            &forces,
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("全断面性能を確定できません") && reason.contains("一致しません")));
+    }
+}
+
+#[test]
+fn slenderness_uses_each_plates_actual_thickness_to_select_f() {
+    let mut model = issue_model();
+    model.materials[0].name = "SN400B".into();
+    let section = SectionShape::SteelBuiltH {
+        height: 870.0,
+        upper_width: 1440.0,
+        upper_thick: 45.0,
+        lower_width: 1440.0,
+        lower_thick: 45.0,
+        web_thick: 16.0,
+    }
+    .to_section(SectionId(0), "溶接組立H形鋼".into());
+    let forces = MemberForcesAt {
+        mz: 100e6,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    let outcome = check(
+        &model,
+        &section,
+        &forces,
+        LoadTerm::Short,
+        MemberKind::Column,
+    );
+    // 16 mm の F=235 では d/t=48.75 が超過。45 mm の F=215 では b/t=16 が上限内。
+    assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("ウェブ d/t=48.7500（上限 47.2567）") && !reason.contains("フランジ")));
+}
+
+#[test]
+fn slender_plates_leave_independent_failures_and_unavailability_visible() {
+    let model = issue_model();
+    let section = rolled_h(200.0, 2.0, 0.0);
+    let forces = MemberForcesAt {
+        n: 1_500_000.0,
+        mz: 400e6,
+        qy: 200_000.0,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    let mut ctx = column_context(&model, LoadTerm::Short);
+    ctx.column_lateral_buckling_length = Some(Err("実材端の横座屈支点が未確認です"));
+    let outcomes: Vec<_> = SteelDesign
+        .check_outcomes(&forces, &section, &model.materials[0], &ctx)
+        .collect();
+    assert!(
+        matches!(outcomes.as_slice(), [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }]
+        if !result.ok()
+            && result.components.iter().map(|c| c.kind).eq([CheckKind::Axial, CheckKind::Shear])
+            && reason.contains("局部座屈")
+            && reason.contains("横座屈支点が未確認"))
+    );
+}
+
+#[test]
+fn a_supplied_full_section_area_retains_the_independent_axial_failure() {
+    let model = issue_model();
+    let mut section = rolled_h(200.0, 2.0, 0.0);
+    section.property_basis.area = PropertyBasis::Supplied;
+    section.area = 5950.0;
+    let forces = MemberForcesAt {
+        n: 1_500_000.0,
+        mz: 400e6,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    let ctx = column_context(&model, LoadTerm::Short);
+    let outcomes: Vec<_> = SteelDesign
+        .check_outcomes(&forces, &section, &model.materials[0], &ctx)
+        .collect();
+    assert!(
+        matches!(outcomes.as_slice(), [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }]
+        if matches!(&result.components[..], [axial]
+                if axial.kind == CheckKind::Axial && (axial.ratio - 1.072_769_533_345_253_2).abs() < 1e-12)
+            && reason.contains("局部座屈"))
+    );
+}
+
 fn issue_model() -> Model {
     input::cantilever(ISSUE_FORCES.n, ISSUE_FORCES.mz, ISSUE_FORCES.qz)
 }
