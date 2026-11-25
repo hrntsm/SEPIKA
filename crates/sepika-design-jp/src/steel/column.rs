@@ -122,49 +122,44 @@ pub(super) fn check_symmetric_h_tension_plate_slenderness(
     sec: &Section,
     mat: &Material,
 ) -> Result<(), String> {
-    let (height_mm, flange_width_mm, flange_thick_mm, web_thick_mm, root_r_mm) = match sec.shape {
-        Some(
-            ref shape @ SectionShape::SteelH {
-                height,
-                width,
-                flange_thick,
-                web_thick,
-                root_r,
-            },
-        ) => {
-            shape.validate_surface_radius()?;
-            (
-                height,
-                width,
-                flange_thick,
-                web_thick,
-                root_r.unwrap_or(0.0),
-            )
-        }
-        Some(SectionShape::SteelBuiltH {
+    let shape = sec.shape.as_ref().expect("上下対称H形鋼の形状が必要");
+    let (height_mm, flange_width_mm, flange_thick_mm, web_thick_mm, root_r_mm) = match *shape {
+        SectionShape::SteelH {
+            height,
+            width,
+            flange_thick,
+            web_thick,
+            root_r,
+        } => (
+            height,
+            width,
+            flange_thick,
+            web_thick,
+            root_r.unwrap_or(0.0),
+        ),
+        SectionShape::SteelBuiltH {
             height,
             upper_width,
             upper_thick,
             web_thick,
             ..
-        }) => (height, upper_width, upper_thick, web_thick, 0.0),
+        } => (height, upper_width, upper_thick, web_thick, 0.0),
         _ => unreachable!("上下対称H形鋼だけを検定する"),
     };
+    let unresolved = "局部座屈の幅厚比照査に必要なH形断面の全断面性能を確定できません";
+    let area_mm2 = sec
+        .resolved_area()
+        .map_err(|reason| format!("{unresolved}。{reason}"))?;
     let web_clear_mm = height_mm - 2.0 * flange_thick_mm;
     if sec.depth != height_mm
         || flange_width_mm < web_thick_mm
-        || [
-            sec.property_basis.area,
-            sec.property_basis.iy,
-            sec.property_basis.depth,
-        ]
-        .contains(&PropertyBasis::PendingShape)
+        || [sec.property_basis.iy, sec.property_basis.depth].contains(&PropertyBasis::PendingShape)
         || [
             web_clear_mm,
             flange_width_mm,
             flange_thick_mm,
             web_thick_mm,
-            sec.area,
+            area_mm2,
             sec.iy,
         ]
         .iter()
@@ -173,8 +168,23 @@ pub(super) fn check_symmetric_h_tension_plate_slenderness(
         return Err("局部座屈の幅厚比照査に必要なH形断面の寸法・全断面性能を確定できません".into());
     }
 
+    if sec.property_basis.iy == PropertyBasis::Shape {
+        let calculated_iy_mm4 = shape
+            .try_calc_iy()
+            .map_err(|reason| format!("{unresolved}。{reason}"))?;
+        let tolerance_mm4 = 8.0 * f64::EPSILON * sec.iy.max(calculated_iy_mm4);
+        if !calculated_iy_mm4.is_finite()
+            || calculated_iy_mm4 <= 0.0
+            || (sec.iy - calculated_iy_mm4).abs() > tolerance_mm4
+        {
+            return Err(format!(
+                "{unresolved}。強軸断面二次モーメントの記録値が現在の断面形状と一致しません"
+            ));
+        }
+    }
+
     let web_flat_mm = web_clear_mm - 2.0 * root_r_mm;
-    let tension_mpa = forces.n / sec.area;
+    let tension_mpa = forces.n / area_mm2;
     let gradient_mpa_per_mm = forces.mz.abs() / sec.iy;
     let flange_bending_mpa = gradient_mpa_per_mm * (height_mm / 2.0);
     let web_bending_mpa = gradient_mpa_per_mm * (web_flat_mm / 2.0);

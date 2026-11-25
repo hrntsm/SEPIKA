@@ -257,11 +257,52 @@ fn a_rolled_section_with_supplied_properties_can_use_the_web_clear_depth() {
         MemberKind::Column,
     );
     assert!(matches!(outcome, CheckOutcome::Checked(result) if result.ok()));
+    for (area, iy) in [
+        (PropertyBasis::Shape, PropertyBasis::Supplied),
+        (PropertyBasis::Supplied, PropertyBasis::Shape),
+    ] {
+        section.property_basis.area = area;
+        section.property_basis.iy = iy;
+        let outcome = check(
+            &model,
+            &section,
+            &forces,
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("フィレット半径が未知") && reason.contains("全断面性能を確定できません")));
+    }
     section.property_basis.iy = PropertyBasis::PendingShape;
     assert!(
         matches!(check(&model, &section, &forces, LoadTerm::Short, MemberKind::Column),
         CheckOutcome::Skipped { reason } if reason.contains("全断面性能を確定できません"))
     );
+}
+
+#[test]
+fn inconsistent_shape_derived_properties_cannot_establish_plate_compression() {
+    let model = issue_model();
+    let section = rolled_h(200.0, 8.0, 16.0);
+    let forces = MemberForcesAt {
+        mz: 100e6,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    for (area_factor, iy_factor) in [(1.01, 1.0), (1.0, 1.01)] {
+        let mut section = section.clone();
+        section.area *= area_factor;
+        section.iy *= iy_factor;
+        let outcome = check(
+            &model,
+            &section,
+            &forces,
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("全断面性能を確定できません") && reason.contains("一致しません")));
+    }
 }
 
 #[test]
