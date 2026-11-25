@@ -5,7 +5,6 @@ mod concrete;
 mod rebar;
 mod steel;
 
-pub(crate) use concrete::concrete_allowable_bond_for_rebar;
 pub use concrete::{
     concrete_allowable_bond, concrete_allowable_compression, concrete_allowable_shear,
     concrete_allowable_shear_class, concrete_young_modulus, young_ratio_n,
@@ -117,6 +116,8 @@ mod tests {
 
     #[test]
     fn test_round_rebar_allowable_bond_fc24() {
+        use super::concrete::concrete_allowable_bond_for_rebar;
+
         assert!((concrete_allowable_bond_for_rebar(24.0, true, true, false) - 0.9).abs() < 1e-9);
         assert!((concrete_allowable_bond_for_rebar(24.0, false, true, false) - 1.35).abs() < 1e-9);
         assert!((concrete_allowable_bond_for_rebar(24.0, true, false, false) - 1.35).abs() < 1e-9);

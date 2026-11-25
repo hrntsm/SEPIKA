@@ -28,8 +28,8 @@ pub(crate) use beam::{
     beam_supports_slab, column_transmits_bending, frame_end_positions, restrains_direction,
     transmits_bending,
 };
+use bond::rc_beam_bond_check_1999;
 pub use bond::{rc_beam_bond_check_1991, Bond1991Result, BondCheckResult};
-pub(crate) use bond::{rc_beam_bond_check_1991_with_rebar, rc_beam_bond_check_with_rebar};
 pub use clear_span::{rc_member_clear_span, RcClearSpanError};
 pub use column_mechanism::{
     compute_column_mechanism_sum_my, design_axial_for_mechanism,
@@ -40,7 +40,6 @@ pub use wall_nonlinear::{
     WallShearTrilinear, WallShearTrilinearInput,
 };
 
-pub(crate) use crate::material_strength::concrete_allowable_bond_for_rebar;
 pub use crate::material_strength::{
     concrete_allowable_bond, concrete_allowable_compression, concrete_allowable_shear,
     concrete_allowable_shear_class, concrete_young_modulus, main_rebar_grade,

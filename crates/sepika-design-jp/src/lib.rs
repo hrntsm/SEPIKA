@@ -53,7 +53,7 @@ pub use steel::SteelDesign;
 
 use sepika_core::model::{Material, Section, SteelDesignAttr};
 
-/// RC 梁付着検定の方式。
+/// 異形鉄筋を主筋に使うRC梁の付着検定方式。丸鋼主筋の付着はどちらの方式でも未算定。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum BondMethod {
     /// RC 規準1999 方式（必要付着長さ ldb と付着長さ ld の比。既定）。

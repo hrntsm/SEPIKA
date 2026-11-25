@@ -274,7 +274,10 @@ fn standard_deformed_size_with_round_bar_grade_is_not_checked() {
         &model.materials[0],
         &ctx,
     );
-    assert!(matches!(result, CheckOutcome::Checked(_)), "{result:?}");
+    assert!(
+        matches!(&result, CheckOutcome::Skipped { reason } if reason.contains("丸鋼主筋") && reason.contains("端部フック")),
+        "{result:?}"
+    );
 
     let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() else {
         unreachable!()

@@ -2,9 +2,9 @@
 //! 強軸曲げ（`mz`）とそれに対のせん断（`qy`）のみを検定する。
 
 use super::{
-    axis_props_from_shape, main_rebar_grade, rc_allow, rc_beam_bond_check_1991_with_rebar,
-    rc_beam_bond_check_with_rebar, rebar_allowable_tension, rebar_info_from_shape,
-    rebar_sigma_y_of, shear_alpha, shear_capacity, shear_rebar_grade, AxisProps,
+    axis_props_from_shape, main_rebar_grade, rc_allow, rc_beam_bond_check_1991,
+    rc_beam_bond_check_1999, rebar_allowable_tension, rebar_info_from_shape, rebar_sigma_y_of,
+    shear_alpha, shear_capacity, shear_rebar_grade, AxisProps,
 };
 use crate::member_design_check::combine_incomplete_reasons;
 use crate::ultimate::rc_props::RcDirection;
@@ -369,18 +369,20 @@ pub(crate) fn beam_check(
     section_issue: &mut Option<String>,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
-    let deformed_rebar = if matches!(
-        rebar.main_dia,
-        sepika_core::section_shape::RebarSize::Standard(_)
-    ) {
-        Some(true)
-    } else {
-        main_rebar_valid.then(|| {
-            ctx.rebar_material.as_ref().is_some_and(|m| {
-                m.category == MaterialCategory::Rebar && !matches!(m.name.trim(), "SR235" | "SR295")
-            })
-        })
-    };
+    let round_main_rebar = main_rebar_valid
+        && ctx.rebar_material.as_ref().is_some_and(|material| {
+            material.category == MaterialCategory::Rebar
+                && matches!(material.name.trim(), "SR235" | "SR295")
+        });
+    let bond_rebar_supported = !round_main_rebar
+        && (matches!(
+            rebar.main_dia,
+            sepika_core::section_shape::RebarSize::Standard(_)
+        ) || (main_rebar_valid
+            && ctx
+                .rebar_material
+                .as_ref()
+                .is_some_and(|m| m.category == MaterialCategory::Rebar)));
     let allow = rc_allow(
         fc_raw,
         mat.concrete_class,
@@ -512,39 +514,42 @@ pub(crate) fn beam_check(
         });
     }
 
-    let (ratio_bond, bond_detail) =
-        match (ctx.bond_method, deformed_rebar, q_design) {
-            (BondMethod::Rc1999, Some(deformed_rebar), _)
-                if valid_tension_props
-                    && (long_term || stirrup_effect_available)
-                    && [forces.mz, forces.pos, ctx.length]
-                        .into_iter()
-                        .all(f64::is_finite)
-                    && (shear_rebar_valid
-                        || long_term
-                        || info.shear_pitch <= 0.0
-                        || info.shear_legs == 0
-                        || info.shear_dia.area_mm2() == 0.0) =>
-            {
-                let bond = rc_beam_bond_check_with_rebar(
-                    forces.pos,
-                    ctx.length,
-                    props.b,
-                    props.d,
-                    props.j,
-                    props.at,
-                    forces.mz.abs(),
-                    &info,
-                    fc_raw,
-                    long_term,
-                    tension_is_top,
-                    deformed_rebar,
-                )
-                .filter(|bond| bond.ratio.is_finite());
-                let ratio = bond.as_ref().map(|b| b.ratio).unwrap_or(0.0);
-                let detail =
-                    bond.as_ref().map(|b| {
-                        format!(
+    if round_main_rebar {
+        *section_issue = combine_incomplete_reasons(
+            section_issue.take(),
+            Some("RC 梁付着検定未算定: 丸鋼主筋に適用できる方式がなく、端部フックと実際の付着長さを確認できません"),
+        );
+    }
+    let (ratio_bond, bond_detail) = match (ctx.bond_method, bond_rebar_supported, q_design) {
+        (BondMethod::Rc1999, true, _)
+            if valid_tension_props
+                && (long_term || stirrup_effect_available)
+                && [forces.mz, forces.pos, ctx.length]
+                    .into_iter()
+                    .all(f64::is_finite)
+                && (shear_rebar_valid
+                    || long_term
+                    || info.shear_pitch <= 0.0
+                    || info.shear_legs == 0
+                    || info.shear_dia.area_mm2() == 0.0) =>
+        {
+            let bond = rc_beam_bond_check_1999(
+                forces.pos,
+                ctx.length,
+                props.b,
+                props.d,
+                props.j,
+                props.at,
+                forces.mz.abs(),
+                &info,
+                fc_raw,
+                long_term,
+                tension_is_top,
+            )
+            .filter(|bond| bond.ratio.is_finite());
+            let ratio = bond.as_ref().map(|b| b.ratio).unwrap_or(0.0);
+            let detail = bond.as_ref().map(|b| {
+                format!(
                     "1999: ld={:.1} mm, ldb={:.1} mm, K={:.3}, W={:.3} mm, fb={:.3} N/mm², \
                      σt={:.1} N/mm², 付着検定比={:.3}（{}・{}）",
                     b.ld,
@@ -555,47 +560,44 @@ pub(crate) fn beam_check(
                     b.sigma_t,
                     b.ratio,
                     if b.is_end { "端部" } else { "中央" },
-                    if tension_is_top { "上端筋" } else { "下端筋" }
+                    if tension_is_top {
+                        "上端筋"
+                    } else {
+                        "下端筋"
+                    }
                 )
-                    });
-                (ratio, detail)
-            }
-            (BondMethod::Rc1991, Some(deformed_rebar), Some(q_design)) => {
-                let n_t = info.tension_count_1991;
-                let phi = n_t * info.main_dia.perimeter_mm();
-                let is_end = !(0.25 < forces.pos && forces.pos < 0.75);
-                let bond = rc_beam_bond_check_1991_with_rebar(
-                    q_design,
-                    props.j,
-                    phi,
-                    fc_raw,
-                    tension_is_top,
-                    long_term,
-                    deformed_rebar,
-                )
-                .filter(|bond| bond.ratio.is_finite());
-                let ratio = bond.as_ref().map(|b| b.ratio).unwrap_or(0.0);
-                let detail = bond.as_ref().map(|b| {
-                    format!(
-                        "1991: τa={:.3} N/mm², fa={:.3} N/mm², ψ={:.1} mm, \
+            });
+            (ratio, detail)
+        }
+        (BondMethod::Rc1991, true, Some(q_design)) => {
+            let n_t = info.tension_count_1991;
+            let phi = n_t * info.main_dia.perimeter_mm();
+            let is_end = !(0.25 < forces.pos && forces.pos < 0.75);
+            let bond =
+                rc_beam_bond_check_1991(q_design, props.j, phi, fc_raw, tension_is_top, long_term)
+                    .filter(|bond| bond.ratio.is_finite());
+            let ratio = bond.as_ref().map(|b| b.ratio).unwrap_or(0.0);
+            let detail = bond.as_ref().map(|b| {
+                format!(
+                    "1991: τa={:.3} N/mm², fa={:.3} N/mm², ψ={:.1} mm, \
                      Q={:.1} N, 付着検定比={:.3}（{}・{}）",
-                        b.tau,
-                        b.fa,
-                        phi,
-                        q_design,
-                        b.ratio,
-                        if is_end { "端部" } else { "中央" },
-                        if tension_is_top {
-                            "上端筋"
-                        } else {
-                            "下端筋"
-                        }
-                    )
-                });
-                (ratio, detail)
-            }
-            _ => (0.0, None),
-        };
+                    b.tau,
+                    b.fa,
+                    phi,
+                    q_design,
+                    b.ratio,
+                    if is_end { "端部" } else { "中央" },
+                    if tension_is_top {
+                        "上端筋"
+                    } else {
+                        "下端筋"
+                    }
+                )
+            });
+            (ratio, detail)
+        }
+        _ => (0.0, None),
+    };
 
     let basis = "RC 規準13条（梁の曲げ・せん断・付着）".to_string();
     let detail = format!(
@@ -603,7 +605,7 @@ pub(crate) fn beam_check(
         props.at,
         props.d,
         props.j,
-        if bond_detail.is_some() || !main_rebar_valid || !shear_rebar_valid {
+        if bond_detail.is_some() || round_main_rebar || !main_rebar_valid || !shear_rebar_valid {
             ""
         } else {
             ", 付着検定: 部材長(柱面間距離)が未設定、または入力不足のため省略"
@@ -1144,7 +1146,7 @@ mod tests {
     }
 
     #[test]
-    fn test_beam_bond_selects_rebar_category_and_grade() {
+    fn test_beam_bond_accepts_numeric_diameter_with_deformed_or_custom_rebar_grade() {
         let shape = rc_beam_shape(300.0, 600.0, 4, 19.0, 1, 40.0, 10.0, 100.0, 2);
         let sec = make_section(shape);
         let mut ctx = ctx_beam(LoadTerm::Long);
@@ -1172,7 +1174,6 @@ mod tests {
                 .clone()
         };
         assert!(detail("SD345").contains("fa=2.310"));
-        assert!(detail("SR235").contains("fa=1.350"));
         assert!(detail("任意名称").contains("fa=2.310"));
     }
 }
