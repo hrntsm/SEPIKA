@@ -236,7 +236,12 @@ fn elastic_original_and_oblique_wall_loaded_states_match_linear_beam_forces_and_
                 u.data[7] = 0.003;
                 u.data[10] = 1e-6;
                 let expected = beam
-                    .loaded_response(&u.data, &loads, m.wall_connection.clone())
+                    .loaded_response_with_stiffness(
+                        &u.data,
+                        &loads,
+                        m.wall_connection.clone(),
+                        &beam.local_stiffness_flex_raw(),
+                    )
                     .unwrap();
                 m.try_update_state_with_member_loads(&u, Some(&loads), false)
                     .unwrap();

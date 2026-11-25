@@ -13,12 +13,16 @@ impl BeamElement {
         loads: &[MemberLoad],
         connection: Option<ReleaseConnection>,
     ) -> Result<LoadedFrameResponse, String> {
-        self.loaded_response_with_stiffness(
+        let (li, lj) = self.rigid_lengths();
+        let phi = self.bending_shear_factors(self.length - li - lj);
+        self.try_loaded_response(
             u_elem,
             loads,
             connection,
             &self.local_stiffness_flex_raw(),
+            phi,
         )
+        .map_err(|reason| format!("部材 {:?} の線形部材荷重応答: {reason}", self.id))
     }
 
     pub(crate) fn loaded_response_with_stiffness(
@@ -28,7 +32,8 @@ impl BeamElement {
         connection: Option<ReleaseConnection>,
         raw: &crate::behavior::LocalMat,
     ) -> Result<LoadedFrameResponse, String> {
-        self.try_loaded_response(u_elem, loads, connection, raw)
+        // 集中ばね梁では弾性部の剛性を使う場合も、荷重換算は Hermite のままとする。
+        self.try_loaded_response(u_elem, loads, connection, raw, [0.0; 2])
             .map_err(|reason| format!("部材 {:?} の線形部材荷重応答: {reason}", self.id))
     }
 
@@ -38,6 +43,7 @@ impl BeamElement {
         loads: &[MemberLoad],
         connection: Option<ReleaseConnection>,
         raw: &crate::behavior::LocalMat,
+        phi: [f64; 2],
     ) -> Result<LoadedFrameResponse, String> {
         let u_global: &[f64; 12] = u_elem.try_into().map_err(|_| "変位は12自由度が必要です")?;
         if u_global.iter().any(|v| !v.is_finite()) {
@@ -47,7 +53,8 @@ impl BeamElement {
             return Err("異なる部材IDの荷重が含まれています".into());
         }
         let (li, lj) = self.rigid_lengths();
-        let map = FrameDeadLoadMap::new(loads, &self.axis, self.length, li, lj)?;
+        let map =
+            FrameDeadLoadMap::with_shear_factors(loads, &self.axis, self.length, li, lj, phi)?;
         let tangent = std::array::from_fn(|i| std::array::from_fn(|j| raw.get(i, j)));
         let mut connection = match connection {
             Some(connection) => connection,

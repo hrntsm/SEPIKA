@@ -51,19 +51,6 @@ fn resolve(load: &MemberLoad, frame: &LocalFrame) -> [Option<Comp>; 3] {
     out
 }
 
-fn n_vi(xi: f64) -> f64 {
-    1.0 - 3.0 * xi * xi + 2.0 * xi * xi * xi
-}
-fn n_ti(xi: f64, l: f64) -> f64 {
-    l * (xi - 2.0 * xi * xi + xi * xi * xi)
-}
-fn n_vj(xi: f64) -> f64 {
-    3.0 * xi * xi - 2.0 * xi * xi * xi
-}
-fn n_tj(xi: f64, l: f64) -> f64 {
-    l * (-xi * xi + xi * xi * xi)
-}
-
 fn gauss_dist<F: Fn(f64) -> f64>(a: f64, b: f64, w1: f64, w2: f64, f: F) -> f64 {
     if b == a {
         return 0.0;
@@ -96,7 +83,7 @@ pub struct FrameDeadLoadMap {
 
 impl FrameDeadLoadMap {
     /// 解決済み剛域長 `[mm]` と全長座標の荷重を受け取る。フェイス上の集中荷重は可撓側に属する。
-    /// 非有限値、不正な長さ・荷重区間・方向、非有限な計算結果はエラーを返す。
+    /// 曲げは Hermite 形状関数で換算する。不正入力・非有限な計算結果はエラーを返す。
     pub fn new(
         loads: &[MemberLoad],
         frame: &LocalFrame,
@@ -104,14 +91,26 @@ impl FrameDeadLoadMap {
         li_mm: f64,
         lj_mm: f64,
     ) -> Result<Self, String> {
+        Self::with_shear_factors(loads, frame, length_mm, li_mm, lj_mm, [0.0; 2])
+    }
+
+    pub(super) fn with_shear_factors(
+        loads: &[MemberLoad],
+        frame: &LocalFrame,
+        length_mm: f64,
+        li_mm: f64,
+        lj_mm: f64,
+        phi: [f64; 2],
+    ) -> Result<Self, String> {
         if ![length_mm, li_mm, lj_mm].iter().all(|v| v.is_finite())
             || length_mm <= 0.0
             || li_mm < 0.0
             || lj_mm < 0.0
             || length_mm - li_mm - lj_mm <= 0.0
+            || phi.iter().any(|&p| !p.is_finite() || p < 0.0)
             || !frame.rot.iter().flatten().all(|v| v.is_finite())
         {
-            return Err("部材荷重の全長・解決済み剛域長・局所座標系が不正です".into());
+            return Err("部材荷重の全長・解決済み剛域長・せん断特性・局所座標系が不正です".into());
         }
         let mut map = Self {
             loads: loads.to_vec(),
@@ -123,7 +122,7 @@ impl FrameDeadLoadMap {
             rigid_node_load: [0.0; 12],
         };
         let face_j = length_mm - lj_mm;
-        let flex_length = face_j - li_mm;
+        let flex_length = length_mm - li_mm - lj_mm;
         for load in loads {
             load.validate_direction()
                 .map_err(|reason| format!("部材 {:?}: {reason}", load.elem))?;
@@ -158,6 +157,7 @@ impl FrameDeadLoadMap {
                                 axis,
                                 &Comp::Point { a: a - li_mm, p },
                                 flex_length,
+                                phi,
                             );
                         }
                     }
@@ -198,6 +198,7 @@ impl FrameDeadLoadMap {
                                         w2,
                                     },
                                     flex_length,
+                                    phi,
                                 );
                             }
                         }
@@ -448,11 +449,11 @@ impl LoadedFrameSection {
     }
 }
 
-fn add_flex_load(q: &mut [f64; 12], axis: usize, comp: &Comp, length: f64) {
+fn add_flex_load(q: &mut [f64; 12], axis: usize, comp: &Comp, length: f64, phi: [f64; 2]) {
     if axis == 0 {
         add_axial_consistent(q, comp, length);
     } else {
-        add_bending_consistent(q, comp, length, axis);
+        add_bending_consistent(q, comp, length, axis, phi[axis - 1]);
     }
 }
 
@@ -495,13 +496,11 @@ pub fn consistent_load_local(
             let Some(comp) = comp else { continue };
             match (axis, transfer) {
                 (0, _) => add_axial_consistent(&mut q, comp, l),
-                (1, SpanLoadTransfer::Consistent) => add_bending_consistent(&mut q, comp, l, 1),
-                (1, SpanLoadTransfer::StaticallyEquivalent) => {
-                    add_bending_static(&mut q, comp, l, 1)
+                (_, SpanLoadTransfer::Consistent) => {
+                    add_bending_consistent(&mut q, comp, l, axis, 0.0)
                 }
-                (_, SpanLoadTransfer::Consistent) => add_bending_consistent(&mut q, comp, l, 2),
                 (_, SpanLoadTransfer::StaticallyEquivalent) => {
-                    add_bending_static(&mut q, comp, l, 2)
+                    add_bending_static(&mut q, comp, l, axis)
                 }
             }
         }
@@ -525,26 +524,21 @@ fn add_axial_consistent(q: &mut [f64; 12], comp: &Comp, l: f64) {
 }
 
 /// 曲げ面（plane=1: y面 → Vy,Mz / plane=2: z面 → Vz,My）。
-fn add_bending_consistent(q: &mut [f64; 12], comp: &Comp, l: f64, plane: usize) {
-    let (iv, im, jv, jm, msign) = if plane == 1 {
-        (1usize, 5usize, 7usize, 11usize, 1.0)
+fn add_bending_consistent(q: &mut [f64; 12], comp: &Comp, l: f64, plane: usize, phi: f64) {
+    let (dofs, msign) = if plane == 1 {
+        ([1, 5, 7, 11], 1.0)
     } else {
-        (2usize, 4usize, 8usize, 10usize, -1.0)
+        ([2, 4, 8, 10], -1.0)
     };
-    match *comp {
-        Comp::Point { a, p } => {
-            let xi = (a / l).clamp(0.0, 1.0);
-            q[iv] += p * n_vi(xi);
-            q[im] += msign * p * n_ti(xi, l);
-            q[jv] += p * n_vj(xi);
-            q[jm] += msign * p * n_tj(xi, l);
-        }
+    let shape = |xi| super::prismatic::timoshenko_shape_functions(xi, l, phi).0;
+    let forces = match *comp {
+        Comp::Point { a, p } => shape((a / l).clamp(0.0, 1.0)).map(|n| p * n),
         Comp::Dist { a, b, w1, w2 } => {
-            q[iv] += gauss_dist(a, b, w1, w2, |s| n_vi(s / l));
-            q[im] += msign * gauss_dist(a, b, w1, w2, |s| n_ti(s / l, l));
-            q[jv] += gauss_dist(a, b, w1, w2, |s| n_vj(s / l));
-            q[jm] += msign * gauss_dist(a, b, w1, w2, |s| n_tj(s / l, l));
+            std::array::from_fn(|i| gauss_dist(a, b, w1, w2, |x| shape(x / l)[i]))
         }
+    };
+    for (i, (dof, force)) in dofs.into_iter().zip(forces).enumerate() {
+        q[dof] += if i % 2 == 0 { force } else { msign * force };
     }
 }
 

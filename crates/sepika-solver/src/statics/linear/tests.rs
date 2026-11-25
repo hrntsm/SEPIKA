@@ -2700,3 +2700,207 @@ fn xyz_brace_public_static_entries_return_reasons_for_invalid_geometry() {
         assert!(crate::statics::analysis::Analysis::prepare(&model).is_err());
     }
 }
+
+fn timoshenko_member_load_model(kind: MemberLoadKind, axis: usize) -> Model {
+    let mut dir = [0.0; 3];
+    dir[axis] = 1.0;
+    let mut model = ss_beam(4000.0, vec![MemberLoad::manual(ElemId(0), dir, kind)]);
+    let section = &mut model.sections[0];
+    section.area = 28800.0;
+    section.iy = 138240000.0;
+    section.iz = 34560000.0;
+    section.as_y = 24000.0;
+    section.as_z = 24000.0;
+    model.materials[0].young = 10000.0;
+    model.materials[0].shear = Some(666.67);
+    model
+}
+
+fn assert_member_load_reference(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() <= 1e-6 * expected.abs().max(1.0),
+        "{actual} != {expected}"
+    );
+}
+
+#[test]
+fn timoshenko_point_load_matches_split_beam_reactions_and_support_rotations() {
+    const A: f64 = 1000.0;
+    const P: f64 = 5000.0;
+    for (axis, rotation) in [(1, 5), (2, 4)] {
+        for fixed in [true, false] {
+            for rigid in [false, true] {
+                let mut one =
+                    timoshenko_member_load_model(MemberLoadKind::Point { a: A, p: P }, axis);
+                for node in &mut one.nodes {
+                    node.restraint = if fixed {
+                        Dof6Mask::FIXED
+                    } else {
+                        Dof6Mask(63 ^ (1 << rotation))
+                    };
+                }
+                if rigid {
+                    one.elements[0].rigid_zone.length_i = 250.0;
+                    one.elements[0].rigid_zone.length_j = 400.0;
+                }
+                let mut split = one.clone();
+                split.nodes.push(Node {
+                    id: NodeId(2),
+                    coord: [A, 0.0, 0.0],
+                    restraint: Dof6Mask::FREE,
+                    mass: None,
+                    story: None,
+                    support_spring: None,
+                });
+                let mut right = split.elements[0].clone();
+                right.id = ElemId(1);
+                right.nodes[0] = NodeId(2);
+                right.rigid_zone.length_i = 0.0;
+                split.elements[0].nodes[1] = NodeId(2);
+                split.elements[0].rigid_zone.length_j = 0.0;
+                split.elements.push(right);
+                let mut values = [0.0; 6];
+                values[axis] = P;
+                split.load_cases[0].member.clear();
+                split.load_cases[0]
+                    .nodal
+                    .push(sepika_core::model::NodalLoad {
+                        node: NodeId(2),
+                        values,
+                        name: String::new(),
+                        source: sepika_core::model::LoadSource::Manual,
+                    });
+
+                let solve = |m: &Model| linear_static_once(m, m.load_cases[0].id).unwrap();
+                let actual = solve(&one);
+                let reference = solve(&split);
+                if fixed {
+                    let reactions = |m: &Model, result: &StaticOnce| {
+                        let map = DofMap::build(m);
+                        let reducer = Reducer::build(m, &map);
+                        let case = &m.load_cases[0];
+                        let stiffness =
+                            StaticStiffness::build(m, &map, &reducer, case.kind).unwrap();
+                        let entries: Vec<_> = stiffness
+                            .behaviors
+                            .iter()
+                            .map(|(id, b, g)| (*id, b.as_ref(), g.as_slice()))
+                            .collect();
+                        let ledger = PhysicalLoadLedger::new(m, case).unwrap();
+                        let mut u = vec![0.0; map.n_active()];
+                        for (n, disp) in result.disp.iter().enumerate() {
+                            for (d, &value) in disp.iter().enumerate() {
+                                if let Some(i) = map.active(n * 6 + d) {
+                                    u[i as usize] = value;
+                                }
+                            }
+                        }
+                        recover_static(m, &map, &u, &ledger, &entries).unwrap().1
+                    };
+                    let actual_reactions = reactions(&one, &actual);
+                    let expected = reactions(&split, &reference);
+                    let cmq = sepika_element::frame::member_load::cmq_with_rigid_zone(
+                        &one,
+                        &one.elements[0],
+                        &one.load_cases[0].member,
+                    )
+                    .unwrap();
+                    for node in 0..2 {
+                        for dof in [axis, rotation] {
+                            assert_member_load_reference(
+                                actual_reactions[node][dof],
+                                expected[node][dof],
+                            );
+                            assert_member_load_reference(
+                                cmq.physical_frame_end_force_global[node * 6 + dof],
+                                expected[node][dof],
+                            );
+                        }
+                    }
+                } else {
+                    for node in 0..2 {
+                        let expected = reference.disp[node][rotation];
+                        assert!(expected.abs() > 1e-8);
+                        assert!((actual.disp[node][rotation] / expected - 1.0).abs() <= 1e-6);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn timoshenko_point_load_fixed_end_moments_match_euler_limit() {
+    let mut model = timoshenko_member_load_model(
+        MemberLoadKind::Point {
+            a: 1000.0,
+            p: 5000.0,
+        },
+        2,
+    );
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask::FIXED;
+    }
+    model.sections[0].as_y = 1e15;
+    model.sections[0].as_z = 1e15;
+    let result = linear_static_once(&model, model.load_cases[0].id).unwrap();
+    let section = &result.member_forces[0].1;
+    // 両端固定 Euler–Bernoulli 梁の端断面は Pab²/L² と Pa²b/L²（b は j 端から荷重点まで）。
+    assert_member_load_reference(value_at(section, 0.0, 5), 2812500.0);
+    assert_member_load_reference(value_at(section, 1.0, 5), 937500.0);
+}
+
+#[test]
+fn timoshenko_partial_trapezoid_matches_complementary_energy_and_euler_limit() {
+    let mut model = timoshenko_member_load_model(
+        MemberLoadKind::Distributed {
+            a: 350.0,
+            b: 2600.0,
+            w1: 2.0,
+            w2: 5.0,
+        },
+        2,
+    );
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask::FIXED;
+    }
+    // 断面の M・Q から補エネルギーを積分し、両端固定の不静定力に関する停留条件で算定。
+    for (as_mm2, expected) in [
+        (
+            24000.0,
+            [
+                -4863.367954988264,
+                3834372.628726527,
+                3011.632045011735,
+                2999650.808773473,
+            ],
+        ),
+        (
+            1e15,
+            [
+                -4876.890380859375,
+                3861417.48046875,
+                2998.109619140625,
+                2972605.95703125,
+            ],
+        ),
+    ] {
+        model.sections[0].as_z = as_mm2;
+        let section = linear_static_once(&model, model.load_cases[0].id)
+            .unwrap()
+            .member_forces
+            .remove(0)
+            .1;
+        for (actual, expected) in [
+            value_at(&section, 0.0, 1),
+            value_at(&section, 0.0, 5),
+            value_at(&section, 1.0, 1),
+            value_at(&section, 1.0, 5),
+        ]
+        .into_iter()
+        .zip(expected)
+        {
+            assert_member_load_reference(actual, expected);
+        }
+    }
+}
