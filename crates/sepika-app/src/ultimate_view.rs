@@ -14,6 +14,53 @@ fn margin_color(margin: f64) -> egui::Color32 {
     }
 }
 
+fn bond_margin_cell(margin: f64, partial: bool, enabled: bool) -> (String, egui::Color32) {
+    use crate::theme::UI_MUTED;
+    if !enabled {
+        return ("無効".into(), UI_MUTED);
+    }
+    if margin.is_nan() {
+        return ("未算定".into(), UI_MUTED);
+    }
+    let value = if margin.is_infinite() {
+        "∞".into()
+    } else {
+        let rounded = format!("{margin:.2}");
+        if margin < 1.0 && rounded == "1.00" {
+            "＜1.00".into()
+        } else {
+            rounded
+        }
+    };
+    if partial {
+        let color = if margin < 1.0 {
+            margin_color(margin)
+        } else {
+            UI_MUTED
+        };
+        (format!("{value}（一部）"), color)
+    } else {
+        (value, margin_color(margin))
+    }
+}
+
+fn bond_length_cell(
+    length_ok: Option<bool>,
+    cutoff_absent: bool,
+    enabled: bool,
+) -> (&'static str, egui::Color32) {
+    use crate::theme::{ERROR_RED, GOOD_GREEN, UI_MUTED};
+    if !enabled {
+        return ("無効", UI_MUTED);
+    }
+    match length_ok {
+        Some(true) => ("OK", GOOD_GREEN),
+        Some(false) => ("不足", ERROR_RED),
+        None if cutoff_absent => ("対象なし", UI_MUTED),
+        None => ("未算定", UI_MUTED),
+    }
+}
+
 fn demand_source_note(app: &App) -> Result<String, String> {
     app.ultimate_demand_by_elem()?;
     if !app.core.ultimate_use_pushover {
@@ -84,7 +131,8 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             .on_hover_text("Qmu = 上限強度倍率·2·Mu/内法 の倍率。");
         });
         ui.horizontal(|ui| {
-            ui.checkbox(&mut app.core.ultimate_include_bond, "大地震時の付着を照査");
+            ui.checkbox(&mut app.core.ultimate_include_bond, "大地震時の付着を照査")
+                .on_hover_text("付着長さや補強条件などを通常の解析結果からは決定できません。");
         });
         ui.horizontal(|ui| {
             ui.checkbox(&mut app.core.ultimate_biaxial_shear, "柱の弱軸単独せん断も検定")
@@ -177,7 +225,10 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             };
             ui.label(demand_note);
             if mode == UltimateDemandMode::ConfirmedTotal {
-                ui.label("せん断余裕度は軸別の Qsu/|Qtotal|。軸表示なしは強軸。材軸ねじりとの組合せは未評価。付着余裕度 Kfb/τD。");
+                ui.label("せん断余裕度は軸別の Qsu/|Qtotal|。軸表示なしは強軸。材軸ねじりとの組合せは未評価。");
+            }
+            if include_bond {
+                ui.label("付着余裕度は Kfb/τD。「一部」は算定済みの範囲だけの値です。必要延長はカットオフ筋の別判定です。付着の欄にカーソルを合わせると詳細を確認できます。");
             }
             crate::table_util::standard_table(
                 ui,
@@ -191,7 +242,8 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                     Col::wide_num("せん断余裕度（軸別）"),
                     Col::num("τD[N/mm²]"),
                     Col::num("Kfb[N/mm²]"),
-                    Col::num("付着余裕度"),
+                    Col::wide_num("付着余裕度"),
+                    Col::wide_num("必要延長"),
                     Col::label("検定結果"),
                 ],
                 checks.len(),
@@ -258,34 +310,40 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                                 .on_hover_text(&c.detail);
                         }
                     });
+                    for value in [
+                        c.bond_stress.map(|stress| stress.demand_mpa),
+                        c.bond_stress.map(|stress| stress.capacity_mpa),
+                    ] {
+                        row.col(|ui| {
+                            if include_bond {
+                                let label = value
+                                    .map_or_else(|| "未算定".into(), |value| format!("{value:.3}"));
+                                ui.label(label).on_hover_text(&c.detail);
+                            } else {
+                                ui.label("無効");
+                            }
+                        });
+                    }
                     row.col(|ui| {
-                        if !include_bond {
-                            ui.label("無効");
-                        } else if let Some(stress) = c.bond_stress {
-                            ui.label(format!("{:.3}", stress.demand_mpa));
-                        } else {
-                            ui.label("未算定");
+                        let (label, color) = bond_margin_cell(
+                            c.bond_margin,
+                            c.bond_unchecked_reason.is_some(),
+                            include_bond,
+                        );
+                        let response = ui.colored_label(color, label);
+                        if include_bond {
+                            response.on_hover_text(&c.detail);
                         }
                     });
                     row.col(|ui| {
-                        if !include_bond {
-                            ui.label("無効");
-                        } else if let Some(stress) = c.bond_stress {
-                            ui.label(format!("{:.3}", stress.capacity_mpa));
-                        } else {
-                            ui.label("未算定");
-                        }
-                    });
-                    row.col(|ui| {
-                        if !include_bond {
-                            ui.label("無効");
-                        } else if c.bond_margin.is_nan() {
-                            ui.label("未算定");
-                        } else {
-                            ui.colored_label(
-                                margin_color(c.bond_margin),
-                                format!("{:.2}", c.bond_margin),
-                            );
+                        let (label, color) = bond_length_cell(
+                            c.bond_development_length_ok,
+                            c.bond_cutoff_absent,
+                            include_bond,
+                        );
+                        let response = ui.colored_label(color, label);
+                        if include_bond {
+                            response.on_hover_text(&c.detail);
                         }
                     });
                     row.col(|ui| {
@@ -295,7 +353,8 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                         } else if c.ok {
                             ui.colored_label(crate::theme::GOOD_GREEN, "OK");
                         } else {
-                            ui.colored_label(crate::theme::ERROR_RED, "NG");
+                            ui.colored_label(crate::theme::ERROR_RED, "NG")
+                                .on_hover_text(&c.detail);
                         }
                     });
                 },
@@ -447,6 +506,50 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn bond_cells_distinguish_partial_stress_and_independent_cutoff_length() {
+        use crate::theme::{ERROR_RED, GOOD_GREEN, PARETO_RED, UI_MUTED};
+        assert_eq!(
+            bond_margin_cell(1.25, true, true),
+            ("1.25（一部）".into(), UI_MUTED)
+        );
+        assert_eq!(
+            bond_margin_cell(0.80, true, true),
+            ("0.80（一部）".into(), PARETO_RED)
+        );
+        assert_eq!(
+            bond_margin_cell(0.9999, true, true),
+            ("＜1.00（一部）".into(), PARETO_RED)
+        );
+        assert_eq!(
+            bond_margin_cell(f64::NAN, true, true),
+            ("未算定".into(), UI_MUTED)
+        );
+        assert_eq!(
+            bond_margin_cell(f64::INFINITY, false, true),
+            ("∞".into(), GOOD_GREEN)
+        );
+        assert_eq!(
+            bond_margin_cell(0.80, true, false),
+            ("無効".into(), UI_MUTED)
+        );
+
+        assert_eq!(
+            bond_length_cell(Some(false), false, true),
+            ("不足", ERROR_RED)
+        );
+        assert_eq!(
+            bond_length_cell(Some(true), false, true),
+            ("OK", GOOD_GREEN)
+        );
+        assert_eq!(bond_length_cell(None, true, true), ("対象なし", UI_MUTED));
+        assert_eq!(bond_length_cell(None, false, true), ("未算定", UI_MUTED));
+        assert_eq!(
+            bond_length_cell(Some(false), false, false),
+            ("無効", UI_MUTED)
+        );
     }
 
     #[test]

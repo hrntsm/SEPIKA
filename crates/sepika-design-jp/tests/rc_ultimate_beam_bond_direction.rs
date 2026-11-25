@@ -193,6 +193,7 @@ fn confirmed_load_directions_use_distinct_sections_and_tension_layers() {
     );
     assert!((checked.bond_margin - 2.139078947368421).abs() < 1e-12);
     assert!(checked.bond_margin > 1.0);
+    assert!(checked.bond_cutoff_absent && checked.bond_unchecked_reason.is_none());
     assert!(!checked.ok && checked.qsu.is_nan());
     assert!(checked
         .unchecked_reason
@@ -335,6 +336,11 @@ fn missing_direction_or_unconfirmed_coverage_does_not_pass_and_preserves_ng() {
         .unchecked_reason
         .is_some());
     assert!(partial.bond_margin > 1.0);
+    assert!(!partial.bond_cutoff_absent);
+    assert!(partial
+        .bond_unchecked_reason
+        .as_deref()
+        .is_some_and(|reason| reason.contains("存在応力度を確認できません")));
 
     let not_representative = directional(
         &model,
@@ -347,6 +353,7 @@ fn missing_direction_or_unconfirmed_coverage_does_not_pass_and_preserves_ng() {
         },
     );
     assert!(!not_representative.ok && not_representative.bond_margin > 1.0);
+    assert!(!not_representative.bond_cutoff_absent);
     assert!(not_representative
         .beam_bond
         .unwrap()
@@ -407,6 +414,7 @@ fn missing_direction_or_unconfirmed_coverage_does_not_pass_and_preserves_ng() {
             (!extension_ok).then_some(false)
         );
         assert_eq!(result.stress.is_some(), tau_available);
+        assert!(checked.bond_unchecked_reason.is_some() && !checked.bond_cutoff_absent);
         if tau_available {
             assert!((result.cutoff_sigma_d_mpa.unwrap() - 176.77558101977465).abs() < 1e-10);
             assert!(checked.bond_margin < 1.0);
@@ -417,6 +425,665 @@ fn missing_direction_or_unconfirmed_coverage_does_not_pass_and_preserves_ng() {
         } else {
             assert!(result.cutoff_sigma_d_mpa.is_none());
             assert!(checked.detail.contains("カットオフ筋の必要延長不足"));
+        }
+    }
+}
+
+#[test]
+fn cutoff_absence_and_length_pass_require_valid_through_only_geometry_in_every_direction() {
+    use RcUltimateBeamBondTensionSide::Top;
+    let model = model();
+    let supplied = demand();
+    let positive = supplied.positive.unwrap();
+    let negative = supplied.negative.unwrap();
+    let RcUltimateBondDemand::Single(negative_bar) = negative.bars else {
+        unreachable!()
+    };
+    let negative_unknown_stress = RcUltimateBeamBondDirectionDemand {
+        bars: RcUltimateBondDemand::Single(RcUltimateBondInput {
+            confinement: None,
+            ..negative_bar
+        }),
+        ..negative
+    };
+    let partial = directional(
+        &model,
+        RcUltimateBeamBondDemand {
+            negative: Some(negative_unknown_stress),
+            ..supplied
+        },
+    );
+    assert!(partial.bond_stress.is_some() && partial.bond_unchecked_reason.is_some());
+    assert!(partial.bond_cutoff_absent);
+    let partial = directional(
+        &model,
+        RcUltimateBeamBondDemand {
+            positive: Some(RcUltimateBeamBondDirectionDemand {
+                bars: through(
+                    RcUltimateBondElasticStress {
+                        long_term_tensile_stress_mpa: f64::NAN,
+                        ..top_stress()
+                    },
+                    Top,
+                ),
+                ..positive
+            }),
+            ..supplied
+        },
+    );
+    assert!(partial.bond_stress.is_some() && partial.bond_unchecked_reason.is_some());
+    assert!(partial.bond_cutoff_absent);
+
+    for (invalid_direction, reason) in [
+        (
+            RcUltimateBeamBondDirectionDemand {
+                section: RcUltimateBeamBondSection {
+                    distance_from_i_face_mm: 3001.0,
+                    ..negative.section
+                },
+                ..negative
+            },
+            "検定断面の位置が部材の内法区間にありません",
+        ),
+        (
+            RcUltimateBeamBondDirectionDemand {
+                bars: RcUltimateBondDemand::Single(RcUltimateBondInput {
+                    axis: RcUltimateBondAxis::Weak,
+                    ..negative_bar
+                }),
+                ..negative
+            },
+            "強軸方向に限ります",
+        ),
+        (
+            RcUltimateBeamBondDirectionDemand {
+                section: RcUltimateBeamBondSection {
+                    long_term_mz_nmm: -100e6,
+                    ..negative.section
+                },
+                ..negative
+            },
+            "引張側と採用主筋が一致しません",
+        ),
+    ] {
+        let checked = directional(
+            &model,
+            RcUltimateBeamBondDemand {
+                negative: Some(invalid_direction),
+                ..supplied
+            },
+        );
+        assert!(!checked.bond_cutoff_absent && checked.bond_development_length_ok.is_none());
+        assert!(checked
+            .bond_unchecked_reason
+            .as_deref()
+            .unwrap()
+            .contains(reason));
+
+        for (length_mm, ok) in [(1600.0, true), (310.0, false)] {
+            let checked = directional(
+                &model,
+                RcUltimateBeamBondDemand {
+                    positive: Some(RcUltimateBeamBondDirectionDemand {
+                        bars: RcUltimateBondDemand::Single(input(
+                            RcUltimateBondBar::Cutoff {
+                                development_length_mm: length_mm,
+                                clear_span_mm: 3000.0,
+                                unnecessary_distance_mm: 200.0,
+                                stress: RcUltimateCutoffBarStress::WithoutFlexuralYield(
+                                    top_stress(),
+                                ),
+                            },
+                            Top,
+                        )),
+                        ..positive
+                    }),
+                    negative: Some(invalid_direction),
+                    ..supplied
+                },
+            );
+            assert_eq!(
+                checked.beam_bond.unwrap().positive.development_length_ok,
+                Some(ok)
+            );
+            assert_eq!(checked.bond_development_length_ok, (!ok).then_some(false));
+            assert!(!checked.bond_cutoff_absent);
+        }
+    }
+}
+
+#[test]
+fn cutoff_length_pass_requires_the_design_tension_side_but_not_a_calculated_stress() {
+    use RcUltimateBeamBondTensionSide::{Bottom, Top};
+    let model = model();
+    let supplied = demand();
+    let positive = supplied.positive.unwrap();
+    let RcUltimateBondDemand::Single(positive_bar) = positive.bars else {
+        unreachable!()
+    };
+    let confinement = positive_bar.confinement;
+
+    for (side, length_mm, stresses, confinement, expected) in [
+        (Top, 1600.0, top_stress(), None, Some(true)),
+        (
+            Top,
+            1600.0,
+            RcUltimateBondElasticStress {
+                long_term_tensile_stress_mpa: f64::NAN,
+                ..top_stress()
+            },
+            confinement,
+            Some(true),
+        ),
+        (Bottom, 1600.0, top_stress(), confinement, None),
+        (Bottom, 1600.0, top_stress(), None, None),
+        (Bottom, 310.0, top_stress(), confinement, Some(false)),
+    ] {
+        let bar = RcUltimateBondBar::Cutoff {
+            development_length_mm: length_mm,
+            clear_span_mm: 3000.0,
+            unnecessary_distance_mm: 200.0,
+            stress: RcUltimateCutoffBarStress::WithoutFlexuralYield(stresses),
+        };
+        let checked = directional(
+            &model,
+            RcUltimateBeamBondDemand {
+                positive: Some(RcUltimateBeamBondDirectionDemand {
+                    section: RcUltimateBeamBondSection {
+                        tension_side: side,
+                        ..positive.section
+                    },
+                    bars: RcUltimateBondDemand::Single(RcUltimateBondInput {
+                        confinement,
+                        ..input(bar, side)
+                    }),
+                    ..positive
+                }),
+                ..supplied
+            },
+        );
+        let positive = checked.beam_bond.unwrap().positive;
+        assert!(
+            positive.stress.is_none() && positive.unchecked_reason.is_some(),
+            "{checked:?}"
+        );
+        assert_eq!(checked.bond_development_length_ok, expected, "{checked:?}");
+        assert!(!checked.bond_cutoff_absent && !checked.ok, "{checked:?}");
+        assert_eq!(
+            checked.unchecked_reason.is_none(),
+            expected == Some(false),
+            "{checked:?}"
+        );
+        if expected.is_none() {
+            assert!(checked
+                .detail
+                .contains("引張側の一致を確認できないため、必要延長は未算定"));
+        }
+        if confinement.is_none() {
+            assert!(positive
+                .unchecked_reason
+                .unwrap()
+                .contains("横補強筋を確認できません"));
+        }
+    }
+}
+
+#[test]
+fn paired_cutoff_can_confirm_its_length_without_using_the_through_bar_stress() {
+    use RcUltimateBeamBondTensionSide::Top;
+    let model = model();
+    let supplied = demand();
+    let positive = supplied.positive.unwrap();
+    let through = input(
+        RcUltimateBondBar::Through {
+            clear_span_mm: 3000.0,
+            cutoff_unnecessary_distance_mm: Some(200.0),
+            yielding: RcUltimateThroughBarYield::WithoutFlexuralYield {
+                moment_distribution: RcUltimateBondMomentDistribution::NearAntisymmetric,
+                stress: top_stress(),
+            },
+        },
+        Top,
+    );
+    let cutoff = |development_length_mm, distance_mm, stress| {
+        input(
+            RcUltimateBondBar::Cutoff {
+                development_length_mm,
+                clear_span_mm: 3000.0,
+                unnecessary_distance_mm: distance_mm,
+                stress,
+            },
+            Top,
+        )
+    };
+    let unknown = cutoff(1600.0, 200.0, RcUltimateCutoffBarStress::Unverified);
+    let known = RcUltimateCutoffBarStress::WithoutFlexuralYield(top_stress());
+    let invalid_geometry = RcUltimateBondInput {
+        effective_depth_mm: 291.0,
+        ..through
+    };
+    let through_with_factor = |lateral_factor| RcUltimateBondInput {
+        bar: RcUltimateBondBar::Through {
+            clear_span_mm: 3000.0,
+            cutoff_unnecessary_distance_mm: Some(200.0),
+            yielding: RcUltimateThroughBarYield::WithoutFlexuralYield {
+                moment_distribution: RcUltimateBondMomentDistribution::NearAntisymmetric,
+                stress: RcUltimateBondElasticStress {
+                    lateral_factor,
+                    ..top_stress()
+                },
+            },
+        },
+        ..through
+    };
+    for (through, cutoff, expected, reason, through_stress_calculated) in [
+        (
+            through,
+            unknown,
+            Some(true),
+            "カットオフ筋の曲げ降伏状態",
+            true,
+        ),
+        (
+            RcUltimateBondInput {
+                confinement: None,
+                ..through
+            },
+            unknown,
+            Some(true),
+            "横補強筋を確認できません",
+            false,
+        ),
+        (
+            through_with_factor(1.49),
+            unknown,
+            Some(true),
+            "鉄筋応力度または割増",
+            false,
+        ),
+        (invalid_geometry, unknown, None, "有効せいが検討方向", false),
+        (
+            invalid_geometry,
+            cutoff(1600.0, 200.0, known),
+            None,
+            "有効せいが検討方向",
+            false,
+        ),
+        (
+            invalid_geometry,
+            cutoff(310.0, 200.0, known),
+            Some(false),
+            "有効せいが検討方向",
+            false,
+        ),
+        (
+            through,
+            cutoff(1600.0, 250.0, RcUltimateCutoffBarStress::Unverified),
+            None,
+            "距離が一致しません",
+            false,
+        ),
+        (
+            through,
+            cutoff(
+                1600.0,
+                200.0,
+                RcUltimateCutoffBarStress::WithoutFlexuralYield(RcUltimateBondElasticStress {
+                    lateral_factor: 2.0,
+                    ..top_stress()
+                }),
+            ),
+            None,
+            "水平荷重の割増が一致しません",
+            false,
+        ),
+    ] {
+        let checked = directional(
+            &model,
+            RcUltimateBeamBondDemand {
+                positive: Some(RcUltimateBeamBondDirectionDemand {
+                    bars: RcUltimateBondDemand::ThroughAndCutoff { through, cutoff },
+                    ..positive
+                }),
+                ..supplied
+            },
+        );
+        let positive = checked.beam_bond.unwrap().positive;
+        assert_eq!(checked.bond_development_length_ok, expected, "{checked:?}");
+        if matches!(
+            cutoff.bar,
+            RcUltimateBondBar::Cutoff {
+                stress: RcUltimateCutoffBarStress::Unverified,
+                ..
+            }
+        ) {
+            assert!(positive.cutoff_sigma_d_mpa.is_none());
+        }
+        assert!(
+            positive.unchecked_reason.unwrap().contains(reason),
+            "{checked:?}"
+        );
+        assert_eq!(
+            positive.through_sigma_d_mpa.is_some(),
+            through_stress_calculated
+        );
+    }
+
+    for (ld_mm, expected) in [(1600.0, true), (310.0, false)] {
+        let checked = directional(
+            &model,
+            RcUltimateBeamBondDemand {
+                positive: Some(RcUltimateBeamBondDirectionDemand {
+                    bars: RcUltimateBondDemand::ThroughAndCutoff {
+                        through: through_with_factor(f64::NAN),
+                        cutoff: cutoff(
+                            ld_mm,
+                            200.0,
+                            RcUltimateCutoffBarStress::WithoutFlexuralYield(
+                                RcUltimateBondElasticStress {
+                                    lateral_factor: f64::NAN,
+                                    ..top_stress()
+                                },
+                            ),
+                        ),
+                    },
+                    ..positive
+                }),
+                ..supplied
+            },
+        );
+        let positive = checked.beam_bond.unwrap().positive;
+        assert_eq!(
+            positive.development_length_ok,
+            Some(expected),
+            "{checked:?}"
+        );
+        assert_eq!(
+            checked.bond_development_length_ok,
+            Some(expected),
+            "{checked:?}"
+        );
+        assert!(
+            positive.stress.is_none()
+                && positive.through_sigma_d_mpa.is_none()
+                && positive.cutoff_sigma_d_mpa.is_none(),
+            "{checked:?}"
+        );
+        assert!(positive
+            .unchecked_reason
+            .unwrap()
+            .contains("鉄筋応力度または割増"));
+    }
+
+    let confirmed_cutoff = cutoff(1600.0, 200.0, known);
+    let unconfirmed_depth = RcUltimateBondInput {
+        effective_depth_mm: 291.0,
+        ..confirmed_cutoff
+    };
+    for (represents_all_bond_checks, tension_side, through_span, cutoff, local_length, detail) in [
+        (
+            false,
+            Top,
+            3000.0,
+            confirmed_cutoff,
+            Some(true),
+            "必要延長の全体判定に必要な、この方向の指定断面・主筋の代表性",
+        ),
+        (
+            true,
+            RcUltimateBeamBondTensionSide::Bottom,
+            3000.0,
+            confirmed_cutoff,
+            None,
+            "引張側の一致を確認できないため、必要延長",
+        ),
+        (
+            true,
+            Top,
+            3000.0,
+            unconfirmed_depth,
+            None,
+            "付着照査の有効せいが検討方向の配筋と一致しません",
+        ),
+        (
+            true,
+            Top,
+            3000.0,
+            cutoff(3001.0, 200.0, known),
+            None,
+            "カットオフ筋の付着長さが付着検定断面から到達できる内法区間を外れています",
+        ),
+        (
+            true,
+            Top,
+            2999.0,
+            unconfirmed_depth,
+            None,
+            "付着照査の有効せいが検討方向の配筋と一致しません",
+        ),
+    ] {
+        let mut through = RcUltimateBondInput {
+            confinement: None,
+            ..through
+        };
+        let RcUltimateBondBar::Through { clear_span_mm, .. } = &mut through.bar else {
+            unreachable!()
+        };
+        *clear_span_mm = through_span;
+        let checked = directional(
+            &model,
+            RcUltimateBeamBondDemand {
+                positive: Some(RcUltimateBeamBondDirectionDemand {
+                    represents_all_bond_checks,
+                    section: RcUltimateBeamBondSection {
+                        tension_side,
+                        ..positive.section
+                    },
+                    bars: RcUltimateBondDemand::ThroughAndCutoff { through, cutoff },
+                }),
+                ..supplied
+            },
+        );
+        let positive = checked.beam_bond.unwrap().positive;
+        assert_eq!(positive.development_length_ok, local_length, "{checked:?}");
+        assert_eq!(checked.bond_development_length_ok, None, "{checked:?}");
+        let stress_reason = if through_span == 3000.0 {
+            "横補強筋を確認できません"
+        } else {
+            "付着照査の内法長さが部材の内法長さと一致しません"
+        };
+        assert!(positive.unchecked_reason.unwrap().contains(stress_reason));
+        assert!(checked.detail.contains(detail), "{checked:?}");
+    }
+}
+
+#[test]
+fn single_bar_in_the_tension_layer_cannot_confirm_two_distinct_bond_groups() {
+    use RcUltimateBeamBondTensionSide::Top;
+    let mut model = model();
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() else {
+        unreachable!()
+    };
+    rebar.top = vec![1];
+    model.validate().unwrap();
+    let supplied = demand();
+    let positive = supplied.positive.unwrap();
+    for (yielding, stress) in [
+        (
+            RcUltimateThroughBarYield::Unverified,
+            RcUltimateCutoffBarStress::Unverified,
+        ),
+        (
+            RcUltimateThroughBarYield::WithoutFlexuralYield {
+                moment_distribution: RcUltimateBondMomentDistribution::NearAntisymmetric,
+                stress: top_stress(),
+            },
+            RcUltimateCutoffBarStress::WithoutFlexuralYield(top_stress()),
+        ),
+    ] {
+        let through = input(
+            RcUltimateBondBar::Through {
+                clear_span_mm: 3000.0,
+                cutoff_unnecessary_distance_mm: Some(200.0),
+                yielding,
+            },
+            Top,
+        );
+        for (development_length_mm, expected) in [(1600.0, None), (310.0, Some(false))] {
+            let cutoff = input(
+                RcUltimateBondBar::Cutoff {
+                    development_length_mm,
+                    clear_span_mm: 3000.0,
+                    unnecessary_distance_mm: 200.0,
+                    stress,
+                },
+                Top,
+            );
+            let checked = directional(
+                &model,
+                RcUltimateBeamBondDemand {
+                    positive: Some(RcUltimateBeamBondDirectionDemand {
+                        bars: RcUltimateBondDemand::ThroughAndCutoff { through, cutoff },
+                        ..positive
+                    }),
+                    ..supplied
+                },
+            );
+            let by_direction = checked.beam_bond.unwrap();
+            let positive = by_direction.positive;
+            assert_eq!(positive.development_length_ok, expected);
+            assert_eq!(checked.bond_development_length_ok, expected);
+            assert!(
+                positive.stress.is_none()
+                    && positive.through_sigma_d_mpa.is_none()
+                    && positive.cutoff_sigma_d_mpa.is_none(),
+                "{checked:?}"
+            );
+            assert!(by_direction.negative.stress.is_some() && checked.bond_stress.is_some());
+            assert!(checked.detail.contains("引張側の主筋が2本未満"));
+        }
+    }
+}
+
+#[test]
+fn same_sign_moments_confirm_the_length_scope_without_calculating_bar_stress() {
+    use RcUltimateBeamBondTensionSide::Top;
+    let model = model();
+    let supplied = demand();
+    let positive = supplied.positive.unwrap();
+    let invalid_factor = RcUltimateBondElasticStress {
+        lateral_factor: 1.49,
+        ..top_stress()
+    };
+    for (yielding, stress) in [
+        (
+            RcUltimateThroughBarYield::Unverified,
+            RcUltimateCutoffBarStress::Unverified,
+        ),
+        (
+            RcUltimateThroughBarYield::WithoutFlexuralYield {
+                moment_distribution: RcUltimateBondMomentDistribution::NearAntisymmetric,
+                stress: invalid_factor,
+            },
+            RcUltimateCutoffBarStress::WithoutFlexuralYield(invalid_factor),
+        ),
+    ] {
+        for (bar, absent, length) in [
+            (
+                RcUltimateBondBar::Through {
+                    clear_span_mm: 3000.0,
+                    cutoff_unnecessary_distance_mm: None,
+                    yielding,
+                },
+                true,
+                None,
+            ),
+            (
+                RcUltimateBondBar::Cutoff {
+                    development_length_mm: 1600.0,
+                    clear_span_mm: 3000.0,
+                    unnecessary_distance_mm: 200.0,
+                    stress,
+                },
+                false,
+                Some(true),
+            ),
+        ] {
+            let checked = directional(
+                &model,
+                RcUltimateBeamBondDemand {
+                    positive: Some(RcUltimateBeamBondDirectionDemand {
+                        bars: RcUltimateBondDemand::Single(input(bar, Top)),
+                        ..positive
+                    }),
+                    ..supplied
+                },
+            );
+            let positive = checked.beam_bond.unwrap().positive;
+            assert!(positive.stress.is_none() && positive.unchecked_reason.is_some());
+            assert_eq!(checked.bond_cutoff_absent, absent, "{checked:?}");
+            assert_eq!(checked.bond_development_length_ok, length, "{checked:?}");
+        }
+    }
+}
+
+#[test]
+fn explicit_yield_conflicts_with_directional_bond_even_when_both_moments_are_zero() {
+    use RcUltimateBeamBondTensionSide::Top;
+    let model = model();
+    let supplied = demand();
+    let positive = supplied.positive.unwrap();
+    for (development_length_mm, expected) in [(1600.0, None), (310.0, Some(false))] {
+        let cutoff = |stress| {
+            input(
+                RcUltimateBondBar::Cutoff {
+                    development_length_mm,
+                    clear_span_mm: 3000.0,
+                    unnecessary_distance_mm: 200.0,
+                    stress,
+                },
+                Top,
+            )
+        };
+        let pair = |yielding| RcUltimateBondDemand::ThroughAndCutoff {
+            through: input(
+                RcUltimateBondBar::Through {
+                    clear_span_mm: 3000.0,
+                    cutoff_unnecessary_distance_mm: Some(200.0),
+                    yielding,
+                },
+                Top,
+            ),
+            cutoff: cutoff(RcUltimateCutoffBarStress::Unverified),
+        };
+        for bars in [
+            RcUltimateBondDemand::Single(cutoff(RcUltimateCutoffBarStress::FlexuralYield)),
+            pair(RcUltimateThroughBarYield::BothEnds),
+            pair(RcUltimateThroughBarYield::OneEndWithOtherElastic),
+        ] {
+            let checked = directional(
+                &model,
+                RcUltimateBeamBondDemand {
+                    positive: Some(RcUltimateBeamBondDirectionDemand {
+                        section: RcUltimateBeamBondSection {
+                            long_term_mz_nmm: 0.0,
+                            lateral_mz_nmm: 0.0,
+                            ..positive.section
+                        },
+                        bars,
+                        ..positive
+                    }),
+                    ..supplied
+                },
+            );
+            let result = checked.beam_bond.unwrap().positive;
+            assert_eq!(result.development_length_ok, expected, "{checked:?}");
+            assert_eq!(checked.bond_development_length_ok, expected, "{checked:?}");
+            assert!(result.stress.is_none());
+            assert!(result
+                .unchecked_reason
+                .unwrap()
+                .contains("曲げ降伏条件が矛盾"));
         }
     }
 }
@@ -635,10 +1302,10 @@ fn reaching_yield_before_amplification_contradicts_non_yielding_without_hiding_l
         lateral_tensile_stress_mpa,
         lateral_factor: 2.0,
     };
-    let short = |stress, side| {
+    let cutoff = |development_length_mm, stress, side| {
         RcUltimateBondDemand::Single(input(
             RcUltimateBondBar::Cutoff {
-                development_length_mm: 310.0,
+                development_length_mm,
                 clear_span_mm: 3000.0,
                 unnecessary_distance_mm: 200.0,
                 stress,
@@ -662,6 +1329,32 @@ fn reaching_yield_before_amplification_contradicts_non_yielding_without_hiding_l
     assert_eq!(result.through_sigma_d_mpa, Some(380.0));
     assert!(result.stress.is_some() && result.unchecked_reason.is_none());
 
+    let RcUltimateBondDemand::Single(cutoff_with_low_yield) = cutoff(
+        1600.0,
+        RcUltimateCutoffBarStress::WithoutFlexuralYield(stress(120.0)),
+        Top,
+    ) else {
+        unreachable!()
+    };
+    let unverified_design_strength = check(
+        RcUltimateBondDemand::Single(RcUltimateBondInput {
+            design_yield_stress_mpa: Some(100.0),
+            ..cutoff_with_low_yield
+        }),
+        negative,
+    );
+    let result = unverified_design_strength.beam_bond.unwrap().positive;
+    assert!(result.stress.is_none());
+    assert_eq!(result.development_length_ok, Some(true));
+    assert_eq!(
+        unverified_design_strength.bond_development_length_ok,
+        Some(true)
+    );
+    assert!(result
+        .unchecked_reason
+        .unwrap()
+        .contains("規格降伏強度を下回っています"));
+
     for lateral in [300.0, 320.0] {
         let invalid = check(through(stress(lateral), Top), negative);
         let result = invalid.beam_bond.unwrap();
@@ -672,12 +1365,135 @@ fn reaching_yield_before_amplification_contradicts_non_yielding_without_hiding_l
             .unwrap()
             .contains("割増前の鉄筋応力度が設計用降伏応力度に達し"));
         assert_eq!(result.negative.through_sigma_d_mpa, Some(380.0));
-        assert!(!invalid.ok && invalid.unchecked_reason.is_some());
+        assert!(!invalid.ok && invalid.unchecked_reason.is_some() && !invalid.bond_cutoff_absent);
+        let sufficient = check(
+            cutoff(
+                1600.0,
+                RcUltimateCutoffBarStress::WithoutFlexuralYield(stress(lateral)),
+                Top,
+            ),
+            negative,
+        );
+        assert!(sufficient.bond_development_length_ok.is_none());
+        assert!(sufficient
+            .beam_bond
+            .unwrap()
+            .positive
+            .development_length_ok
+            .is_none());
+    }
+
+    let paired_through = input(
+        RcUltimateBondBar::Through {
+            clear_span_mm: 3000.0,
+            cutoff_unnecessary_distance_mm: Some(200.0),
+            yielding: RcUltimateThroughBarYield::WithoutFlexuralYield {
+                moment_distribution: RcUltimateBondMomentDistribution::NearAntisymmetric,
+                stress: stress(299.0),
+            },
+        },
+        Top,
+    );
+    for (ld, effective_depth_mm, cutoff_stress, through_ng_kept, expected_length, reason) in [
+        (
+            3100.0,
+            290.5,
+            stress(320.0),
+            true,
+            None,
+            "付着長さが付着検定断面から到達できる内法区間を外れています",
+        ),
+        (
+            250.0,
+            290.5,
+            stress(320.0),
+            true,
+            Some(false),
+            "付着長さから有効せいを引いた長さを正の値として確認できません",
+        ),
+        (
+            290.5,
+            290.4999999,
+            stress(320.0),
+            true,
+            Some(false),
+            "付着長さから有効せいを引いた長さを正の値として確認できません",
+        ),
+        (
+            290.5,
+            290.4999999,
+            stress(299.0),
+            true,
+            Some(false),
+            "付着長さから有効せいを引いた長さを正の値として確認できません",
+        ),
+        (
+            1600.0,
+            290.5,
+            RcUltimateBondElasticStress {
+                long_term_tensile_stress_mpa: 0.0,
+                ..stress(380.0)
+            },
+            true,
+            Some(true),
+            "曲げと鉄筋応力度の一方のみがゼロ",
+        ),
+        (
+            1600.0,
+            290.5,
+            stress(320.0),
+            false,
+            None,
+            "割増前の鉄筋応力度が設計用降伏応力度に達し",
+        ),
+    ] {
+        let RcUltimateBondDemand::Single(cutoff) = cutoff(
+            ld,
+            RcUltimateCutoffBarStress::WithoutFlexuralYield(cutoff_stress),
+            Top,
+        ) else {
+            unreachable!()
+        };
+        let checked = check(
+            RcUltimateBondDemand::ThroughAndCutoff {
+                through: paired_through,
+                cutoff: RcUltimateBondInput {
+                    effective_depth_mm,
+                    ..cutoff
+                },
+            },
+            negative,
+        );
+        let result = checked.beam_bond.unwrap().positive;
+        assert_eq!(result.stress.is_some(), through_ng_kept, "{checked:?}");
+        assert!(result.cutoff_sigma_d_mpa.is_none(), "{checked:?}");
+        if let Some(stress) = result.stress {
+            assert!(
+                (stress.demand_mpa - 1.4385335724247859).abs() < 1e-12,
+                "{checked:?}"
+            );
+        }
+        assert_eq!(checked.bond_margin < 1.0, through_ng_kept, "{checked:?}");
+        assert_eq!(
+            checked.unchecked_reason.is_none(),
+            through_ng_kept,
+            "{checked:?}"
+        );
+        assert_eq!(result.development_length_ok, expected_length, "{checked:?}");
+        assert_eq!(
+            checked.bond_development_length_ok, expected_length,
+            "{checked:?}"
+        );
+        assert!(
+            result.unchecked_reason.unwrap().contains(reason),
+            "{checked:?}"
+        );
     }
 
     for (bars, negative, length_ng_in_positive) in [
         (
-            short(
+            cutoff(
+                310.0,
                 RcUltimateCutoffBarStress::WithoutFlexuralYield(stress(320.0)),
                 Top,
             ),
@@ -687,7 +1503,7 @@ fn reaching_yield_before_amplification_contradicts_non_yielding_without_hiding_l
         (
             through(stress(320.0), Top),
             RcUltimateBeamBondDirectionDemand {
-                bars: short(RcUltimateCutoffBarStress::Unverified, Bottom),
+                bars: cutoff(310.0, RcUltimateCutoffBarStress::Unverified, Bottom),
                 ..negative
             },
             false,
@@ -873,64 +1689,70 @@ fn directional_bond_requires_a_uniform_standalone_section_and_one_beam_element()
 
 #[test]
 fn directional_hinge_input_conflicts_only_with_bond_on_the_same_axis_and_direction() {
-    let mut bond = demand();
-    let mut positive = bond.positive.unwrap();
-    positive.bars = RcUltimateBondDemand::Single(input(
-        RcUltimateBondBar::Cutoff {
-            development_length_mm: 310.0,
-            clear_span_mm: 3000.0,
-            unnecessary_distance_mm: 200.0,
-            stress: RcUltimateCutoffBarStress::WithoutFlexuralYield(top_stress()),
-        },
-        RcUltimateBeamBondTensionSide::Top,
-    ));
-    bond.positive = Some(positive);
-    let baseline = directional(&model(), bond);
-    assert_eq!(baseline.bond_development_length_ok, Some(false));
-    for seismic_axis in [SeismicDir::X, SeismicDir::Y] {
-        let checked = check(
-            &model(),
-            MemberDemand {
-                beam_bond: Some(bond),
-                beam_hinge_shear: Some(RcUltimateBeamHingeShearDemand {
-                    seismic_axis,
-                    face_positions_mm: [0.0, 3000.0],
-                    q0_n: [0.0; 2],
-                    end_envelope_confirmed: true,
-                    positive: Some(RcUltimateBeamHingeShearDirectionDemand {
-                        mechanism: StaticBeamHingeMechanism::ITopJBottom,
-                        yield_moment_bounds_nmm: [100e6; 2],
-                        support_transfer_confirmed: true,
-                    }),
-                    negative: None,
-                }),
-                ..total()
+    for (development_length_mm, length_ok) in [(310.0, false), (1600.0, true)] {
+        let mut bond = demand();
+        let mut positive = bond.positive.unwrap();
+        positive.bars = RcUltimateBondDemand::Single(input(
+            RcUltimateBondBar::Cutoff {
+                development_length_mm,
+                clear_span_mm: 3000.0,
+                unnecessary_distance_mm: 200.0,
+                stress: RcUltimateCutoffBarStress::WithoutFlexuralYield(top_stress()),
             },
-        );
-        assert_eq!(checked.bond_development_length_ok, Some(false));
-        assert!(!checked.ok && checked.unchecked_reason.is_none());
-        let by_direction = checked.beam_bond.unwrap();
-        let hinge = checked.beam_hinge_shear.unwrap();
-        let positive_reason = hinge.positive.unwrap_err();
-        if seismic_axis == SeismicDir::X {
-            assert!(positive_reason.contains("非降伏と両端曲げ降伏"));
-            assert!(by_direction
-                .positive
-                .unchecked_reason
-                .unwrap()
-                .contains("非降伏と両端曲げ降伏"));
-            assert!(by_direction.positive.stress.is_none());
-        } else {
-            assert!(positive_reason.contains("接続柱がありません"));
-            assert!(by_direction.positive.unchecked_reason.is_none());
-            assert!(by_direction.positive.stress.is_some());
+            RcUltimateBeamBondTensionSide::Top,
+        ));
+        bond.positive = Some(positive);
+        let baseline = directional(&model(), bond);
+        assert_eq!(baseline.bond_development_length_ok, Some(length_ok));
+        for seismic_axis in [SeismicDir::X, SeismicDir::Y] {
+            let checked = check(
+                &model(),
+                MemberDemand {
+                    beam_bond: Some(bond),
+                    beam_hinge_shear: Some(RcUltimateBeamHingeShearDemand {
+                        seismic_axis,
+                        face_positions_mm: [0.0, 3000.0],
+                        q0_n: [0.0; 2],
+                        end_envelope_confirmed: true,
+                        positive: Some(RcUltimateBeamHingeShearDirectionDemand {
+                            mechanism: StaticBeamHingeMechanism::ITopJBottom,
+                            yield_moment_bounds_nmm: [100e6; 2],
+                            support_transfer_confirmed: true,
+                        }),
+                        negative: None,
+                    }),
+                    ..total()
+                },
+            );
+            let expected_length =
+                (!length_ok || seismic_axis != SeismicDir::X).then_some(length_ok);
+            assert_eq!(checked.bond_development_length_ok, expected_length);
+            if !length_ok {
+                assert!(!checked.ok && checked.unchecked_reason.is_none());
+            }
+            let by_direction = checked.beam_bond.unwrap();
+            let hinge = checked.beam_hinge_shear.unwrap();
+            let positive_reason = hinge.positive.unwrap_err();
+            if seismic_axis == SeismicDir::X {
+                assert!(positive_reason.contains("非降伏と両端曲げ降伏"));
+                assert!(by_direction
+                    .positive
+                    .unchecked_reason
+                    .unwrap()
+                    .contains("非降伏と両端曲げ降伏"));
+                assert!(by_direction.positive.stress.is_none());
+            } else {
+                assert!(positive_reason.contains("接続柱がありません"));
+                assert!(by_direction.positive.unchecked_reason.is_none());
+                assert!(by_direction.positive.stress.is_some());
+            }
+            assert_eq!(by_direction.positive.development_length_ok, expected_length);
+            assert_eq!(by_direction.negative.through_sigma_d_mpa, Some(380.0));
+            assert!(by_direction.negative.unchecked_reason.is_none());
+            assert!(hinge
+                .negative
+                .unwrap_err()
+                .contains("この方向の両端曲げ降伏"));
         }
-        assert_eq!(by_direction.positive.development_length_ok, Some(false));
-        assert_eq!(by_direction.negative.through_sigma_d_mpa, Some(380.0));
-        assert!(by_direction.negative.unchecked_reason.is_none());
-        assert!(hinge
-            .negative
-            .unwrap_err()
-            .contains("この方向の両端曲げ降伏"));
     }
 }

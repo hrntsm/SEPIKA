@@ -90,7 +90,7 @@ pub struct RcUltimateBondTransverseRebar {
 pub enum RcUltimateBondDemand {
     /// 一組で必要な照査をすべて代表できる場合に指定する。
     Single(RcUltimateBondInput),
-    /// 同じ検討断面・曲げ軸で、共通の曲げ降伏条件と不要断面までの距離を指定する。
+    /// 同じ検討断面・曲げ軸で別々に実在する鉄筋組と、共通の曲げ降伏条件・不要断面までの距離を確認して指定する。
     ThroughAndCutoff {
         through: RcUltimateBondInput,
         cutoff: RcUltimateBondInput,
@@ -228,6 +228,8 @@ pub struct RcUltimateBeamBondDirectionCheck {
     pub stress: Option<RcUltimateBondStress>,
     /// 付着応力度とは独立した必要延長の判定。該当なしまたは未確認は None。
     pub development_length_ok: Option<bool>,
+    pub(super) length_unchecked_reason: Option<&'static str>,
+    pub(super) cutoff_absent: bool,
     /// 未算定の理由。確認済みの不適合がある場合も保持する。
     pub unchecked_reason: Option<&'static str>,
 }
@@ -237,40 +239,101 @@ impl RcUltimateBeamBondDirectionCheck {
         bars: RcUltimateBondDemand,
         section: Option<RcUltimateBeamBondSection>,
         directional_conflict: Option<&'static str>,
-        check_input: impl Fn(RcUltimateBondInput) -> Result<RcUltimateBondCheck, &'static str>,
+        check_input: impl Fn(
+            RcUltimateBondInput,
+            bool,
+            bool,
+        ) -> Result<RcUltimateBondCheck, &'static str>,
     ) -> Self {
         let (inputs, grouping_issue) = bars.inputs();
-        let factor_issue = match (section, inputs) {
-            (Some(_), [Some(a), Some(b)]) => a
+        let mut directional_conflict = directional_conflict.or_else(|| {
+            section?;
+            inputs
+                .iter()
+                .flatten()
+                .any(|input| input.bar.has_explicit_flexural_yield())
+                .then_some(
+                    "方向別の非降伏RC梁の付着照査入力と、指定した鉄筋組の曲げ降伏条件が矛盾します",
+                )
+        });
+        let verified_factor = |input: RcUltimateBondInput| {
+            input
                 .bar
                 .elastic_stress()
-                .zip(b.bar.elastic_stress())
-                .filter(|(a, b)| a.lateral_factor != b.lateral_factor)
+                .and_then(RcUltimateBondElasticStress::verified_lateral_factor)
+        };
+        let factor_issue = match (section, inputs) {
+            (Some(_), [Some(a), Some(b)]) => verified_factor(a)
+                .zip(verified_factor(b))
+                .filter(|(a, b)| a != b)
                 .map(|_| "同じ地震荷重方向の通し筋とカットオフ筋で水平荷重の割増が一致しません"),
             _ => None,
         };
-        let inconsistent_pair = (grouping_issue.is_some() || factor_issue.is_some())
-            && matches!(bars, RcUltimateBondDemand::ThroughAndCutoff { .. });
+        let is_pair = matches!(bars, RcUltimateBondDemand::ThroughAndCutoff { .. });
+        let inconsistent_pair = is_pair && (grouping_issue.is_some() || factor_issue.is_some());
+        let can_share_tension_side = section.is_some() && !inconsistent_pair && is_pair;
+        let mut through_side = None;
         let mut result = Self {
             section,
             unchecked_reason: grouping_issue.or(factor_issue).or(directional_conflict),
             ..Self::default()
         };
         for input in inputs.into_iter().flatten() {
-            let check = match check_input(input) {
+            let shared_side = can_share_tension_side
+                && directional_conflict.is_none()
+                && through_side == Some(true)
+                && matches!(
+                    input.bar,
+                    RcUltimateBondBar::Cutoff {
+                        stress: RcUltimateCutoffBarStress::Unverified,
+                        ..
+                    }
+                );
+            let check = match check_input(input, shared_side, is_pair) {
                 Ok(check) => check,
                 Err(reason) => {
                     result.unchecked_reason.get_or_insert(reason);
+                    if matches!(input.bar, RcUltimateBondBar::Cutoff { .. }) {
+                        result.length_unchecked_reason = Some(reason);
+                    } else if is_pair {
+                        result.length_unchecked_reason.get_or_insert(reason);
+                    }
                     continue;
                 }
             };
+            if check.yield_before_amplification {
+                directional_conflict.get_or_insert(YIELD_BEFORE_AMPLIFICATION);
+                result
+                    .unchecked_reason
+                    .get_or_insert(YIELD_BEFORE_AMPLIFICATION);
+                result.stress = None;
+                result.through_sigma_d_mpa = None;
+                result.cutoff_sigma_d_mpa = None;
+                result.development_length_ok = result.development_length_ok.filter(|&ok| !ok);
+                result.cutoff_absent = false;
+            }
+            if matches!(input.bar, RcUltimateBondBar::Through { .. }) {
+                through_side = check.through_tension_side_confirmed;
+            }
+            result.length_unchecked_reason = result
+                .length_unchecked_reason
+                .or(check.length_unchecked_reason);
             if let Some(length_ok) = check
                 .development_length_ok
-                .filter(|&ok| !inconsistent_pair || !ok)
+                .filter(|&ok| !ok || (!inconsistent_pair && directional_conflict.is_none()))
             {
-                result.development_length_ok =
-                    Some(result.development_length_ok.unwrap_or(true) && length_ok);
+                if length_ok && is_pair && through_side.is_none() {
+                    let reason =
+                        "併用する通し筋の検定断面と配筋を確認できないため、必要延長は未算定です";
+                    result.length_unchecked_reason.get_or_insert(reason);
+                    result.unchecked_reason.get_or_insert(reason);
+                } else {
+                    result.development_length_ok =
+                        Some(result.development_length_ok.unwrap_or(true) && length_ok);
+                }
             }
+            result.cutoff_absent |=
+                grouping_issue.is_none() && directional_conflict.is_none() && check.cutoff_absent;
             if inconsistent_pair || directional_conflict.is_some() {
                 continue;
             }
@@ -322,6 +385,12 @@ impl RcUltimateBeamBondDirectionCheck {
         if let Some(reason) = self.unchecked_reason {
             detail.push_str(&format!("、付着応力度の未算定あり（{reason}）"));
         }
+        if let Some(reason) = self
+            .length_unchecked_reason
+            .filter(|&reason| Some(reason) != self.unchecked_reason)
+        {
+            detail.push_str(&format!("、{reason}"));
+        }
         if self.development_length_ok == Some(false) {
             detail.push_str("、カットオフ筋の必要延長不足");
         }
@@ -358,36 +427,66 @@ impl RcUltimateBeamBondSection {
         }
     }
 
+    pub(super) fn design_tension_side(
+        self,
+        lateral_factor: f64,
+    ) -> Option<RcUltimateBeamBondTensionSide> {
+        let long = self.long_term_mz_nmm;
+        let lateral = self.lateral_mz_nmm;
+        let design = long + lateral_factor * lateral;
+        if ![long, lateral, design].into_iter().all(f64::is_finite) || design == 0.0 {
+            return None;
+        }
+        Some(if design < 0.0 {
+            RcUltimateBeamBondTensionSide::Top
+        } else {
+            RcUltimateBeamBondTensionSide::Bottom
+        })
+    }
+
+    pub(super) fn common_tension_side(self) -> Option<RcUltimateBeamBondTensionSide> {
+        let moments = [self.long_term_mz_nmm, self.lateral_mz_nmm];
+        if !moments.into_iter().all(f64::is_finite) {
+            return None;
+        }
+        if moments.iter().all(|&m| m >= 0.0) && moments.iter().any(|&m| m > 0.0) {
+            Some(RcUltimateBeamBondTensionSide::Bottom)
+        } else if moments.iter().all(|&m| m <= 0.0) && moments.iter().any(|&m| m < 0.0) {
+            Some(RcUltimateBeamBondTensionSide::Top)
+        } else {
+            None
+        }
+    }
+
     pub(super) fn check_stress(
         self,
         stress: RcUltimateBondElasticStress,
         design_yield_stress_mpa: f64,
     ) -> Result<(), &'static str> {
-        if stress.long_term_tensile_stress_mpa + stress.lateral_tensile_stress_mpa
-            >= design_yield_stress_mpa
-        {
-            return Err("割増前の鉄筋応力度が設計用降伏応力度に達し、曲げ非降伏の条件と矛盾します");
+        self.check_stress_conditions(stress)?;
+        if stress.reaches_yield_before_amplification(design_yield_stress_mpa) {
+            return Err(YIELD_BEFORE_AMPLIFICATION);
         }
+        Ok(())
+    }
+
+    pub(super) fn check_stress_conditions(
+        self,
+        stress: RcUltimateBondElasticStress,
+    ) -> Result<(), &'static str> {
         let long = self.long_term_mz_nmm;
         let lateral = self.lateral_mz_nmm;
-        let design = long + stress.lateral_factor * lateral;
-        if ![long, lateral, design].into_iter().all(f64::is_finite) || design == 0.0 {
-            return Err(
-                "付着検定断面の長期・水平荷重時の強軸曲げまたは設計曲げの符号を確認できません",
-            );
-        }
-        let side = if design < 0.0 {
-            RcUltimateBeamBondTensionSide::Top
-        } else {
-            RcUltimateBeamBondTensionSide::Bottom
-        };
+        let side = self.design_tension_side(stress.lateral_factor).ok_or(
+            "付着検定断面の長期・水平荷重時の強軸曲げまたは設計曲げの符号を確認できません",
+        )?;
         if self.tension_side != side {
             return Err("長期と割増水平荷重を合わせた曲げの引張側と採用主筋が一致しません");
         }
-        if [long, lateral]
-            .into_iter()
-            .any(|m| m * design.signum() < 0.0)
-        {
+        let design_sign = match side {
+            RcUltimateBeamBondTensionSide::Top => -1.0,
+            RcUltimateBeamBondTensionSide::Bottom => 1.0,
+        };
+        if [long, lateral].into_iter().any(|m| m * design_sign < 0.0) {
             return Err(
                 "長期荷重または水平荷重で採用主筋が圧縮側となる場合の存在応力度は未算定です",
             );
@@ -425,7 +524,11 @@ pub struct RcUltimateBondStress {
 
 impl RcUltimateBondStress {
     pub(super) fn margin(self) -> f64 {
-        self.capacity_mpa / self.demand_mpa
+        if self.demand_mpa == 0.0 {
+            f64::INFINITY
+        } else {
+            self.capacity_mpa / self.demand_mpa
+        }
     }
 }
 
@@ -434,10 +537,30 @@ impl RcUltimateBondStress {
 pub(super) struct RcUltimateBondCheck {
     pub(super) stress: Result<RcUltimateBondStress, &'static str>,
     pub(super) development_length_ok: Option<bool>,
+    pub(super) length_unchecked_reason: Option<&'static str>,
+    pub(super) positive_effective_length: bool,
+    pub(super) yield_before_amplification: bool,
+    pub(super) cutoff_absent: bool,
+    /// 併用に必要な通し筋の幾何確認が成立した場合は、同じ検定断面での引張側を確認できたか返す。
+    pub(super) through_tension_side_confirmed: Option<bool>,
     pub(super) sigma_d_mpa: Option<f64>,
 }
 
 impl RcUltimateBondBar {
+    fn has_explicit_flexural_yield(self) -> bool {
+        matches!(
+            self,
+            Self::Through {
+                yielding: RcUltimateThroughBarYield::BothEnds
+                    | RcUltimateThroughBarYield::OneEndWithOtherElastic,
+                ..
+            } | Self::Cutoff {
+                stress: RcUltimateCutoffBarStress::FlexuralYield,
+                ..
+            }
+        )
+    }
+
     pub(super) fn elastic_stress(self) -> Option<RcUltimateBondElasticStress> {
         match self {
             Self::Through {
@@ -466,6 +589,7 @@ impl RcUltimateBondInput {
         self,
         fc_mpa: f64,
         concrete_class: ConcreteClass,
+        model_effective_depth_mm: f64,
     ) -> Result<RcUltimateBondCheck, &'static str> {
         let positive = |value: f64| value.is_finite() && value > 0.0;
         if !positive(self.effective_depth_mm) {
@@ -530,7 +654,9 @@ impl RcUltimateBondInput {
                 (
                     development_length_mm,
                     Some(
-                        development_length_mm - self.effective_depth_mm >= unnecessary_distance_mm,
+                        development_length_mm
+                            >= unnecessary_distance_mm
+                                + self.effective_depth_mm.max(model_effective_depth_mm),
                     ),
                     match stress {
                         RcUltimateCutoffBarStress::FlexuralYield => design_yield_stress_mpa,
@@ -544,14 +670,30 @@ impl RcUltimateBondInput {
                 )
             }
         };
+        let positive_effective_length =
+            length > self.effective_depth_mm.max(model_effective_depth_mm);
+        let through_geometry_confirmed =
+            matches!(self.bar, RcUltimateBondBar::Through { .. }) && positive_effective_length;
+        let effective_length_mm = length - self.effective_depth_mm;
         Ok(RcUltimateBondCheck {
-            stress: self.check_stress(
-                length - self.effective_depth_mm,
-                tensile,
-                fc_mpa,
-                concrete_class,
-            ),
+            stress: if positive_effective_length {
+                self.check_stress(effective_length_mm, tensile, fc_mpa, concrete_class)
+            } else {
+                Err("付着長さから有効せいを引いた長さを正の値として確認できません")
+            },
             development_length_ok,
+            length_unchecked_reason: None,
+            positive_effective_length,
+            yield_before_amplification: false,
+            cutoff_absent: through_geometry_confirmed
+                && matches!(
+                    self.bar,
+                    RcUltimateBondBar::Through {
+                        cutoff_unnecessary_distance_mm: None,
+                        ..
+                    }
+                ),
+            through_tension_side_confirmed: through_geometry_confirmed.then_some(false),
             sigma_d_mpa: elastic_sigma_d_mpa.and_then(Result::ok),
         })
     }
@@ -564,9 +706,6 @@ impl RcUltimateBondInput {
         concrete_class: ConcreteClass,
     ) -> Result<RcUltimateBondStress, &'static str> {
         let positive = |value: f64| value.is_finite() && value > 0.0;
-        if !positive(effective_length) {
-            return Err("付着長さから有効せいを引いた長さを正の値として確認できません");
-        }
         if !positive(self.bar_designation_mm) {
             return Err("終局付着の鉄筋・材料強度を確認できません");
         }
@@ -648,7 +787,27 @@ impl RcUltimateBondConfinement {
     }
 }
 
+const YIELD_BEFORE_AMPLIFICATION: &str =
+    "割増前の鉄筋応力度が設計用降伏応力度に達し、曲げ非降伏の条件と矛盾します";
+
 impl RcUltimateBondElasticStress {
+    pub(super) fn verified_lateral_factor(self) -> Option<f64> {
+        (self.lateral_factor.is_finite() && self.lateral_factor >= 1.5)
+            .then_some(self.lateral_factor)
+    }
+
+    pub(super) fn reaches_yield_before_amplification(self, yield_mpa: f64) -> bool {
+        [
+            self.long_term_tensile_stress_mpa,
+            self.lateral_tensile_stress_mpa,
+        ]
+        .into_iter()
+        .all(|value| value.is_finite() && value >= 0.0)
+            && yield_mpa.is_finite()
+            && yield_mpa > 0.0
+            && self.long_term_tensile_stress_mpa + self.lateral_tensile_stress_mpa >= yield_mpa
+    }
+
     fn limited_stress_mpa(self, yield_stress_mpa: f64) -> Result<f64, &'static str> {
         let stress = self.long_term_tensile_stress_mpa
             + self.lateral_factor * self.lateral_tensile_stress_mpa;
@@ -658,8 +817,7 @@ impl RcUltimateBondElasticStress {
         ]
         .into_iter()
         .all(|value| value.is_finite() && value >= 0.0)
-            || !self.lateral_factor.is_finite()
-            || self.lateral_factor < 1.5
+            || self.verified_lateral_factor().is_none()
             || !stress.is_finite()
         {
             return Err("長期・水平荷重時の鉄筋応力度または割増を確認できません");
@@ -695,7 +853,11 @@ mod tests {
                 }),
             }),
         };
-        let check = |input: RcUltimateBondInput| input.check(24.0, ConcreteClass::Normal).unwrap();
+        let check = |input: RcUltimateBondInput| {
+            input
+                .check(24.0, ConcreteClass::Normal, input.effective_depth_mm)
+                .unwrap()
+        };
         let through_only = check(input);
         assert_eq!(through_only.development_length_ok, None);
         let through_only = through_only.stress.unwrap();

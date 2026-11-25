@@ -830,7 +830,12 @@ fn ultimate_table_labels(app: &mut App) -> Vec<String> {
 }
 
 #[cfg(feature = "gui")]
-fn ultimate_table_hover(app: &mut App, label: &str, detail_fragment: &str) -> String {
+fn ultimate_table_hover(
+    app: &mut App,
+    label: &str,
+    occurrence: usize,
+    detail_fragment: &str,
+) -> String {
     let ctx = egui::Context::default();
     ctx.global_style_mut(|style| {
         style.interaction.tooltip_delay = 0.0;
@@ -840,13 +845,14 @@ fn ultimate_table_hover(app: &mut App, label: &str, detail_fragment: &str) -> St
     let position = ultimate_table_frame(&ctx, app, vec![])
         .shapes
         .iter()
-        .find_map(|shape| match &shape.shape {
+        .filter_map(|shape| match &shape.shape {
             egui::Shape::Text(text) if text.galley.text() == label => {
                 Some(text.galley.rect.translate(text.pos.to_vec2()).center())
             }
             _ => None,
         })
-        .unwrap_or_else(|| panic!("一覧に「{label}」がありません"));
+        .nth(occurrence)
+        .unwrap_or_else(|| panic!("一覧に{}個目の「{label}」がありません", occurrence + 1));
     ultimate_table_frame(&ctx, app, vec![egui::Event::PointerMoved(position)]);
     for _ in 0..3 {
         let output = ultimate_table_frame(&ctx, app, vec![]);
@@ -864,7 +870,7 @@ fn ultimate_table_hover(app: &mut App, label: &str, detail_fragment: &str) -> St
 
 #[cfg(feature = "gui")]
 #[test]
-fn rc_ultimate_table_and_member_hover_distinguish_disabled_and_unavailable_bond() {
+fn rc_ultimate_table_and_bond_hover_distinguish_disabled_and_unavailable_bond() {
     let mut app = column(false);
     let mut round_bars = app.core.model.materials[1].clone();
     round_bars.id = MaterialId(2);
@@ -880,9 +886,10 @@ fn rc_ultimate_table_and_member_hover_distinguish_disabled_and_unavailable_bond(
         let labels = ultimate_table_labels(&mut app);
         assert_eq!(
             labels.iter().filter(|&label| label == status).count(),
-            3,
+            4,
             "{labels:?}"
         );
+        assert!(labels.iter().any(|label| label == "必要延長"), "{labels:?}");
         assert!(labels.iter().any(|label| label == verdict), "{labels:?}");
         let check = &app.compute_ultimate_checks().unwrap()[0];
         if include_bond {
@@ -892,7 +899,7 @@ fn rc_ultimate_table_and_member_hover_distinguish_disabled_and_unavailable_bond(
             assert_eq!(check.bond_margin, f64::INFINITY);
         }
 
-        let detail = ultimate_table_hover(&mut app, "0", "τD=");
+        let detail = ultimate_table_hover(&mut app, "0", 0, "τD=");
         for expected in [
             format!("τD={status}, Kfb={status}"),
             format!("付着余裕度={status}"),
@@ -904,6 +911,11 @@ fn rc_ultimate_table_and_member_hover_distinguish_disabled_and_unavailable_bond(
             include_bond,
             "{detail}"
         );
+        if include_bond {
+            let reason =
+                ultimate_table_hover(&mut app, status, 3, "ultimate_bond_round_bar_unsupported:");
+            assert!(reason.contains("SR235"), "{reason}");
+        }
     }
 }
 
@@ -950,8 +962,8 @@ fn rc_column_with_no_clear_span_keeps_its_unchecked_reason_in_the_ultimate_table
     }
     #[cfg(feature = "gui")]
     {
-        ultimate_table_hover(&mut app, "未検定", reason);
-        for (include_bond, status, count) in [(false, "無効", 6), (true, "未算定", 6)] {
+        ultimate_table_hover(&mut app, "未検定", 0, reason);
+        for (include_bond, status, count) in [(false, "無効", 8), (true, "未算定", 8)] {
             app.core.ultimate_include_bond = include_bond;
             let labels = ultimate_table_labels(&mut app);
             assert_eq!(
@@ -959,7 +971,11 @@ fn rc_column_with_no_clear_span_keeps_its_unchecked_reason_in_the_ultimate_table
                 count,
                 "{labels:?}"
             );
-            let detail = ultimate_table_hover(&mut app, "0", "τD=");
+            let detail = if include_bond {
+                ultimate_table_hover(&mut app, status, 3, "ultimate_clear_span_invalid:")
+            } else {
+                ultimate_table_hover(&mut app, "0", 0, "τD=")
+            };
             for expected in cause {
                 assert!(detail.contains(expected), "{expected}: {detail}");
             }
@@ -1025,7 +1041,7 @@ fn actual_rc_beam_mixed_static_bending_withholds_reference_mu() {
         );
         assert_eq!(
             labels.iter().filter(|&label| label == "未算定").count(),
-            6,
+            8,
             "{labels:?}"
         );
         assert!(
@@ -1148,7 +1164,7 @@ fn actual_rc_free_end_never_shows_an_ok_or_ng_from_an_inapplicable_hinge_demand(
                 5,
                 "{labels:?}"
             );
-            let detail = ultimate_table_hover(&mut app, "1", "τD=");
+            let detail = ultimate_table_hover(&mut app, "1", 0, "τD=");
             for expected in ["τD=未算定", "付着余裕度=未算定", cause] {
                 assert!(detail.contains(expected), "{expected}: {detail}");
             }
