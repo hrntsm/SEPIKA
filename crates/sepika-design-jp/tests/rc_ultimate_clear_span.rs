@@ -100,7 +100,7 @@ fn confirmed_faces_supply_the_same_demands_and_capacities_as_the_equivalent_clea
                 let expected_qmu = demand.shear.unwrap_or_else(|| 2.0 * faced.mu / span_mm);
                 assert!((faced.qmu - expected_qmu).abs() < 1e-6);
                 if kind == MemberKind::Column {
-                    assert_eq!(faced.biaxial_shear_margin, clear.biaxial_shear_margin);
+                    assert_eq!(faced.weak_shear_margin, clear.weak_shear_margin);
                 }
             }
         }
@@ -157,7 +157,7 @@ fn missing_or_inconsistent_faces_leave_the_member_unchecked_in_both_modes() {
                 }
                 assert!(check.qmu.is_nan() && check.qsu.is_nan() && check.bond_stress.is_none());
                 assert!(check.shear_margin.is_nan() && check.bond_margin.is_nan());
-                assert!(check.biaxial_shear_margin.is_none());
+                assert!(check.weak_shear_margin.is_none());
             }
         }
     }

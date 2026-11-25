@@ -95,7 +95,7 @@ pub fn member_demand_from_pushover(
                     r.shear_weak,
                     r.rp,
                 );
-                d.min_axial_for_shear_n = r.min_axial_for_shear_n;
+                d.rc_ultimate_shear = r.rc_ultimate_shear;
                 d.q_long = q_long_by_elem.and_then(|m| m.get(&r.elem).copied());
                 (r.elem, d)
             })
@@ -429,7 +429,6 @@ mod tests {
         let resp = [PushoverMemberResponse {
             elem: ElemId(3),
             axial: 2000.0,
-            min_axial_for_shear_n: None,
             m_strong: 3.0e6,
             m_weak: 1.0e6,
             shear_strong: 40_000.0,
@@ -437,6 +436,7 @@ mod tests {
             rp: 0.01,
             horizontal_force: 0.0,
             wall_shear_signed: None,
+            rc_ultimate_shear: None,
         }];
         let mut ql = HashMap::new();
         ql.insert(ElemId(3), 8_000.0);
@@ -470,10 +470,10 @@ mod wall_availability_tests {
             shear_strong: 0.0,
             shear_weak: 0.0,
             axial: 0.0,
-            min_axial_for_shear_n: None,
             rp: 0.0,
             horizontal_force: 0.0,
             wall_shear_signed: None,
+            rc_ultimate_shear: None,
         };
         let demand = member_demand_from_pushover(&[response], None).unwrap();
         assert_eq!(demand.len(), 1);

@@ -87,9 +87,9 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             ui.checkbox(&mut app.core.ultimate_include_bond, "大地震時の付着を照査");
         });
         ui.horizontal(|ui| {
-            ui.checkbox(&mut app.core.ultimate_biaxial_shear, "柱を2軸せん断で検定")
+            ui.checkbox(&mut app.core.ultimate_biaxial_shear, "柱の弱軸単独せん断も検定")
                 .on_hover_text(
-                    "確定総応答を採用し、両軸の耐力を確認できる場合に、初期重力を含む両軸の総せん断力で算定します。",
+                    "増分解析の確定総応答で、柱の弱軸単独のせん断余裕度も算定します。二軸同時作用は未算定です。",
                 );
             ui.checkbox(&mut app.core.ultimate_biaxial_bending, "柱を2軸曲げで検定")
                 .on_hover_text(
@@ -158,7 +158,6 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             ui.add_space(4.0);
 
             let include_bond = app.core.ultimate_include_bond;
-            let biaxial_shear = app.core.ultimate_biaxial_shear;
             let mode = if app.core.ultimate_use_pushover {
                 UltimateDemandMode::ConfirmedTotal
             } else {
@@ -178,7 +177,7 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             };
             ui.label(demand_note);
             if mode == UltimateDemandMode::ConfirmedTotal {
-                ui.label("強軸せん断余裕度 Qsu/|Qtotal|。付着余裕度 Kfb/τD");
+                ui.label("せん断余裕度は軸別の Qsu/|Qtotal|。軸表示なしは強軸。材軸ねじりとの組合せは未評価。付着余裕度 Kfb/τD。");
             }
             crate::table_util::standard_table(
                 ui,
@@ -187,9 +186,9 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                     Col::id_named("部材"),
                     Col::label("種別"),
                     Col::wide_num("Mu[kN·m]（梁は参考）"),
-                    Col::num(&format!("{demand_symbol}[kN]")),
-                    Col::num(&format!("{shear_symbol}[kN]")),
-                    Col::num("せん断余裕度"),
+                    Col::wide_num(&format!("{demand_symbol}[kN]")),
+                    Col::wide_num(&format!("{shear_symbol}[kN]")),
+                    Col::wide_num("せん断余裕度（軸別）"),
                     Col::num("τD[N/mm²]"),
                     Col::num("Kfb[N/mm²]"),
                     Col::num("付着余裕度"),
@@ -225,28 +224,38 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
                             ui.label(value);
                         }
                     });
-                    row.col(|ui| {
-                        ui.label(format_capacity(force_kn(c.qmu)));
-                    });
-                    row.col(|ui| {
-                        ui.label(format_capacity(force_kn(c.qsu)));
-                    });
+                    for (strong, weak) in [
+                        (c.qmu, c.weak_shear_n.map(|(demand, _)| demand)),
+                        (c.qsu, c.weak_shear_n.map(|(_, capacity)| capacity)),
+                    ] {
+                        row.col(|ui| {
+                            let strong = format_capacity(force_kn(strong));
+                            let value = if let Some(weak) = weak {
+                                format!("強 {strong} / 弱 {}", format_capacity(force_kn(weak)))
+                            } else {
+                                strong
+                            };
+                            ui.label(value).on_hover_text(&c.detail);
+                        });
+                    }
                     row.col(|ui| {
                         if c.shear_margin.is_nan() {
-                            ui.label("-");
-                        } else if let Some(m) = c.biaxial_shear_margin {
-                            ui.colored_label(margin_color(m), format!("二軸 {m:.2}"));
-                        } else if biaxial_shear && c.kind == sepika_design_jp::MemberKind::Column {
-                            let m = c.shear_margin;
-                            let color = if m < 1.0 {
-                                crate::theme::ERROR_RED
-                            } else {
-                                crate::theme::UI_MUTED
-                            };
-                            ui.colored_label(color, format!("強軸 {m:.2}"));
+                            if c.weak_shear_margin.is_none() {
+                                ui.label("-");
+                            }
                         } else {
                             let m = c.shear_margin;
-                            ui.colored_label(margin_color(m), format!("{m:.2}"));
+                            let value = if c.weak_shear_margin.is_some() {
+                                format!("強 {m:.2}")
+                            } else {
+                                format!("{m:.2}")
+                            };
+                            ui.colored_label(margin_color(m), value)
+                                .on_hover_text(&c.detail);
+                        }
+                        if let Some(m) = c.weak_shear_margin {
+                            ui.colored_label(margin_color(m), format!("弱 {m:.2}"))
+                                .on_hover_text(&c.detail);
                         }
                     });
                     row.col(|ui| {

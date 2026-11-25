@@ -67,14 +67,18 @@ pub struct MemberDemand {
     pub static_beam_hinge_mechanism: Option<StaticBeamHingeMechanism>,
     /// 弱軸（幅方向）まわりの設計用曲げモーメント Mmy [N·mm]（符号は内部で abs）。
     pub my: f64,
-    /// 設計用せん断力 Qm `[N]`（プッシュオーバー応答の強軸せん断。`Some` のとき
-    /// 確定総応答モードで `Qmu = |Qm|` として採用する。上限強度倍率は1のみ対応）。
+    /// 部材応答の強軸せん断力 `[N]`。確定総応答モードでは専用内力の有無にかかわらず必須。
+    /// RC終局せん断では `rc_ultimate_shear` を確認できればその強軸の `Q`、確認済みの直接入力ではこの値の絶対値を採用する。
     pub shear: Option<f64>,
-    /// 弱軸の確定総せん断力 `[N]`。総応答モードで `Qmuy = |Qmy|` として採用する。
+    /// 部材応答の弱軸せん断力 `[N]`。確定総応答モードでは専用内力の有無にかかわらず必須。
+    /// RC終局せん断では `rc_ultimate_shear` を確認できればその弱軸の `Q`、確認済みの直接入力ではこの値の絶対値を採用する。
     pub shear_weak: Option<f64>,
     /// 検討区間で確認した最小軸力 [N]（圧縮正）。未確認は None。
     /// 部材荷重がなく、両フェースを含む区間の確定総応答として曲げとせん断を確認し、最小軸力を得た場合にだけ指定できる。
     pub min_axial_for_shear_n: Option<f64>,
+    /// 終局せん断専用の内力。直接指定する場合も、同一ステップの実フェース間に正の内法が成立し、範囲を確認済みであること。
+    /// 未指定の場合、従来の内法条件と `min_axial_for_shear_n` を確認した直接入力だけで算定する。
+    pub rc_ultimate_shear: Option<sepika_core::rc_capacity::RcUltimateShearActions>,
     /// 大地震時の付着応力度と必要延長を確認する配筋組。未確認は None。
     pub bond: Option<super::rc_bond::RcUltimateBondDemand>,
     /// 確定応答の部材変形角 [rad]。
@@ -95,9 +99,9 @@ impl MemberDemand {
         }
     }
 
-    /// プッシュオーバー応答から部材需要を作る。軸力（圧縮正）・強軸/弱軸の設計用曲げ・
-    /// 強軸/弱軸の設計用せん断・部材別 Rp を直接反映する（`Qmu`・弱軸 Qmuy・Rp を
-    /// 応答値で置き換える）。検討区間の最小軸力は別途確認して指定する。
+    /// 軸力 `[N]`（圧縮正）、軸別の曲げ `[N·mm]` とせん断 `[N]`、部材変形角 Rp `[rad]` を指定して確定総応答の需要を作る。
+    /// 軸別のせん断力と Rp は必須。RC終局せん断の需要には別途確認した `rc_ultimate_shear` の同軸 `Q` が優先される。
+    /// 専用内力を指定しない直接入力では、検討区間の最小軸力も別途確認して指定する。
     #[allow(clippy::too_many_arguments)]
     pub fn from_pushover(
         n_axial: f64,
@@ -128,8 +132,7 @@ pub struct UltimateShearOptions {
     pub upper_strength_factor: f64,
     /// 大地震時の付着照査を有効にする場合 true。カットオフ筋の必要延長は応力度と独立に判定する。
     pub include_bond: bool,
-    /// RC 柱の二軸せん断を検定する場合 true。
-    /// 両軸の確定総応答に対する終局せん断耐力が必要。
+    /// RC柱の弱軸も独立に検定する場合 true。二軸同時作用の余裕度は算定しない。
     pub biaxial_shear: bool,
     /// 柱の曲げを 2 軸曲げとして検定する場合 true（採用応力）。
     /// 両軸の設計用曲げ Mm と終局曲げ強度 Mu を相互作用式
