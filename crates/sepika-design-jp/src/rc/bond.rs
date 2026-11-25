@@ -1,7 +1,7 @@
 //! 鉄筋コンクリート造梁付着の断面検定（RC 規準の梁主筋の付着検討）。
 //! 既定の検定経路は RC 規準1999 方式。
 
-use super::concrete_allowable_bond_for_rebar;
+use super::concrete_allowable_bond;
 use super::section_props::RcRebarInfo;
 
 /// RC 規準 1991 方式の付着検定結果。
@@ -14,7 +14,7 @@ pub struct Bond1991Result {
     pub fa: f64,
 }
 
-/// RC 梁付着の断面検定（RC 規準 1991 方式）: `τa = Q/(φ・j) ≦ fa`。
+/// 異形鉄筋を主筋に用いる RC 梁付着の断面検定（RC 規準 1991 方式）: `τa = Q/(φ・j) ≦ fa`。
 /// `top_bar`: 上端筋なら true（fa が低減される）。
 /// `phi`: 引張鉄筋の周長総和 Σφ `[mm]`。
 pub fn rc_beam_bond_check_1991(
@@ -25,23 +25,11 @@ pub fn rc_beam_bond_check_1991(
     top_bar: bool,
     long_term: bool,
 ) -> Option<Bond1991Result> {
-    rc_beam_bond_check_1991_with_rebar(q_abs, j, phi, fc_raw, top_bar, long_term, true)
-}
-
-pub(crate) fn rc_beam_bond_check_1991_with_rebar(
-    q_abs: f64,
-    j: f64,
-    phi: f64,
-    fc_raw: f64,
-    top_bar: bool,
-    long_term: bool,
-    deformed: bool,
-) -> Option<Bond1991Result> {
     if q_abs < 0.0 || j <= 0.0 || phi <= 0.0 || fc_raw <= 0.0 {
         return None;
     }
     let tau = q_abs / (phi * j);
-    let fa = concrete_allowable_bond_for_rebar(fc_raw, top_bar, long_term, deformed);
+    let fa = concrete_allowable_bond(fc_raw, top_bar, long_term);
     if fa <= 0.0 {
         return None;
     }
@@ -72,10 +60,10 @@ pub struct BondCheckResult {
     pub is_end: bool,
 }
 
-/// RC 規準1999の通し筋・カットオフ無しの付着検定。寸法は mm、応力は N/mm²。
-/// `top_bar` は上端筋、`deformed` は異形鉄筋を表す。付着長さ等が成立しない場合は `None`。
+/// 異形鉄筋の通し筋・カットオフ無しの付着検定（1999方式）。寸法は mm、応力は N/mm²。
+/// `top_bar` は上端筋を表す。付着長さ等が成立しない場合は `None`。
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn rc_beam_bond_check_with_rebar(
+pub(crate) fn rc_beam_bond_check_1999(
     pos: f64,
     lo: f64,
     b: f64,
@@ -87,7 +75,6 @@ pub(crate) fn rc_beam_bond_check_with_rebar(
     fc_raw: f64,
     long_term: bool,
     top_bar: bool,
-    deformed: bool,
 ) -> Option<BondCheckResult> {
     let db = info.main_dia.designation_or_diameter_mm();
     if lo <= 0.0 || info.tension_count == 0 || db <= 0.0 || at <= 0.0 || j <= 0.0 {
@@ -128,11 +115,7 @@ pub(crate) fn rc_beam_bond_check_with_rebar(
         return None;
     }
 
-    let fb_other = if deformed {
-        fc_raw / 60.0 + 0.6
-    } else {
-        fc_raw / 30.0 + 0.4
-    };
+    let fb_other = fc_raw / 60.0 + 0.6;
     let fb_long = if top_bar { 0.8 * fb_other } else { fb_other };
     let fb_row1 = if long_term { fb_long } else { fb_long * 1.5 };
     let fb = if info.tension_layers >= 2 {
@@ -196,7 +179,7 @@ mod tests {
             (false, false, 1.5, 208.33333333333334),
             (true, false, 1.2, 260.4166666666667),
         ] {
-            let result = rc_beam_bond_check_with_rebar(
+            let result = rc_beam_bond_check_1999(
                 0.5,
                 3000.0,
                 420.0,
@@ -208,7 +191,6 @@ mod tests {
                 24.0,
                 long_term,
                 top_bar,
-                true,
             )
             .unwrap();
             assert!((result.fb - expected_fb).abs() < 1e-12);
@@ -253,7 +235,7 @@ mod tests {
     #[test]
     fn test_bond_lo_zero_skips_check() {
         let info = bond_test_info();
-        let result = rc_beam_bond_check_with_rebar(
+        let result = rc_beam_bond_check_1999(
             0.1,
             0.0,
             300.0,
@@ -265,7 +247,6 @@ mod tests {
             24.0,
             false,
             true,
-            true,
         );
         assert!(result.is_none(), "Lo<=0 のときは付着検定を省略するはず");
     }
@@ -275,7 +256,7 @@ mod tests {
         let info = bond_test_info();
         let lo = 3000.0;
         let d_eff = 539.0;
-        let end = rc_beam_bond_check_with_rebar(
+        let end = rc_beam_bond_check_1999(
             0.1,
             lo,
             300.0,
@@ -287,10 +268,9 @@ mod tests {
             24.0,
             false,
             true,
-            true,
         )
         .unwrap();
-        let mid = rc_beam_bond_check_with_rebar(
+        let mid = rc_beam_bond_check_1999(
             0.5,
             lo,
             300.0,
@@ -302,10 +282,9 @@ mod tests {
             24.0,
             false,
             false,
-            true,
         )
         .unwrap();
-        let right = rc_beam_bond_check_with_rebar(
+        let right = rc_beam_bond_check_1999(
             0.9,
             lo,
             300.0,
@@ -316,7 +295,6 @@ mod tests {
             &info,
             24.0,
             false,
-            true,
             true,
         )
         .unwrap();
@@ -333,7 +311,7 @@ mod tests {
     fn test_bond_fb_top_bar_factor_0_8() {
         let info = bond_test_info();
         let lo = 3000.0;
-        let top = rc_beam_bond_check_with_rebar(
+        let top = rc_beam_bond_check_1999(
             0.1,
             lo,
             300.0,
@@ -344,11 +322,10 @@ mod tests {
             &info,
             24.0,
             false,
-            true,
             true,
         )
         .unwrap();
-        let bottom = rc_beam_bond_check_with_rebar(
+        let bottom = rc_beam_bond_check_1999(
             0.1,
             lo,
             300.0,
@@ -360,37 +337,9 @@ mod tests {
             24.0,
             false,
             false,
-            true,
         )
         .unwrap();
         assert!((top.fb - 0.8 * bottom.fb).abs() < 1e-9);
-    }
-
-    #[test]
-    fn test_bond_fb_round_bar_uses_1999_formula() {
-        let info = bond_test_info();
-        let run = |top_bar: bool, long_term: bool| {
-            rc_beam_bond_check_with_rebar(
-                0.1,
-                3000.0,
-                300.0,
-                539.0,
-                471.625,
-                1140.4,
-                30_000_000.0,
-                &info,
-                24.0,
-                long_term,
-                top_bar,
-                false,
-            )
-            .unwrap()
-            .fb
-        };
-        assert!((run(true, true) - 0.96).abs() < 1e-9);
-        assert!((run(false, true) - 1.2).abs() < 1e-9);
-        assert!((run(true, false) - 1.44).abs() < 1e-9);
-        assert!((run(false, false) - 1.8).abs() < 1e-9);
     }
 
     #[test]
@@ -402,7 +351,7 @@ mod tests {
         let expected_spacing = (b - 2.0 * (40.0 + 10.0) - n1 * db) / (n1 - 1.0);
 
         // 長期は K=0.3・C/db+0.4（W 項なし）なので C を逆算で検証できる。
-        let result = rc_beam_bond_check_with_rebar(
+        let result = rc_beam_bond_check_1999(
             0.1,
             3000.0,
             b,
@@ -412,7 +361,6 @@ mod tests {
             30_000_000.0,
             &info,
             24.0,
-            true,
             true,
             true,
         )
@@ -444,7 +392,7 @@ mod tests {
         let top = super::super::rebar_info_from_shape(&shape, true).unwrap();
         let bottom = super::super::rebar_info_from_shape(&shape, false).unwrap();
         let run = |info: &RcRebarInfo| {
-            rc_beam_bond_check_with_rebar(
+            rc_beam_bond_check_1999(
                 0.1,
                 3000.0,
                 400.0,
@@ -455,7 +403,6 @@ mod tests {
                 info,
                 24.0,
                 false,
-                true,
                 true,
             )
             .unwrap()
@@ -483,7 +430,7 @@ mod tests {
             shear_legs: 10,
             is_circle: false,
         };
-        let result = rc_beam_bond_check_with_rebar(
+        let result = rc_beam_bond_check_1999(
             0.1,
             3000.0,
             1000.0,
@@ -494,7 +441,6 @@ mod tests {
             &info,
             24.0,
             false,
-            true,
             true,
         )
         .unwrap();
@@ -516,7 +462,7 @@ mod tests {
             ..info1
         };
         let run = |info: &RcRebarInfo| {
-            rc_beam_bond_check_with_rebar(
+            rc_beam_bond_check_1999(
                 0.1,
                 3000.0,
                 300.0,
@@ -527,7 +473,6 @@ mod tests {
                 info,
                 24.0,
                 false,
-                true,
                 true,
             )
             .unwrap()
@@ -553,10 +498,9 @@ mod tests {
         let mz_abs = 30_000_000.0;
         let fc = 24.0;
 
-        let result = rc_beam_bond_check_with_rebar(
-            0.1, lo, b, d_eff, j, at, mz_abs, &info, fc, false, true, true,
-        )
-        .unwrap();
+        let result =
+            rc_beam_bond_check_1999(0.1, lo, b, d_eff, j, at, mz_abs, &info, fc, false, true)
+                .unwrap();
 
         // 独立に手計算した期待値。
         let n1 = 6.0;

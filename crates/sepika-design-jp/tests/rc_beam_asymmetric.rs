@@ -1132,3 +1132,102 @@ fn simplified_zero_bending_beam_reports_unavailable_shear_instead_of_a_pass() {
     assert!(matches!(RcDesign.check(&zero, &section, concrete, &ctx),
         CheckOutcome::Skipped { reason } if reason.contains("引張側に主筋がなく")));
 }
+
+#[test]
+fn round_main_rebar_holds_bond_but_retains_bending_and_shear_failures() {
+    let mut model = input::model(false);
+    model.nodes[1].coord[0] = 1500.0;
+    model.nodes[1].restraint = sepika_core::dof::Dof6Mask::FIXED;
+    model.elements[0].rigid_zone.face_i = Some(250.0);
+    model.elements[0].rigid_zone.face_j = Some(250.0);
+    model.sections[0] = section(400.0, 600.0, 20.0, &[4], &[4]);
+    let mut main = material("SR235", MaterialCategory::Rebar);
+    main.id = sepika_core::ids::MaterialId(2);
+    model.sections[0].rebar_material = Some(main.id);
+    model.materials.push(main);
+
+    let face_i = 250.0 / 1500.0;
+    for (term, mz, qy) in [
+        (LoadTerm::Long, 90e6, 240_000.0),
+        (LoadTerm::Short, 136e6, 240_000.0),
+    ] {
+        for method in [BondMethod::Rc1999, BondMethod::Rc1991] {
+            let options = MemberDesignCheckOptions {
+                term,
+                rc_damage_control: true,
+                bond_method: method,
+                ..Default::default()
+            };
+            let outcomes = |model: &sepika_core::model::Model, mz, qy| {
+                run_member_design_checks(
+                    model,
+                    &[(
+                        ElemId(0),
+                        MemberForces {
+                            at: vec![(face_i, [0.0, qy, 0.0, 0.0, 0.0, mz])],
+                        },
+                    )],
+                    &[],
+                    &options,
+                )
+                .unwrap()
+                .member_checks
+                .into_iter()
+                .filter_map(|(_, pos, outcome)| (pos == face_i).then_some(outcome))
+                .collect::<Vec<_>>()
+            };
+            for grade in ["SR235", "SR295"] {
+                model.materials[2] = material(grade, MaterialCategory::Rebar);
+                model.materials[2].id = sepika_core::ids::MaterialId(2);
+                let is_round_bond_reason = |reason: &str| {
+                    reason.contains("丸鋼主筋")
+                        && reason.contains("端部フック")
+                        && reason.contains("付着長さ")
+                };
+                let reference = outcomes(&model, mz, qy);
+                assert!(
+                    matches!(reference.last(), Some(CheckOutcome::Skipped { reason }) if is_round_bond_reason(reason)),
+                    "{grade} {term:?} {method:?}: {reference:?}"
+                );
+                assert!(reference.iter().all(|outcome| match outcome {
+                    CheckOutcome::Checked(result) =>
+                        !result.ok() && result.components.iter().all(|c| c.kind != CheckKind::Bond),
+                    CheckOutcome::Skipped { .. } => true,
+                }));
+
+                let light = outcomes(&model, 1e6, 1_000.0);
+                assert!(
+                    matches!(light.as_slice(), [CheckOutcome::Skipped { reason }] if is_round_bond_reason(reason)),
+                    "{grade} {term:?} {method:?}: {light:?}"
+                );
+
+                let heavy = outcomes(&model, 400e6, 600_000.0);
+                let [CheckOutcome::Checked(ng), CheckOutcome::Skipped { reason }] =
+                    heavy.as_slice()
+                else {
+                    panic!("{grade} {term:?} {method:?}: {heavy:?}");
+                };
+                assert!(is_round_bond_reason(reason));
+                assert!(!ng.ok());
+                assert_eq!(
+                    ng.components
+                        .iter()
+                        .filter(|c| c.ratio > 1.0)
+                        .map(|c| c.kind)
+                        .collect::<Vec<_>>(),
+                    [CheckKind::Bending, CheckKind::Shear],
+                );
+                assert!(ng.components.iter().all(|c| c.kind != CheckKind::Bond));
+            }
+
+            let mut deformed = model.clone();
+            deformed.sections[0].rebar_material = Some(deformed.materials[1].id);
+            let control = outcomes(&deformed, mz, qy);
+            assert!(
+                matches!(control.as_slice(), [CheckOutcome::Checked(result)]
+                 if result.components.iter().any(|c| c.kind == CheckKind::Bond && c.ratio > 0.0)),
+                "{term:?} {method:?}: {control:?}"
+            );
+        }
+    }
+}
