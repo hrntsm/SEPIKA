@@ -147,7 +147,7 @@ fn bending_component(
     })
 }
 
-/// RC矩形梁のQD1に必要な両端の強軸曲げ伝達と内法長さ [mm] を確認する。
+/// 単一のRC矩形梁で両端の接合と内法長さ [mm] を確認する。接続柱の遠端支持は問わない。
 /// `adjacency` は同一モデルの `NodeAdjacency::primary_frame` を渡す。
 pub fn beam_qd1_clear_span(
     model: &Model,
@@ -199,7 +199,7 @@ pub(super) fn beam_qd1_face_distance(
     elem: &ElementData,
     index: usize,
     ez: [f64; 3],
-    required_qy_axis: Option<[f64; 3]>,
+    grouped_qy_axis: Option<[f64; 3]>,
 ) -> Result<f64, String> {
     if !elem.kind.is_primary_frame_support() {
         return Err("QD1用に両端の強軸曲げを伝達する梁要素を確認できません".into());
@@ -237,7 +237,7 @@ pub(super) fn beam_qd1_face_distance(
         format!("QD1用の一本部材の外端（{end}）で局所Qy方向の反力を伝達する支持を確認できません")
     };
     let required_qy_axis =
-        required_qy_axis.filter(|&ey| !restrains_direction(node, ey, [Dof::Ux, Dof::Uy, Dof::Uz]));
+        grouped_qy_axis.filter(|&ey| !restrains_direction(node, ey, [Dof::Ux, Dof::Uy, Dof::Uz]));
     let distance_mm = if column_connected {
         let column_faces = girder_column_faces(model, elem, adjacency);
         let face = column_faces
@@ -248,7 +248,11 @@ pub(super) fn beam_qd1_face_distance(
         if !restrained
             && !others().any(|column| {
                 face.columns.contains(&column.id)
-                    && column_transmits_bending(model, column, node, ez)
+                    && if grouped_qy_axis.is_some() {
+                        column_transmits_bending(model, column, node, ez)
+                    } else {
+                        column_axis_at_bending_connection(model, column, node, ez).is_some()
+                    }
             })
         {
             return Err(unsupported());
@@ -327,21 +331,14 @@ pub(crate) fn column_transmits_bending(
     near: &Node,
     ez: [f64; 3],
 ) -> bool {
-    let side = usize::from(column.nodes[0] != near.id);
-    if !transmits_bending(column.end_cond[side]) {
-        return false;
-    }
-    let Some(ex) = frame_end_positions(model, column).and_then(|[a, b]| unit_from(a, b)) else {
+    let Some(ex) = column_axis_at_bending_connection(model, column, near, ez) else {
         return false;
     };
-    if dot(ex, ez).abs() >= 1.0 - 1e-9 {
-        return false;
-    }
     let Some(translation_axis) = unit(cross(ez, ex)) else {
         return false;
     };
     let rotation_axis = cross(ex, translation_axis);
-    let far_side = 1 - side;
+    let far_side = usize::from(column.nodes[0] == near.id);
     let Some(far) = model.node(column.nodes[far_side]) else {
         return false;
     };
@@ -349,6 +346,21 @@ pub(crate) fn column_transmits_bending(
     restrains_direction(far, translation_axis, [Dof::Ux, Dof::Uy, Dof::Uz])
         || (transmits_bending(column.end_cond[far_side])
             && restrains_direction(far, rotation_axis, [Dof::Rx, Dof::Ry, Dof::Rz]))
+}
+
+fn column_axis_at_bending_connection(
+    model: &Model,
+    column: &ElementData,
+    near: &Node,
+    ez: [f64; 3],
+) -> Option<[f64; 3]> {
+    let side = usize::from(column.nodes[0] != near.id);
+    if !transmits_bending(column.end_cond[side]) {
+        return None;
+    }
+    let [a, b] = frame_end_positions(model, column)?;
+    let ex = unit_from(a, b)?;
+    (dot(ex, ez).abs() < 1.0 - 1e-9).then_some(ex)
 }
 
 fn column_transmits_qy_reaction(

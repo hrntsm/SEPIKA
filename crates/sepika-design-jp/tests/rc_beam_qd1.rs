@@ -3,32 +3,17 @@ use std::collections::HashMap;
 use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::ElemId;
 use sepika_core::model::{EndCondition, Model};
-use sepika_core::section_shape::{RebarSize, SectionShape, StandardRebar};
+use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::{
     run_member_design_checks, CheckKind, CheckOutcome, LoadTerm, MemberDesignCheckOptions, QdMethod,
 };
 use sepika_element::frame::beam::MemberForces;
 
 #[path = "fixtures/rc_beam_asymmetric_model.rs"]
+mod asymmetric;
+#[path = "fixtures/rc_beam_qd1_model.rs"]
 mod input;
-
-fn model() -> Model {
-    let mut model = input::model(false);
-    model.nodes[1].coord[0] = 4500.0;
-    model.nodes[1].restraint = Dof6Mask::FIXED;
-    let beam = &mut model.elements[0];
-    beam.local_axis.ref_vector = [0.0, 0.0, 1.0];
-    beam.rigid_zone.face_i = Some(250.0);
-    beam.rigid_zone.face_j = Some(250.0);
-    let mut section = input::section(350.0, 600.0, 19.0, &[2], &[4]);
-    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut section.shape else {
-        unreachable!();
-    };
-    rebar.main_dia = RebarSize::Standard(StandardRebar::D19);
-    rebar.cover = 30.5;
-    model.sections[0] = section;
-    model
-}
+use input::{add_columns_at_outer_nodes, extend_j_column, model};
 
 fn check(
     model: &Model,
@@ -177,55 +162,8 @@ fn unavailable_qd1_preserves_independent_bending_failure_and_never_switches_to_q
     }
 }
 
-fn add_columns_at_outer_nodes(model: &mut Model, reference: [f64; 3]) {
-    use sepika_core::ids::{NodeId, SectionId};
-    use sepika_core::model::FrameSectionUse;
-    use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
-
-    let column_shape = SectionShape::RcColumnRect {
-        b: 500.0,
-        d: 500.0,
-        rebar: RcRectColumnRebar {
-            main_dia: RebarSize::Standard(StandardRebar::D19),
-            x: vec![3],
-            y: vec![3],
-            cover: 40.0,
-            hoop: RectColumnHoop {
-                dia: RebarSize::Standard(StandardRebar::D10),
-                pitch: 100.0,
-                legs_x: 2,
-                legs_y: 2,
-            },
-        },
-    };
-    let section_id = SectionId(model.sections.len() as u32);
-    let mut section = column_shape.to_section(section_id, "C1".into());
-    section.frame_use = Some(FrameSectionUse::Column);
-    section.material = model.sections[0].material;
-    model.sections.push(section);
-    let beam = model.elements[0].clone();
-    for node_id in [NodeId(0), NodeId(1)] {
-        model.nodes[node_id.index()].restraint = Dof6Mask::FREE;
-        let mut base = model.nodes[node_id.index()].clone();
-        let base_id = NodeId(model.nodes.len() as u32);
-        base.id = base_id;
-        base.coord[2] = -3000.0;
-        base.restraint = Dof6Mask::FIXED;
-        model.nodes.push(base);
-        let mut column = beam.clone();
-        column.id = ElemId(model.elements.len() as u32);
-        column.section = Some(section_id);
-        column.nodes = [base_id, node_id].into_iter().collect();
-        column.local_axis.ref_vector = reference;
-        model.elements.push(column);
-    }
-}
-
 #[test]
 fn connected_columns_define_moment_transfer_and_physical_clear_span() {
-    use sepika_core::dof::Dof;
-    use sepika_core::ids::NodeId;
-
     let mut model = model();
     add_columns_at_outer_nodes(&mut model, [1.0, 1.0, 0.0]);
     let rows = [(0.5, [0.0, 30_000.0, 0.0, 0.0, 0.0, 10e6])];
@@ -242,63 +180,27 @@ fn connected_columns_define_moment_transfer_and_physical_clear_span() {
         "{missing:?}"
     );
 
-    let mut free_branch = model.clone();
-    free_branch.nodes[3].restraint = Dof6Mask::FREE;
-    for (fixed, spring, qd1_available) in [
-        (None, None, false),
-        (Some(Dof::Uz), None, false),
-        (None, Some(Dof::Uz), false),
-        (Some(Dof::Ux), None, true),
-        (None, Some(Dof::Ry), true),
-    ] {
-        let far = &mut free_branch.nodes[3];
-        far.restraint = Dof6Mask::FREE;
-        if let Some(dof) = fixed {
-            far.restraint.set_fixed(dof);
+    let mut extended = model.clone();
+    extend_j_column(&mut extended);
+    for restraint in [Dof6Mask::FIXED, Dof6Mask::FREE] {
+        extended.nodes[4].restraint = restraint;
+        for (method, expected_n) in [
+            (QdMethod::Qd1, 77_398.0),
+            (QdMethod::Min, 70_000.0),
+            (QdMethod::Qd2, 70_000.0),
+        ] {
+            let outcomes = check(&extended, method, Some(0.0), &rows, -10_000.0);
+            assert_eq!(outcomes.len(), 1, "{outcomes:?}");
+            assert_shear_n(&outcomes[0].2, expected_n);
         }
-        far.support_spring = spring.map(|dof| {
-            let mut spring = [0.0; 6];
-            spring[dof as usize] = 1e6;
-            spring
-        });
-        for method in [QdMethod::Qd1, QdMethod::Min] {
-            let outcomes = check(&free_branch, method, Some(0.0), &rows, -10_000.0);
-            if qd1_available {
-                let expected = if method == QdMethod::Qd1 {
-                    77_398.0
-                } else {
-                    70_000.0
-                };
-                assert_shear_n(&outcomes[0].2, expected);
-            } else {
-                assert!(
-                    matches!(&outcomes[0].2, CheckOutcome::Skipped { reason } if reason.contains("伝達先")),
-                    "{outcomes:?}"
-                );
-            }
-        }
-        let qd2 = check(&free_branch, QdMethod::Qd2, None, &rows, -10_000.0);
-        assert_shear_n(&qd2[0].2, 70_000.0);
     }
 
-    free_branch.nodes[3].support_spring = None;
-    let mut unrestrained_tip = free_branch.nodes[3].clone();
-    unrestrained_tip.id = NodeId(4);
-    unrestrained_tip.coord[2] = -6000.0;
-    free_branch.nodes.push(unrestrained_tip);
-    let mut extension = free_branch.elements[2].clone();
-    extension.id = ElemId(3);
-    extension.nodes = [NodeId(4), NodeId(3)].into_iter().collect();
-    free_branch.elements.push(extension);
-    for method in [QdMethod::Qd1, QdMethod::Min] {
-        let outcomes = check(&free_branch, method, Some(0.0), &rows, -10_000.0);
-        assert!(
-            matches!(&outcomes[0].2, CheckOutcome::Skipped { reason } if reason.contains("伝達先")),
-            "{outcomes:?}"
-        );
-    }
-    let qd2 = check(&free_branch, QdMethod::Qd2, None, &rows, -10_000.0);
-    assert_shear_n(&qd2[0].2, 70_000.0);
+    extended.elements[0].end_cond[1] = EndCondition::Pinned;
+    let beam_pin = check(&extended, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
+    assert!(
+        matches!(&beam_pin[0].2, CheckOutcome::Skipped { reason } if reason.contains("強軸曲げが解放")),
+        "{beam_pin:?}"
+    );
 
     model.elements[2].end_cond[1] = EndCondition::Pinned;
     let outcomes = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
