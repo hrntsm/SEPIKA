@@ -18,6 +18,8 @@ pub struct FrameStrongBendingSpan {
 /// 強軸曲げの需要を照査する全長比と、その位置の局所断面力 [N, N·mm]。
 pub struct FrameStrongBendingPeak {
     pub xi: f64,
+    /// 実材軸i端からの距離 [mm]。
+    pub x_mm: f64,
     /// 集中荷重位置では左極限。
     pub left: [f64; 6],
     /// i端フェースまたは区間内部で集中荷重による断面力の跳びがある場合の右極限。
@@ -221,6 +223,7 @@ pub fn frame_strong_bending_span(
             };
             FrameStrongBendingPeak {
                 xi: x / length_mm,
+                x_mm: x,
                 left,
                 right,
                 is_i_face: x == demand_lo,
