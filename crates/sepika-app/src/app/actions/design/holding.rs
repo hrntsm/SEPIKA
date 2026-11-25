@@ -1426,7 +1426,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 13.0,
-            steel_manufacture: Default::default(),
+            steel_manufacture: sepika_core::section_shape::SrcHManufacture::BuiltUp,
         });
         let steel_id = steel.id;
         section.steel_material = Some(steel_id);

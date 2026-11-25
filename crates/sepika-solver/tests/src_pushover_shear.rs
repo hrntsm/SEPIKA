@@ -652,6 +652,33 @@ fn src_nonlinear_analysis_identifies_unconfirmed_manufacture_and_plate_thickness
 }
 
 #[test]
+fn rigid_diaphragm_src_girder_keeps_auto_spring_but_explicit_fiber_requires_manufacture() {
+    use sepika_core::model::Constraint;
+
+    let mut model = restrained_member(FrameSectionUse::Girder, 10.0, 13.0);
+    model.elements[0].kind = ElementKind::Beam;
+    model.constraints.push(Constraint::rigid_diaphragm(
+        StoryId(1),
+        NodeId(1),
+        vec![],
+    ));
+    let Some(SectionShape::SrcBeamRect { steel_manufacture, .. }) =
+        model.sections[0].shape.as_mut()
+    else {
+        unreachable!();
+    };
+    *steel_manufacture = SrcHManufacture::Unknown;
+
+    let result = run(&mut model, SeismicDir::Y, 1_000.0).unwrap();
+    assert!((result.member_response[0].shear_strong - 1_000.0).abs() < 1.0);
+    assert!(result.fiber_states.is_empty());
+
+    model.elements[0].force_regime = ForceRegime::AxialBendingInteract;
+    let error = run(&mut model, SeismicDir::Y, 1_000.0).unwrap_err();
+    assert!(error.contains("部材 ID 0") && error.contains("製造区分が不明"), "{error}");
+}
+
+#[test]
 fn src_material_strength_rejects_factor_above_the_notice_limit() {
     let mut model = restrained_member(FrameSectionUse::Column, 45.0, 13.0);
     model.materials[3].strength_factor = Some(1.11);
