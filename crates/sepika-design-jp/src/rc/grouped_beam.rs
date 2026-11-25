@@ -152,7 +152,14 @@ pub(crate) fn grouped_beam_qd1_mechanism(
     let mut clear_mm = span.parts.iter().map(|(_, l)| l).sum::<f64>();
     let mut moments_nmm = [[0.0; 2]; 2];
     for (side, (elem, length_mm)) in [end_i, end_j].into_iter().enumerate() {
-        let face_mm = beam_qd1_face_distance(model, adjacency, elem, side, span.axes[2])?;
+        let face_mm = beam_qd1_face_distance(
+            model,
+            adjacency,
+            elem,
+            side,
+            span.axes[2],
+            Some(span.axes[1]),
+        )?;
         if face_mm >= length_mm {
             return Err("QD1用の一本部材の外端フェースが端の分割区間に収まりません".into());
         }

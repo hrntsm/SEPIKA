@@ -416,13 +416,15 @@ fn grouped_rc_q0_uses_whole_span_reactions_without_exposing_a_segment_q0() {
         );
     }
 
-    // 右区間の x=1000 mm で 8 kN 上向き。全スパンの左端18 kN、右端14 kN。
-    let mut unload = point(1000.0, -8000.0);
-    unload.elem = ElemId(1);
-    split.load_cases[1].member.push(unload);
-    let q0 = rc_grouped_beam_q0_by_terms(&split, &[(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)]);
-    for value in q0.values() {
-        close(*value.as_ref().unwrap(), 18_000.0);
+    // 鏡映した二つの荷重配置では、18 kNが支配する外端が入れ替わる。
+    for load_part in [ElemId(0), ElemId(1)] {
+        let mut unload = point(1000.0, -8000.0);
+        unload.elem = load_part;
+        split.load_cases[1].member = vec![unload];
+        let q0 = rc_grouped_beam_q0_by_terms(&split, &[(LoadCaseId(0), 1.0), (LoadCaseId(1), 1.0)]);
+        for value in q0.values() {
+            close(*value.as_ref().unwrap(), 18_000.0);
+        }
     }
 }
 

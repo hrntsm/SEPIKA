@@ -177,14 +177,11 @@ fn unavailable_qd1_preserves_independent_bending_failure_and_never_switches_to_q
     }
 }
 
-#[test]
-fn connected_columns_define_moment_transfer_and_physical_clear_span() {
-    use sepika_core::dof::Dof;
+fn add_columns_at_outer_nodes(model: &mut Model, reference: [f64; 3]) {
     use sepika_core::ids::{NodeId, SectionId};
     use sepika_core::model::FrameSectionUse;
     use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop};
 
-    let mut model = model();
     let column_shape = SectionShape::RcColumnRect {
         b: 500.0,
         d: 500.0,
@@ -201,26 +198,36 @@ fn connected_columns_define_moment_transfer_and_physical_clear_span() {
             },
         },
     };
-    let mut section = column_shape.to_section(SectionId(1), "C1".into());
+    let section_id = SectionId(model.sections.len() as u32);
+    let mut section = column_shape.to_section(section_id, "C1".into());
     section.frame_use = Some(FrameSectionUse::Column);
     section.material = model.sections[0].material;
     model.sections.push(section);
     let beam = model.elements[0].clone();
-    for end in 0..2 {
-        model.nodes[end].restraint = Dof6Mask::FREE;
-        let mut base = model.nodes[end].clone();
-        let base_id = NodeId(2 + end as u32);
+    for node_id in [NodeId(0), NodeId(1)] {
+        model.nodes[node_id.index()].restraint = Dof6Mask::FREE;
+        let mut base = model.nodes[node_id.index()].clone();
+        let base_id = NodeId(model.nodes.len() as u32);
         base.id = base_id;
         base.coord[2] = -3000.0;
         base.restraint = Dof6Mask::FIXED;
         model.nodes.push(base);
         let mut column = beam.clone();
-        column.id = ElemId(1 + end as u32);
-        column.section = Some(SectionId(1));
-        column.nodes = [base_id, beam.nodes[end]].into_iter().collect();
-        column.local_axis.ref_vector = [1.0, 1.0, 0.0];
+        column.id = ElemId(model.elements.len() as u32);
+        column.section = Some(section_id);
+        column.nodes = [base_id, node_id].into_iter().collect();
+        column.local_axis.ref_vector = reference;
         model.elements.push(column);
     }
+}
+
+#[test]
+fn connected_columns_define_moment_transfer_and_physical_clear_span() {
+    use sepika_core::dof::Dof;
+    use sepika_core::ids::NodeId;
+
+    let mut model = model();
+    add_columns_at_outer_nodes(&mut model, [1.0, 1.0, 0.0]);
     let rows = [(0.5, [0.0, 30_000.0, 0.0, 0.0, 0.0, 10e6])];
     let outcomes = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
     assert_eq!(outcomes.len(), 1, "{outcomes:?}");
@@ -649,6 +656,46 @@ fn grouped_rc_beam_qd1_does_not_accept_an_element_only_q0_or_unverified_span() {
             assert!(outcomes.iter().all(|(_, _, outcome)| !matches!(
                 outcome, CheckOutcome::Checked(result) if result.components.iter().any(|c| c.kind == CheckKind::Shear)
             )));
+        }
+    }
+}
+
+#[test]
+fn grouped_rc_qd1_requires_transverse_reaction_support_at_each_outer_end() {
+    use sepika_core::dof::Dof;
+
+    let mut directly_supported = split_beam();
+    let mut column_supported = split_beam();
+    add_columns_at_outer_nodes(&mut column_supported, [1.0, 0.0, 0.0]);
+    // 反平行な柱軸も同じ鉛直反力を伝える。
+    column_supported.elements[3].nodes.swap(0, 1);
+
+    for (model, support_index) in [(&mut directly_supported, 1), (&mut column_supported, 4)] {
+        // 0.5 m角の柱面も、直接支持として入力したフェースも、節点芯から各0.25 m。
+        for stage in [0, 1, 2] {
+            model.nodes[support_index]
+                .restraint
+                .set(Dof::Uz, stage == 0);
+            model.nodes[support_index].support_spring =
+                (stage == 2).then_some([0.0, 0.0, 1.0e6, 0.0, 0.0, 0.0]);
+            for method in [QdMethod::Qd1, QdMethod::Min] {
+                let outcomes = check_split(model, method, Some(Ok(20_000.0)));
+                assert_eq!(outcomes.len(), 6, "{outcomes:?}");
+                if stage == 1 {
+                    assert!(outcomes.iter().all(|(_, _, outcome)| matches!(
+                        outcome, CheckOutcome::Skipped { reason } if reason.contains("局所Qy方向の反力")
+                    )), "{outcomes:?}");
+                } else {
+                    let expected = if method == QdMethod::Qd1 {
+                        93_390.556_25
+                    } else {
+                        80_000.0
+                    };
+                    for (_, _, outcome) in outcomes {
+                        assert_shear_n(&outcome, expected);
+                    }
+                }
+            }
         }
     }
 }

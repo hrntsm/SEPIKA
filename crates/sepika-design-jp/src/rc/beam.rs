@@ -167,8 +167,8 @@ pub fn beam_qd1_clear_span(
     let [i, j] = frame_end_positions(model, elem).ok_or("QD1用の梁の材軸を確定できません")?;
     let [_, _, ez] = local_frame_axes(i, j, elem.local_axis.ref_vector)?;
     let span_mm = dist(i, j)
-        - beam_qd1_face_distance(model, adjacency, elem, 0, ez)?
-        - beam_qd1_face_distance(model, adjacency, elem, 1, ez)?;
+        - beam_qd1_face_distance(model, adjacency, elem, 0, ez, None)?
+        - beam_qd1_face_distance(model, adjacency, elem, 1, ez, None)?;
     if !span_mm.is_finite() || span_mm <= 0.0 {
         return Err("QD1に必要な有限で正の内法長さが成立しません".into());
     }
@@ -199,6 +199,7 @@ pub(super) fn beam_qd1_face_distance(
     elem: &ElementData,
     index: usize,
     ez: [f64; 3],
+    required_qy_axis: Option<[f64; 3]>,
 ) -> Result<f64, String> {
     if !elem.kind.is_primary_frame_support() {
         return Err("QD1用に両端の強軸曲げを伝達する梁要素を確認できません".into());
@@ -232,6 +233,11 @@ pub(super) fn beam_qd1_face_distance(
             "QD1用の梁の{end}が自由端・回転自由な支点、または強軸曲げの伝達先を確認できない接合です"
         )
     };
+    let unrecoverable_reaction = || {
+        format!("QD1用の一本部材の外端（{end}）で局所Qy方向の反力を伝達する支持を確認できません")
+    };
+    let required_qy_axis =
+        required_qy_axis.filter(|&ey| !restrains_direction(node, ey, [Dof::Ux, Dof::Uy, Dof::Uz]));
     let distance_mm = if column_connected {
         let column_faces = girder_column_faces(model, elem, adjacency);
         let face = column_faces
@@ -247,6 +253,15 @@ pub(super) fn beam_qd1_face_distance(
         {
             return Err(unsupported());
         }
+        if let Some(ey) = required_qy_axis {
+            let supported = others().any(|column| {
+                face.columns.contains(&column.id)
+                    && column_transmits_qy_reaction(model, column, node, ey)
+            });
+            if !supported {
+                return Err(unrecoverable_reaction());
+            }
+        }
         if index == 0 {
             face.position_mm
         } else {
@@ -260,6 +275,9 @@ pub(super) fn beam_qd1_face_distance(
             return Err(format!(
                 "QD1用の内法長さ: {end}で柱以外の接続部材との実端面を確認できません"
             ));
+        }
+        if required_qy_axis.is_some() {
+            return Err(unrecoverable_reaction());
         }
         [elem.rigid_zone.face_i, elem.rigid_zone.face_j][index]
             .ok_or_else(|| format!("QD1用の内法長さ: {end}のフェース距離が未算定です"))?
@@ -331,6 +349,24 @@ pub(crate) fn column_transmits_bending(
     restrains_direction(far, translation_axis, [Dof::Ux, Dof::Uy, Dof::Uz])
         || (transmits_bending(column.end_cond[far_side])
             && restrains_direction(far, rotation_axis, [Dof::Rx, Dof::Ry, Dof::Rz]))
+}
+
+fn column_transmits_qy_reaction(
+    model: &Model,
+    column: &ElementData,
+    near: &Node,
+    ey: [f64; 3],
+) -> bool {
+    let Some(ex) = frame_end_positions(model, column).and_then(|[a, b]| unit_from(a, b)) else {
+        return false;
+    };
+    if dist(ex, ey).min(dist(ex, ey.map(|value| -value))) > 1e-9 {
+        return false;
+    }
+    let far_side = usize::from(column.nodes[0] == near.id);
+    model
+        .node(column.nodes[far_side])
+        .is_some_and(|far| restrains_direction(far, ey, [Dof::Ux, Dof::Uy, Dof::Uz]))
 }
 
 pub(crate) fn frame_end_positions(model: &Model, elem: &ElementData) -> Option<[[f64; 3]; 2]> {
