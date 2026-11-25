@@ -916,3 +916,39 @@ fn time_history_cft_shows_buckling_and_required_gravity_reasons_at_each_position
         }
     }
 }
+
+#[test]
+fn signed_q0_th_detail_released_beam_keeps_independent_bending_failure() {
+    use sepika_core::model::EndCondition;
+
+    let mut app = App::default();
+    app.load_model(fixture::model());
+    app.run_combination(0);
+    let mut peak = app.core.scoped.results.as_ref().unwrap().member_forces[0]
+        .1
+        .clone();
+    for (_, f) in &mut peak.at {
+        f[5] = 1e9;
+    }
+    app.run_combination(1);
+    let rec = ThRecording {
+        peak_member_forces: vec![Some(peak)],
+        ..Default::default()
+    };
+    app.core.model.elements[0].end_cond[0] = EndCondition::Pinned;
+
+    for method in [QdMethod::Qd1, QdMethod::Min, QdMethod::Qd2] {
+        app.core.analysis_cfg.qd_method = method;
+        let text = labels(&app, &rec, true);
+        assert!(text.contains("NG"), "{method:?}: {text}");
+        if method == QdMethod::Qd2 {
+            assert!(!text.contains("強軸曲げが解放"), "{text}");
+            assert!(!text.contains("検定不能"), "{text}");
+        } else {
+            assert!(
+                text.contains("検定不能: QD1用の梁のi端で強軸曲げが解放"),
+                "{text}"
+            );
+        }
+    }
+}

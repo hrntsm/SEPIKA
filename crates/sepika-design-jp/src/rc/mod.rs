@@ -23,6 +23,7 @@ mod design_shear;
 pub(crate) mod section_props;
 mod shear_capacity;
 
+pub use beam::beam_qd1_clear_span;
 pub use bond::{rc_beam_bond_check_1991, Bond1991Result, BondCheckResult};
 pub(crate) use bond::{rc_beam_bond_check_1991_with_rebar, rc_beam_bond_check_with_rebar};
 pub use clear_span::{rc_member_clear_span, RcClearSpanError};
@@ -174,7 +175,7 @@ impl RcDesign {
         let main_rebar_valid = material_issue.is_none();
         let shear_rebar_valid = shear_material_issue.is_none();
         let beam = matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }));
-        let shear_issue = missing_shear_reference.or_else(|| beam_shear_issue(forces, sec, ctx));
+        let shear_issue = missing_shear_reference;
         let mut section_issue = None;
         let outcome = if let (false, true, true, Some(reason)) = (
             beam,
@@ -198,22 +199,6 @@ impl RcDesign {
                 &mut section_issue,
             )
         };
-        if let (true, true, true, Some(reason), None) = (
-            beam,
-            main_rebar_valid,
-            shear_rebar_valid,
-            shear_issue,
-            &section_issue,
-        ) {
-            if matches!(outcome, CheckOutcome::Checked(_)) {
-                return (
-                    CheckOutcome::Skipped {
-                        reason: reason.into(),
-                    },
-                    None,
-                );
-            }
-        }
         let incomplete =
             combine_incomplete_reasons(material_issue, shear_material_issue.as_deref());
         let incomplete = if beam || incomplete.is_some() {
@@ -427,27 +412,6 @@ impl RcDesign {
         }
         Ok((shape, fc_raw))
     }
-}
-
-fn beam_shear_issue(
-    forces: &MemberForcesAt,
-    sec: &Section,
-    ctx: &DesignCtx,
-) -> Option<&'static str> {
-    let qd = ctx.seismic_qd.as_ref()?;
-    if !matches!(sec.shape, Some(SectionShape::RcBeamRect { .. })) {
-        return None;
-    }
-    if !qd
-        .long_at
-        .iter()
-        .find(|(p, _)| (p - forces.pos).abs() < 1e-6)
-        .is_some_and(|(p, f)| p.is_finite() && f.iter().all(|v| v.is_finite()))
-    {
-        return Some("設計用せん断力に必要な重力参照内力が不足しています");
-    }
-    (qd.method != crate::QdMethod::Qd2 && !qd.q_simple.is_some_and(|q| q.is_finite() && q >= 0.0))
-        .then_some("QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません")
 }
 
 #[cfg(test)]

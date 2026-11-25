@@ -304,6 +304,7 @@ pub fn run_member_design_checks(
         });
 
     let mut column_mechanism_topology = None;
+    let mut rc_beam_adjacency = None;
     let mut member_checks: Vec<(ElemId, f64, CheckOutcome)> = Vec::new();
     let mut lateral_bracing_references = Vec::new();
     let mut steel_deflection_references = Vec::new();
@@ -499,6 +500,17 @@ pub fn run_member_design_checks(
             None => length,
         };
 
+        let rc_beam_qd1 = (structure == StructureKind::Rc
+            && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }))
+            && options.term == LoadTerm::Short
+            && options.long_member_forces.is_some()
+            && options.qd_method != QdMethod::Qd2)
+            .then(|| {
+                let adjacency = rc_beam_adjacency.get_or_insert_with(|| {
+                    sepika_core::adjacency::NodeAdjacency::primary_frame(model)
+                });
+                crate::rc::beam_qd1_clear_span(model, adjacency, elem)
+            });
         let seismic_qd = long_mf_by_id
             .as_ref()
             .and_then(|map| map.get(elem_id))
@@ -509,7 +521,11 @@ pub fn run_member_design_checks(
                 q_simple: options
                     .q_simple_by_elem
                     .and_then(|m| m.get(elem_id).copied()),
-                clear_length: clear_span,
+                clear_length: match &rc_beam_qd1 {
+                    Some(Ok(span)) => *span,
+                    Some(Err(_)) => f64::NAN,
+                    None => clear_span,
+                },
                 method: options.qd_method,
             });
 
@@ -635,6 +651,7 @@ pub fn run_member_design_checks(
             src_column_seismic_bending: None,
             column_sum_my,
             beam_has_slab: kind == MemberKind::Girder && beam_has_attached_slab(model, elem),
+            rc_beam_qd1_issue: rc_beam_qd1.and_then(Result::err),
             steel_attr,
         };
 
@@ -660,26 +677,11 @@ pub fn run_member_design_checks(
                 continue;
             }
             let mfa = MemberForcesAt::from_local(*pos, *forces);
-            let missing_q0 = kind == MemberKind::Girder
-                && options.long_member_forces.is_some()
-                && options.qd_method != QdMethod::Qd2
-                && matches!(
-                    sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category)),
-                    sepika_core::structure_kind::StructureKind::Rc
-                )
-                && options
-                    .q_simple_by_elem
-                    .and_then(|q| q.get(elem_id))
-                    .is_none();
             let missing_gravity = options.long_member_forces.is_some()
                 && ctx.seismic_qd.is_none()
-                && (matches!(
-                    sec.shape,
-                    Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
-                ) && sepika_core::structure_kind::structure_kind_of(
-                    Some(sec),
-                    Some(mat.category),
-                ) == sepika_core::structure_kind::StructureKind::Rc
+                && (options.term == LoadTerm::Short
+                    && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }))
+                    && structure == StructureKind::Rc
                     || matches!(
                         (&sec.shape, kind),
                         (Some(SectionShape::SrcColumnRect { .. }), MemberKind::Column)
@@ -712,8 +714,6 @@ pub fn run_member_design_checks(
                     (wrong_main_rebar || wrong_shear_rebar) && column_without_gravity;
                 let missing_shear_reference = if missing_gravity || missing_column_reference {
                     Some("設計用せん断力に必要な重力参照内力が不足しています")
-                } else if missing_q0 {
-                    Some("QD1用の部材荷重由来Q0が不足しています。FEMのQLでは代替しません")
                 } else {
                     None
                 };

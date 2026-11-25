@@ -238,7 +238,9 @@ impl App {
         let long_member_forces = gravity_long_owned.as_deref().filter(|_| is_seismic_combo);
         let group_overrides =
             sepika_design_jp::girder_group_overrides(&self.core.model, &results.member_forces);
-        let q0_by_elem = if long_member_forces.is_some() {
+        let q0_by_elem = if long_member_forces.is_some()
+            && self.core.analysis_cfg.qd_method != sepika_design_jp::QdMethod::Qd2
+        {
             match sepika_job::simple_beam_q0_by_terms(&self.core.model, &gravity_terms) {
                 Ok(q0) => q0,
                 Err(reason) => {

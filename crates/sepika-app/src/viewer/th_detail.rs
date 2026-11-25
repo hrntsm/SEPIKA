@@ -715,35 +715,41 @@ fn draw_peak_check(
             })
         })
         .flatten();
-    let q_simple = if wire_qd && rc_beam && kind != MemberKind::Column && qd_method != QdMethod::Qd2
-    {
-        match sepika_job::design_q0::rc_beam_q0_for_gravity_cases(model, elem) {
-            Ok(q0) => q0,
-            Err(reason) => {
-                ui.colored_label(
-                    theme::PARETO_RED,
-                    format!("検定不能: QD1用の部材荷重由来Q0を算定できません（{reason}）"),
-                );
-                if !wrong_shear_rebar {
-                    draw_peak_precheck(ui, peak, axial_peaks, None, torsion_reason, None);
-                    return;
-                }
-                None
+    let (rc_beam_qd1, q_simple) =
+        if wire_qd && rc_beam && kind != MemberKind::Column && qd_method != QdMethod::Qd2 {
+            match sepika_job::design_q0::rc_beam_q0_for_gravity_cases(model, elem) {
+                Ok(q0) => (
+                    Some(sepika_design_jp::rc::beam_qd1_clear_span(
+                        model,
+                        &sepika_core::adjacency::NodeAdjacency::primary_frame(model),
+                        elem,
+                    )),
+                    q0,
+                ),
+                Err(reason) => (
+                    Some(Err(format!(
+                        "QD1用の部材荷重由来Q0を算定できません（{reason}）"
+                    ))),
+                    None,
+                ),
             }
-        }
-    } else {
-        None
-    };
+        } else {
+            (None, None)
+        };
     let long_at = long_mf.and_then(|list| list.iter().find(|(id, _)| *id == elem.id));
     let missing_gravity = wire_qd && long_at.is_none();
     let seismic_qd = (long_at.is_some()
-        || (wire_qd && (rc_column || structure == StructureKind::Cft)))
+        || (wire_qd && (rc_beam || rc_column || structure == StructureKind::Cft)))
         .then(|| sepika_design_jp::SeismicQd {
             long_at: long_at.map_or_else(Vec::new, |(_, mf)| mf.at.clone()),
             n_factor: 1.5,
             n_mechanism: 1.0,
             q_simple,
-            clear_length: clear_span,
+            clear_length: match &rc_beam_qd1 {
+                Some(Ok(span)) => *span,
+                Some(Err(_)) => f64::NAN,
+                None => clear_span,
+            },
             method: qd_method,
         });
     let frame_buckling = structure == StructureKind::S
@@ -787,30 +793,6 @@ fn draw_peak_check(
         }
     }
 
-    let missing_rc_beam_gravity = wire_qd
-        && rc_beam
-        && seismic_qd.as_ref().is_none_or(|qd| {
-            qd.long_at.is_empty()
-                || !qd
-                    .long_at
-                    .iter()
-                    .all(|(p, f)| p.is_finite() && f.iter().all(|v| v.is_finite()))
-                || peak
-                    .at
-                    .iter()
-                    .any(|(p, _)| !qd.long_at.iter().any(|(q, _)| (p - q).abs() < 1e-6))
-        });
-    if missing_rc_beam_gravity && !wrong_main_rebar && !wrong_shear_rebar {
-        draw_peak_precheck(
-            ui,
-            peak,
-            axial_peaks,
-            Some("設計用せん断力に必要な重力参照内力が不足しています"),
-            torsion_reason,
-            None,
-        );
-        return;
-    }
     let column_mechanism_topology =
         (rc_column && kind == MemberKind::Column && wire_qd && qd_method != QdMethod::Qd2)
             .then(|| sepika_design_jp::rc::ColumnMechanismTopology::new(model));
@@ -856,6 +838,7 @@ fn draw_peak_check(
             }),
         beam_has_slab: kind == MemberKind::Girder
             && sepika_design_jp::beam_has_attached_slab(&app.core.model, elem),
+        rc_beam_qd1_issue: rc_beam_qd1.and_then(Result::err),
         seismic_qd,
         ..Default::default()
     };
@@ -954,13 +937,10 @@ fn draw_peak_check(
                         sec,
                         mat,
                         &ctx,
-                        if rc_column {
-                            false
-                        } else if wrong_shear_rebar {
-                            missing_gravity
-                        } else {
-                            missing_rc_beam_gravity || (missing_gravity && wrong_main_rebar)
-                        },
+                        !rc_beam
+                            && !rc_column
+                            && missing_gravity
+                            && (wrong_shear_rebar || wrong_main_rebar),
                     ) {
                         draw_outcome(&outcome);
                     }

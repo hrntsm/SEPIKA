@@ -76,7 +76,13 @@ pub fn model() -> Model {
         })
         .collect();
     model.nodes[0].restraint = sepika_core::dof::Dof6Mask::FIXED;
-    model.nodes[1].restraint = sepika_core::dof::Dof6Mask::FREE;
+    for dof in [
+        sepika_core::dof::Dof::Rx,
+        sepika_core::dof::Dof::Ry,
+        sepika_core::dof::Dof::Rz,
+    ] {
+        model.nodes[1].restraint.set_fixed(dof);
+    }
     model.sections[0].frame_use = Some(FrameSectionUse::Girder);
     model.sections[0].rebar_material = Some(MaterialId(1));
     model.sections[0].shear_rebar_material = Some(MaterialId(1));

@@ -1349,10 +1349,19 @@ fn seismic_static_produces_monotonic_story_displacement() {
 /// 全部材の危険断面・全接合部・全スラブに検定結果があり、照査条件を満たさない位置には理由が付く。
 #[test]
 fn design_check_covers_every_member() {
+    use sepika_core::ids::ElemId;
+    use sepika_core::section_shape::SectionShape;
     use sepika_core::structure_kind::{structure_kind_of, StructureKind};
-    use sepika_design_jp::CheckOutcome;
+    use sepika_design_jp::{CheckKind, CheckOutcome, QdMethod};
+
+    const SLAB_GIRDERS: [u32; 17] = [
+        40, 41, 48, 49, 56, 57, 66, 67, 76, 77, 78, 91, 92, 93, 103, 104, 105,
+    ];
+    const QD1_SLAB_REASON: &str =
+        "QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません";
 
     let mut app = analyzed();
+    assert_eq!(app.core.analysis_cfg.qd_method, QdMethod::Min);
     app.run_design_check();
     assert_no_error(&app, "断面検定");
 
@@ -1384,7 +1393,8 @@ fn design_check_covers_every_member() {
     assert_eq!(ordinary_steel_columns, 40);
     let mut steel_column_positions = 0usize;
     let mut steel_unavailable_shear_positions = 0usize;
-    let mut rc_src_positions = 0usize;
+    let mut rc_src_zero_torsion_positions = 0usize;
+    let mut slab_girder_positions = 0usize;
     let mut max_rc_src_mx_nmm = 0.0_f64;
     for mc in &results.member_checks {
         let mut positions: Vec<_> = mc.positions.iter().map(|p| p.xi).collect();
@@ -1432,8 +1442,56 @@ fn design_check_covers_every_member() {
                 .filter(|p| p.xi == xi)
                 .map(|p| &p.outcome)
                 .collect();
+            if is_rc_src {
+                if mx_nmm == 0.0 {
+                    rc_src_zero_torsion_positions += 1;
+                } else {
+                    max_rc_src_mx_nmm = max_rc_src_mx_nmm.max(mx_nmm.abs());
+                }
+            }
+            if SLAB_GIRDERS.contains(&mc.elem.0) {
+                assert_eq!(structure, StructureKind::Rc);
+                assert!(matches!(
+                    section.shape,
+                    Some(SectionShape::RcBeamRect { .. })
+                ));
+                let reasons: Vec<_> = outcomes
+                    .iter()
+                    .filter_map(|outcome| match outcome {
+                        CheckOutcome::Skipped { reason } => Some(reason.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                let expected_reason = match reasons.as_slice() {
+                    [reason] if mx_nmm == 0.0 => *reason == QD1_SLAB_REASON,
+                    [reason] => {
+                        reason.starts_with(QD1_SLAB_REASON)
+                            && reason.contains("Mx")
+                            && reason.contains("同時に作用")
+                    }
+                    _ => false,
+                };
+                assert!(
+                    expected_reason,
+                    "部材 {:?} 位置 {xi}: {outcomes:?}",
+                    mc.elem
+                );
+                assert!(
+                    outcomes.iter().all(|outcome| match outcome {
+                        CheckOutcome::Checked(result) =>
+                            !result.ok()
+                                && result.components.iter().all(|c| c.ratio.is_finite()
+                                    && c.ratio > 1.0
+                                    && c.kind != CheckKind::Shear),
+                        CheckOutcome::Skipped { .. } => true,
+                    }),
+                    "部材 {:?} 位置 {xi}: {outcomes:?}",
+                    mc.elem
+                );
+                slab_girder_positions += 1;
+                continue;
+            }
             if is_rc_src && mx_nmm != 0.0 {
-                max_rc_src_mx_nmm = max_rc_src_mx_nmm.max(mx_nmm.abs());
                 assert_eq!(
                     outcomes
                         .iter()
@@ -1507,19 +1565,62 @@ fn design_check_covers_every_member() {
                     "{r:?}"
                 );
             }
-            if is_rc_src {
-                rc_src_positions += 1;
-            }
         }
     }
     assert_eq!(steel_column_positions, 120, "通常S柱40本・各3位置");
     assert!(steel_unavailable_shear_positions > 0);
     assert!(
-        rc_src_positions > 0,
+        rc_src_zero_torsion_positions > 0,
         "RC/SRC 部材に Mx が 0 の検定位置がない"
     );
     assert!(max_rc_src_mx_nmm > 0.0, "RC/SRC 部材に非零の Mx がない");
     println!("RC/SRC 部材の検定位置の最大 |Mx| = {max_rc_src_mx_nmm} N·mm");
+    assert_eq!(slab_girder_positions, SLAB_GIRDERS.len() * 3);
+
+    let beam_id = ElemId(40);
+    let (_, forces) = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .member_forces
+        .iter_mut()
+        .find(|(elem, _)| *elem == beam_id)
+        .unwrap();
+    let (_, mid) = forces.at.iter_mut().find(|(xi, _)| *xi == 0.5).unwrap();
+    mid[3] = 0.0;
+    mid[5] = 1e10;
+    app.run_design_check();
+    assert_no_error(&app, "スラブ付き梁の独立した曲げ不適合");
+    let beam = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_checks
+        .iter()
+        .find(|member| member.elem == beam_id)
+        .unwrap();
+    let outcomes: Vec<_> = beam
+        .positions
+        .iter()
+        .filter(|p| p.xi == 0.5)
+        .map(|p| &p.outcome)
+        .collect();
+    let [CheckOutcome::Checked(ng), CheckOutcome::Skipped { reason }] = outcomes.as_slice() else {
+        panic!("スラブ付き梁 {beam_id:?} 中央: {outcomes:?}");
+    };
+    assert_eq!(reason, QD1_SLAB_REASON);
+    assert!(ng
+        .components
+        .iter()
+        .any(|c| c.kind == CheckKind::Bending && c.ratio > 1.0));
+    assert!(ng
+        .components
+        .iter()
+        .all(|c| c.ratio.is_finite() && c.ratio > 1.0 && c.kind != CheckKind::Shear));
 }
 
 fn story_metrics(app: &App, dir: SeismicDir) -> Vec<sepika_app::summary::StoryMetric> {
@@ -3051,6 +3152,7 @@ fn snapshot_key_scalars() {
     assert_panel_505_fixture_geometry_and_states(&app);
     let dl_joint_check_count = app.core.scoped.results.as_ref().unwrap().joint_checks.len();
     app.select_displayed_result(selected);
+    app.core.analysis_cfg.qd_method = sepika_design_jp::QdMethod::Qd2;
     // 既存の検定式の数値回帰がMxの丸め残差で左右されるため、この検定への入力だけMxを0にする。
     let results = app.core.scoped.results.as_mut().expect("解析結果");
     let original_member_forces = results.member_forces.clone();
@@ -3179,13 +3281,13 @@ fn snapshot_key_scalars() {
             },
         );
     assert!(checked_positions > 0 && unchecked_positions > 0);
-    line("design.zero_mx_max_ratio", sig4(max_ratio));
+    line("design.qd2_zero_mx_max_ratio", sig4(max_ratio));
     line(
-        "design.zero_mx_checked_positions",
+        "design.qd2_zero_mx_checked_positions",
         checked_positions.to_string(),
     );
     line(
-        "design.zero_mx_unchecked_positions",
+        "design.qd2_zero_mx_unchecked_positions",
         unchecked_positions.to_string(),
     );
     // 接合条件不足の総合未検定で除外すると、算定済みの曲げ・たわみの数値回帰が空振りする。
