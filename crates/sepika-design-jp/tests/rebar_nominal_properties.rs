@@ -201,6 +201,7 @@ fn rc_and_src_beam_bending_and_rc_beam_shear_use_nominal_areas() {
             steel_width: 100.0,
             steel_web_thick: 20.0,
             steel_flange_thick: 12.0,
+            steel_manufacture: Default::default(),
         }
         .to_section(SectionId(0), "SRC梁".into());
         let src_forces = MemberForcesAt { qy: 0.0, ..forces };

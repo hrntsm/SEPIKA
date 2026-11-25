@@ -3744,6 +3744,7 @@ fn fireproof_story_difference_and_exclusions() {
         steel_width: 200.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 13.0,
+        steel_manufacture: Default::default(),
     });
     assert_eq!(
         crate::fireproof::primary_line_weight(&rc, &rc.elements[0]).unwrap(),
@@ -3937,6 +3938,7 @@ fn rc_src柱仕上げは階共通値と実形状を使いdlと地震用重量で
                 steel_width: 200.0,
                 steel_web_thick: 10.0,
                 steel_flange_thick: 20.0,
+                steel_manufacture: Default::default(),
             },
             2400.0,
         ),
@@ -5025,6 +5027,7 @@ fn src_embedded_steel_high_density_does_not_apply_steel_threshold_to_total_secti
         steel_width: 200.0,
         steel_web_thick: 10.0,
         steel_flange_thick: 20.0,
+        steel_manufacture: Default::default(),
     });
     let mut steel = model.materials[0].clone();
     steel.id = MaterialId(model.materials.len() as u32);

@@ -319,6 +319,7 @@ fn src(count: u32, steel_height: f64) -> SectionShape {
         steel_width: 100.0,
         steel_web_thick: 6.0,
         steel_flange_thick: 9.0,
+        steel_manufacture: Default::default(),
     }
 }
 

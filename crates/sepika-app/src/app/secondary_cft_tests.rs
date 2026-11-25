@@ -410,6 +410,7 @@ fn rc_steel_src_secondary_members_keep_edit_save_quantity_and_prepare_contract()
             steel_width: 100.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 10.0,
+            steel_manufacture: Default::default(),
         },
     ];
     for (idx, shape) in shapes.into_iter().enumerate() {

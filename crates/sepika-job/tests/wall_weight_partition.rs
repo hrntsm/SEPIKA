@@ -902,6 +902,7 @@ fn asymmetric_real_faces_separate_wall_midpoint_from_floor_midpoint() {
                 steel_width: 150.0,
                 steel_web_thick: 8.0,
                 steel_flange_thick: 10.0,
+                steel_manufacture: Default::default(),
             });
         }
     }

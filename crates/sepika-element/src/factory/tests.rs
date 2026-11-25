@@ -1360,6 +1360,7 @@ fn test_src_beam_alpha_y_falls_back_to_default() {
         steel_width: 200.0,
         steel_web_thick: 9.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: Default::default(),
     });
     assert!((flexural_alpha_y(&beam, &model) - 0.3).abs() < 1e-12);
 }

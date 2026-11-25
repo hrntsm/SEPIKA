@@ -27,6 +27,7 @@ fn src_column() -> Model {
         steel_width: 200.0,
         steel_web_thick: 9.0,
         steel_flange_thick: 14.0,
+        steel_manufacture: Default::default(),
     };
     let mut steel = cft::cantilever(true, 0.0).materials.remove(1);
     steel.id = MaterialId(2);

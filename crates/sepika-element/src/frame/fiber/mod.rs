@@ -83,6 +83,7 @@ pub(crate) struct FiberYield {
     pub rebar: Option<f64>,
     /// 鋼材領域の fy（SRC は内蔵鉄骨、CFT は鋼管、それ以外は主材料）。
     pub steel: Option<f64>,
+    pub src_web: Option<f64>,
 }
 
 pub(crate) fn resolve_fiber_yield(
@@ -92,27 +93,39 @@ pub(crate) fn resolve_fiber_yield(
     let main = model.element_material(data).and_then(|m| m.fy);
     let rebar =
         sepika_core::material_grade::rebar_yield_strength(model.element_rebar_material(data));
-    let steel = match model.element_section(data).and_then(|s| s.shape.as_ref()) {
+    let (steel, src_web) = match model.element_section(data).and_then(|s| s.shape.as_ref()) {
         Some(
             SectionShape::SrcBeamRect {
                 steel_web_thick,
                 steel_flange_thick,
+                steel_manufacture,
                 ..
             }
             | SectionShape::SrcColumnRect {
                 steel_web_thick,
                 steel_flange_thick,
+                steel_manufacture,
                 ..
             },
         ) => model
             .element_steel_material(data)
-            .and_then(|m| resolve_src_fiber_fy(m, *steel_web_thick, *steel_flange_thick).ok()),
-        Some(shape @ (SectionShape::CftBox { .. } | SectionShape::CftPipe { .. })) => {
-            resolve_cft_fiber_fy(shape, model.element_steel_material(data)).and_then(Result::ok)
-        }
-        _ => main,
+            .and_then(|m| {
+                resolve_src_fiber_fy(m, *steel_manufacture, *steel_web_thick, *steel_flange_thick)
+                    .ok()
+            })
+            .map_or((None, None), |[web, flange]| (Some(flange), Some(web))),
+        Some(shape @ (SectionShape::CftBox { .. } | SectionShape::CftPipe { .. })) => (
+            resolve_cft_fiber_fy(shape, model.element_steel_material(data)).and_then(Result::ok),
+            None,
+        ),
+        _ => (main, None),
     };
-    FiberYield { main, rebar, steel }
+    FiberYield {
+        main,
+        rebar,
+        steel,
+        src_web,
+    }
 }
 
 pub(crate) fn resolve_cft_fiber_fy(
@@ -150,30 +163,47 @@ pub(crate) fn resolve_cft_fiber_fy(
 
 pub(crate) fn resolve_src_fiber_fy(
     steel: &Material,
+    manufacture: sepika_core::section_shape::SrcHManufacture,
     web_thick_mm: f64,
     flange_thick_mm: f64,
-) -> Result<f64, String> {
+) -> Result<[f64; 2], String> {
+    use sepika_core::material_grade::{resolve_steel_f, src_h_steel_minimum_thickness_mm};
+    use sepika_core::section_shape::SrcHManufacture;
+
     if steel.category != MaterialCategory::Steel {
         return Err(format!(
             "材料区分は「{}」です。内蔵鉄骨には材料区分が「鋼材」の材料を割り当ててください。",
             steel.category.label()
         ));
     }
-    for thickness_mm in [web_thick_mm.max(flange_thick_mm), flange_thick_mm] {
-        if let Some(reason) = steel_f_value_issue(&steel.name, thickness_mm) {
-            return Err(reason);
+    match manufacture {
+        SrcHManufacture::Unknown => {
+            return Err(
+                "内蔵H形断面の製造区分が不明です。断面の製造区分を確認してください。".into(),
+            );
         }
+        SrcHManufacture::Rolled => {
+            return Err("圧延H形鋼のウェブ・フランジに適用する降伏強度の根拠が未確認です。".into());
+        }
+        SrcHManufacture::BuiltUp => {}
     }
-    steel_f_value_prefix(&steel.name, flange_thick_mm)
-        .or(steel.fy)
-        .filter(|fy| fy.is_finite() && *fy > 0.0)
-        .ok_or_else(|| {
-            if steel.fy.is_none() {
-                "材種名から降伏強度 fy を解決できず、明示 fy も未入力です。材料タブで正の有限値を設定してください。".into()
-            } else {
-                "材種名から降伏強度 fy を解決できず、明示 fy は正の有限値が必要です。材料タブで設定を見直してください。".into()
-            }
-        })
+    if steel.name.trim() == "SN400A" {
+        return Err("SN400A鋼板の溶接部に必要な品質を現在の断面入力から確認できません。".into());
+    }
+    let minimum_mm = src_h_steel_minimum_thickness_mm(steel)?;
+    let resolve = |label, thickness_mm| {
+        if thickness_mm < minimum_mm {
+            return Err(format!(
+                "{label}の実板厚 {thickness_mm} mm は適用範囲外です。{minimum_mm} mm 以上が必要です"
+            ));
+        }
+        resolve_steel_f(Some(steel), Some(thickness_mm))
+            .map_err(|reason| format!("{label}: {reason}"))
+    };
+    Ok([
+        resolve("ウェブ", web_thick_mm)?,
+        resolve("フランジ", flange_thick_mm)?,
+    ])
 }
 
 /// 断面形状が生成するファイバ領域の降伏点が [`FiberYield`] から解決できるか。
@@ -188,7 +218,7 @@ pub(crate) fn fiber_yield_covers_shape(shape: Option<&SectionShape>, yield_: &Fi
         | Some(SectionShape::RcColumnRect { .. })
         | Some(SectionShape::RcColumnCircle { .. }) => rebar,
         Some(SectionShape::SrcBeamRect { .. }) | Some(SectionShape::SrcColumnRect { .. }) => {
-            rebar && steel
+            rebar && steel && yield_.src_web.is_some()
         }
         Some(SectionShape::CftBox { .. }) | Some(SectionShape::CftPipe { .. }) => steel,
         Some(SectionShape::RcWall { .. }) | None => true,
@@ -280,8 +310,10 @@ fn fiber_strength_params_from_yield(
     let fc = mat_ref.and_then(|m| m.fc);
     let rebar_fy = yield_.rebar.or(yield_.main);
     let steel_fy = yield_.steel;
+    let steel_factor = basis.steel_factor(steel_mat_ref);
     StrengthParams {
-        steel_fy: steel_fy.unwrap_or(235.0) * basis.steel_factor(steel_mat_ref),
+        steel_fy: steel_fy.unwrap_or(235.0) * steel_factor,
+        src_web_fy: yield_.src_web.map(|fy| fy * steel_factor),
         rebar_fy: rebar_fy.unwrap_or(345.0) * rebar_factor,
         concrete_fc: fc.unwrap_or(24.0),
         steel_e,
@@ -359,10 +391,43 @@ pub(crate) fn build_gauss_fiber_pair(
     let shape = model.element_section(data).and_then(|s| s.shape.as_ref());
     let fc = mat_ref.and_then(|m| m.fc);
     let (concrete_e, steel_e) = fiber_young_moduli(data, model);
+    let steel_factor = basis.steel_factor(fiber_steel_material(data, model));
     let yield_ = resolve_fiber_yield(model, data);
+    if let Some(
+        SectionShape::SrcBeamRect {
+            steel_manufacture,
+            steel_web_thick,
+            steel_flange_thick,
+            ..
+        }
+        | SectionShape::SrcColumnRect {
+            steel_manufacture,
+            steel_web_thick,
+            steel_flange_thick,
+            ..
+        },
+    ) = shape
+    {
+        if yield_.steel.is_none() {
+            let steel = model.element_steel_material(data).ok_or_else(|| {
+                RebarGeometryError::SectionGeometry("SRC断面の内蔵鉄骨材料が未割当です".into())
+            })?;
+            resolve_src_fiber_fy(
+                steel,
+                *steel_manufacture,
+                *steel_web_thick,
+                *steel_flange_thick,
+            )
+            .map_err(RebarGeometryError::SectionGeometry)?;
+        }
+        if !(steel_factor > 0.0 && steel_factor <= 1.1) {
+            return Err(RebarGeometryError::SectionGeometry(format!(
+                "内蔵鉄骨の材料強度割増 {steel_factor} は範囲外です。0より大きく1.1以下を指定してください。"
+            )));
+        }
+    }
     let rebar_factor = basis.rebar_factor(model.element_rebar_material(data));
     let strength = fiber_strength_params_from_yield(data, model, basis, yield_, rebar_factor);
-    let steel_factor = basis.steel_factor(fiber_steel_material(data, model));
     let concrete_rule = crate::factory::resolve_fiber_concrete_hysteresis(data, model, kind);
     let build = || {
         build_gauss_fibers(
@@ -414,7 +479,6 @@ pub(crate) fn build_gauss_fibers(
                 concrete_e,
                 steel_e,
                 yield_,
-                steel_factor,
                 rebar_factor,
                 strength,
                 concrete_rule,
@@ -456,15 +520,13 @@ fn build_shape_fibers(
     concrete_e: f64,
     steel_e: f64,
     yield_: FiberYield,
-    steel_factor: f64,
     rebar_factor: f64,
     strength: StrengthParams,
     concrete_rule: HysteresisModel,
 ) -> Result<(Vec<Fiber>, Vec<Box<dyn UniaxialMaterial>>), RebarGeometryError> {
-    use sepika_section::mn_surface::{max_dimension, plastic_fibers_at, AnnulusRes, FiberRegion};
+    use sepika_section::mn_surface::{AnnulusRes, FiberRegion, max_dimension, plastic_fibers_at};
 
     let rebar_fy = yield_.rebar.or(yield_.main);
-    let steel_fy = yield_.steel;
     let target = max_dimension(shape) / 16.0;
     let ring = AnnulusRes {
         n_theta: 24,
@@ -475,6 +537,7 @@ fn build_shape_fibers(
 
     let mut concrete: Option<Box<dyn UniaxialMaterial>> = None;
     let mut steel: Option<Box<dyn UniaxialMaterial>> = None;
+    let mut src_web: Option<Box<dyn UniaxialMaterial>> = None;
     let mut rebar: Option<Box<dyn UniaxialMaterial>> = None;
 
     let mut fibers = Vec::with_capacity(placed.len());
@@ -493,8 +556,13 @@ fn build_shape_fibers(
                 (1usize, template.clone_box())
             }
             FiberRegion::Steel => {
-                let template = steel.get_or_insert_with(|| {
-                    steel_fiber_material(steel_e, steel_fy.map(|fy| fy * steel_factor))
+                let template = if f.sigma_t == strength.steel_fy {
+                    &mut steel
+                } else {
+                    &mut src_web
+                };
+                let template = template.get_or_insert_with(|| {
+                    steel_fiber_material(steel_e, yield_.steel.map(|_| f.sigma_t))
                 });
                 (2usize, template.clone_box())
             }
@@ -1416,7 +1484,10 @@ impl ElementBehavior for FiberBeam {
         _u_elem: &[f64],
         _absolute_loads: &[MemberLoad],
     ) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
-        Err(format!("Fiber/MS 要素 {:?}: 非線形要素の線形荷重応答は未対応です。状態更新後の試行応答を使用してください", self.element_id))
+        Err(format!(
+            "Fiber/MS 要素 {:?}: 非線形要素の線形荷重応答は未対応です。状態更新後の試行応答を使用してください",
+            self.element_id
+        ))
     }
 
     fn state_frame_load_response(

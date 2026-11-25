@@ -3459,6 +3459,7 @@ mod capacity_issue_tests {
             steel_width: 300.0,
             steel_web_thick: 12.0,
             steel_flange_thick: 20.0,
+            steel_manufacture: Default::default(),
         };
         let (model, wall) = model_with_src_side_column(shape);
         let issue = WallElement::wall_shear_capacity_issue(

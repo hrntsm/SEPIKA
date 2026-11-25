@@ -1203,6 +1203,7 @@ fn src_cross_panel_uses_signed_column_face_moments_and_direction() {
         steel_width: 200.0,
         steel_web_thick: 9.0,
         steel_flange_thick: 16.0,
+        steel_manufacture: Default::default(),
     };
     let beam_shape = SectionShape::SrcBeamRect {
         b: 400.0,
@@ -1222,6 +1223,7 @@ fn src_cross_panel_uses_signed_column_face_moments_and_direction() {
         steel_width: 200.0,
         steel_web_thick: 9.0,
         steel_flange_thick: 16.0,
+        steel_manufacture: Default::default(),
     };
     let mut model = cross_joint_model(col_shape, beam_shape);
 
@@ -3097,6 +3099,7 @@ fn panel_585_orthogonal_nonsteel_beam_keeps_joint_wide_gate_and_invalid_lower_di
             steel_width: 200.0,
             steel_web_thick: 9.0,
             steel_flange_thick: 16.0,
+            steel_manufacture: Default::default(),
         },
     ] {
         let mut model = cross_joint_model(h.clone(), h.clone());

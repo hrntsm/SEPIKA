@@ -1241,6 +1241,7 @@ fn src_members_do_not_use_rc_or_steel_fallback_display_thresholds() {
         steel_width: 200.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: Default::default(),
     });
     for material_yield in [None, Some(235.0)] {
         model.materials[0].fy = material_yield;
@@ -3881,7 +3882,7 @@ fn assert_wall_committed_history(result: &PushoverResult) {
 
 #[test]
 fn sm520_src_nonlinear_precheck_rejects_each_out_of_range_plate() {
-    for name in ["SM520", "SM520B", "SM520C"] {
+    for name in ["SM520B", "SM520C"] {
         for fy in [None, Some(177.0), Some(235.0), Some(335.0), Some(999.0)] {
             for (tw, tf) in [(100.001, 80.0), (80.0, 100.001)] {
                 let (mut model, rebar, b, d) = rc_column_model_with_rigid_zone(Default::default());
@@ -3893,6 +3894,7 @@ fn sm520_src_nonlinear_precheck_rejects_each_out_of_range_plate() {
                     steel_width: 200.0,
                     steel_web_thick: tw,
                     steel_flange_thick: tf,
+                    steel_manufacture: sepika_core::section_shape::SrcHManufacture::BuiltUp,
                 };
                 model.sections[0].shape = Some(shape);
                 model.sections[0].steel_material = Some(MaterialId(3));

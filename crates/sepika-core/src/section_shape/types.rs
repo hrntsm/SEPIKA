@@ -32,6 +32,25 @@ pub(super) fn validate_src_steel_fit(
     Ok(())
 }
 
+/// SRC内蔵H形断面の製造区分。組立はウェブ・上下フランジに同一材種を使う。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SrcHManufacture {
+    #[default]
+    Unknown,
+    Rolled,
+    BuiltUp,
+}
+
+impl SrcHManufacture {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unknown => "不明",
+            Self::Rolled => "圧延H形鋼",
+            Self::BuiltUp => "鋼板組立H形断面",
+        }
+    }
+}
+
 /// Parametric section shape definition.
 ///
 /// Each variant carries the minimal parameters needed to define the geometry.
@@ -128,6 +147,8 @@ pub enum SectionShape {
         steel_width: f64,
         steel_web_thick: f64,
         steel_flange_thick: f64,
+        #[serde(default)]
+        steel_manufacture: SrcHManufacture,
     },
     /// SRC 矩形柱（RC 矩形柱 + 内蔵 H 形鉄骨）。
     SrcColumnRect {
@@ -138,6 +159,8 @@ pub enum SectionShape {
         steel_width: f64,
         steel_web_thick: f64,
         steel_flange_thick: f64,
+        #[serde(default)]
+        steel_manufacture: SrcHManufacture,
     },
     /// CFT 角形（角形鋼管 + 充填コンクリート）。検定では `Material.fc` の充填コンクリート強度を用いる。
     CftBox {
@@ -343,7 +366,9 @@ impl SectionShape {
                 if dy.hypot(dz) < radius {
                     return Err(RebarGeometryError::SectionGeometry(format!(
                         "SRC主筋{}（径 {diameter_mm} mm、中心位置 ({}, {}) mm）が内蔵 H 形鋼 {h}×{w}×{tw}×{tf} mm と干渉します",
-                        i + 1, p.x, p.y
+                        i + 1,
+                        p.x,
+                        p.y
                     )));
                 }
             }

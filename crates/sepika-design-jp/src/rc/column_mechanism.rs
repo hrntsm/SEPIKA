@@ -943,6 +943,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 9.0,
             steel_flange_thick: 16.0,
+            steel_manufacture: Default::default(),
         };
         let materials = vec![
             Material {

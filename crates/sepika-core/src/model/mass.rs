@@ -1291,6 +1291,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 9.0,
             steel_flange_thick: 12.0,
+            steel_manufacture: Default::default(),
         };
         let section = shape.to_section(SectionId(0), "SRC".into());
         let concrete = material(0, MaterialCategory::Concrete, 2.0, Some(24.0));
@@ -1522,6 +1523,7 @@ mod tests {
                 steel_width: 200.0,
                 steel_web_thick: 9.0,
                 steel_flange_thick: 12.0,
+                steel_manufacture: Default::default(),
             },
             SectionShape::SrcBeamRect {
                 b: 400.0,
@@ -1531,6 +1533,7 @@ mod tests {
                 steel_width: 200.0,
                 steel_web_thick: 9.0,
                 steel_flange_thick: 12.0,
+                steel_manufacture: Default::default(),
             },
             SectionShape::RcWall {
                 thickness: 150.0,
@@ -1733,6 +1736,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 9.0,
             steel_flange_thick: 12.0,
+            steel_manufacture: Default::default(),
         };
         let section = shape.to_section(SectionId(0), "SRC".into());
         let concrete = material(0, MaterialCategory::Concrete, 2.4e-9, Some(24.0));

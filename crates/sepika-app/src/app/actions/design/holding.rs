@@ -1323,6 +1323,7 @@ mod tests {
                 steel_width: width_mm,
                 steel_web_thick: web_mm,
                 steel_flange_thick: 13.0,
+                steel_manufacture: Default::default(),
             });
             section.steel_material = Some(steel.id);
             model.materials.push(steel);
@@ -1425,6 +1426,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 13.0,
+            steel_manufacture: Default::default(),
         });
         let steel_id = steel.id;
         section.steel_material = Some(steel_id);

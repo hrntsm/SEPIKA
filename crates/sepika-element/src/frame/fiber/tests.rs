@@ -374,6 +374,7 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
                 steel_width: 200.0,
                 steel_web_thick: 10.0,
                 steel_flange_thick: 16.0,
+                steel_manufacture: sepika_core::section_shape::SrcHManufacture::BuiltUp,
             },
             true,
             true,
@@ -419,6 +420,7 @@ fn rc_src_cftの材料領域質量はbeamとfiberの全成分で一致する() {
         });
         model.materials.push(Material {
             density: 7.8e-9,
+            name: "SN490B".into(),
             category: MaterialCategory::Steel,
             young: 205000.0,
             poisson: 0.3,
@@ -513,6 +515,7 @@ fn srcファイバーは内蔵鋼材のstrength_factorを使う() {
         steel_width: 200.0,
         steel_web_thick: 10.0,
         steel_flange_thick: 16.0,
+        steel_manufacture: sepika_core::section_shape::SrcHManufacture::BuiltUp,
     });
     model.sections[0].rebar_material = Some(MaterialId(1));
     model.sections[0].steel_material = Some(MaterialId(2));
@@ -3235,11 +3238,13 @@ fn test_steel_box_fibers_are_hollow() {
             main: Some(295.0),
             rebar: None,
             steel: Some(295.0),
+            src_web: None,
         },
         1.0,
         1.0,
         StrengthParams {
             steel_fy: 295.0,
+            src_web_fy: None,
             rebar_fy: 295.0,
             concrete_fc: 24.0,
             steel_e: 205000.0,
@@ -3291,11 +3296,13 @@ fn test_rc_circle_fibers_match_circle_area() {
             main: Some(345.0),
             rebar: Some(345.0),
             steel: None,
+            src_web: None,
         },
         1.0,
         1.0,
         StrengthParams {
             steel_fy: 235.0,
+            src_web_fy: None,
             rebar_fy: 345.0,
             concrete_fc: 24.0,
             steel_e: 22000.0,
@@ -3339,6 +3346,7 @@ fn src_analysis_ratio_model() -> Model {
         steel_width: 200.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: sepika_core::section_shape::SrcHManufacture::BuiltUp,
     };
     model.sections[0] = Section {
         material: Some(MaterialId(0)),
@@ -3355,6 +3363,7 @@ fn src_analysis_ratio_model() -> Model {
     concrete.concrete_class = sepika_core::units::ConcreteClass::UserDefined;
     let mut steel = concrete.clone();
     steel.id = MaterialId(1);
+    steel.name = "SS400".into();
     steel.category = MaterialCategory::Steel;
     steel.young = 205000.0;
     steel.poisson = 0.3;

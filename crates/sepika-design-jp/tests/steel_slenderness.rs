@@ -271,6 +271,7 @@ fn issue901_composite_checkers_do_not_apply_ordinary_steel_limit() {
             steel_width: 200.0,
             steel_web_thick: 12.0,
             steel_flange_thick: 12.0,
+            steel_manufacture: Default::default(),
         },
     ] {
         let sec = shape.to_section(SectionId(0), "合成柱".into());

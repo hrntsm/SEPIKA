@@ -57,6 +57,8 @@ impl YieldModelKind {
 pub struct StrengthParams {
     /// 鋼材（形鋼）降伏強度 [N/mm²]
     pub steel_fy: f64,
+    /// SRCウェブの降伏強度 [N/mm²]。未指定なら鋼材と同じ強度。
+    pub src_web_fy: Option<f64>,
     /// 鉄筋降伏強度 [N/mm²]
     pub rebar_fy: f64,
     /// コンクリート圧縮強度 [N/mm²]（正値で与える）
@@ -69,6 +71,7 @@ impl Default for StrengthParams {
     fn default() -> Self {
         StrengthParams {
             steel_fy: 235.0,
+            src_web_fy: None,
             rebar_fy: 345.0,
             concrete_fc: 24.0,
             steel_e: 205000.0,

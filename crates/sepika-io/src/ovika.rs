@@ -911,6 +911,52 @@ mod tests {
         assert!(matches!(load_ovika(&path),Err(IoError::Decode(reason)) if reason==expected));
     }
     #[test]
+    fn src_h_manufacture_roundtrips_in_ovika() {
+        use sepika_core::section_shape::{
+            RcRectColumnRebar, RebarSize, RectColumnHoop, SrcHManufacture,
+        };
+        let mut model = Model::default();
+        let values = [
+            SrcHManufacture::Unknown,
+            SrcHManufacture::Rolled,
+            SrcHManufacture::BuiltUp,
+        ];
+        for manufacture in values {
+            let id = SectionId(model.sections.len() as u32);
+            model.sections.push(
+                SectionShape::SrcColumnRect {
+                    b: 400.0,
+                    d: 600.0,
+                    rebar: RcRectColumnRebar {
+                        main_dia: RebarSize::DiameterMm(19.0),
+                        x: vec![],
+                        y: vec![],
+                        cover: 40.0,
+                        hoop: RectColumnHoop {
+                            dia: RebarSize::DiameterMm(10.0),
+                            pitch: 100.0,
+                            legs_x: 2,
+                            legs_y: 2,
+                        },
+                    },
+                    steel_height: 300.0,
+                    steel_width: 150.0,
+                    steel_web_thick: 45.0,
+                    steel_flange_thick: 13.0,
+                    steel_manufacture: manufacture,
+                }
+                .input_section(id, format!("SRC{}", id.0))
+                .unwrap(),
+            );
+        }
+        let path = crate::test_util::test_tmp().join("src_h_manufacture.ovika");
+        save_ovika(&path, &model, OvikaExtras::default()).unwrap();
+        let loaded = load_ovika(&path).unwrap().model;
+        assert!(model.eq_ignoring_dofmap(&loaded));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn surface_radii_ovika_roundtrip() {
         let mut model = Model::default();
         for radius in [None, Some(0.0), Some(13.0)] {

@@ -405,6 +405,7 @@ mod src_tests {
             steel_width: 200.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 12.0,
+            steel_manufacture: Default::default(),
         }
     }
 

@@ -135,6 +135,7 @@ mod tests {
                 steel_width: 200.0,
                 steel_web_thick: 10.0,
                 steel_flange_thick: 16.0,
+                steel_manufacture: Default::default(),
             },
             SectionShape::SrcColumnRect {
                 b: 400.0,
@@ -144,6 +145,7 @@ mod tests {
                 steel_width: 200.0,
                 steel_web_thick: 10.0,
                 steel_flange_thick: 16.0,
+                steel_manufacture: Default::default(),
             },
         ];
         for shape in &src_shapes {

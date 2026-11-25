@@ -692,6 +692,7 @@ fn nonlinear_time_history_requires_rebar_category_for_src_main_bars() {
         steel_width: 160.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: sepika_core::section_shape::SrcHManufacture::BuiltUp,
     }
     .to_section(SectionId(0), "SRC柱".into());
     section.frame_use = Some(FrameSectionUse::Column);

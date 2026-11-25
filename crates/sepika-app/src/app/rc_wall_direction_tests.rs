@@ -651,6 +651,7 @@ fn quantity_ratio_fixture() -> Model {
         steel_width: 200.0,
         steel_web_thick: 8.0,
         steel_flange_thick: 13.0,
+        steel_manufacture: Default::default(),
     }
     .to_section(SectionId(3), "SRC小梁".into());
     src.frame_use = rc.frame_use;

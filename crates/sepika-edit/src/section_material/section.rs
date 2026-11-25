@@ -338,6 +338,7 @@ fn same_geometry_ignoring_rebar(
             steel_width,
             steel_web_thick,
             steel_flange_thick,
+            ..
         }
         | SrcColumnRect {
             b,
@@ -347,6 +348,7 @@ fn same_geometry_ignoring_rebar(
             steel_width,
             steel_web_thick,
             steel_flange_thick,
+            ..
         } => Some((
             b,
             d,

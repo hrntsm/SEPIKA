@@ -870,6 +870,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 12.0,
+            steel_manufacture: Default::default(),
         };
         let mut model = crate::sample::portal_frame();
         model.panel_zone = sepika_core::model::PanelZoneMode::None;
@@ -920,6 +921,7 @@ mod tests {
             steel_width: 200.0,
             steel_web_thick: 8.0,
             steel_flange_thick: 12.0,
+            steel_manufacture: Default::default(),
         };
         model.sections[1] = sepika_core::model::Section {
             id: SectionId(1),

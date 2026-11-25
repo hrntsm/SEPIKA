@@ -88,6 +88,7 @@ fn src_beam() -> SectionShape {
         steel_width: 150.0,
         steel_web_thick: 10.0,
         steel_flange_thick: 16.0,
+        steel_manufacture: Default::default(),
     }
 }
 
@@ -143,6 +144,7 @@ fn rebar_edits_preserve_properties_and_update_design_and_fiber_inputs() {
                 steel_width: 150.0,
                 steel_web_thick: 10.0,
                 steel_flange_thick: 16.0,
+                steel_manufacture: Default::default(),
             },
             Column,
             12,

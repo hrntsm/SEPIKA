@@ -743,6 +743,7 @@ fn test_model_issues_detects_new_src_column_purpose_mismatch() {
         steel_width: 200.0,
         steel_web_thick: 9.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: Default::default(),
     }
     .to_section(SectionId(0), "SRCC".into());
     sec.rebar_material = Some(MaterialId(0));
@@ -774,6 +775,7 @@ fn test_model_issues_detects_new_src_column_steel_missing() {
         steel_width: 200.0,
         steel_web_thick: 9.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: Default::default(),
     }
     .to_section(SectionId(0), "SRCC".into());
     sec.rebar_material = Some(MaterialId(0));
@@ -816,6 +818,7 @@ fn src_shape() -> sepika_core::section_shape::SectionShape {
         steel_width: 200.0,
         steel_web_thick: 9.0,
         steel_flange_thick: 12.0,
+        steel_manufacture: Default::default(),
     }
 }
 
