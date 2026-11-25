@@ -319,6 +319,30 @@ fn slender_plates_leave_independent_failures_and_unavailability_visible() {
     );
 }
 
+#[test]
+fn a_supplied_full_section_area_retains_the_independent_axial_failure() {
+    let model = issue_model();
+    let mut section = rolled_h(200.0, 2.0, 0.0);
+    section.property_basis.area = PropertyBasis::Supplied;
+    section.area = 5950.0;
+    let forces = MemberForcesAt {
+        n: 1_500_000.0,
+        mz: 400e6,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    let ctx = column_context(&model, LoadTerm::Short);
+    let outcomes: Vec<_> = SteelDesign
+        .check_outcomes(&forces, &section, &model.materials[0], &ctx)
+        .collect();
+    assert!(
+        matches!(outcomes.as_slice(), [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }]
+        if matches!(&result.components[..], [axial]
+                if axial.kind == CheckKind::Axial && (axial.ratio - 1.072_769_533_345_253_2).abs() < 1e-12)
+            && reason.contains("局部座屈"))
+    );
+}
+
 fn issue_model() -> Model {
     input::cantilever(ISSUE_FORCES.n, ISSUE_FORCES.mz, ISSUE_FORCES.qz)
 }

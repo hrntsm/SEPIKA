@@ -409,23 +409,21 @@ fn independent_axial_failure(
         || !forces.qz.is_finite()
         || forces.my != 0.0
         || forces.mz != 0.0
+        || sec.property_basis.area != PropertyBasis::Shape
         || has_section_loss(ctx)
     {
         return None;
     }
-    axial_material_limit_failure(forces, sec, ctx.term, f)
+    let area_mm2 = sec.shape.as_ref()?.try_calc_area().ok()?;
+    axial_material_limit_failure(forces.n, area_mm2, ctx.term, f)
 }
 
 fn axial_material_limit_failure(
-    forces: &MemberForcesAt,
-    sec: &Section,
+    axial_n: f64,
+    area_mm2: f64,
     term: crate::LoadTerm,
     f: f64,
 ) -> Option<CheckComponent> {
-    if sec.property_basis.area != PropertyBasis::Shape {
-        return None;
-    }
-    let area_mm2 = sec.shape.as_ref()?.try_calc_area().ok()?;
     let limit_mpa = steel_ft(f, term);
     if ![area_mm2, limit_mpa]
         .iter()
@@ -433,14 +431,13 @@ fn axial_material_limit_failure(
     {
         return None;
     }
-    let stress_mpa = forces.n.abs() / area_mm2;
+    let stress_mpa = axial_n.abs() / area_mm2;
     let ratio = stress_mpa / limit_mpa;
     (ratio.is_finite() && ratio > 1.0).then(|| CheckComponent {
         kind: CheckKind::Axial,
         ratio,
         detail: format!(
-            "N={:.4} N, A={area_mm2:.4} mm², |N|/A={stress_mpa:.4} N/mm², 材料許容上限={limit_mpa:.4} N/mm²",
-            forces.n
+            "N={axial_n:.4} N, A={area_mm2:.4} mm², |N|/A={stress_mpa:.4} N/mm², 材料許容上限={limit_mpa:.4} N/mm²",
         ),
     })
 }
@@ -971,7 +968,10 @@ impl SteelDesign {
                 incomplete.take(),
                 h_combined_reason,
             );
-            let components: Vec<_> = axial_material_limit_failure(forces, sec, term, f)
+            let components: Vec<_> = sec
+                .resolved_area()
+                .ok()
+                .and_then(|area_mm2| axial_material_limit_failure(forces.n, area_mm2, term, f))
                 .into_iter()
                 .chain(independent_h_web_shear_failure(forces, sec, mat, ctx))
                 .collect();
