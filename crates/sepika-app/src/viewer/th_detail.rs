@@ -348,7 +348,7 @@ fn draw_th_detail_content_at(
         recording,
         th_nonlinear,
         th_applied_long_term,
-        || confirmed_time_history_long_term(app, view, &display, th_result),
+        || damage_control_gravity_issue(app, view, &display, th_result),
         &axis,
     );
     app.ui.view.th_detail_axis_z = axis_z;
@@ -572,21 +572,40 @@ fn end_moments(mf: &MemberForces, axis_z: bool) -> Option<(f64, f64)> {
     Some((-i_at.1[idx], j_at.1[idx]))
 }
 
-fn confirmed_time_history_long_term(
+const UNVERIFIED_DAMAGE_CONTROL_GRAVITY: &str =
+    "RC損傷制御用せん断に必要な長期荷重を含む応答を確認できません";
+
+fn damage_control_gravity_issue(
     app: &App,
     view: &super::ViewportState,
     analyzed_model: &sepika_core::model::Model,
     result: &sepika_solver::dynamic::timehistory::ResponseResult,
-) -> bool {
-    result.nonlinear
-        && result.applied_long_term
-        && analyzed_model.load_cases.iter().any(|case| {
-            case.kind.is_long_term() && (!case.nodal.is_empty() || !case.member.is_empty())
-        })
-        && view.spatial_case_id(app).is_some_and(|id| {
+) -> Option<&'static str> {
+    use sepika_core::model::LoadCaseKind;
+    if !result.nonlinear
+        || !result.applied_long_term
+        || !view.spatial_case_id(app).is_some_and(|id| {
             app.require_result_input(crate::app::ResultInputKey::TimeHistory(id))
                 .is_ok()
         })
+    {
+        return Some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY);
+    }
+    let mut loaded_kinds = analyzed_model
+        .load_cases
+        .iter()
+        .filter(|case| {
+            case.kind.is_long_term() && (!case.nodal.is_empty() || !case.member.is_empty())
+        })
+        .map(|case| case.kind)
+        .peekable();
+    if loaded_kinds.peek().is_none() {
+        Some("RC損傷制御用せん断に必要な固定・架構用積載荷重の初期載荷がありません")
+    } else if loaded_kinds.any(|kind| !matches!(kind, LoadCaseKind::Dead | LoadCaseKind::Live)) {
+        Some("初期載荷に固定・架構用積載以外（積雪または種別未指定）の荷重を含むため、RC損傷制御用せん断は未算定です")
+    } else {
+        None
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -598,7 +617,7 @@ fn draw_peak_check(
     rec: &ThRecording,
     th_nonlinear: bool,
     th_applied_long_term: bool,
-    confirmed_long_term: impl FnOnce() -> bool,
+    damage_control_gravity_issue: impl FnOnce() -> Option<&'static str>,
     axis: &super::MemberAxisEndpoints,
 ) {
     let model = &app.core.model;
@@ -706,9 +725,11 @@ fn draw_peak_check(
         && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }));
     let rc_damage_control = (rc_beam || rc_column) && app.core.analysis_cfg.rc_damage_control;
     let wire_qd = wire_qd && !rc_damage_control;
-    let confirmed_long_term = rc_damage_control && confirmed_long_term();
-    if rc_damage_control && th_applied_long_term && !confirmed_long_term {
-        ui.label("長期荷重を含む設定ですが、実際の初期載荷は確認できません。");
+    let gravity_issue = rc_damage_control
+        .then(damage_control_gravity_issue)
+        .flatten();
+    if th_applied_long_term && gravity_issue.is_some() {
+        ui.label("長期荷重を初期載荷する設定です。");
     } else {
         draw_long_term_note(ui, th_nonlinear, th_applied_long_term);
     }
@@ -724,8 +745,8 @@ fn draw_peak_check(
     }
     if rc_damage_control {
         ui.label("RCせん断の損傷制御（15.4式）は長期荷重を含む確定ステップに限ります。抽出時刻の確認であり、全時刻の適否は未判定です。");
-        if !confirmed_long_term {
-            ui.colored_label(theme::WARN_TEXT, "RCせん断の損傷制御は未算定です（長期荷重を含む非線形時刻歴の応答を確認できません）。");
+        if let Some(reason) = gravity_issue {
+            ui.colored_label(theme::WARN_TEXT, reason);
         } else if axial_peaks.is_none_or(|peaks| peaks.snapshots.is_empty()) {
             ui.colored_label(theme::WARN_TEXT, "RCせん断の損傷制御は未算定です（せん断を照査できる確定ステップの抽出記録がありません）。");
         }
@@ -976,8 +997,8 @@ fn draw_peak_check(
                 } else if structure == StructureKind::Rc {
                     let shear_issue = if !rc_damage_control {
                         None
-                    } else if !confirmed_long_term {
-                        Some("RC損傷制御用せん断に必要な長期荷重を含む応答を確認できません")
+                    } else if let Some(reason) = gravity_issue {
+                        Some(reason)
                     } else if selected.is_none() {
                         Some("RC損傷制御用せん断は異なる時刻の内力包絡では算定しません")
                     } else {
@@ -1443,7 +1464,7 @@ mod tests {
                     rec,
                     with_gravity,
                     with_gravity,
-                    || with_gravity,
+                    || (!with_gravity).then_some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),
                     &axis,
                 )
             })
@@ -1887,6 +1908,8 @@ mod tests {
             model.materials.push(main);
 
             let mut app = App::default();
+            app.core.analysis_cfg.rc_damage_control = false;
+            app.core.analysis_cfg.rc_damage_control = false;
             assert!(app.load_model(model));
             let text = peak_check_text(&app, 0, [-100_000.0, 10_000_000.0, 0.0, 0.0, 0.0, 1e6]);
             assert!(
@@ -2460,7 +2483,17 @@ mod tests {
             let elem = &app.core.model.elements[0];
             let axis = super::super::member_axis_endpoints(elem, &app.core.model).unwrap();
             let output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
-                draw_peak_check(ui, &app, elem, 0, &rec, false, false, || false, &axis)
+                draw_peak_check(
+                    ui,
+                    &app,
+                    elem,
+                    0,
+                    &rec,
+                    false,
+                    false,
+                    || Some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),
+                    &axis,
+                )
             });
             let text = output
                 .shapes

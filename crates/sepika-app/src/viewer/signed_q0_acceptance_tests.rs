@@ -54,7 +54,7 @@ fn peak_labels_with_confirmed_long_term(
                     rec,
                     nonlinear,
                     applied_long_term,
-                    || confirmed_long_term,
+                    || (!confirmed_long_term).then_some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),
                     &axis,
                 )
             },
@@ -981,9 +981,16 @@ fn signed_q0_th_detail_released_beam_keeps_independent_bending_failure() {
 
 #[test]
 fn time_history_damage_control_uses_the_combined_committed_force_and_not_the_envelope() {
+    use sepika_core::section_shape::{RebarSize, SectionShape, StandardRebar};
     use sepika_design_jp::QdMethod;
     let mut app = App::default();
-    assert!(app.load_model(fixture::model()));
+    let mut model = fixture::model();
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape else {
+        unreachable!()
+    };
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D22);
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.bond_method = sepika_design_jp::BondMethod::Rc1991;
     app.core.analysis_cfg.rc_damage_control = true;
     let rec = gravity_test_record(
         [0.0, 900_000.0, 0.0, 0.0, 0.0, 100e6],
@@ -994,6 +1001,7 @@ fn time_history_damage_control_uses_the_combined_committed_force_and_not_the_env
         let text = peak_labels_with_confirmed_long_term(&app, &rec, 0, true, true, true);
         // Fc24・SD345、b=300 mm、d=539 mm、α=2、2-φ10@100 の許容値は285.551 kN。
         assert_eq!(text.matches("せん断 ").count(), 1, "{text}");
+        assert_eq!(text.matches("付着 ").count(), 1, "{text}");
         assert!(text.contains("せん断 0.70"), "{text}");
         assert!(
             text.contains("異なる時刻の内力包絡では算定しません"),
@@ -1005,6 +1013,7 @@ fn time_history_damage_control_uses_the_combined_committed_force_and_not_the_env
     for (nonlinear, apply) in [(false, false), (true, false), (true, true)] {
         let text = peak_labels_with_confirmed_long_term(&app, &rec, 0, nonlinear, apply, false);
         assert!(!text.contains("せん断 "), "{text}");
+        assert!(!text.contains("付着 "), "{text}");
         assert!(
             text.contains("長期荷重を含む応答を確認できません"),
             "{text}"
@@ -1014,12 +1023,15 @@ fn time_history_damage_control_uses_the_combined_committed_force_and_not_the_env
 
 #[test]
 fn time_history_damage_control_requires_current_generation_input_and_nonempty_long_term_loads() {
+    use sepika_core::model::LoadCaseKind;
     use sepika_solver::dynamic::timehistory::{GroundMotion, ResponseResult};
-    let make_app = |has_load: bool| {
+    let make_app = |kinds: [Option<LoadCaseKind>; 2]| {
         let mut app = App::default();
         let mut model = fixture::model();
-        if !has_load {
-            for case in &mut model.load_cases {
+        for (case, kind) in model.load_cases.iter_mut().zip(kinds) {
+            if let Some(kind) = kind {
+                case.kind = kind;
+            } else {
                 case.member.clear();
                 case.nodal.clear();
             }
@@ -1055,13 +1067,13 @@ fn time_history_damage_control_requires_current_generation_input_and_nonempty_lo
         );
         app
     };
-    let confirmed = |app: &App| {
+    let issue = |app: &App| {
         let view = &app.ui.view;
         let result = view.spatial_result(app).unwrap();
-        confirmed_time_history_long_term(app, view, &app.core.model, result)
+        damage_control_gravity_issue(app, view, &app.core.model, result)
     };
-    let mut app = make_app(true);
-    assert!(confirmed(&app));
+    let mut app = make_app([Some(LoadCaseKind::Dead), Some(LoadCaseKind::Live)]);
+    assert_eq!(issue(&app), None);
     app.core
         .scoped
         .results
@@ -1069,6 +1081,18 @@ fn time_history_damage_control_requires_current_generation_input_and_nonempty_lo
         .unwrap()
         .input_records
         .clear();
-    assert!(!confirmed(&app));
-    assert!(!confirmed(&make_app(false)));
+    assert_eq!(issue(&app), Some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY));
+    assert!(issue(&make_app([None, None]))
+        .unwrap()
+        .contains("初期載荷がありません"));
+    assert_eq!(issue(&make_app([Some(LoadCaseKind::Live), None])), None);
+    for kinds in [
+        [Some(LoadCaseKind::Other), None],
+        [Some(LoadCaseKind::Dead), Some(LoadCaseKind::Other)],
+        [Some(LoadCaseKind::Dead), Some(LoadCaseKind::Snow)],
+    ] {
+        assert!(issue(&make_app(kinds))
+            .unwrap()
+            .contains("固定・架構用積載以外"));
+    }
 }
