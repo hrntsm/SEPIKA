@@ -1,5 +1,9 @@
 use super::*;
+use crate::app::rc_beam_asymmetric_tests::input as asymmetric;
 use crate::app::signed_q0_acceptance_tests::fixture;
+
+#[path = "../../../sepika-design-jp/tests/fixtures/rc_beam_qd1_model.rs"]
+mod rc_beam_qd1_model;
 
 fn labels(app: &App, rec: &ThRecording, applied_long_term: bool) -> String {
     member_labels(app, rec, 0, applied_long_term)
@@ -956,6 +960,65 @@ fn time_history_cft_shows_buckling_and_required_gravity_reasons_at_each_position
                 }
             }
         }
+    }
+}
+
+#[test]
+fn time_history_rc_beam_qd1_does_not_require_a_support_beyond_the_connection() {
+    use sepika_core::{dof::Dof6Mask, model::EndCondition};
+
+    let mut model = rc_beam_qd1_model::model();
+    rc_beam_qd1_model::add_columns_at_outer_nodes(&mut model, [1.0, 1.0, 0.0]);
+    let direct = model.clone();
+    rc_beam_qd1_model::extend_j_column(&mut model);
+    let extended_fixed = model.clone();
+    model.nodes[4].restraint = Dof6Mask::FREE;
+    let mut pinned = model.clone();
+    pinned.elements[0].end_cond[1] = EndCondition::Pinned;
+    let rec = gravity_test_record(
+        [0.0, 30_000.0, 0.0, 0.0, 0.0, 10e6],
+        [0.0, 30_000.0, 0.0, 0.0, 0.0, 10e6],
+    );
+    let mut expected_shear = None;
+    for (support, model, released) in [
+        ("直接固定", direct, false),
+        ("延長先固定", extended_fixed, false),
+        ("延長先自由", model, false),
+        ("延長先自由・梁端ピン", pinned, true),
+    ] {
+        let mut app = App::default();
+        app.core.analysis_cfg.rc_damage_control = false;
+        app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+        assert!(app.load_model(model));
+        set_gravity_forces(
+            &mut app,
+            Some(
+                [0.0, 0.5, 0.75, 1.0]
+                    .map(|xi| (xi, [0.0, -10_000.0, 0.0, 0.0, 0.0, 0.0]))
+                    .to_vec(),
+            ),
+        );
+        let text = labels(&app, &rec, true);
+        if released {
+            assert!(
+                text.contains("QD1用の梁のj端で強軸曲げが解放"),
+                "{support}: {text}"
+            );
+            continue;
+        }
+        let shear = text
+            .lines()
+            .find_map(|line| line.split_once("せん断 ").map(|(_, value)| value))
+            .and_then(|value| value.split_whitespace().next())
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or_else(|| panic!("{support}: {text}"));
+        assert!(shear > 0.0, "{support}: {text}");
+        assert!(!text.contains("検定不能"), "{support}: {text}");
+        assert_eq!(
+            shear,
+            *expected_shear.get_or_insert(shear),
+            "{support}: {text}"
+        );
     }
 }
 

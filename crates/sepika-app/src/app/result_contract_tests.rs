@@ -447,6 +447,7 @@ fn ovika_old_design_keeps_forces_until_explicit_recheck_without_display_save_or_
         ("design-old-before-rc-column-head-shear-factor", Some(99)),
         ("design-old-before-rc-column-qd1-girder-kinds", Some(101)),
         ("design-old-before-rc-column-qd1-end-conditions", Some(102)),
+        ("design-old-before-rc-beam-qd1-support-path", Some(123)),
         ("design-future", Some(DESIGN_CONTRACT_VERSION + 1)),
     ] {
         let (mut loaded, path) = restore(&app, Some(ANALYSIS_CONTRACT_VERSION), version, name);
