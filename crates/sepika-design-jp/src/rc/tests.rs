@@ -129,7 +129,7 @@ pub(crate) fn ctx_column(term: LoadTerm) -> DesignCtx {
 }
 
 #[test]
-fn test_seismic_design_shear_min_of_qd1_qd2() {
+fn legacy_column_design_shear_uses_min_and_fallbacks() {
     use crate::{QdMethod, SeismicQd};
     let mut ctx = DesignCtx {
         seismic_qd: Some(SeismicQd {
@@ -143,30 +143,19 @@ fn test_seismic_design_shear_min_of_qd1_qd2() {
         ..Default::default()
     };
     // 当該組合せ Q=150kN、QL=50kN → QE=100kN、QD2 = 50+1.5×100 = 200kN。
-    // ΣMy=400kN·m、Q0 未算定 → 梁 QD1 = QL+ΣMy/l′ = 50+400e6/4000 = 150kN → min = 150kN。
-    let q_beam = seismic_design_shear(&ctx, 0.0, 150_000.0, 1, 400.0e6, false);
-    assert!((q_beam - 150_000.0).abs() < 1e-6, "q_beam={q_beam}");
-    // Q0=80kN を与えると梁 QD1 = 80+100 = 180kN → min(180, 200) = 180kN。
-    ctx.seismic_qd.as_mut().unwrap().q_simple = Some(80_000.0);
-    let q_beam_q0 = seismic_design_shear(&ctx, 0.0, 150_000.0, 1, 400.0e6, false);
-    assert!(
-        (q_beam_q0 - 180_000.0).abs() < 1e-6,
-        "q_beam_q0={q_beam_q0}"
-    );
-    ctx.seismic_qd.as_mut().unwrap().q_simple = None;
     // 柱 QD1 = ΣcMy/h′ = 100kN（Q0/QL を加算しない）→ min(100, 200) = 100kN。
-    let q_col = seismic_design_shear(&ctx, 0.0, 150_000.0, 1, 400.0e6, true);
+    let q_col = legacy_column_design_shear(&ctx, 0.0, 150_000.0, 1, 400.0e6);
     assert!((q_col - 100_000.0).abs() < 1e-6, "q_col={q_col}");
     ctx.seismic_qd.as_mut().unwrap().method = QdMethod::Qd2;
-    let q2 = seismic_design_shear(&ctx, 0.0, 150_000.0, 1, 400.0e6, false);
+    let q2 = legacy_column_design_shear(&ctx, 0.0, 150_000.0, 1, 400.0e6);
     assert!((q2 - 200_000.0).abs() < 1e-6, "q2={q2}");
     ctx.seismic_qd.as_mut().unwrap().method = QdMethod::Min;
-    let q_no_mu = seismic_design_shear(&ctx, 0.0, 150_000.0, 1, 0.0, false);
+    let q_no_mu = legacy_column_design_shear(&ctx, 0.0, 150_000.0, 1, 0.0);
     assert!((q_no_mu - 200_000.0).abs() < 1e-6);
-    let q_missing = seismic_design_shear(&ctx, 0.5, 150_000.0, 1, 400.0e6, false);
+    let q_missing = legacy_column_design_shear(&ctx, 0.5, 150_000.0, 1, 400.0e6);
     assert!((q_missing - 150_000.0).abs() < 1e-6);
     ctx.seismic_qd = None;
-    let q_none = seismic_design_shear(&ctx, 0.0, 150_000.0, 1, 400.0e6, false);
+    let q_none = legacy_column_design_shear(&ctx, 0.0, 150_000.0, 1, 400.0e6);
     assert!((q_none - 150_000.0).abs() < 1e-6);
 }
 
@@ -981,7 +970,7 @@ mod rc_gravity_contract_tests {
                 .map(|(i, x)| Node {
                     id: NodeId(i as u32),
                     coord: [x, 0.0, 0.0],
-                    restraint: Default::default(),
+                    restraint: sepika_core::dof::Dof6Mask::FIXED,
                     mass: None,
                     story: None,
                     support_spring: None,
@@ -1011,7 +1000,11 @@ mod rc_gravity_contract_tests {
             },
             end_cond: [EndCondition::Fixed; 2],
             force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
+            rigid_zone: sepika_core::model::RigidZone {
+                face_i: Some(0.0),
+                face_j: Some(0.0),
+                ..Default::default()
+            },
             end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
             plastic_zone: None,
             spring: None,

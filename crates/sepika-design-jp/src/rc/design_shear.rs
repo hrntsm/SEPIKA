@@ -75,6 +75,73 @@ fn mechanism_shear(qd: &SeismicQd, sum_mu: f64) -> Option<f64> {
     }
 }
 
+pub(super) fn beam_design_shear(
+    qd: &SeismicQd,
+    pos: f64,
+    q_signed: f64,
+    mechanism_issue: Option<&str>,
+    sum_my_nmm: impl FnOnce() -> Result<f64, String>,
+) -> Result<f64, String> {
+    let ql_signed = qd
+        .long_at
+        .iter()
+        .find(|(p, _)| (p - pos).abs() < 1e-6)
+        .map(|(_, forces)| forces[1])
+        .filter(|q| q.is_finite());
+    let qd2 = |ql_signed| {
+        if !qd.n_factor.is_finite() || qd.n_factor < 1.5 {
+            return Err("QD2用の水平荷重時せん断力の割増係数は有限で1.5以上が必要です");
+        }
+        let demand_n = qd2(ql_signed, q_signed, qd.n_factor);
+        demand_n
+            .is_finite()
+            .then_some(demand_n)
+            .ok_or("QD2の設計用せん断力が非有限です")
+    };
+    let ql_signed = ql_signed.ok_or(gravity_shear_reason(1));
+    if qd.method == QdMethod::Qd2 {
+        return ql_signed.and_then(qd2).map_err(str::to_owned);
+    }
+    let qd1 = beam_qd1(qd, mechanism_issue, sum_my_nmm);
+    match (qd1, ql_signed) {
+        (Ok(qd1), Ok(_)) if qd.method == QdMethod::Qd1 => Ok(qd1),
+        (Ok(qd1), Ok(ql)) => Ok(qd1.min(qd2(ql)?)),
+        (Err(qd1_reason), Err(ql_reason)) => Err(format!("{qd1_reason}。{ql_reason}")),
+        (Err(reason), Ok(_)) => Err(reason),
+        (Ok(_), Err(reason)) => Err(reason.into()),
+    }
+}
+
+fn beam_qd1(
+    qd: &SeismicQd,
+    mechanism_issue: Option<&str>,
+    sum_my_nmm: impl FnOnce() -> Result<f64, String>,
+) -> Result<f64, String> {
+    let q0 = qd.q_simple.filter(|q| q.is_finite() && *q >= 0.0);
+    if let Some(reason) = mechanism_issue {
+        return if q0.is_none() {
+            Err(format!("{reason}。{BEAM_Q0_ISSUE}"))
+        } else {
+            Err(reason.into())
+        };
+    }
+    let q0 = q0.ok_or(BEAM_Q0_ISSUE)?;
+    let sum_my_nmm = sum_my_nmm()?;
+    if !qd.clear_length.is_finite() || qd.clear_length <= 0.0 {
+        return Err("QD1用の内法長さは有限な正値でなければなりません".into());
+    }
+    if !qd.n_mechanism.is_finite() || qd.n_mechanism < 1.0 {
+        return Err("QD1用のメカニズム側割増係数は有限で1.0以上が必要です".into());
+    }
+    let demand_n = q0 + qd.n_mechanism * sum_my_nmm / qd.clear_length;
+    if !demand_n.is_finite() {
+        return Err("QD1の設計用せん断力が非有限です".into());
+    }
+    Ok(demand_n)
+}
+
+const BEAM_Q0_ISSUE: &str = "QD1用の部材荷重由来Q0が不足または不正です。FEMのQLでは代替しません";
+
 fn qd2(ql_signed: f64, q_signed: f64, n_factor: f64) -> f64 {
     ql_signed.abs() + n_factor * (q_signed - ql_signed).abs()
 }
@@ -82,13 +149,12 @@ fn qd2(ql_signed: f64, q_signed: f64, n_factor: f64) -> f64 {
 /// 地震時短期の設計用せん断力 QD [N]。`QD = min(QD1, QD2)`。
 /// `ctx.seismic_qd` が None の場合は解析せん断力 `|q_signed|` を返す。
 /// `q_index`: 長期内力配列のせん断成分位置（qy=1, qz=2）。
-pub(crate) fn seismic_design_shear(
+pub(crate) fn legacy_column_design_shear(
     ctx: &DesignCtx,
     pos: f64,
     q_signed: f64,
     q_index: usize,
     sum_mu: f64,
-    is_column: bool,
 ) -> f64 {
     let Some(qd) = &ctx.seismic_qd else {
         return q_signed.abs();
@@ -101,16 +167,7 @@ pub(crate) fn seismic_design_shear(
     else {
         return q_signed.abs();
     };
-    let ql = ql_signed.abs();
     let qd2 = qd2(ql_signed, q_signed, qd.n_factor);
-    let qd1 = mechanism_shear(qd, sum_mu)
-        .map(|mech| {
-            if is_column {
-                mech
-            } else {
-                qd.q_simple.unwrap_or(ql).abs() + mech
-            }
-        })
-        .unwrap_or(f64::INFINITY);
+    let qd1 = mechanism_shear(qd, sum_mu).unwrap_or(f64::INFINITY);
     qd.method.resolve(qd1, qd2)
 }

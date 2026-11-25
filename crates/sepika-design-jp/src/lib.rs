@@ -75,7 +75,7 @@ pub enum QdMethod {
 }
 
 impl QdMethod {
-    /// QD1・QD2 から設計用せん断力を決定する（RCなどの決定規約）。
+    /// 柱についてQD1・QD2から設計用せん断力を決定する。
     /// `Qd1` 選択時でも QD1 が無効（`qd1` が非有限）なら QD2 で代替する。
     pub(crate) fn resolve(self, qd1: f64, qd2: f64) -> f64 {
         match self {
@@ -107,8 +107,7 @@ pub(crate) fn ratio_or_large(m: f64, ma: f64) -> f64 {
 /// 地震時短期の設計用せん断力 QD = min(QD1, QD2) の算定に用いる文脈
 /// （RC規準、RC 梁・柱）。
 ///
-/// - 梁: `QD1 = Q0 + n_mech・ΣBMy/l′`（`Q0` は両端支持とした長期せん断。
-///   未算定時は `QL` で代替）、柱: `QD1 = n_mech・ΣcMy/h′`
+/// - 梁: `QD1 = Q0 + n_mech・ΣBMy/l′`（`Q0` は両端支持とした長期せん断）、柱: `QD1 = n_mech・ΣcMy/h′`
 /// - `QD2 = QL + n・QE`（`QE` = 当該組合せのせん断力 − 長期せん断力）
 ///
 /// 記号 QD1/QD2 は UI・既存コードの呼称（メカニズム側＝QD1、割増 QE 側＝QD2）。
@@ -124,12 +123,12 @@ pub struct SeismicQd {
     pub long_at: Vec<(f64, [f64; 6])>,
     /// 水平荷重時せん断力の割増係数 n（柱は 1.5 以上。既定 1.5）。QD2 用。
     pub n_factor: f64,
-    /// メカニズム側（QD1）の割増係数 n_mech（マニュアルの n2。既定 1.0）。
+    /// メカニズム側（QD1）の割増係数 n_mech（既定 1.0）。RC矩形梁では有限で1.0以上が必要。
     pub n_mechanism: f64,
     /// 両端支持とした長期せん断力 Q0 `[N]`（絶対値）。梁の QD1 に用いる。
-    /// `None` のときは `QL` で代替する。
+    /// RC矩形梁のQD1とminでは有限な非負値が必須。
     pub q_simple: Option<f64>,
-    /// 内法長さ l′／h′（剛域控除後）`[mm]`。0 以下なら QD1 は省略する。
+    /// 内法長さ l′／h′ `[mm]`。RC矩形梁のQD1とminでは有限な正値が必須。
     pub clear_length: f64,
     /// QD の決定方法。
     pub method: QdMethod,
@@ -386,6 +385,9 @@ pub struct DesignCtx {
     /// 梁にスラブが取り付くか（両端節点がいずれかのスラブ境界に含まれる）。
     /// 中央部の許容曲げを `Ma = at·ft·j` のみとする判定に用いる。
     pub beam_has_slab: bool,
+    /// RC矩形梁のQD1を適用できない理由。QD1/minで `None` を渡す呼出側は、
+    /// 両端の強軸曲げ伝達、有限で正のフェース間内法、両端が同じ断面であることを確認する。
+    pub rc_beam_qd1_issue: Option<String>,
     /// S 造部材の断面検定属性（継手・スカラップ欠損率、横座屈長さ入力）。
     /// `Model::steel_design_attrs` 由来。None は欠損なし。一般H形鋼柱の横座屈支点は未確認。
     pub steel_attr: Option<SteelDesignAttr>,
@@ -416,6 +418,7 @@ impl Default for DesignCtx {
             src_column_seismic_bending: None,
             column_sum_my: None,
             beam_has_slab: false,
+            rc_beam_qd1_issue: None,
             steel_attr: None,
         }
     }

@@ -910,6 +910,9 @@ fn symmetric_beam_outcomes(
     options: &MemberDesignCheckOptions<'_>,
 ) -> Vec<CheckOutcome> {
     let mut model = input::model(false);
+    model.nodes[1].restraint = sepika_core::dof::Dof6Mask::FIXED;
+    model.elements[0].rigid_zone.face_i = Some(0.0);
+    model.elements[0].rigid_zone.face_j = Some(0.0);
     let Some(SectionShape::RcBeamRect { rebar, .. }) = model.sections[0].shape.as_mut() else {
         unreachable!()
     };
@@ -1115,6 +1118,7 @@ fn simplified_zero_bending_beam_reports_unavailable_shear_instead_of_a_pass() {
     let zero = MemberForcesAt::from_local(0.0, [0.0; 6]);
     assert!(matches!(RcDesign.check(&zero, &section, concrete, &ctx),
         CheckOutcome::Checked(result) if result.ok()));
+    ctx.term = LoadTerm::Short;
     ctx.seismic_qd = Some(SeismicQd {
         method: QdMethod::Qd2,
         long_at: vec![(0.0, [0.0, -20_000.0, 0.0, 0.0, 0.0, 0.0])],

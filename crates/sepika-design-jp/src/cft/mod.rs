@@ -324,8 +324,8 @@ fn cft_q_design(
 ) -> Result<Option<f64>, String> {
     let q_signed = if q_index == 1 { forces.qy } else { forces.qz };
     if !strict_gravity {
-        return Ok(Some(crate::rc::seismic_design_shear(
-            ctx, forces.pos, q_signed, q_index, sum_c_my?, true,
+        return Ok(Some(crate::rc::legacy_column_design_shear(
+            ctx, forces.pos, q_signed, q_index, sum_c_my?,
         )));
     }
     let qd = ctx.seismic_qd.as_ref().expect("設計用せん断力を使う条件");

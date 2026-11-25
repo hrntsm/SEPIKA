@@ -1,8 +1,8 @@
 //! 鉄筋コンクリート造柱の断面検定（RC 規準14条: 軸力・軸力+曲げ・せん断）。
 
 use super::{
-    axis_props_from_shape, main_rebar_grade, rc_allow, rebar_allowable_tension,
-    rebar_info_from_shape, rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity,
+    axis_props_from_shape, legacy_column_design_shear, main_rebar_grade, rc_allow,
+    rebar_allowable_tension, rebar_info_from_shape, rebar_sigma_y_of, shear_alpha, shear_capacity,
     shear_rebar_grade, AxisProps, ColumnGravityMode, ColumnMechanism,
 };
 use crate::member_design_check::combine_incomplete_reasons;
@@ -128,8 +128,8 @@ fn seismic_column_design_shear(
                 }
             }
         } else {
-            Some(seismic_design_shear(
-                ctx, forces.pos, q_signed, q_index, sum_my, true,
+            Some(legacy_column_design_shear(
+                ctx, forces.pos, q_signed, q_index, sum_my,
             ))
         }
     };

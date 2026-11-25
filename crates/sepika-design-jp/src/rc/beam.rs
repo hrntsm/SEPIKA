@@ -4,8 +4,7 @@
 use super::{
     axis_props_from_shape, main_rebar_grade, rc_allow, rc_beam_bond_check_1991_with_rebar,
     rc_beam_bond_check_with_rebar, rebar_allowable_tension, rebar_info_from_shape,
-    rebar_sigma_y_of, seismic_design_shear, shear_alpha, shear_capacity, shear_rebar_grade,
-    AxisProps,
+    rebar_sigma_y_of, shear_alpha, shear_capacity, shear_rebar_grade, AxisProps,
 };
 use crate::member_design_check::combine_incomplete_reasons;
 use crate::ultimate::rc_props::RcDirection;
@@ -13,7 +12,14 @@ use crate::{
     BondMethod, CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm,
     MemberForcesAt, QdMethod,
 };
-use sepika_core::model::{Material, MaterialCategory};
+use sepika_core::adjacency::NodeAdjacency;
+use sepika_core::dof::Dof;
+use sepika_core::face_distance::girder_column_faces;
+use sepika_core::geom::vec3::{cross, dist, dot, local_frame_axes, unit, unit_from};
+use sepika_core::model::{
+    ElementData, EndCondition, FrameSectionUse, Material, MaterialCategory, Model, Node,
+    SupportMemberId,
+};
 use sepika_core::section_shape::{RcBeamRebar, SectionShape};
 
 pub(crate) struct BeamMoment {
@@ -141,6 +147,209 @@ fn bending_component(
     })
 }
 
+/// RC矩形梁のQD1に必要な両端の強軸曲げ伝達と内法長さ [mm] を確認する。
+/// `adjacency` は同一モデルの `NodeAdjacency::primary_frame` を渡す。
+pub fn beam_qd1_clear_span(
+    model: &Model,
+    adjacency: &NodeAdjacency,
+    elem: &ElementData,
+) -> Result<f64, String> {
+    if model
+        .girder_groups
+        .iter()
+        .any(|group| group.contains(&elem.id))
+    {
+        return Err("QD1用に一本部材グループの両端断面とQ0を確定できません".into());
+    }
+    if model.member_detail(elem.id).is_some_and(|detail| {
+        [detail.haunch_i, detail.haunch_j]
+            .into_iter()
+            .flatten()
+            .any(|haunch| haunch.depth_increase != 0.0 || haunch.width_increase != 0.0)
+    }) {
+        return Err("QD1用にハンチ付きの梁の端部断面を確定できません".into());
+    }
+    if model.beam_has_attached_slab(elem)
+        || model.floor_assignment_regions.regions.iter().any(|region| {
+            region.assignment.plate().is_some()
+                && region
+                    .boundary
+                    .iter()
+                    .any(|edge| edge.support == SupportMemberId::Primary(elem.id))
+        })
+    {
+        return Err("QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません".into());
+    }
+    if !elem.kind.is_primary_frame_support() {
+        return Err("QD1用に両端の強軸曲げを伝達する梁要素を確認できません".into());
+    }
+    let [i, j] = frame_end_positions(model, elem).ok_or("QD1用の梁の材軸を確定できません")?;
+    let [_, _, ez] = local_frame_axes(i, j, elem.local_axis.ref_vector)?;
+    let length_mm = dist(i, j);
+    let mut distances_mm = [0.0; 2];
+    let column_faces = girder_column_faces(model, elem, adjacency);
+    for (index, end) in ["i端", "j端"].into_iter().enumerate() {
+        if !transmits_bending(elem.end_cond[index]) {
+            return Err(format!(
+                "QD1用の梁の{end}で強軸曲げが解放されているか接合剛性が不正です"
+            ));
+        }
+        let node = elem
+            .nodes
+            .get(index)
+            .and_then(|id| model.node(*id))
+            .ok_or_else(|| format!("QD1用の梁の{end}に接続する節点を確認できません"))?;
+        let restrained = restrains_direction(node, ez, [Dof::Rx, Dof::Ry, Dof::Rz]);
+        let others = || {
+            adjacency
+                .elements_at(model, node.id)
+                .filter(|other| other.id != elem.id)
+        };
+        let column_connected = others().any(|other| {
+            model
+                .element_section(other)
+                .is_some_and(|section| section.frame_use == Some(FrameSectionUse::Column))
+        });
+        let unsupported = || {
+            format!(
+            "QD1用の梁の{end}が自由端・回転自由な支点、または強軸曲げの伝達先を確認できない接合です"
+        )
+        };
+        let distance_mm = if column_connected {
+            let face = column_faces
+                .as_ref()
+                .ok_or_else(|| format!("QD1用の内法長さ: {end}の実柱面を確認できません"))?[index]
+                .as_ref()
+                .map_err(|reason| format!("QD1用の内法長さ: {reason}"))?;
+            if !restrained
+                && !others().any(|column| {
+                    face.columns.contains(&column.id)
+                        && column_transmits_bending(model, column, node, ez)
+                })
+            {
+                return Err(unsupported());
+            }
+            if index == 0 {
+                face.position_mm
+            } else {
+                length_mm - face.position_mm
+            }
+        } else {
+            if !restrained {
+                return Err(unsupported());
+            }
+            if others().next().is_some() {
+                return Err(format!(
+                    "QD1用の内法長さ: {end}で柱以外の接続部材との実端面を確認できません"
+                ));
+            }
+            [elem.rigid_zone.face_i, elem.rigid_zone.face_j][index]
+                .ok_or_else(|| format!("QD1用の内法長さ: {end}のフェース距離が未算定です"))?
+        };
+        if !distance_mm.is_finite() || distance_mm < 0.0 {
+            return Err(format!(
+                "QD1用の内法長さ: {end}のフェース距離が有限な非負値ではありません"
+            ));
+        }
+        distances_mm[index] = distance_mm;
+    }
+    let span_mm = length_mm - distances_mm[0] - distances_mm[1];
+    if !span_mm.is_finite() || span_mm <= 0.0 {
+        return Err("QD1に必要な有限で正の内法長さが成立しません".into());
+    }
+    Ok(span_mm)
+}
+
+fn transmits_bending(condition: EndCondition) -> bool {
+    match condition {
+        EndCondition::Fixed => true,
+        EndCondition::Pinned => false,
+        EndCondition::SemiRigid { k_theta } => k_theta.is_finite() && k_theta > 0.0,
+    }
+}
+
+fn restrains_direction(node: &Node, direction: [f64; 3], dofs: [Dof; 3]) -> bool {
+    direction.into_iter().zip(dofs).all(|(component, dof)| {
+        component.abs() < 1e-9
+            || node.restraint.is_fixed(dof)
+            || node.support_spring.is_some_and(|spring| {
+                let k = spring[dof as usize];
+                k.is_finite() && k > 0.0
+            })
+    })
+}
+
+fn column_transmits_bending(
+    model: &Model,
+    column: &ElementData,
+    near: &Node,
+    ez: [f64; 3],
+) -> bool {
+    let side = usize::from(column.nodes[0] != near.id);
+    if !transmits_bending(column.end_cond[side]) {
+        return false;
+    }
+    let Some(ex) = frame_end_positions(model, column).and_then(|[a, b]| unit_from(a, b)) else {
+        return false;
+    };
+    if dot(ex, ez).abs() >= 1.0 - 1e-9 {
+        return false;
+    }
+    let Some(translation_axis) = unit(cross(ez, ex)) else {
+        return false;
+    };
+    let rotation_axis = cross(ex, translation_axis);
+    let far_side = 1 - side;
+    let Some(far) = model.node(column.nodes[far_side]) else {
+        return false;
+    };
+
+    restrains_direction(far, translation_axis, [Dof::Ux, Dof::Uy, Dof::Uz])
+        || (transmits_bending(column.end_cond[far_side])
+            && restrains_direction(far, rotation_axis, [Dof::Rx, Dof::Ry, Dof::Rz]))
+}
+
+fn frame_end_positions(model: &Model, elem: &ElementData) -> Option<[[f64; 3]; 2]> {
+    match model.primary_frame_axis_end_positions(elem).ok()? {
+        Some(ends) => Some(ends),
+        None => {
+            let [i, j] = elem.nodes.as_slice() else {
+                return None;
+            };
+            Some([model.node(*i)?.coord, model.node(*j)?.coord])
+        }
+    }
+}
+
+fn beam_qd1_sum_my(
+    shape: &SectionShape,
+    ctx: &DesignCtx,
+    main_rebar_valid: bool,
+) -> Result<f64, String> {
+    if ctx.beam_has_slab {
+        return Err("QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません".into());
+    }
+    let sigma_y = rebar_sigma_y_of(ctx.rebar_material.as_ref());
+    if !main_rebar_valid || !sigma_y.is_finite() || sigma_y <= 0.0 {
+        return Err("QD1用の梁端降伏曲げモーメントに必要な主筋の降伏強度を確定できません".into());
+    }
+
+    let mut sum_my_nmm = 0.0;
+    for (tension_is_top, side) in [(true, "上端"), (false, "下端")] {
+        let props = axis_props_from_shape(shape, RcDirection::Strong, tension_is_top)
+            .ok_or_else(|| format!("QD1用の梁端の{side}引張断面を確定できません"))?;
+        let my_nmm = 0.9 * props.at * sigma_y * props.d;
+        if !my_nmm.is_finite() || my_nmm <= 0.0 {
+            return Err(format!(
+                "QD1用の梁端の{side}引張降伏曲げモーメントを確定できません"
+            ));
+        }
+        sum_my_nmm += my_nmm;
+    }
+    // 両端に同じ断面を使うため、逆符号の二つの組合せは同じ和になる。
+    Ok(sum_my_nmm)
+}
+
 /// 梁の断面検定（RC 規準 13条）。強軸曲げ mz とそれに対のせん断 qy のみを扱う。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn beam_check(
@@ -218,37 +427,28 @@ pub(crate) fn beam_check(
     let valid_tension_props = [props.b, props.d, props.j, props.at, fc_raw]
         .into_iter()
         .all(|value| value.is_finite() && value > 0.0);
-    let uses_qd1 = ctx
-        .seismic_qd
-        .as_ref()
-        .is_some_and(|qd| qd.method != QdMethod::Qd2);
-    let q_design = if !shear_reference_valid || !forces.mz.is_finite() || !forces.qy.is_finite() {
+    let seismic_qd = ctx.seismic_qd.as_ref().filter(|_| !long_term);
+    let uses_qd1 = seismic_qd.is_some_and(|qd| qd.method != QdMethod::Qd2);
+    let q_design = if !shear_reference_valid {
         None
-    } else if !uses_qd1 {
-        Some(seismic_design_shear(
-            ctx, forces.pos, forces.qy, 1, 0.0, false,
-        ))
-    } else if !main_rebar_valid || !valid_tension_props || section_issue.is_some() {
-        None
+    } else if let Some(qd) = seismic_qd {
+        match super::beam_design_shear(
+            qd,
+            forces.pos,
+            forces.qy,
+            ctx.rc_beam_qd1_issue.as_deref(),
+            || beam_qd1_sum_my(shape, ctx, main_rebar_valid),
+        ) {
+            Ok(demand_n) => Some(demand_n),
+            Err(reason) => {
+                *section_issue = combine_incomplete_reasons(section_issue.take(), Some(&reason));
+                None
+            }
+        }
     } else {
-        let mu_inp = sepika_core::rc_capacity::RcCapacityInput {
-            b: props.b,
-            d: props.d_full,
-            at: props.at,
-            d_eff: props.d,
-            sigma_y: rebar_sigma_y_of(ctx.rebar_material.as_ref()),
-            fc: fc_raw,
-            pw: 0.0,
-            sigma_wy: 0.0,
-            clear_span: 0.0,
-            sigma_0: 0.0,
-        };
-        let sum_mu = 2.0 * sepika_core::rc_capacity::rc_mu_simple(&mu_inp);
-        Some(seismic_design_shear(
-            ctx, forces.pos, forces.qy, 1, sum_mu, false,
-        ))
+        Some(forces.qy.abs())
     }
-    .filter(|value| value.is_finite());
+    .filter(|_| forces.mz.is_finite() && forces.qy.is_finite());
     let shear_input_issue = if !forces.qy.is_finite() {
         Some("RC 梁せん断検定不能: 解析せん断力Qyが非有限です")
     } else if forces.mz == 0.0
