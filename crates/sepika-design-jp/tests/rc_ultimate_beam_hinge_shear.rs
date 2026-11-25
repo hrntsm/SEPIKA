@@ -7,7 +7,7 @@ use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::dof::{Dof, Dof6Mask};
 use sepika_core::face_distance::girder_column_faces;
 use sepika_core::ids::{ElemId, NodeId, SectionId};
-use sepika_core::model::{EndCondition, Model};
+use sepika_core::model::{Constraint, EndCondition, Model};
 use sepika_core::rc_capacity::RcUltimateShearActions;
 use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::ultimate::{
@@ -402,12 +402,15 @@ fn assert_j_end_cannot_transfer_moment(model: &Model) {
     let result = direction_checks(model, input());
     for direction in [result.positive, result.negative] {
         let reason = direction.unwrap_err();
-        assert!(reason.contains("j端の接続柱が行き止まり"), "{reason}");
+        assert!(
+            reason.contains("j端の強軸曲げを受ける直接支持を確認できません"),
+            "{reason}"
+        );
     }
 }
 
 #[test]
-fn a_free_column_stub_without_a_support_path_cannot_receive_the_beam_end_moment() {
+fn the_column_at_the_face_must_have_direct_support_or_the_beam_joint_must_resist_moment() {
     let mut model = model();
     model.nodes[3].restraint = Dof6Mask::FREE;
     assert_j_end_cannot_transfer_moment(&model);
@@ -428,7 +431,26 @@ fn a_free_column_stub_without_a_support_path_cannot_receive_the_beam_end_moment(
     lower_column.nodes = [NodeId(4), NodeId(3)].into_iter().collect();
     model.elements.push(lower_column);
     model.validate().unwrap();
-    assert!(direction_checks(&model, input()).positive.is_ok());
+    assert_j_end_cannot_transfer_moment(&model);
+}
+
+#[test]
+fn a_rigid_link_that_only_couples_translation_at_the_joint_does_not_supply_direct_support() {
+    let mut model = model();
+    model.nodes[3].restraint = Dof6Mask::FREE;
+    let mut anchor = model.nodes[1].clone();
+    anchor.id = NodeId(4);
+    anchor.restraint = Dof6Mask::FIXED;
+    model.nodes.push(anchor);
+    let mut dofs = Dof6Mask::FREE;
+    dofs.set_fixed(Dof::Ux);
+    model.constraints.push(Constraint::RigidLink {
+        master: NodeId(4),
+        slaves: vec![NodeId(1)],
+        dofs,
+    });
+    model.validate().unwrap();
+    assert_j_end_cannot_transfer_moment(&model);
 }
 
 #[test]

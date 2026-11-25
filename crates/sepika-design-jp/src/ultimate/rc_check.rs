@@ -1349,14 +1349,8 @@ pub fn collect_rc_ultimate_checks(
                 sepika_core::load_combo::ultimate_gravity_terms(model)?,
                 check.detail
             );
-            check.beam_hinge_shear = rc_beam_hinge_shear::check(
-                model,
-                elem,
-                check.kind,
-                demand,
-                &hinge_adjacency,
-                &connection_counts,
-            );
+            check.beam_hinge_shear =
+                rc_beam_hinge_shear::check(model, elem, check.kind, demand, &hinge_adjacency);
             if let Some(by_direction) = &check.beam_hinge_shear {
                 by_direction.append_detail(&mut check.detail);
             }

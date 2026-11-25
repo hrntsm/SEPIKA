@@ -1,5 +1,4 @@
 use std::cell::OnceCell;
-use std::collections::HashMap;
 use std::fmt::Write;
 
 use num_rational::BigRational;
@@ -8,7 +7,7 @@ use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::dof::Dof;
 use sepika_core::face_distance::girder_column_faces;
 use sepika_core::geom::vec3::local_frame_axes;
-use sepika_core::ids::{ElemId, NodeId};
+use sepika_core::ids::ElemId;
 use sepika_core::model::{ElementData, MaterialCategory, Model};
 use sepika_solver::statics::analysis::SeismicDir;
 
@@ -117,7 +116,6 @@ fn verified_faces(
     kind: MemberKind,
     input: RcUltimateBeamHingeShearDemand,
     adjacency: &OnceCell<NodeAdjacency>,
-    connection_counts: &HashMap<NodeId, usize>,
 ) -> Result<[f64; 2], String> {
     if kind != MemberKind::Girder || !elem.kind.is_primary_frame_support() || elem.nodes.len() != 2
     {
@@ -177,32 +175,24 @@ fn verified_faces(
                 let [i, j] = *column.nodes.as_slice() else {
                     return None;
                 };
-                let (near_side, far) = if i == near.id {
-                    (0, j)
+                let near_side = if i == near.id {
+                    0
                 } else if j == near.id {
-                    (1, i)
+                    1
                 } else {
                     return None;
                 };
-                transmits_bending(column.end_cond[near_side]).then_some((column, far))
+                transmits_bending(column.end_cond[near_side]).then_some(column)
             })
             .peekable();
         if receiving_columns.peek().is_none() {
             return Err(format!("{name}の接続柱に曲げを伝達できる端部がありません"));
         }
-        let other_path = restrains_direction(near, strong_axis, [Dof::Rx, Dof::Ry, Dof::Rz])
-            || connection_counts
-                .get(&near.id)
-                .is_some_and(|&count| count > 1 + face.columns.len());
-        if !other_path
-            && !receiving_columns.any(|(column, far)| {
-                connection_counts.get(&far).is_some_and(|&count| count > 1)
-                    || column_transmits_bending(model, column, near, strong_axis)
-            })
+        if !restrains_direction(near, strong_axis, [Dof::Rx, Dof::Ry, Dof::Rz])
+            && !receiving_columns
+                .any(|column| column_transmits_bending(model, column, near, strong_axis))
         {
-            return Err(format!(
-                "{name}の接続柱が行き止まりか、強軸曲げを受ける直接支持を確認できません"
-            ));
+            return Err(format!("{name}の強軸曲げを受ける直接支持を確認できません"));
         }
         if face.position_mm != input_position_mm {
             return Err(format!(
@@ -285,13 +275,12 @@ pub(super) fn check(
     kind: MemberKind,
     demand: MemberDemand,
     adjacency: &OnceCell<NodeAdjacency>,
-    connection_counts: &HashMap<NodeId, usize>,
 ) -> Option<RcUltimateBeamHingeShearChecks> {
     let input = demand.beam_hinge_shear?;
     let bond = demand
         .beam_bond
         .filter(|bond| bond.seismic_axis == input.seismic_axis);
-    let checked_faces = verified_faces(model, elem, kind, input, adjacency, connection_counts);
+    let checked_faces = verified_faces(model, elem, kind, input, adjacency);
     let direction = |value: Option<_>, conflict: bool| {
         let value = value.ok_or("この方向の両端曲げ降伏と端別曲げ耐力を確認できません")?;
         if conflict {
