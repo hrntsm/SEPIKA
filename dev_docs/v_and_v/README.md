@@ -46,6 +46,10 @@ ST-Bridge に関する各レポートは [ADR 0141](../adr/0141-remove-st-bridge
 
 [原典・自由体と公開検定との照合](RC柱の曲げ降伏時の常時せん断力_Issue1905_照合記録.md)に、常時横荷重を算入すると需要が変わる条件、通常検定と時刻歴簡易検定の重力参照、後続の仕様検討を記録する。状態🔶。
 
+## RC柱QD1で用いる大梁の曲げ軸（#1907）
+
+[原典・実軸と公開検定との照合](RC柱QD1の大梁曲げ軸_Issue1907_照合記録.md)に、断面回転・斜交・傾斜による曲げ伝達、従来候補と新規候補の需要差、通常・時刻歴簡易検定の条件を記録する。状態🔶。
+
 ## RC分割梁の全スパンQD1（#1881）
 
 [原典・全スパンの独立釣合い・通常／時刻歴簡易検定](RC分割梁の全スパンQD1_Issue1881_検証.md)に、一本部材に指定したRC矩形梁の分割前後と未算定境界を記録する。
@@ -659,6 +663,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 |---|---|---|
 | [STKN490Wの標準材種と基準強度](鋼管材種STKN490W_Issue1618_確認記録.md) | 指定原典、実板厚40・41 mmのF、明示強度と未入力診断 | 🔶（通常鋼管・CFTの公開入口のVerification。個別認定・実験Validation未） |
 | [一般階のRC柱QD1の候補比較](RC柱QD1の崩壊メカニズム_Issue1817_検証.md) | 係数適用後の候補比較、柱脚梁の適用境界、通常・時刻歴簡易検定、保存検定 | 🔶（原典と有限例の照合。実分担・実験Validationは未確認） |
+| [RC柱QD1で用いる大梁の曲げ軸](RC柱QD1の大梁曲げ軸_Issue1907_照合記録.md) | 原典と軸変換、従来候補と軸確認済み候補の方向別需要 | 🔶（限定Verification。従来候補の是正は[#1970](https://github.com/hrntsm/SEPIKA/issues/1970)） |
 | [RC柱QD1の床板付き梁候補保留](RC柱QD1の床板付き梁候補保留_Issue1936_検証.md) | 最上階・一般階、通常・時刻歴簡易検定での需要と理由、独立候補とQD2単独の保持 | 🔶（原典と対照架構の照合。床板筋の実寄与は未確認） |
 | [RC柱QD1に用いる梁端のスラブ筋](RC柱QD1の梁端スラブ筋_Issue1906_検証.md) | 最上階・一般階の梁端降伏と床取付きの対照、通常・時刻歴の機構値 | 🔶（仮定した寄与の感度照合。実際のスラブ筋の寄与は未検証） |
 | [RC柱QD1の柱側梁端条件](RC柱QD1の柱側梁端条件_Issue1839_照合記録.md) | ピン・半剛接・剛域・XYZ偏心の候補判定、通常・時刻歴簡易検定、保存検定版103 | 🔶（有限の解析・検定例を独立計算と照合。実験Validationは未確認） |
@@ -1148,6 +1153,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 1841 | RC柱の長期許容せん断力の割増係数 | sepika-job / sepika-design-jp | member_design_check.rs、rc/column/mod.rs、rc/shear_capacity.rs | [是正前の照合](RC柱の長期許容せん断力_Issue1841_照合記録.md) | 一次設計 | 🔶（矩形・円形の単軸の有限例） |
 | 1854 | RC柱の長期許容せん断力の二段階判定 | sepika-element / sepika-design-jp / sepika-job / sepika-app | frame/member_load/shear_envelope.rs、rc/column/long_term_shear.rs、member_design_check.rs | [是正後の公開解析・検定と独立計算](RC柱の長期許容せん断力_Issue1854_検証.md) | 一次設計・保存 | 🔶（両材端支配、有限二方向と未算定。せん断の二方向相関と実験Validationは未確認） |
 | 1905 | RC柱の曲げ降伏時の常時せん断 | sepika-design-jp / sepika-app | rc/design_shear.rs、rc/column/mod.rs、actions/design/check.rs、viewer/th_detail.rs | [独立釣合いと公開部材検定](RC柱の曲げ降伏時の常時せん断力_Issue1905_照合記録.md) | 一次設計 | 🔶（限定Verification、算入仕様は[#1962](https://github.com/hrntsm/SEPIKA/issues/1962)） |
+| 1907 | RC柱QD1の梁降伏に用いる曲げ軸 | sepika-design-jp / sepika-element / sepika-app | rc/column_mechanism.rs、transform.rs、viewer/th_detail.rs | [独立した軸変換、通常公開検定、時刻歴共通入口](RC柱QD1の大梁曲げ軸_Issue1907_照合記録.md) | 一次設計 | 🔶（立体の降伏・実応答は未検証） |
 | 1582 | RC梁の方向別両端降伏せん断 | sepika-design-jp | ultimate/rc_beam_hinge_shear.rs、tests/rc_ultimate_beam_hinge_shear.rs、tests/rc_ultimate_beam_bond_direction.rs | [独立した自由体と公開入口](RC梁の方向別両端降伏せん断_Issue1582_検証.md#公開入口での照合) | 二次設計 | 🔶（実建物の機構同定・GUI入力は範囲外） |
 | 1857 | RC梁の非有限なあばら筋間隔による終局検定 | sepika-design-jp | ultimate/rc_check.rs、tests/rc_ultimate_beam_hinge.rs | [独立算術と公開検定](RC梁の非有限なあばら筋間隔による終局検定_Issue1857_検証.md#独立算術と公開検定) | 二次設計 | 🔶（両方式・両需要の未算定と独立したNG。実験Validationは未確認） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
