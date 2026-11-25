@@ -508,6 +508,20 @@ fn check_compression_slenderness(
 /// 非零または非有限のねじりモーメントでは応力度検定を未算定とし、法定細長比の不適合時も理由を併記する。
 pub struct SteelDesign;
 
+/// 一般H形鋼梁の単一補剛区間全体に対して成立する符号付きの強軸曲げ分布。
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum SteelBeamMomentDiagram {
+    /// 区間内で符号付き曲げが単調。材軸 i/j 順の端部曲げモーメント [N·mm]。
+    Monotonic([f64; 2]),
+    /// 強軸曲げの絶対値最大が区間内部にある。端部と同値で確認できた平坦区間を含む。
+    InteriorMaximum,
+    /// 単調または内部最大を確認できていない。
+    #[default]
+    Unverified,
+}
+
+pub(crate) use beam::beam_lateral_buckling_length;
+
 impl DesignCheck for SteelDesign {
     fn check(
         &self,
@@ -539,6 +553,56 @@ impl SteelDesign {
     ) -> impl Iterator<Item = CheckOutcome> {
         let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx);
         crate::member_design_check::strength_outcomes(outcome, incomplete.as_deref())
+    }
+
+    /// 成分別の時刻歴包絡では、単一補剛区間の強軸曲げと組合せは未算定とする。
+    /// その場合は各成分だけから確定する不適合を別行で返す。
+    pub fn check_time_history_envelope_outcomes(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &mut DesignCtx,
+    ) -> Vec<CheckOutcome> {
+        let (lb, partial) = beam_lateral_buckling_length(ctx, forces.pos);
+        if ctx.kind != MemberKind::Girder
+            || !is_symmetric_h_section(sec)
+            || !lb.is_finite()
+            || lb <= 1e-9
+            || partial
+            || forces.mz == 0.0
+        {
+            return self.check_outcomes(forces, sec, mat, ctx).collect();
+        }
+        let diagram = std::mem::take(&mut ctx.steel_beam_moment_diagram);
+        let mut outcomes = Vec::new();
+        for (axis, force) in [
+            forces.n, forces.qy, forces.qz, forces.mx, forces.my, forces.mz,
+        ]
+        .into_iter()
+        .enumerate()
+        .filter(|(_, force)| *force != 0.0)
+        {
+            let mut isolated = [0.0; 6];
+            isolated[axis] = force;
+            let single = MemberForcesAt::from_local(forces.pos, isolated);
+            if let CheckOutcome::Checked(mut result) = self.check(&single, sec, mat, ctx) {
+                result
+                    .components
+                    .retain(|c| c.ratio.is_finite() && c.ratio > 1.0);
+                if !result.components.is_empty() {
+                    outcomes.push(CheckOutcome::Checked(result));
+                }
+            }
+        }
+        ctx.steel_beam_moment_diagram = diagram;
+        let mut reason = "単一補剛区間の強軸曲げ分布を確認できず、横座屈を考慮した強軸曲げは未算定です。時刻歴の成分別包絡から同時に作用する組合せを確定できません".to_owned();
+        if let Some(issue) = steel_torsion_reason(forces, sec) {
+            reason.push('。');
+            reason.push_str(issue);
+        }
+        outcomes.push(CheckOutcome::Skipped { reason });
+        outcomes
     }
 
     pub(crate) fn check_with_incomplete(
@@ -867,9 +931,8 @@ impl SteelDesign {
         let combined_and_shear = built_h_shear_unavailable.then(built_h_unavailable_reasons);
         let h_combined_reason = combined_and_shear.as_deref().or(h_combined_reason);
         let cr = match ctx.kind {
-            MemberKind::Girder => {
-                beam::check_beam(forces, sec, mat, ctx, f, term, lambda).map(CheckOutcome::Checked)
-            }
+            MemberKind::Girder => beam::check_beam(forces, sec, mat, ctx, f, lambda, incomplete)
+                .map(CheckOutcome::Checked),
             MemberKind::Column => column_allowables(
                 sec,
                 mat,

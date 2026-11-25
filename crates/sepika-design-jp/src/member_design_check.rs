@@ -23,6 +23,7 @@ use sepika_element::frame::beam::MemberForces;
 use sepika_solver::statics::linear::{GirderColumnFaceEnds, SteelPanelColumnFaceForce};
 
 pub(crate) mod rc_column_long_term_shear;
+mod steel_beam_span;
 use rc_column_long_term_shear::{missing_design_positions, ColumnShearLoads};
 
 use crate::design_position::{design_positions, is_near_design_position};
@@ -69,6 +70,9 @@ pub struct MemberDesignCheckOptions<'a> {
     /// 同じ応力バッチを生成した荷重terms。ケース文字列からは推定しない。
     /// None では大梁の長期たわみは未算定とし、壁は全荷重ケースの未対応部材荷重を検査する。
     pub load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
+    /// 全長を単一補剛区間とする鋼梁の解析に用いた荷重ケースID・係数。モデルは解析に用いた部材荷重を持つこと。
+    /// 不明ならNoneとし、強軸曲げ分布は未確認とする。
+    pub steel_beam_span_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
     /// 通常の長期RC柱検定に渡す線形静的解析結果の由来。
     pub rc_column_long_term_shear: RcColumnLongTermShearInput<'a>,
     /// RC 短期許容せん断力で損傷制御式（2/3·α）を使うか。
@@ -303,6 +307,8 @@ pub fn run_member_design_checks(
             m
         });
 
+    let beam_span_loads =
+        steel_beam_span::BeamSpanLoads::from_terms(model, options.steel_beam_span_load_terms);
     let mut column_mechanism_topology = None;
     let mut rc_beam_adjacency = None;
     let mut member_checks: Vec<(ElemId, f64, CheckOutcome)> = Vec::new();
@@ -333,7 +339,63 @@ pub fn run_member_design_checks(
         })
         .collect();
 
+    let mut force_rows = HashMap::<ElemId, usize>::with_capacity(member_forces.len());
+    for (id, _) in member_forces {
+        *force_rows.entry(*id).or_default() += 1;
+    }
+    let mut unavailable_beam_ids = HashSet::new();
+    for elem in model
+        .elements
+        .iter()
+        .filter(|elem| frame_check_target(elem))
+    {
+        let reason = match force_rows.get(&elem.id) {
+            None => "鋼梁の解析断面力がありません",
+            Some(1) => continue,
+            Some(_) => "鋼梁の解析断面力が重複し、一意の解析応答を確認できません",
+        };
+        let (Some(sec), Some(mat)) = (model.element_section(elem), model.element_material(elem))
+        else {
+            continue;
+        };
+        let structure = structure_kind_of(Some(sec), Some(mat.category));
+        if structure != StructureKind::S || !crate::steel::is_symmetric_h_section(sec) {
+            continue;
+        }
+        let Ok(MemberKind::Girder) = MemberKind::try_of_element(elem, model) else {
+            continue;
+        };
+        let group = options
+            .girder_group_overrides
+            .and_then(|groups| groups.get(&elem.id));
+        let ctx = DesignCtx {
+            kind: MemberKind::Girder,
+            length: group.map_or_else(|| model.member_length(elem), |group| group.length),
+            node_span_mm: Some(crate::steel::frame_node_span_mm(model, elem)),
+            steel_attr: model
+                .steel_design_attrs
+                .iter()
+                .find(|attr| attr.elem == elem.id)
+                .cloned(),
+            ..Default::default()
+        };
+        if steel_beam_span::requires_bending_span(sec, structure, &ctx)
+            && unavailable_beam_ids.insert(elem.id)
+        {
+            member_checks.push((
+                elem.id,
+                0.5,
+                CheckOutcome::Skipped {
+                    reason: reason.into(),
+                },
+            ));
+        }
+    }
+
     for (elem_id, mf) in member_forces {
+        if unavailable_beam_ids.contains(elem_id) {
+            continue;
+        }
         let Some(elem) = elem_by_id.get(elem_id).copied() else {
             continue;
         };
@@ -622,7 +684,7 @@ pub fn run_member_design_checks(
             (None, None, None)
         };
 
-        let ctx = DesignCtx {
+        let mut ctx = DesignCtx {
             rebar_material: rebar_material.cloned(),
             shear_rebar_material: shear_rebar_material.cloned(),
             steel_material: model.element_steel_material(elem).cloned(),
@@ -647,6 +709,7 @@ pub fn run_member_design_checks(
             bond_method: options.bond_method,
             end_moments_z,
             mid_moment_z,
+            steel_beam_moment_diagram: crate::steel::SteelBeamMomentDiagram::Unverified,
             seismic_qd,
             src_column_seismic_bending: None,
             column_sum_my,
@@ -655,6 +718,44 @@ pub fn run_member_design_checks(
             steel_attr,
         };
 
+        let needs_beam_span = steel_beam_span::requires_bending_span(sec, structure, &ctx);
+        let station_key = |xi: f64| if xi == 0.0 { 0 } else { xi.to_bits() };
+        let repeated_stations: HashSet<_> = if needs_beam_span {
+            let mut observed = HashSet::new();
+            mf.at
+                .iter()
+                .map(|(pos, _)| station_key(*pos))
+                .filter(|key| !observed.insert(*key))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        let beam_span = needs_beam_span.then(|| {
+            if !repeated_stations.is_empty() {
+                return Err(
+                    "同一の評価位置で解析断面力が重複し、強軸曲げ分布を確認できません".into(),
+                );
+            }
+            beam_span_loads
+                .as_ref()
+                .map_err(|reason| (*reason).to_owned())
+                .and_then(|loads| {
+                    loads.bending_span(
+                        model,
+                        elem,
+                        mf,
+                        &ctx,
+                        group.is_some() || grouped_girders.contains(elem_id),
+                    )
+                })
+        });
+        let beam_peaks = beam_span
+            .as_ref()
+            .and_then(|span| span.as_ref().ok())
+            .map_or(&[][..], |span| {
+                ctx.steel_beam_moment_diagram = span.diagram;
+                span.demand_peaks.as_slice()
+            });
         let checker: Box<dyn DesignCheck> = checker_for(structure);
 
         let positions = design_positions(elem, model, length);
@@ -672,11 +773,55 @@ pub fn run_member_design_checks(
         let mut has_long_shear_row = false;
 
         let first_row = member_checks.len();
-        for (pos, forces) in &mf.at {
-            if !is_near_design_position(*pos, &positions) {
-                continue;
+        let has_two_cuts = |peak: &sepika_element::frame::member_load::FrameStrongBendingPeak| {
+            peak.left[5] != 0.0 && !matches!(peak.right, Ok(None))
+        };
+        let mut peak_sections = Vec::new();
+        for peak in beam_peaks.iter().filter(|peak| peak.left[5] != 0.0) {
+            if has_two_cuts(peak) {
+                if !peak.is_i_face {
+                    peak_sections.push((peak.xi, peak.left, Some("集中荷重の左側")));
+                }
+                match &peak.right {
+                    Ok(Some(right)) => {
+                        peak_sections.push((peak.xi, *right, Some("集中荷重の右側")))
+                    }
+                    Ok(None) => unreachable!(),
+                    Err(reason) => member_checks.push((
+                        *elem_id,
+                        peak.xi,
+                        CheckOutcome::Skipped {
+                            reason: format!("集中荷重の右側の組合せは未算定です。{reason}"),
+                        },
+                    )),
+                }
+            } else {
+                peak_sections.push((peak.xi, peak.left, None));
             }
-            let mfa = MemberForcesAt::from_local(*pos, *forces);
+        }
+        // 既定のjフェースのξと、物理座標から求めるξは演算順序の違いで一致しない場合がある。
+        let sampled_j_face = elem
+            .rigid_zone
+            .face_j
+            .map(|face| (1.0 - face / length).clamp(0.5 + 1e-9, 1.0));
+        let section_forces = mf
+            .at
+            .iter()
+            .filter(|(pos, _)| {
+                is_near_design_position(*pos, &positions)
+                    && !repeated_stations.contains(&station_key(*pos))
+                    && !beam_peaks.iter().any(|peak| {
+                        peak.left[5] != 0.0
+                            && (peak.xi == *pos
+                                || (peak.is_j_face
+                                    && sampled_j_face == Some(*pos)
+                                    && (peak.xi - pos).abs() <= f64::EPSILON))
+                    })
+            })
+            .map(|&(pos, forces)| (pos, forces, None))
+            .chain(peak_sections);
+        for (pos, forces, cut_side) in section_forces {
+            let mfa = MemberForcesAt::from_local(pos, forces);
             let missing_gravity = options.long_member_forces.is_some()
                 && ctx.seismic_qd.is_none()
                 && (options.term == LoadTerm::Short
@@ -825,15 +970,44 @@ pub fn run_member_design_checks(
                     _ => {}
                 }
             }
+            if let Some(side) = cut_side {
+                match &mut outcome {
+                    CheckOutcome::Checked(result) => result.detail.push_str(&format!(", {side}")),
+                    CheckOutcome::Skipped { reason } => reason.insert_str(0, &format!("{side}。")),
+                }
+                if let Some(reason) = &mut incomplete {
+                    reason.insert_str(0, &format!("{side}。"));
+                }
+            }
             push_strength_outcome(
                 &mut member_checks,
                 *elem_id,
-                *pos,
+                pos,
                 outcome,
                 incomplete.as_deref(),
             );
         }
 
+        if let Some(span) = beam_span {
+            let issue = match span {
+                Err(reason) => Some(reason),
+                Ok(span) if span.diagram == crate::steel::SteelBeamMomentDiagram::Unverified => {
+                    Some(
+                        "符号付き強軸曲げの単調性または区間内部の絶対値最大を確認できません".into(),
+                    )
+                }
+                Ok(_) => None,
+            };
+            if let Some(reason) = issue {
+                member_checks.push((
+                    *elem_id,
+                    0.5,
+                    CheckOutcome::Skipped {
+                        reason: format!("単一補剛区間の強軸曲げ・横座屈は未算定です。{reason}"),
+                    },
+                ));
+            }
+        }
         if let Some(check) = confirmed_long_shear {
             if let Some((xi, result)) = &check.bound_failure {
                 member_checks.push((*elem_id, *xi, CheckOutcome::Checked(result.clone())));
@@ -972,7 +1146,7 @@ pub fn run_member_design_checks(
 
     let mf_slices: Vec<(ElemId, crate::joint_wiring::ForcesAt)> = member_forces
         .iter()
-        .filter(|(id, _)| !duplicate_column_ids.contains(id))
+        .filter(|(id, _)| !duplicate_column_ids.contains(id) && !unavailable_beam_ids.contains(id))
         .map(|(id, mf)| (*id, mf.at.as_slice()))
         .collect();
     // 同じ位置の既存行を先に置き、たわみ算定可否で比較時の順序を変えない。

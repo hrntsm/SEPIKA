@@ -288,6 +288,14 @@ impl App {
         } else {
             RcColumnLongTermShearInput::Unverified
         };
+        let steel_beam_span_load_terms = if load_error.is_none()
+            && selected_response.is_some_and(|response| {
+                same_saved_member_forces(&response.member_forces, &results.member_forces)
+            }) {
+            load_terms.as_deref()
+        } else {
+            None
+        };
         let frame_report = if frame_design_requested {
             sepika_design_jp::run_member_design_checks(
                 design_model,
@@ -313,6 +321,7 @@ impl App {
                     src_holding_reviewed: self.src_wall_holding_reviewed(is_seismic_combo),
                     src_wall_gravity_forces: gravity_long_owned.as_deref(),
                     load_terms: load_terms.as_deref(),
+                    steel_beam_span_load_terms,
                     rc_column_long_term_shear,
                     rc_damage_control: self.core.analysis_cfg.rc_damage_control,
                     bond_method: self.core.analysis_cfg.bond_method,

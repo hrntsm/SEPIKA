@@ -368,11 +368,13 @@ pub struct DesignCtx {
     /// RC 梁付着検定の方式（既定は 1999）。
     pub bond_method: BondMethod,
     /// 部材両端の強軸まわり曲げモーメント `(M_i端, M_j端)` [N·mm]（符号付き）。
-    /// 鋼の横座屈修正係数 C と RC 梁の構造規定に用いる。None の場合は C=1.0。
+    /// 鋼柱の横座屈修正係数 C と RC 梁の構造規定に用いる。
     pub end_moments_z: Option<(f64, f64)>,
     /// 部材中央（pos=0.5）の強軸まわり曲げモーメント [N·mm]（符号付き）。
-    /// 鋼の横座屈修正係数 C と RC 梁の構造規定に用いる。
+    /// 鋼柱の横座屈修正係数 C と RC 梁の構造規定に用いる。
     pub mid_moment_z: Option<f64>,
+    /// 全長を単一の補剛区間とする一般H形鋼梁の、確認済みの強軸曲げ分布。
+    pub steel_beam_moment_diagram: steel::SteelBeamMomentDiagram,
     /// 地震時短期の設計用せん断力 QD = min(QD1, QD2) の算定文脈（RC）。
     /// None の場合は解析せん断力をそのまま用いる。
     pub seismic_qd: Option<SeismicQd>,
@@ -414,6 +416,7 @@ impl Default for DesignCtx {
             bond_method: BondMethod::default(),
             end_moments_z: None,
             mid_moment_z: None,
+            steel_beam_moment_diagram: steel::SteelBeamMomentDiagram::Unverified,
             seismic_qd: None,
             src_column_seismic_bending: None,
             column_sum_my: None,

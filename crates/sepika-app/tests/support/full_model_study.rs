@@ -169,7 +169,12 @@ fn representative_manual_study_retains_three_completed_runs() {
                         .unwrap();
                     assert!(
                         (forces[3] != 0.0 && reason.contains("ねじりモーメントMx"))
-                            || (forces[2] != 0.0 && reason.contains("弱軸せん断力Qz")),
+                            || (forces[2] != 0.0 && reason.contains("弱軸せん断力Qz"))
+                            || (position.xi == 0.5
+                                && reason
+                                    .starts_with("単一補剛区間の強軸曲げ・横座屈は未算定です")
+                                && reason
+                                    .contains("単調性または区間内部の絶対値最大を確認できません")),
                         "{}: ξ={} {forces:?}: {reason}",
                         run.proposal_name,
                         position.xi

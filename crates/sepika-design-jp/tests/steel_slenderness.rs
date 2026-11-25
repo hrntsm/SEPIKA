@@ -499,7 +499,7 @@ fn girder_group_keeps_direct_lateral_length() {
         },
     )]);
     let mut ratios = Vec::new();
-    for mid_lb_mm in [700.0, 8500.0] {
+    for mid_lb_mm in [700.0, 4500.0] {
         model.steel_design_attrs[0].lb_direct = Some((600.0, mid_lb_mm, 800.0));
         let report = sepika_design_jp::run_member_design_checks(
             &model,
@@ -512,6 +512,9 @@ fn girder_group_keeps_direct_lateral_length() {
         )
         .unwrap();
         let result = result(report.member_checks[0].2.clone());
+        assert!(result.components[0]
+            .detail
+            .contains(&format!("lb={mid_lb_mm} mm")));
         ratios.push(result.components[0].ratio);
     }
     assert!(ratios[1] > ratios[0], "{ratios:?}");

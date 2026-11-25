@@ -1396,10 +1396,14 @@ fn design_check_covers_every_member() {
     let mut rc_src_zero_torsion_positions = 0usize;
     let mut slab_girder_positions = 0usize;
     let mut max_rc_src_mx_nmm = 0.0_f64;
+    let mut recovered_h_girder_peaks = 0;
+    let mut symmetric_h_girders = 0;
+    let mut h_girders_with_lb_input = 0;
+    let mut unverified_h_girder_shears = Vec::new();
+    let mut unverified_h_girder_spans = std::collections::BTreeMap::<&str, usize>::new();
     for mc in &results.member_checks {
         let mut positions: Vec<_> = mc.positions.iter().map(|p| p.xi).collect();
         positions.dedup();
-        assert_eq!(positions.len(), 3, "部材 {:?} の危険断面位置数", mc.elem);
         let elem = app.core.model.element(mc.elem).unwrap();
         let section = app.core.model.element_section(elem).unwrap();
         let structure = structure_kind_of(
@@ -1413,6 +1417,34 @@ fn design_check_covers_every_member() {
         let is_steel = structure == StructureKind::S;
         let is_steel_column =
             is_steel && section.frame_use == Some(sepika_core::model::FrameSectionUse::Column);
+        let is_h_girder = is_steel
+            && section.frame_use == Some(FrameSectionUse::Girder)
+            && sepika_design_jp::steel::is_symmetric_h_section(section);
+        if is_h_girder {
+            symmetric_h_girders += 1;
+            h_girders_with_lb_input +=
+                usize::from(app.core.model.steel_design_attrs.iter().any(|attr| {
+                    attr.elem == mc.elem
+                        && (attr.lb_direct.is_some()
+                            || attr.lateral_brace_count.is_some_and(|n| n > 0))
+                }));
+        }
+        let regular_positions = sepika_design_jp::design_position::design_positions(
+            elem,
+            &app.core.model,
+            app.core.model.member_length(elem),
+        );
+        assert_eq!(regular_positions.len(), 3, "部材 {:?}", mc.elem);
+        assert!(
+            regular_positions
+                .iter()
+                .all(|expected| positions.iter().any(|pos| (pos - expected).abs() < 1e-9)),
+            "部材 {:?} の既定の検定位置: {positions:?} / {regular_positions:?}",
+            mc.elem
+        );
+        if !is_h_girder {
+            assert_eq!(positions.len(), 3, "部材 {:?}: {positions:?}", mc.elem);
+        }
         let (_, forces) = results
             .member_forces
             .iter()
@@ -1430,18 +1462,57 @@ fn design_check_covers_every_member() {
                 assert!(xi > 0.0 && xi < 1.0);
                 steel_column_positions += 1;
             }
+            let outcomes: Vec<_> = mc
+                .positions
+                .iter()
+                .filter(|p| p.xi == xi)
+                .map(|p| &p.outcome)
+                .filter(|outcome| {
+                    let CheckOutcome::Skipped { reason } = outcome else {
+                        return true;
+                    };
+                    let Some(detail) =
+                        reason.strip_prefix("単一補剛区間の強軸曲げ・横座屈は未算定です。")
+                    else {
+                        return true;
+                    };
+                    assert!(is_h_girder, "部材 {:?}: {reason}", mc.elem);
+                    *unverified_h_girder_spans.entry(detail).or_default() += 1;
+                    let (q_min, q_max) = forces
+                        .at
+                        .iter()
+                        .fold((0.0_f64, 0.0_f64), |(lo, hi), (_, f)| {
+                            (lo.min(f[1]), hi.max(f[1]))
+                        });
+                    unverified_h_girder_shears.push((mc.elem, q_min, q_max));
+                    false
+                })
+                .collect();
+            if !regular_positions.iter().any(|pos| (xi - pos).abs() < 1e-9) {
+                assert!(is_h_girder, "部材 {:?} の追加曲げ極値 {xi}", mc.elem);
+                let length_mm = app.core.model.member_length(elem);
+                let face_i = elem.rigid_zone.face_i.unwrap() / length_mm;
+                let face_j = 1.0 - elem.rigid_zone.face_j.unwrap() / length_mm;
+                assert!(
+                    (face_i..=face_j).contains(&xi),
+                    "部材 {:?} の追加曲げ極値 {xi}",
+                    mc.elem
+                );
+                assert!(!outcomes.is_empty());
+                assert!(outcomes.iter().all(|outcome| match outcome {
+                    CheckOutcome::Checked(result) =>
+                        result.ratio().is_finite() && result.ratio() >= 0.0,
+                    CheckOutcome::Skipped { reason } => !reason.is_empty(),
+                }));
+                recovered_h_girder_peaks += 1;
+                continue;
+            }
             let (_, local_forces) = forces
                 .at
                 .iter()
                 .find(|(pos, _)| (xi - pos).abs() < 1e-9)
                 .unwrap();
             let mx_nmm = local_forces[3];
-            let outcomes: Vec<_> = mc
-                .positions
-                .iter()
-                .filter(|p| p.xi == xi)
-                .map(|p| &p.outcome)
-                .collect();
             if is_rc_src {
                 if mx_nmm == 0.0 {
                     rc_src_zero_torsion_positions += 1;
@@ -1546,6 +1617,16 @@ fn design_check_covers_every_member() {
                 steel_unavailable_shear_positions += 1;
                 continue;
             }
+            if is_h_girder && outcomes.iter().any(|outcome| matches!(outcome,
+                CheckOutcome::Skipped { reason } if reason.contains("単一補剛区間の強軸曲げ分布を確認できず")))
+            {
+                assert_eq!(outcomes.iter().filter(|outcome| matches!(outcome, CheckOutcome::Skipped { .. })).count(), 1);
+                assert!(outcomes.iter().all(|outcome| match outcome {
+                    CheckOutcome::Checked(result) => result.ratio().is_finite() && !result.ok(),
+                    CheckOutcome::Skipped { .. } => true,
+                }));
+                continue;
+            }
             let [CheckOutcome::Checked(r)] = &outcomes[..] else {
                 panic!("部材 {:?} 位置 {xi}: {outcomes:?}", mc.elem);
             };
@@ -1567,6 +1648,12 @@ fn design_check_covers_every_member() {
             }
         }
     }
+    println!("一般H形鋼梁={symmetric_h_girders}, 横座屈長さ・補剛本数の指定あり={h_girders_with_lb_input}, 追加ピーク={recovered_h_girder_peaks}, 強軸曲げ・横座屈未算定={unverified_h_girder_spans:?}");
+    let observed_reversals = unverified_h_girder_shears
+        .iter()
+        .filter(|(_, lo, hi)| *lo < 0.0 && *hi > 0.0)
+        .count();
+    println!("未算定のうち保存Qyに反転あり={observed_reversals}, 各梁の保存Qy最小・最大[N]={unverified_h_girder_shears:?}");
     assert_eq!(steel_column_positions, 120, "通常S柱40本・各3位置");
     assert!(steel_unavailable_shear_positions > 0);
     assert!(
@@ -3160,20 +3247,40 @@ fn snapshot_key_scalars() {
     app.select_displayed_result(selected);
     app.core.analysis_cfg.qd_method = sepika_design_jp::QdMethod::Qd2;
     // 既存の検定式の数値回帰がMxの丸め残差で左右されるため、この検定への入力だけMxを0にする。
-    let results = app.core.scoped.results.as_mut().expect("解析結果");
-    let original_member_forces = results.member_forces.clone();
-    for (_, forces) in &mut results.member_forces {
+    let replace_fixture_forces = |app: &mut App, forces| {
+        use sepika_app::app::StaticKey;
+        let results = app.core.scoped.results.as_mut().expect("解析結果");
+        let response = match selected {
+            StaticKey::Case(key) => {
+                &mut results
+                    .statics
+                    .iter_mut()
+                    .find(|(stored_key, _)| *stored_key == key)
+                    .unwrap()
+                    .1
+            }
+            StaticKey::Combo(index) => &mut results.combos[index].1,
+        };
+        // 表示中の内力だけを差し替えると、保存応答と不一致になり鋼梁の荷重の由来を確定できない。
+        response.member_forces.clone_from(&forces);
+        std::mem::replace(&mut results.member_forces, forces)
+    };
+    let mut zero_mx = app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .member_forces
+        .clone();
+    for (_, forces) in &mut zero_mx {
         for (_, local_forces) in &mut forces.at {
             local_forces[3] = 0.0;
         }
     }
+    let original_member_forces = replace_fixture_forces(&mut app, zero_mx);
     app.run_design_check();
-    app.core
-        .scoped
-        .results
-        .as_mut()
-        .expect("解析結果")
-        .member_forces = original_member_forces;
+    replace_fixture_forces(&mut app, original_member_forces);
     clear_error(&mut app);
 
     let mut out = String::new();
@@ -3278,7 +3385,14 @@ fn snapshot_key_scalars() {
                 }
                 sepika_design_jp::CheckOutcome::Skipped { reason } => {
                     assert!(
-                        reason.contains("せん断"),
+                        reason.contains("せん断")
+                            || (reason.contains("単一補剛区間の強軸曲げ")
+                                && app.core.model.element(elem).is_some_and(|element| {
+                                    app.core.model.element_section(element).is_some_and(|sec| {
+                                        sec.frame_use == Some(FrameSectionUse::Girder)
+                                            && sepika_design_jp::steel::is_symmetric_h_section(sec)
+                                    })
+                                })),
                         "Mx=0の部材 {elem:?} 位置 {}: {reason}",
                         p.xi
                     );

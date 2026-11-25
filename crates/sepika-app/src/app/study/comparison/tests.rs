@@ -474,6 +474,20 @@ fn saved_expected_targets_positions_and_component_multisets_reject_missing_resul
     let mut app = app();
     let mut model = app.core.model.clone();
     crate::app::tests::use_standard_two_axis_panel_columns(&mut model, &[NodeId(2)]);
+    model
+        .steel_design_attrs
+        .push(sepika_core::model::SteelDesignAttr {
+            elem: ElemId(2),
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: None,
+            lateral_brace_count: Some(1),
+            lk_y_direct: None,
+            lk_z_direct: None,
+            c_direct: None,
+            column_lateral_buckling_end_supports: None,
+        });
     assert!(app.load_model(model));
     let app = compute(app);
     let original = app.studies.items[0].runs[0].comparison_checks[0].clone();

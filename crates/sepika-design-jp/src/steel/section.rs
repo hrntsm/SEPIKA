@@ -24,8 +24,36 @@ pub(crate) fn steel_lateral_buckling_c(ctx: &DesignCtx) -> f64 {
     let Some(m2_over_m1) = end_moment_ratio_m2_m1(ctx) else {
         return 1.0;
     };
-    let c = 1.75 + 1.05 * m2_over_m1 + 0.3 * m2_over_m1 * m2_over_m1;
-    c.min(2.3)
+    moment_ratio_c(m2_over_m1)
+}
+
+fn moment_ratio_c(ratio: f64) -> f64 {
+    (1.75 + 1.05 * ratio + 0.3 * ratio * ratio).min(2.3)
+}
+
+pub(super) fn steel_beam_lateral_parameters(ctx: &DesignCtx) -> Option<(f64, f64)> {
+    use super::SteelBeamMomentDiagram;
+    let (c, p_lambda_b) = match ctx.steel_beam_moment_diagram {
+        SteelBeamMomentDiagram::Monotonic([i, j]) if i.is_finite() && j.is_finite() => {
+            let max = i.abs().max(j.abs());
+            let min = i.abs().min(j.abs());
+            let magnitude = if max == 0.0 { 1.0 } else { min / max };
+            let ratio = if i.is_sign_positive() != j.is_sign_positive() && min > 0.0 {
+                magnitude
+            } else {
+                -magnitude
+            };
+            (moment_ratio_c(ratio), 0.6 + 0.3 * ratio)
+        }
+        SteelBeamMomentDiagram::InteriorMaximum => (1.0, 0.3),
+        _ => return None,
+    };
+    let direct_c = ctx
+        .steel_attr
+        .as_ref()
+        .and_then(|a| a.c_direct)
+        .filter(|&v| v > 1e-9);
+    Some((direct_c.unwrap_or(c), p_lambda_b))
 }
 
 /// 端部強軸モーメントの絶対値が大きい方をM1、小さい方をM2とした比を返す。
