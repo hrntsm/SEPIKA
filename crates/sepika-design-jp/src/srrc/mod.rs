@@ -205,6 +205,27 @@ fn uses_explicit_route21_column(sec: &Section, ctx: &DesignCtx) -> bool {
         && matches!(sec.shape, Some(SectionShape::SrcColumnRect { .. }))
 }
 
+pub(crate) fn preserve_route21_shear_detail(
+    sec: &Section,
+    ctx: &DesignCtx,
+    outcome: &CheckOutcome,
+    incomplete: &mut Option<String>,
+) {
+    if !uses_explicit_route21_column(sec, ctx) {
+        return;
+    }
+    let (Some(reason), CheckOutcome::Checked(result)) = (incomplete, outcome) else {
+        return;
+    };
+    if let Some(shear) = result
+        .components
+        .iter()
+        .find(|component| component.kind == crate::CheckKind::Shear && component.ratio <= 1.0)
+    {
+        reason.push_str(&format!("。せん断の確認結果（{}）", shear.detail));
+    }
+}
+
 /// 矩形SRC梁・柱の断面検定（`SectionShape::SrcBeamRect`・`SrcColumnRect` を対象とする）。
 /// 断面形状・配筋、内蔵 H 形鋼の材種・実板厚、短期地震時の柱せん断が適用条件を満たさない場合は理由付き未算定とする。
 /// SRC柱で軸力が非有限の位置は理由付き未算定とする。
@@ -218,7 +239,8 @@ impl DesignCheck for SrcDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> CheckOutcome {
-        let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx, false);
+        let (outcome, mut incomplete) = self.check_with_incomplete(forces, sec, mat, ctx, false);
+        preserve_route21_shear_detail(sec, ctx, &outcome, &mut incomplete);
         match incomplete {
             Some(reason) => CheckOutcome::Skipped { reason },
             None => outcome,
@@ -302,7 +324,8 @@ impl SrcDesign {
         }
         let torsion =
             concrete_member_torsion_reason(sepika_core::structure_kind::StructureKind::Src, forces);
-        let reason = combine_incomplete_reasons(incomplete, torsion);
+        let mut reason = combine_incomplete_reasons(incomplete, torsion);
+        preserve_route21_shear_detail(sec, ctx, &outcome, &mut reason);
         strength_outcomes(outcome, reason.as_deref())
     }
 

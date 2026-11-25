@@ -269,6 +269,27 @@ impl ResultsBundle {
     }
 }
 
+// NaNを含む同じ保存応答のコピーは、PartialEqだけでは出所の一致を確認できない。
+pub(super) fn same_saved_member_forces(
+    expected: &[(ElemId, sepika_element::frame::beam::MemberForces)],
+    observed: &[(ElemId, sepika_element::frame::beam::MemberForces)],
+) -> bool {
+    let same_value = |a: &f64, b: &f64| a == b || a.to_bits() == b.to_bits();
+    expected.len() == observed.len()
+        && expected.iter().zip(observed).all(
+            |((expected_id, expected), (observed_id, observed))| {
+                expected_id == observed_id
+                    && expected.at.len() == observed.at.len()
+                    && expected.at.iter().zip(&observed.at).all(
+                        |((expected_pos, expected), (observed_pos, observed))| {
+                            same_value(expected_pos, observed_pos)
+                                && expected.iter().zip(observed).all(|(a, b)| same_value(a, b))
+                        },
+                    )
+            },
+        )
+}
+
 fn contract_reason(category: &str, saved: Option<u32>, current: u32) -> Option<String> {
     if saved == Some(current) {
         return None;
@@ -787,6 +808,24 @@ impl App {
     }
 
     fn design_input(&self, source: Option<ResultInputKey>) -> Vec<u8> {
+        let baseline = self.design_input_without_route21(source.clone());
+        let Some(ResultInputKey::Combo(combo)) = source else {
+            return baseline;
+        };
+        if !self.has_route21_registrations(&combo) {
+            return baseline;
+        }
+        let route_source = self.route21_source(&combo, &baseline);
+        let mut registrations: Vec<_> = route_source
+            .as_ref()
+            .into_iter()
+            .flat_map(|source| self.route21_registrations(source))
+            .collect();
+        registrations.sort_unstable_by_key(|record| record.elem.0);
+        rmp_serde::to_vec_named(&(baseline, registrations)).expect("SRC柱ルート2-1検定入力の直列化")
+    }
+
+    pub(super) fn design_input_without_route21(&self, source: Option<ResultInputKey>) -> Vec<u8> {
         let state = match &source {
             Some(ResultInputKey::Static(key)) => {
                 let id = match key {

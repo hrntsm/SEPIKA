@@ -374,7 +374,7 @@ fn src912_material_edit_preparation_design_save_preserve_beam_and_column_skips()
 }
 
 #[path = "../../../sepika-design-jp/tests/fixtures/src_h_steel_product_model.rs"]
-mod steel_product_input;
+pub(super) mod steel_product_input;
 #[path = "../../../sepika-design-jp/tests/fixtures/src_h_steel_product_reference.rs"]
 mod steel_product_reference;
 

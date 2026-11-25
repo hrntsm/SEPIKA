@@ -1693,6 +1693,7 @@ mod tests {
         let bytes = rmp_serde::to_vec_named(&saved).unwrap();
         let cfg = rmp_serde::to_vec_named(&SavedAnalysisSettings {
             design_settings: None,
+            src_column_route21: Vec::new(),
             references: Some(app.saved_references()),
             cfg: app.core.analysis_cfg,
             wave_name: None,
