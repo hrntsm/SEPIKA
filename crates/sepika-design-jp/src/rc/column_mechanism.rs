@@ -10,6 +10,7 @@ use sepika_core::geom::vec3::{norm, sub};
 use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::{
     Constraint, ElementData, ElementKind, EndCondition, Material, MaterialCategory, Model,
+    RegionAnchor, SlabShape,
 };
 use sepika_core::rc_capacity::{rc_column_mu_simple, rc_mu_simple, RcCapacityInput};
 use sepika_core::section_shape::SectionShape;
@@ -377,6 +378,7 @@ pub struct ColumnMechanismTopology {
     linked_nodes: HashSet<NodeId>,
     unconfirmed_reverse_joints: HashSet<NodeId>,
     shell_node_pairs: HashSet<[NodeId; 2]>,
+    line_slab_supports: HashSet<ElemId>,
 }
 
 impl ColumnMechanismTopology {
@@ -435,11 +437,28 @@ impl ColumnMechanismTopology {
                 Constraint::RigidDiaphragm { .. } => {}
             }
         }
+        let line_slab_supports = model
+            .slabs
+            .iter()
+            .filter(|slab| {
+                matches!(
+                    slab.shape,
+                    SlabShape::Attached {
+                        anchor: RegionAnchor::Line { .. },
+                        ..
+                    }
+                ) && model.slab_plate_thickness(slab).is_some()
+            })
+            .filter_map(|slab| model.attached_slab_supports(slab).ok())
+            .flatten()
+            .map(|support| support.elem)
+            .collect();
         Self {
             frame: NodeAdjacency::primary_frame(model),
             linked_nodes: Reducer::explicit_constraint_linked_nodes(model),
             unconfirmed_reverse_joints,
             shell_node_pairs,
+            line_slab_supports,
         }
     }
 
@@ -464,7 +483,8 @@ impl ColumnMechanismTopology {
     }
 
     fn has_attached_floor(&self, model: &Model, girder: &ElementData) -> bool {
-        beam_supports_slab(model, girder)
+        self.line_slab_supports.contains(&girder.id)
+            || beam_supports_slab(model, girder)
             || self
                 .shell_node_pairs
                 .contains(&node_pair(girder.nodes[0], girder.nodes[1]))

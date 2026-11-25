@@ -294,6 +294,80 @@ fn qd1_excludes_slab_supported_girder_yield_without_changing_qd2() {
 }
 
 #[test]
+fn qd1_excludes_each_girder_supporting_a_split_attached_floor_plate() {
+    let (mut model, edge) =
+        fixture::column_with_slab_sensitive_head(column::column_model(false, 0.0), false);
+    let [head, far] = edge;
+    let support = model
+        .elements
+        .iter()
+        .position(|elem| elem.nodes.contains(&head) && elem.nodes.contains(&far))
+        .unwrap();
+    let mut midpoint = model.nodes[far.index()].clone();
+    midpoint.id = NodeId(model.nodes.len() as u32);
+    midpoint.coord[0] = -2000.0;
+    let middle = midpoint.id;
+    model.nodes.push(midpoint);
+    let mut outer = model.elements[support].clone();
+    outer.id = ElemId(model.elements.len() as u32);
+    outer.nodes = [far, middle].into_iter().collect();
+    model.elements[support].nodes = [middle, head].into_iter().collect();
+    model.elements.push(outer);
+
+    fixture::attach_slab(&mut model, edge);
+    let mut attached = model.slabs.pop().unwrap();
+    let plate_section = attached.plate.section.take();
+    let time_history_qd1_n = |model: &Model| {
+        time_history_column_mechanism_sum_my(
+            model,
+            &ColumnMechanismTopology::new(model),
+            &model.elements[COLUMN.index()],
+            [Some(-100_000.0); 2],
+            [Some(-100_000.0); 2],
+        )
+        .unwrap()
+        .qy
+        .unwrap()
+        .unwrap()
+            / 1700.0
+    };
+    for (attach, section, expected_n) in [
+        (false, None, 156_178.120_903_194),
+        (true, None, 156_178.120_903_194),
+        (true, plate_section, reference::TERMINAL_SLAB_HEAD_QD1_N),
+    ] {
+        model.slabs.clear();
+        if attach {
+            attached.plate.section = section;
+            model.slabs.push(attached.clone());
+        }
+        assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+        assert_near(time_history_qd1_n(&model), expected_n, 1e-6);
+        let rows = check_stations(
+            &model,
+            QdMethod::Qd1,
+            Some(-100_000.0),
+            [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0],
+            &[0.0, 0.5, 1.0],
+        );
+        let [CheckOutcome::Checked(result)] = &rows[..] else {
+            panic!("{rows:?}");
+        };
+        let detail = &result
+            .components
+            .iter()
+            .find(|c| c.kind == CheckKind::Shear)
+            .unwrap()
+            .detail;
+        assert_eq!(
+            detail.contains("梁端降伏曲げを確認できない"),
+            section.is_some(),
+            "{detail}"
+        );
+    }
+}
+
+#[test]
 fn qd1_keeps_an_independent_girder_candidate_when_the_other_end_supports_a_slab() {
     for (head_bars, foot_bars, slab_edge, expected_n) in [
         (
