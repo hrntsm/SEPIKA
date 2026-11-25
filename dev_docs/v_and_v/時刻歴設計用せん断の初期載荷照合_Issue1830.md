@@ -12,6 +12,7 @@
 
 - RC片持ち柱で固定および架構用積載に加え、断面力を生じる積雪荷重を指定する。固定・架構用積載の保存組合せは、積雪を含む初期載荷とは一致しない。非線形時刻歴の簡易検定は該当位置を未算定とし、長期初期載荷を無効にした対照では応答せん断力で検定する。
 - 架構用積載を複数ケース指定した対照では、一部のケースを欠く静的組合せを使わない。同一ケースの係数 0.5 を二つ指定した一致組合せを使い、静的組合せの保存順を反転しても検定表示を維持する。一致する静的組合せの入力識別を除くと、適合確認済みの表示を行わない。
-- テスト入口は `crates/sepika-app/src/viewer/th_detail.rs` の `time_history_shear_rejects_snow_reference_mismatch_but_checks_without_initial_load` と `time_history_shear_uses_only_matching_current_cases_independent_of_save_order`。
+- 固定荷重10 kNと架構用積載20 kNが同じ荷重ケースIDを持つ片持ち柱では、柱脚の静的参照せん断力が10 kN、時刻歴の初期せん断力が30 kNとなる。荷重ケースIDの重複を理由として未算定を表示する。
+- テスト入口は `crates/sepika-app/src/viewer/th_detail.rs` の `time_history_shear_rejects_snow_reference_mismatch_but_checks_without_initial_load` と `time_history_shear_uses_only_matching_current_cases_independent_of_save_order`、`time_history_shear_rejects_duplicate_initial_case_id`。
 
 同じ荷重ケースと係数は、線形静的解析と非線形初期状態における内力の数値の同一性を保証しない。積雪を含む照査への適用拡大、時刻歴の全確定時刻を対象とする適否や実建物の適否の検証は行っていない。

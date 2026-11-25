@@ -642,11 +642,23 @@ fn matching_gravity_member_forces<'a>(
 
     let has_load =
         |case: &sepika_core::model::LoadCase| !case.nodal.is_empty() || !case.member.is_empty();
-    let initial: Vec<_> = analyzed_model
+    let long_term = analyzed_model
         .load_cases
         .iter()
-        .filter(|case| case.kind.is_long_term() && has_load(case))
-        .collect();
+        .filter(|case| case.kind.is_long_term());
+    if long_term.clone().any(|case| {
+        analyzed_model
+            .load_cases
+            .iter()
+            .filter(|other| other.id == case.id)
+            .nth(1)
+            .is_some()
+    }) {
+        return Err(
+            "初期載荷に関わる荷重ケースIDが重複しているため、静的組合せと荷重条件を照合できません",
+        );
+    }
+    let initial: Vec<_> = long_term.filter(|case| has_load(case)).collect();
     if initial.is_empty() {
         return Err("長期荷重を初期載荷する設定ですが、初期載荷の荷重項目がありません");
     }
@@ -1774,6 +1786,67 @@ mod tests {
                 assert!(!text.contains("初期載荷に積雪"), "{text}");
             }
         }
+    }
+
+    #[test]
+    fn time_history_shear_rejects_duplicate_initial_case_id() {
+        let mut model = time_history_gravity_model(false);
+        model.load_cases[2].id = model.load_cases[0].id;
+        model.combinations.truncate(1);
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        app.core.analysis_cfg.rc_damage_control = false;
+        app.core.analysis_cfg.qd_method = QdMethod::Qd2;
+        app.core.analysis_cfg.th_nonlinear = true;
+        app.core.analysis_cfg.th_apply_long_term = true;
+        app.core.analysis_cfg.th_record_every = 1;
+        app.run_combination(0);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let reference = &app.current_static().unwrap().member_forces[0].1.at[0].1;
+        assert!((reference[1].hypot(reference[2]) - 10_000.0).abs() < 1e-3);
+        app.run_time_history(sepika_solver::dynamic::timehistory::GroundMotion {
+            dt: 0.02,
+            accel_x: vec![0.0, 50.0, -50.0, 0.0],
+            accel_y: None,
+            accel_theta: None,
+        });
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let rec = app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .time_history
+            .as_ref()
+            .unwrap()
+            .recording
+            .as_ref()
+            .unwrap();
+        assert_eq!(rec.frame_time[0], 0.0);
+        let initial = &rec.member_forces[0][0].as_ref().unwrap().at[0].1;
+        assert!(
+            (initial[1].hypot(initial[2]) - 30_000.0).abs() < 1.0,
+            "{initial:?}"
+        );
+
+        let text = time_history_detail_labels(&mut app);
+        assert!(
+            text.contains("初期載荷に関わる荷重ケースIDが重複"),
+            "{text}"
+        );
+        assert!(
+            text.contains("ξ=0.00:\n検定不能") && !text.contains("(OK)"),
+            "{text}"
+        );
     }
 
     #[test]
