@@ -454,6 +454,134 @@ fn qd1_new_head_yield_requires_the_girders_to_bend_about_the_column_axis() {
 }
 
 #[test]
+fn qd1_issue1907_compares_legacy_girder_demand_and_real_bending_axes() {
+    use sepika_element::transform::LocalFrame;
+
+    for (far_y, far_z, ref_vector, far_offset, y_components, legacy_n, new_n) in [
+        (
+            0.0,
+            1500.0,
+            [0.0, 0.0, 1.0],
+            [0.0; 3],
+            [0.0, 0.0, 1.0],
+            208_303.442_920_260,
+            177_001.870_356_953,
+        ),
+        (
+            0.0,
+            1500.0,
+            [0.0, 1.0, 0.0],
+            [0.0; 3],
+            [0.0, 1.0, 0.0],
+            208_303.442_920_260,
+            227_114.990_935_399,
+        ),
+        (
+            0.0,
+            1500.0,
+            [1.0, 0.0, 1e-13],
+            [0.0; 3],
+            [0.0, 1.0, 0.0],
+            208_303.442_920_260,
+            227_114.990_935_399,
+        ),
+        (
+            3000.0,
+            1500.0,
+            [0.0, 0.0, 1.0],
+            [0.0; 3],
+            [0.6, 0.0, 0.8],
+            208_303.442_920_260,
+            227_114.990_935_399,
+        ),
+        (
+            0.0,
+            4500.0,
+            [0.0, 0.0, 1.0],
+            [0.0; 3],
+            [0.0, 0.0, 1.0],
+            208_303.442_920_260,
+            177_001.870_356_953,
+        ),
+        (
+            0.0,
+            1500.0,
+            [0.0, 0.0, 1.0],
+            [0.0, 3000.0, 0.0],
+            [0.6, 0.0, 0.8],
+            289_718.136_062_013,
+            227_114.990_935_399,
+        ),
+    ] {
+        for (column_bars, expected_n) in [(4, legacy_n), (3, new_n)] {
+            let mut model =
+                fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
+            model.nodes[2].coord = [4000.0, far_y, far_z];
+            let girder = &mut model.elements[fixture::GIRDER.index()];
+            girder.local_axis.ref_vector = ref_vector;
+            girder.end_offsets_mm[1] = far_offset;
+            let [i, j] = model
+                .primary_frame_axis_end_positions(&model.elements[fixture::GIRDER.index()])
+                .unwrap()
+                .unwrap();
+            let frame = LocalFrame::from_nodes(i, j, ref_vector).unwrap();
+            for (axis, expected) in frame.rot.into_iter().zip(y_components) {
+                assert_near(axis[1].abs(), expected, 1e-12);
+            }
+            let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut model.sections[0].shape
+            else {
+                unreachable!();
+            };
+            rebar.x = vec![column_bars];
+            rebar.y = vec![column_bars];
+            assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+            assert_qd1_issue1907_time_history_demand(&model, expected_n);
+        }
+    }
+}
+
+fn assert_qd1_issue1907_time_history_demand(model: &Model, expected_n: f64) {
+    let time_history = time_history_column_mechanism_sum_my(
+        model,
+        &ColumnMechanismTopology::new(model),
+        &model.elements[COLUMN.index()],
+        [Some(-100_000.0); 2],
+        [Some(-100_000.0); 2],
+    )
+    .unwrap();
+    assert_near(time_history.qy.unwrap().unwrap() / 1500.0, expected_n, 1e-6);
+}
+
+#[test]
+fn qd1_issue1907_compares_legacy_terminal_head_and_foot_with_rotated_girders() {
+    let mut terminal_head = yielding_head_model();
+    let mut terminal_foot =
+        fixture::column_with_reversible_girders(column::column_model(false, 0.0), 4, 1);
+    terminal_foot.elements[3].nodes[0] = NodeId(2);
+    terminal_foot.nodes[4].coord[0] = terminal_foot.nodes[2].coord[0];
+    for axis_reference in [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0]] {
+        terminal_head.elements[fixture::GIRDER.index()]
+            .local_axis
+            .ref_vector = axis_reference;
+        terminal_foot.elements[6].local_axis.ref_vector = axis_reference;
+        assert_qd1_shear_ratio(&terminal_head, reference::TERMINAL_SHEAR_RATIO);
+        assert_qd1_issue1907_time_history_demand(
+            &terminal_head,
+            reference::TWO_HEAD_GIRDERS_HALF_QD1_N,
+        );
+        assert_near(
+            column_qd1_by_direction(&terminal_foot, [-100_000.0; 2], 1500.0)[0],
+            reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N,
+            1e-6,
+        );
+        assert_qd1_issue1907_time_history_demand(
+            &terminal_foot,
+            reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N,
+        );
+    }
+}
+
+#[test]
 fn qd1_keeps_the_planar_mechanisms_after_rotating_the_frame_off_global_axes() {
     for (x_direction, y_direction, scale) in [(3.0, 4.0, 5.0), (3.0, 1.0, 4.0)] {
         for (head_bars, expected_n) in [
