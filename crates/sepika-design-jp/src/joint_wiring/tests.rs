@@ -654,7 +654,7 @@ fn wall_with_side_columns_emits_reference_skeleton_and_missing_columns_are_skipp
     let plain = collect_joint_checks(&columnless, &member_forces, LoadTerm::Short);
     assert!(
         plain.iter().any(|(_, label, outcome)| label == "耐震壁(RC)せん断非線形"
-            && matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("側柱主筋量"))),
+            && matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("両側柱付き壁が参考骨格の適用範囲") && reason.contains("側柱なし"))),
         "側柱のない壁はトリリニア対象外"
     );
 }

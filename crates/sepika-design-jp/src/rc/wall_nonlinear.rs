@@ -95,7 +95,7 @@ impl WallShearTrilinear {
 }
 
 /// 無開口壁のせん断ひび割れ耐力 `[N]`。Fc `[N/mm²]`・実壁厚/柱心距離 `[mm]` を用いる。
-/// 有開口・非有限値・非正値・面積や耐力のoverflowはエラー。
+/// 有開口、Fcが360 kgf/cm²相当を超える場合、入力・面積・耐力が非有限または非正の場合はエラー。
 pub fn wall_shear_crack(inp: &WallShearTrilinearInput) -> Result<f64, String> {
     if inp.opening.is_some() {
         return Err("有開口壁のQc用開口低減率が未確定のため参考骨格は未対応です".into());
@@ -389,15 +389,28 @@ mod tests {
             );
         }
         let mut input = base_input();
-        input.fc = 36.0;
-        assert!(wall_shear_crack(&input)
-            .unwrap_err()
-            .contains("360 kgf/cm²"));
-        input.fc = 24.0;
         input.opening = Some((200.0, 200.0, 3000.0, 4000.0));
         assert!(
             matches!(wall_shear_crack(&input), Err(reason) if reason.contains("Qc用開口低減率が未確定"))
         );
+    }
+
+    #[test]
+    fn crack_force_accepts_exact_fc_limit_but_not_the_next_value() {
+        let mut input = base_input();
+        input.t = 200.0;
+        input.wall_length_mm = 4200.0;
+        input.fc = 35.30394;
+        // 原式の単位で 12.9 kgf/cm² × 20 cm × 420 cm を N に換算した値。
+        assert!((wall_shear_crack(&input).unwrap() - 1_062_648.594).abs() < 1e-6);
+        assert!(wall_shear_trilinear(&input)
+            .unwrap_err()
+            .contains("剛性低下率の原研究範囲"));
+
+        input.fc = input.fc.next_up();
+        assert!(wall_shear_crack(&input)
+            .unwrap_err()
+            .contains("360 kgf/cm²"));
     }
 
     #[test]
