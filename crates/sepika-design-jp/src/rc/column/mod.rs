@@ -513,13 +513,11 @@ pub(super) fn column_check(
         let gross_area = std::f64::consts::PI * d_full * d_full / 4.0;
         let as_total = info.main_area;
         let mut components = Vec::new();
-        if main_rebar_valid && axial_available {
-            let grade = main_rebar_grade(ctx.rebar_material.as_ref());
-            let ft = rebar_allowable_tension(
-                grade,
-                info.main_dia.designation_or_diameter_mm(),
-                long_term,
-            );
+        let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+        if let Some(ft) =
+            rebar_allowable_tension(grade, info.main_dia.designation_or_diameter_mm(), long_term)
+                .filter(|_| main_rebar_valid && axial_available)
+        {
             let nt = as_total * ft;
             if let Some(n_ratio) = allow.n_ratio {
                 let na = column_axial_capacity(gross_area, as_total, allow.fc, ft, n_ratio);
@@ -662,13 +660,11 @@ pub(super) fn column_check(
         let gross_area = b * d;
         let as_total = info.main_area;
         let mut components = Vec::new();
-        if main_rebar_valid && axial_available {
-            let grade = main_rebar_grade(ctx.rebar_material.as_ref());
-            let ft_z = rebar_allowable_tension(
-                grade,
-                info.main_dia.designation_or_diameter_mm(),
-                long_term,
-            );
+        let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+        if let Some(ft_z) =
+            rebar_allowable_tension(grade, info.main_dia.designation_or_diameter_mm(), long_term)
+                .filter(|_| main_rebar_valid && axial_available)
+        {
             let ft_y = ft_z;
             let nt = as_total * ft_z;
             if let Some(n_ratio) = allow.n_ratio {
@@ -948,7 +944,7 @@ mod tests {
             Some("SD345"),
             true,
         );
-        let ft = rebar_allowable_tension("SD345", 22.0, true);
+        let ft = rebar_allowable_tension("SD345", 22.0, true).unwrap();
 
         let props_z = axis_props_from_shape(&shape, RcDirection::Strong, true).unwrap();
         let bm = beam_moment_capacity(&props_z, ft, allow.fc, allow.n_ratio.unwrap()).unwrap();
@@ -991,7 +987,7 @@ mod tests {
             Some("SD345"),
             true,
         );
-        let ft = rebar_allowable_tension("SD345", 19.0, true);
+        let ft = rebar_allowable_tension("SD345", 19.0, true).unwrap();
         let props_z = axis_props_from_shape(&shape, RcDirection::Strong, true).unwrap();
         let gross_area = sec.width * sec.depth;
         let as_total = rebar.total_main_area();
@@ -1187,9 +1183,11 @@ mod tests {
         );
         let props_z = axis_props_from_shape(&shape, RcDirection::Strong, true).unwrap();
         let ft =
-            rebar_allowable_tension("SD345", rebar.main_dia.designation_or_diameter_mm(), false);
+            rebar_allowable_tension("SD345", rebar.main_dia.designation_or_diameter_mm(), false)
+                .unwrap();
         let ft_axial =
-            rebar_allowable_tension("SD345", rebar.main_dia.designation_or_diameter_mm(), false);
+            rebar_allowable_tension("SD345", rebar.main_dia.designation_or_diameter_mm(), false)
+                .unwrap();
         let gross_area = sec.width * sec.depth;
         let as_total = rebar.total_main_area();
         let na = column_axial_capacity(

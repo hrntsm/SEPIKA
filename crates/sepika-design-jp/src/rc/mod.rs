@@ -164,10 +164,9 @@ impl RcDesign {
         let material_issue =
             crate::material_strength::main_rebar_category_issue(ctx.rebar_material.as_ref())
                 .or_else(|| {
-                    matches!(
-                        main_rebar_grade(ctx.rebar_material.as_ref()),
-                        "USD685" | "USD685A" | "USD685B"
-                    )
+                    crate::material_strength::is_usd685_main_rebar_grade(main_rebar_grade(
+                        ctx.rebar_material.as_ref(),
+                    ))
                     .then(|| "USD685系主筋の認定に基づく許容応力度を確認できません".into())
                 })
                 .map(|reason| format!("RC 検定: 断面「{}」の{reason}", sec.name));

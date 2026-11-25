@@ -1418,6 +1418,90 @@ mod tests {
     }
 
     #[test]
+    fn usd685_main_bar_reason_and_independent_ng_survive_saved_gui_check() {
+        use sepika_core::ids::{LoadCaseId, MaterialId};
+
+        mod input {
+            include!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../sepika-design-jp/tests/fixtures/rc_beam_asymmetric_model.rs"
+            ));
+        }
+        for grade in ["USD685", "USD685A", "USD685B"] {
+            let mut model = input::model(false);
+            let mut main = model.materials[1].clone();
+            main.id = MaterialId(2);
+            main.name = grade.into();
+            main.fy = Some(685.0);
+            model.sections[0].rebar_material = Some(main.id);
+            model.materials.push(main);
+            model.load_cases[0].nodal[0].values[1] = 150_000.0;
+
+            let mut app = App::default();
+            assert!(app.load_model(model));
+            app.run_preparation();
+            app.run_linear_static(LoadCaseId(0));
+            let results = app.current_design_results().unwrap();
+            assert_eq!(
+                results.design_contract_version,
+                Some(sepika_core::result_contract::DESIGN_CONTRACT_VERSION)
+            );
+            let expected = serde_json::to_value(&results.member_checks).unwrap();
+            let path =
+                std::env::temp_dir().join(format!("sepika-991-{}.ovika", uuid::Uuid::new_v4()));
+            app.save_project_to(path.clone());
+            let mut loaded = App::default();
+            loaded.open_project_from(path.clone());
+            std::fs::remove_file(path).unwrap();
+            let restored = loaded.current_design_results().unwrap();
+            assert_eq!(
+                serde_json::to_value(&restored.member_checks).unwrap(),
+                expected
+            );
+
+            let ctx = egui::Context::default();
+            let mut labels = Vec::new();
+            for _ in 0..2 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(2400.0, 1200.0),
+                        )),
+                        events: vec![egui::Event::PointerMoved(egui::pos2(30.0, 30.0))],
+                        ..Default::default()
+                    },
+                    |ui| show_check_tooltip(ui, &loaded, ElemId(0)),
+                );
+                labels.extend(
+                    output
+                        .shapes
+                        .into_iter()
+                        .filter_map(|shape| match shape.shape {
+                            egui::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                            _ => None,
+                        }),
+                );
+            }
+            assert!(
+                labels.iter().any(|label| label.starts_with("部材 #0")),
+                "{labels:?}"
+            );
+            assert!(
+                labels.iter().any(|label| label.contains("検定不能")
+                    && label.contains("断面「G1」")
+                    && label.contains("USD685系主筋の認定に基づく許容応力度")),
+                "{labels:?}"
+            );
+            assert!(labels.iter().any(|label| label == "NG"), "{labels:?}");
+            assert!(
+                !labels.iter().any(|label| label == "OK" || label == "曲げ"),
+                "{labels:?}"
+            );
+        }
+    }
+
+    #[test]
     fn eccentric_girder_check_lines_and_position_markers_are_drawn_on_physical_axis() {
         let mut app = crate::app::design_input_tests::pure_bending();
         app.core.model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);

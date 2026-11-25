@@ -161,17 +161,17 @@ fn legacy_column_design_shear_uses_min_and_fallbacks() {
 
 #[test]
 fn test_rebar_allowable_tension_table() {
-    assert!((rebar_allowable_tension("SR235", 16.0, true) - 155.0).abs() < 1e-9);
-    assert!((rebar_allowable_tension("SR235", 16.0, false) - 235.0).abs() < 1e-9);
-    assert!((rebar_allowable_tension("SR295", 16.0, true) - 155.0).abs() < 1e-9);
-    assert!((rebar_allowable_tension("SR295", 16.0, false) - 295.0).abs() < 1e-9);
-    assert!((rebar_allowable_tension("SD295A", 16.0, true) - 195.0).abs() < 1e-9);
-    assert!((rebar_allowable_tension("SD390", 22.0, true) - 215.0).abs() < 1e-9);
-    assert!((rebar_allowable_tension("SD390", 32.0, true) - 195.0).abs() < 1e-9);
-    assert!((rebar_allowable_tension("SD390", 22.0, false) - 390.0).abs() < 1e-9);
-    assert!((rebar_allowable_tension("SD490", 22.0, false) - 490.0).abs() < 1e-9);
-    assert!((rebar_allowable_tension("UNKNOWN", 22.0, true) - 195.0).abs() < 1e-9);
-    assert!((rebar_allowable_tension("UNKNOWN", 22.0, false) - 295.0).abs() < 1e-9);
+    assert_eq!(rebar_allowable_tension("SR235", 16.0, true), Some(155.0));
+    assert_eq!(rebar_allowable_tension("SR235", 16.0, false), Some(235.0));
+    assert_eq!(rebar_allowable_tension("SR295", 16.0, true), Some(155.0));
+    assert_eq!(rebar_allowable_tension("SR295", 16.0, false), Some(295.0));
+    assert_eq!(rebar_allowable_tension("SD295A", 16.0, true), Some(195.0));
+    assert_eq!(rebar_allowable_tension("SD390", 22.0, true), Some(215.0));
+    assert_eq!(rebar_allowable_tension("SD390", 32.0, true), Some(195.0));
+    assert_eq!(rebar_allowable_tension("SD390", 22.0, false), Some(390.0));
+    assert_eq!(rebar_allowable_tension("SD490", 22.0, false), Some(490.0));
+    assert_eq!(rebar_allowable_tension("UNKNOWN", 22.0, true), Some(195.0));
+    assert_eq!(rebar_allowable_tension("UNKNOWN", 22.0, false), Some(295.0));
 }
 
 #[test]

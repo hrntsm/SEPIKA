@@ -423,15 +423,16 @@ pub(crate) fn src_column_check(
         detail: String::new(),
         components: Vec::new(),
     };
-    if main_rebar_valid && !outside_short_column && !simultaneous_bending {
-        let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+    let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+    let main_allowables = [main_dia_z, main_dia_y, main_dia_z.max(main_dia_y)]
+        .map(|dia| rebar_allowable_tension(grade, dia, long_term));
+    if let (true, [Some(ft_z), Some(ft_y), Some(ft_axial)]) = (
+        main_rebar_valid && !outside_short_column && !simultaneous_bending,
+        main_allowables,
+    ) {
         let s_fc = s_ft;
         let s_pc = (steel_width * steel_flange_thick) / (props_z.b * props_z.d_full).max(1e-9);
         let fc_prime = (fc_allow * (1.0 - 15.0 * s_pc)).max(0.0);
-
-        let ft_z = rebar_allowable_tension(grade, main_dia_z, long_term);
-        let ft_y = rebar_allowable_tension(grade, main_dia_y, long_term);
-        let ft_axial = rebar_allowable_tension(grade, main_dia_z.max(main_dia_y), long_term);
 
         let ae = props_z.b * props_z.d_full + (n_ratio - 1.0) * as_total;
         let rnc1 = ae * fc_prime;

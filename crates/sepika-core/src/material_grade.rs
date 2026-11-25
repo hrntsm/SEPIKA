@@ -384,6 +384,7 @@ fn main_rebar_grade(mat: &crate::model::Material) -> Option<&str> {
 }
 
 /// 対応材種の主筋許容引張・圧縮応力度 `[N/mm²]` を長期、短期の順で返す。径は呼び名または `[mm]`。
+/// 名称だけで許容値を確定できないUSD685・USD685A・USD685Bなどは None。
 pub fn rebar_tension_limits(grade: &str, diameter: f64) -> Option<(f64, f64)> {
     let high_grade_long = if diameter > 28.0 { 195.0 } else { 215.0 };
     match grade.trim() {
@@ -393,7 +394,6 @@ pub fn rebar_tension_limits(grade: &str, diameter: f64) -> Option<(f64, f64)> {
         "SD345" => Some((high_grade_long, 345.0)),
         "SD390" => Some((high_grade_long, 390.0)),
         "SD490" => Some((high_grade_long, 490.0)),
-        "USD685" => Some((215.0, 685.0)),
         _ => None,
     }
 }
@@ -723,6 +723,18 @@ pub fn material_presets() -> Vec<MaterialPreset> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replacement_of_designation_with_usd685_does_not_supply_main_bar_allowables() {
+        for grade in ["USD685", "USD685A", " USD685B "] {
+            for diameter_mm in [19.0, 28.6, 41.0] {
+                assert_eq!(rebar_tension_limits(grade, diameter_mm), None);
+            }
+        }
+        assert_eq!(rebar_tension_limits("SD345", 28.0), Some((215.0, 345.0)));
+        assert_eq!(rebar_tension_limits("SD345", 28.6), Some((195.0, 345.0)));
+        assert_eq!(rebar_tension_limits("UNKNOWN", 19.0), None);
+    }
 
     /// H12 建告第2464号の基準強度表と一致することを確認する（板厚 40mm 以下）。
     #[test]

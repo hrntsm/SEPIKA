@@ -10,6 +10,7 @@ pub use concrete::{
     concrete_allowable_bond, concrete_allowable_compression, concrete_allowable_shear,
     concrete_allowable_shear_class, concrete_young_modulus, young_ratio_n,
 };
+pub(crate) use rebar::is_usd685_main_rebar_grade;
 pub(crate) use rebar::{main_rebar_category_issue, shear_rebar_category_issue};
 pub use rebar::{
     main_rebar_grade, rebar_allowable_shear, rebar_allowable_tension, rebar_sigma_y_of,
@@ -138,18 +139,26 @@ mod tests {
             ] {
                 assert_eq!(
                     rebar_allowable_tension(grade, dia_mm, true),
-                    expected_long_term,
+                    Some(expected_long_term),
                     "{grade}, {dia_mm} mm"
                 );
-                assert_eq!(rebar_allowable_tension(grade, dia_mm, false), short_term);
+                assert_eq!(
+                    rebar_allowable_tension(grade, dia_mm, false),
+                    Some(short_term)
+                );
             }
         }
     }
 
     #[test]
-    fn test_rebar_usd685() {
-        assert!((rebar_allowable_tension("USD685", 32.0, true) - 215.0).abs() < 1e-9);
-        assert!((rebar_allowable_tension("USD685", 32.0, false) - 685.0).abs() < 1e-9);
+    fn rebar_tension_has_no_name_only_allowable_for_usd685_main_bars() {
+        for grade in ["USD685", "USD685A", " USD685B "] {
+            for diameter_mm in [19.0, 28.6, 41.0] {
+                for long_term in [true, false] {
+                    assert_eq!(rebar_allowable_tension(grade, diameter_mm, long_term), None);
+                }
+            }
+        }
     }
 
     /// σy は断面の主筋材料の `fy` だけから決まる。材料名からの推定は行わない
