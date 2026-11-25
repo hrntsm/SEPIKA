@@ -3547,6 +3547,74 @@ fn rc_reference_rejects_only_member_loads_applied_in_the_current_analysis() {
 }
 
 #[test]
+fn saved_legacy_rc_beam_reference_requires_reselection_in_both_analyses() {
+    use sepika_core::model::RcBeamReference;
+
+    let mut app = prepared_rectangular_rc_portal();
+    let beam = app
+        .core
+        .model
+        .member_hysteresis_attrs
+        .iter()
+        .find(|attr| attr.rc_beam_reference.is_some())
+        .unwrap()
+        .elem;
+    let legacy_reference = Some(RcBeamReference::AntisymmetricHalfMember);
+    app.core
+        .model
+        .set_member_rc_beam_reference(beam, legacy_reference);
+    let path = test_tmp().join("legacy_rc_beam_reference.ovika");
+    app.save_project_to(path.clone());
+    assert_no_error(&app, "旧RC梁基準の保存");
+
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert_no_error(&reopened, "旧RC梁基準の読込");
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(
+        reopened.core.model.member_rc_beam_reference(beam),
+        legacy_reference
+    );
+
+    reopened.core.analysis_cfg.push_apply_long_term = false;
+    reopened.core.analysis_cfg.push_dir = SeismicDir::X;
+    reopened.core.analysis_cfg.push_steps = 3;
+    reopened.core.analysis_cfg.th_dir = ThDir::X;
+    reopened.core.analysis_cfg.th_nonlinear = true;
+    reopened.core.analysis_cfg.th_apply_long_term = false;
+    reopened.core.analysis_cfg.th_duration = 0.2;
+    reopened.core.analysis_cfg.th_dt = 0.05;
+    for run in [App::run_pushover, App::run_time_history_sample] {
+        run(&mut reopened);
+        let error = reopened.core.scoped.last_error.as_deref().unwrap();
+        assert!(
+            error.contains(&format!("部材 ID {}", beam.0))
+                && error.contains("軸力を見込まない前提")
+                && error.contains("基準の再指定が必要"),
+            "{error}"
+        );
+        let results = reopened.core.scoped.results.as_ref();
+        assert!(results.is_none_or(|r| r.pushover_x.is_none() && r.time_history.is_none()));
+        clear_error(&mut reopened);
+    }
+
+    assert!(reopened.core.scoped.undo.run(
+        &mut reopened.core.model,
+        Box::new(sepika_edit::SetMemberRcBeamReference {
+            elem: beam,
+            reference: Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
+        }),
+    ));
+    reopened.run_pushover();
+    assert_no_error(&reopened, "再指定後の増分解析");
+    reopened.run_time_history_sample();
+    assert_no_error(&reopened, "再指定後の非線形時刻歴");
+    let results = reopened.core.scoped.results.as_ref().unwrap();
+    assert!(results.pushover_x.is_some());
+    assert!(results.time_history.is_some());
+}
+
+#[test]
 fn gui_basement_depth_edit_rejects_conflicting_ground_in_all_standard_results() {
     use sepika_core::model::StoryLevelKind;
     let mut model = four_story_steel_portal();
