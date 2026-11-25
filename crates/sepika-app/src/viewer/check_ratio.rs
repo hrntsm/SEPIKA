@@ -1435,7 +1435,7 @@ mod tests {
     }
 
     #[test]
-    fn usd685_main_bar_reason_and_independent_ng_survive_saved_gui_check() {
+    fn usd_main_bar_reason_and_independent_ng_survive_saved_gui_check() {
         use sepika_core::ids::{LoadCaseId, MaterialId};
 
         mod input {
@@ -1444,12 +1444,19 @@ mod tests {
                 "/../sepika-design-jp/tests/fixtures/rc_beam_asymmetric_model.rs"
             ));
         }
-        for grade in ["USD685", "USD685A", "USD685B"] {
+        for (grade, family, fy) in [
+            ("USD590", "USD590", 590.0),
+            ("USD590A", "USD590", 590.0),
+            ("USD590B", "USD590", 590.0),
+            ("USD685", "USD685", 685.0),
+            ("USD685A", "USD685", 685.0),
+            ("USD685B", "USD685", 685.0),
+        ] {
             let mut model = input::model(false);
             let mut main = model.materials[1].clone();
             main.id = MaterialId(2);
             main.name = grade.into();
-            main.fy = Some(685.0);
+            main.fy = Some(fy);
             model.sections[0].rebar_material = Some(main.id);
             model.materials.push(main);
             model.load_cases[0].nodal[0].values[1] = 150_000.0;
@@ -1507,7 +1514,7 @@ mod tests {
             assert!(
                 labels.iter().any(|label| label.contains("検定不能")
                     && label.contains("断面「G1」")
-                    && label.contains("USD685系主筋の認定に基づく許容応力度")),
+                    && label.contains(&format!("{family}系主筋の認定に基づく許容応力度"))),
                 "{labels:?}"
             );
             assert!(labels.iter().any(|label| label == "NG"), "{labels:?}");

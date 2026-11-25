@@ -10,7 +10,7 @@ pub use concrete::{
     concrete_allowable_bond, concrete_allowable_compression, concrete_allowable_shear,
     concrete_allowable_shear_class, concrete_young_modulus, young_ratio_n,
 };
-pub(crate) use rebar::is_usd685_main_rebar_grade;
+pub(crate) use rebar::main_rebar_grade_requiring_approval;
 pub(crate) use rebar::{main_rebar_category_issue, shear_rebar_category_issue};
 pub use rebar::{
     main_rebar_grade, rebar_allowable_shear, rebar_allowable_tension, rebar_sigma_y_of,
@@ -151,8 +151,15 @@ mod tests {
     }
 
     #[test]
-    fn rebar_tension_has_no_name_only_allowable_for_usd685_main_bars() {
-        for grade in ["USD685", "USD685A", " USD685B "] {
+    fn rebar_tension_has_no_name_only_allowable_for_usd_main_bars() {
+        for grade in [
+            "USD590",
+            "USD590A",
+            " USD590B ",
+            "USD685",
+            "USD685A",
+            " USD685B ",
+        ] {
             for diameter_mm in [19.0, 28.6, 41.0] {
                 for long_term in [true, false] {
                     assert_eq!(rebar_allowable_tension(grade, diameter_mm, long_term), None);
