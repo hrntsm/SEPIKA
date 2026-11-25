@@ -38,6 +38,10 @@ ST-Bridge に関する各レポートは [ADR 0141](../adr/0141-remove-st-bridge
 
 [原典・独立算術・公開検定の照合](RC矩形梁のQD1両端降伏_Issue1851_検証.md)に、上下異配筋の両端降伏、適用条件を満たさない場合とQD2の独立性、通常／時刻歴簡易検定の確認条件を記録する。状態🔶。
 
+## RC柱の曲げ降伏時における常時せん断力の算入（#1905）
+
+[原典・自由体と公開検定との照合](RC柱の曲げ降伏時の常時せん断力_Issue1905_照合記録.md)に、常時横荷重を算入すると需要が変わる条件、通常検定と時刻歴簡易検定の重力参照、後続の仕様検討を記録する。状態🔶。
+
 ## RC梁の方向別両端降伏せん断（#1582）
 
 [原典・独立釣合い・公開終局検定の照合](RC梁の方向別両端降伏せん断_Issue1582_検証.md)に、実支持フェース間の正負の両端降伏と常時荷重、相殺に対する絶対需要上限、既存の確定総応答・付着への非干渉を記録する。状態🔶。
@@ -1133,6 +1137,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 1843 | RC柱の方向別長期最大せん断力 | sepika-element / sepika-design-jp / sepika-app | frame/member_load/shear_envelope.rs、member_design_check/rc_column_long_term_shear.rs、rc/column/mod.rs、app/actions/design/check.rs | [公開解析・検定と独立釣合い](RC柱の長期せん断需要_Issue1843_検証.md) | 一次設計・保存 | 🔶（方向別の需要・位置・不適合と未算定。実験Validationは未確認） |
 | 1841 | RC柱の長期許容せん断力の割増係数 | sepika-job / sepika-design-jp | member_design_check.rs、rc/column/mod.rs、rc/shear_capacity.rs | [是正前の照合](RC柱の長期許容せん断力_Issue1841_照合記録.md) | 一次設計 | 🔶（矩形・円形の単軸の有限例） |
 | 1854 | RC柱の長期許容せん断力の二段階判定 | sepika-element / sepika-design-jp / sepika-job / sepika-app | frame/member_load/shear_envelope.rs、rc/column/long_term_shear.rs、member_design_check.rs | [是正後の公開解析・検定と独立計算](RC柱の長期許容せん断力_Issue1854_検証.md) | 一次設計・保存 | 🔶（両材端支配、有限二方向と未算定。せん断の二方向相関と実験Validationは未確認） |
+| 1905 | RC柱の曲げ降伏時の常時せん断 | sepika-design-jp / sepika-app | rc/design_shear.rs、rc/column/mod.rs、actions/design/check.rs、viewer/th_detail.rs | [独立釣合いと公開部材検定](RC柱の曲げ降伏時の常時せん断力_Issue1905_照合記録.md) | 一次設計 | 🔶（限定Verification、算入仕様は[#1962](https://github.com/hrntsm/SEPIKA/issues/1962)） |
 | 1582 | RC梁の方向別両端降伏せん断 | sepika-design-jp | ultimate/rc_beam_hinge_shear.rs、tests/rc_ultimate_beam_hinge_shear.rs、tests/rc_ultimate_beam_bond_direction.rs | [独立した自由体と公開入口](RC梁の方向別両端降伏せん断_Issue1582_検証.md#公開入口での照合) | 二次設計 | 🔶（実建物の機構同定・GUI入力は範囲外） |
 | 1857 | RC梁の非有限なあばら筋間隔による終局検定 | sepika-design-jp | ultimate/rc_check.rs、tests/rc_ultimate_beam_hinge.rs | [独立算術と公開検定](RC梁の非有限なあばら筋間隔による終局検定_Issue1857_検証.md#独立算術と公開検定) | 二次設計 | 🔶（両方式・両需要の未算定と独立したNG。実験Validationは未確認） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
