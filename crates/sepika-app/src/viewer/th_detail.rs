@@ -603,6 +603,16 @@ fn damage_control_gravity_issue(
         Some("RC損傷制御用せん断に必要な固定・架構用積載荷重の初期載荷がありません")
     } else if loaded_kinds.any(|kind| !matches!(kind, LoadCaseKind::Dead | LoadCaseKind::Live)) {
         Some("初期載荷に固定・架構用積載以外（積雪または種別未指定）の荷重を含むため、RC損傷制御用せん断は未算定です")
+    } else if ![LoadCaseKind::Dead, LoadCaseKind::Live]
+        .into_iter()
+        .all(|kind| {
+            analyzed_model
+                .load_cases
+                .iter()
+                .any(|case| case.kind == kind)
+        })
+    {
+        Some("RC損傷制御用せん断には固定・架構用積載の両荷重ケースを明示してください")
     } else {
         None
     }
@@ -1806,6 +1816,7 @@ mod tests {
         };
 
         let mut rc_app = App::default();
+        rc_app.core.analysis_cfg.rc_damage_control = false;
         assert!(rc_app.load_model(rc::column_model(false, 0.0)));
         let src_app =
             crate::app::src_ql_acceptance_tests::src_column_app(sepika_design_jp::QdMethod::Qd1);
@@ -1908,7 +1919,6 @@ mod tests {
             model.materials.push(main);
 
             let mut app = App::default();
-            app.core.analysis_cfg.rc_damage_control = false;
             app.core.analysis_cfg.rc_damage_control = false;
             assert!(app.load_model(model));
             let text = peak_check_text(&app, 0, [-100_000.0, 10_000_000.0, 0.0, 0.0, 0.0, 1e6]);

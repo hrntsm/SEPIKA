@@ -1085,7 +1085,15 @@ fn time_history_damage_control_requires_current_generation_input_and_nonempty_lo
     assert!(issue(&make_app([None, None]))
         .unwrap()
         .contains("初期載荷がありません"));
-    assert_eq!(issue(&make_app([Some(LoadCaseKind::Live), None])), None);
+    assert_eq!(issue(&make_app([Some(LoadCaseKind::Dead), None])), None);
+    for kinds in [
+        [Some(LoadCaseKind::Seismic), Some(LoadCaseKind::Live)],
+        [Some(LoadCaseKind::Dead), Some(LoadCaseKind::Seismic)],
+    ] {
+        assert!(issue(&make_app(kinds))
+            .unwrap()
+            .contains("両荷重ケースを明示"));
+    }
     for kinds in [
         [Some(LoadCaseKind::Other), None],
         [Some(LoadCaseKind::Dead), Some(LoadCaseKind::Other)],
