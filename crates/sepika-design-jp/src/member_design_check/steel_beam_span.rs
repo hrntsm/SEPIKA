@@ -370,9 +370,6 @@ fn grouped_bending_span(
         let Some(&(1.0, end)) = mf.at.last() else {
             return Err("一本部材の要素j端の解析断面力がありません".into());
         };
-        let local_loads = beam_loads.0.get(id).map_or(&[][..], Vec::as_slice);
-        let local_stations: Vec<_> = mf.at.iter().map(|&(xi, f)| (xi * length_mm, f)).collect();
-        verify_frame_bending_stations_mm(&member.frame, length_mm, local_loads, &local_stations)?;
         if let Some(prev_end) = previous_end {
             if prev_end
                 .into_iter()
@@ -382,6 +379,9 @@ fn grouped_bending_span(
                 return Err("一本部材の要素境界で解析断面力が連続していません".into());
             }
         }
+        let local_loads = beam_loads.0.get(id).map_or(&[][..], Vec::as_slice);
+        let local_stations: Vec<_> = mf.at.iter().map(|&(xi, f)| (xi * length_mm, f)).collect();
+        verify_frame_bending_stations_mm(&member.frame, length_mm, local_loads, &local_stations)?;
         for &(factor, original) in local_loads {
             original.validate_extent(length_mm)?;
             let mut load = original.clone();
