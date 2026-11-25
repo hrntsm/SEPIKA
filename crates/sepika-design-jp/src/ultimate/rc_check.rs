@@ -27,8 +27,9 @@ use super::options::{
 };
 use super::rc_axial::{rc_column_axial_ultimate, RcAxialUltimate};
 use super::rc_bond::{
-    RcUltimateBondAxis, RcUltimateBondBar, RcUltimateBondDemand, RcUltimateBondInput,
-    RcUltimateBondStress,
+    RcUltimateBeamBondChecks, RcUltimateBeamBondDirectionCheck, RcUltimateBeamBondDirectionDemand,
+    RcUltimateBeamBondSection, RcUltimateBeamBondTensionSide, RcUltimateBondAxis,
+    RcUltimateBondDemand, RcUltimateBondInput, RcUltimateBondStress,
 };
 use super::rc_props::{rc_bar_props, RcBarProps, RcDirection};
 use super::rc_strength::{biaxial_margin, column_mu, member_shear_strength};
@@ -54,9 +55,11 @@ pub struct UltimateCheck {
     pub weak_shear_n: Option<(f64, f64)>,
     /// 確認できた組のうち付着余裕度が最小の応力度と許容値 [N/mm²]。他の組の未算定時も保持する。
     /// 無効、併用条件の不整合、または算定できる組がない場合は None。
-    pub bond_stress: Option<super::rc_bond::RcUltimateBondStress>,
+    pub bond_stress: Option<RcUltimateBondStress>,
+    /// 方向別入力に対する非降伏RC梁の照査。付着無効または方向別入力なしでは None。
+    pub beam_bond: Option<RcUltimateBeamBondChecks>,
     /// 応力度とは独立したカットオフ筋の必要延長の適否。対象外または適否未確認は None。
-    /// 併用条件が不整合でも、個別に確認できた延長不足は Some(false)。
+    /// 個別に確認できた延長不足は Some(false)。方向別照査では全対象の適否を確認した場合だけ Some(true)。
     pub bond_development_length_ok: Option<bool>,
     /// 確定総応答の強軸せん断余裕度。耐力が算定済みで需要が 0 の場合は無限大。
     /// 未算定値は、他項目の不適合にかかわらず NaN。
@@ -148,6 +151,7 @@ fn unchecked_member(elem: ElemId, kind: MemberKind, reason: &str) -> UltimateChe
         qsu: f64::NAN,
         weak_shear_n: None,
         bond_stress: None,
+        beam_bond: None,
         bond_development_length_ok: None,
         shear_margin: f64::NAN,
         weak_shear_margin: None,
@@ -467,7 +471,24 @@ fn check_member(
         };
         format!("{code}: {error}")
     });
-    let check_bond_input = |input: RcUltimateBondInput| {
+    let is_beam = matches!(shape, SectionShape::RcBeamRect { .. });
+    let in_girder_group = |min_elements| {
+        model
+            .girder_groups
+            .iter()
+            .any(|group| group.len() >= min_elements && group.contains(&elem.id))
+    };
+    let supports_slab = || beam_supports_slab(model, elem);
+    let has_section_haunch = || {
+        model.member_detail(elem.id).is_some_and(|detail| {
+            [detail.haunch_i, detail.haunch_j]
+                .into_iter()
+                .flatten()
+                .any(|haunch| haunch.depth_increase != 0.0 || haunch.width_increase != 0.0)
+        })
+    };
+    let check_bond_input = |input: RcUltimateBondInput,
+                            section: Option<RcUltimateBeamBondSection>| {
         let l_clear = *l_clear
             .as_ref()
             .map_err(|_| "付着照査の内法長さを確認できません")?;
@@ -488,13 +509,20 @@ fn check_member(
             RcUltimateBondAxis::Strong => RcDirection::Strong,
             RcUltimateBondAxis::Weak => RcDirection::Weak,
         };
-        let props = rc_bar_props(shape, direction, true)
-            .ok_or("付着照査の検討方向の配筋を確認できません")?;
-        let other = rc_bar_props(shape, direction, false)
-            .ok_or("付着照査の検討方向の配筋を確認できません")?;
-        if ![props.d_eff, other.d_eff]
-            .into_iter()
-            .all(|depth| (input.effective_depth_mm - depth).abs() <= depth * 1e-9)
+        if let Some(section) = section {
+            section.check_lengths(l_clear, input.bar)?;
+        }
+        let props = rc_bar_props(
+            shape,
+            direction,
+            section.is_none_or(|s| s.tension_side == RcUltimateBeamBondTensionSide::Top),
+        )
+        .ok_or("付着照査の検討方向の配筋を確認できません")?;
+        let matches_depth = |depth: f64| (input.effective_depth_mm - depth).abs() <= depth * 1e-9;
+        if !matches_depth(props.d_eff)
+            || (section.is_none()
+                && !rc_bar_props(shape, direction, false)
+                    .is_some_and(|other| matches_depth(other.d_eff)))
         {
             return Err("付着照査の有効せいが検討方向の配筋と一致しません");
         }
@@ -523,55 +551,150 @@ fn check_member(
         {
             check.stress = Err("付着照査の設計用降伏応力度が主筋の規格降伏強度を下回っています");
         }
+        if check.stress.is_ok() && is_beam {
+            check.stress = match (
+                section,
+                input.bar.elastic_stress(),
+                input.design_yield_stress_mpa,
+            ) {
+                (Some(section), Some(stress), Some(yield_mpa)) => {
+                    section.check_stress(stress, yield_mpa).and(check.stress)
+                }
+                (Some(_), _, _) => Err("地震荷重方向ごとの曲げ非降伏と鉄筋応力度を確認できません"),
+                (None, Some(_), _) => {
+                    Err("非降伏RC梁の正負地震荷重ごとの検定断面と採用主筋を確認できません")
+                }
+                (None, None, _) => check.stress,
+            };
+        }
         Ok(check)
     };
-    let stress_margin = |stress: RcUltimateBondStress| stress.capacity_mpa / stress.demand_mpa;
-    let (mut bond_stress, mut bond_issue, mut bond_development_length_ok) = (None, None, None);
-    if opts.include_bond {
-        if let Some(reason) = &round_bond_reason {
-            bond_issue = Some(reason.as_str());
-        } else if let Some(bond) = demand.bond {
-            let (inputs, grouping_issue) = bond.inputs();
-            let inconsistent_pair = grouping_issue.is_some()
-                && matches!(bond, RcUltimateBondDemand::ThroughAndCutoff { .. });
-            bond_issue = grouping_issue;
-            for input in inputs.into_iter().flatten() {
-                match check_bond_input(input) {
-                    Ok(check) => {
-                        if let Some(length_ok) = check
-                            .development_length_ok
-                            .filter(|&length_ok| !inconsistent_pair || !length_ok)
-                        {
-                            bond_development_length_ok =
-                                Some(bond_development_length_ok.unwrap_or(true) && length_ok);
-                        }
-                        if inconsistent_pair {
-                            continue;
-                        }
-                        match check.stress {
-                            Ok(stress) => {
-                                if bond_stress.is_none_or(|governing_stress| {
-                                    stress_margin(stress) < stress_margin(governing_stress)
-                                }) {
-                                    bond_stress = Some(stress);
-                                }
-                            }
-                            Err(reason) => {
-                                bond_issue.get_or_insert(reason);
-                            }
-                        }
-                    }
-                    Err(reason) => {
-                        bond_issue.get_or_insert(reason);
-                    }
-                }
-            }
+    let check_legacy_bond = |bond| {
+        RcUltimateBeamBondDirectionCheck::from_bars(bond, None, None, |bar| {
+            check_bond_input(bar, None)
+        })
+    };
+    let mut beam_bond = None;
+    let (bond_stress, bond_issue, bond_development_length_ok) = if !opts.include_bond {
+        (None, None, None)
+    } else if let Some(reason) = &round_bond_reason {
+        (None, Some(reason.as_str()), None)
+    } else if let Some(by_direction) = demand.beam_bond.filter(|_| is_beam) {
+        let scope_issue = if in_girder_group(2) {
+            Some("複数要素で構成する一本部材グループは、全区間の断面と部材端を確認できません")
+        } else if supports_slab() {
+            Some("スラブ付きRC梁は、矩形単独断面として付着照査の条件を確認できません")
+        } else if has_section_haunch() {
+            Some("ハンチ付きRC梁は、内法区間で一定の矩形断面と確認できません")
         } else {
-            bond_issue = Some("終局付着を未算定とします。検討軸、通し筋・カットオフ筋の区分、必要な付着長さと補強条件を確認できません");
+            None
+        };
+        let conflict = if demand.bond.is_some() {
+            Some("方向別の非降伏RC梁の付着照査入力に、方向を指定しない付着照査入力が併用されています")
+        } else if demand.static_beam_hinge_mechanism.is_some() {
+            Some("非降伏RC梁の付着照査入力と確認済みの梁端曲げ降伏機構が矛盾します")
+        } else {
+            None
+        };
+        let check_direction = |input: Option<RcUltimateBeamBondDirectionDemand>| {
+            let Some(input) = input else {
+                return RcUltimateBeamBondDirectionCheck {
+                    unchecked_reason: Some(
+                        "曲げ非降伏、検定断面・採用主筋と存在応力度を確認できません",
+                    ),
+                    ..Default::default()
+                };
+            };
+            let section = Some(input.section);
+            if let Some(reason) = scope_issue {
+                return RcUltimateBeamBondDirectionCheck {
+                    section,
+                    unchecked_reason: Some(reason),
+                    ..Default::default()
+                };
+            }
+            let mut result =
+                RcUltimateBeamBondDirectionCheck::from_bars(input.bars, section, conflict, |bar| {
+                    check_bond_input(bar, section)
+                });
+            if !input.represents_all_bond_checks {
+                result.unchecked_reason.get_or_insert(
+                    "指定断面・主筋でこの方向に必要な付着照査を代表できるか確認できません",
+                );
+            }
+            result
+        };
+        let positive = check_direction(by_direction.positive);
+        let negative = check_direction(by_direction.negative);
+        beam_bond = Some(RcUltimateBeamBondChecks {
+            seismic_axis: by_direction.seismic_axis,
+            positive,
+            negative,
+        });
+        let stress = [positive.stress, negative.stress]
+            .into_iter()
+            .flatten()
+            .min_by(|a, b| a.margin().total_cmp(&b.margin()));
+        let direction_lengths = [
+            (by_direction.positive, positive.development_length_ok),
+            (by_direction.negative, negative.development_length_ok),
+        ];
+        let legacy_length_ng = scope_issue.is_none()
+            && demand
+                .bond
+                .is_some_and(|bond| check_legacy_bond(bond).development_length_ok == Some(false));
+        let developmental = if legacy_length_ng
+            || direction_lengths.iter().any(|(_, ok)| *ok == Some(false))
+        {
+            Some(false)
+        } else if conflict.is_none()
+            && direction_lengths.iter().any(|(_, ok)| *ok == Some(true))
+            && direction_lengths.iter().all(|(input, ok)| {
+                input.is_some_and(|input| {
+                    input.represents_all_bond_checks && (!input.bars.has_cutoff() || ok.is_some())
+                })
+            })
+        {
+            Some(true)
+        } else {
+            None
+        };
+        let issue = scope_issue
+            .or(conflict)
+            .or(positive.unchecked_reason)
+            .or(negative.unchecked_reason);
+        (stress, issue, developmental)
+    } else if let Some(bond) = demand.bond {
+        let result = check_legacy_bond(bond);
+        (
+            result.stress,
+            result.unchecked_reason,
+            result.development_length_ok,
+        )
+    } else if is_beam {
+        (None, Some("終局付着を未算定とします。正負地震荷重ごとの梁端の曲げ降伏状態、検定断面の採用主筋・鉄筋応力度、必要な付着長さと補強条件を確認できません"), None)
+    } else {
+        (None, Some("終局付着を未算定とします。検討軸、通し筋・カットオフ筋の区分、必要な付着長さと補強条件を確認できません"), None)
+    };
+    let directional_detail = beam_bond.map(|checks| {
+        format!(
+            "{:?}軸の{}。{:?}軸の{}",
+            checks.seismic_axis,
+            checks.positive.detail("正"),
+            checks.seismic_axis,
+            checks.negative.detail("負")
+        )
+    });
+    let bond_detail = |stress, margin| {
+        let detail = bond_detail(stress, margin);
+        if let Some(by_direction) = &directional_detail {
+            format!("{detail}。{by_direction}")
+        } else {
+            detail
         }
     };
     let bond_margin = if opts.include_bond {
-        bond_stress.map_or(f64::NAN, stress_margin)
+        bond_stress.map_or(f64::NAN, RcUltimateBondStress::margin)
     } else {
         f64::INFINITY
     };
@@ -580,6 +703,7 @@ fn check_member(
     let bond_ng = bond_margin < 1.0 || bond_length_issue.is_some();
     let set_bond_result = |check: &mut UltimateCheck| {
         check.bond_stress = bond_stress;
+        check.beam_bond = beam_bond;
         check.bond_development_length_ok = bond_development_length_ok;
         check.bond_margin = bond_margin;
         check
@@ -689,6 +813,7 @@ fn check_member(
         {
             (None, Some(reason.as_str()))
         }
+        Err(reason) if beam_bond.is_some() => return unchecked_bending(reason),
         Err(reason) => return unchecked(reason),
     };
     if static_beam_rebar.is_some() && p.at <= 0.0 {
@@ -766,36 +891,23 @@ fn check_member(
         .unwrap_or_default();
     let strong_action = mz != 0.0 || qz != 0.0;
     let weak_action = my != 0.0 || qy != 0.0;
-    let has_cutoff = demand.bond.is_some_and(|bond| match bond {
-        RcUltimateBondDemand::ThroughAndCutoff { .. } => true,
-        RcUltimateBondDemand::Single(input) => matches!(
-            input.bar,
-            RcUltimateBondBar::Cutoff { .. }
-                | RcUltimateBondBar::Through {
-                    cutoff_unnecessary_distance_mm: Some(_),
-                    ..
-                }
-        ),
-    });
+    let has_cutoff = demand.bond.is_some_and(RcUltimateBondDemand::has_cutoff)
+        || (is_beam
+            && demand.beam_bond.is_some_and(|bond| {
+                [bond.positive, bond.negative]
+                    .into_iter()
+                    .flatten()
+                    .any(|input| input.bars.has_cutoff())
+            }));
     let shear_applicability = if demand.mode == UltimateDemandMode::StaticHinge {
         Err("せん断スパン比の算定には確定総応答のMとQが必要です")
     } else if matches!(shape, SectionShape::RcColumnCircle { .. }) {
         Err("荒川mean式の終局検定は矩形断面に限ります")
-    } else if kind == MemberKind::Girder
-        && model
-            .girder_groups
-            .iter()
-            .any(|group| group.contains(&elem.id))
-    {
+    } else if kind == MemberKind::Girder && in_girder_group(1) {
         Err("一本部材グループ全体の曲げ・せん断の最大値を確認できません")
-    } else if kind == MemberKind::Girder && beam_supports_slab(model, elem) {
+    } else if kind == MemberKind::Girder && supports_slab() {
         Err("スラブ付きRC梁の終局せん断の適用条件を確認できません")
-    } else if model.member_detail(elem.id).is_some_and(|detail| {
-        [detail.haunch_i, detail.haunch_j]
-            .into_iter()
-            .flatten()
-            .any(|haunch| haunch.depth_increase != 0.0 || haunch.width_increase != 0.0)
-    }) {
+    } else if has_section_haunch() {
         Err("ハンチ付き部材は内法区間で同じ矩形断面と確認できません")
     } else if has_cutoff {
         Err("カットオフ筋があるため内法区間で一様な配筋を確認できません")
@@ -864,6 +976,7 @@ fn check_member(
             mu,
             qsu,
             bond_stress,
+            beam_bond,
             bond_development_length_ok,
             bond_margin,
             unchecked_reason: (!bond_ng).then(|| reason.clone()),
@@ -1100,6 +1213,7 @@ fn check_member(
         qsu,
         weak_shear_n,
         bond_stress,
+        beam_bond,
         bond_development_length_ok,
         shear_margin,
         weak_shear_margin,
@@ -1116,6 +1230,7 @@ fn check_member(
 /// RC梁・柱の終局検定。必須需要・材料・配筋・寸法の不足は部材ID付きのエラーを返す。
 /// 上限強度倍率は静的・両端ヒンジ略算で有限の正値、確定総応答で 1.0 を要し、違反時は部材ID付きのエラーを返す。
 /// 鉄筋の材料区分や内法長さ等の適用条件を満たさない部材は、未検定理由を保持する。
+/// 非降伏RC梁の付着は `MemberDemand::beam_bond` を用い、方向別の結果を `UltimateCheck::beam_bond` に返す。
 pub fn collect_rc_ultimate_checks(
     model: &Model,
     demand_by_elem: &[(ElemId, MemberDemand)],

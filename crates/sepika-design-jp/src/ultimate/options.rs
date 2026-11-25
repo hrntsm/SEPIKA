@@ -79,8 +79,10 @@ pub struct MemberDemand {
     /// 終局せん断専用の内力。直接指定する場合も、同一ステップの実フェース間に正の内法が成立し、範囲を確認済みであること。
     /// 未指定の場合、従来の内法条件と `min_axial_for_shear_n` を確認した直接入力だけで算定する。
     pub rc_ultimate_shear: Option<sepika_core::rc_capacity::RcUltimateShearActions>,
-    /// 大地震時の付着応力度と必要延長を確認する配筋組。未確認は None。
+    /// 大地震時の付着照査の配筋組。非降伏RC梁は `beam_bond` に方向別の入力を指定する。
     pub bond: Option<super::rc_bond::RcUltimateBondDemand>,
+    /// 非降伏RC梁の方向別付着照査。確認できない方向は None。梁では `bond` と併用しない。
+    pub beam_bond: Option<super::rc_bond::RcUltimateBeamBondDemand>,
     /// 確定応答の部材変形角 [rad]。
     pub rp: Option<f64>,
     /// 強軸の長期せん断力 QL `[N]`。静的ヒンジでは必須、確定総応答では `None`（追加なし）。

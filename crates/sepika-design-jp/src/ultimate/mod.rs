@@ -44,6 +44,8 @@ pub use options::{
 };
 pub use rc_axial::{rc_axial_margin, rc_column_axial_ultimate, RcAxialUltimate};
 pub use rc_bond::{
+    RcUltimateBeamBondChecks, RcUltimateBeamBondDemand, RcUltimateBeamBondDirectionCheck,
+    RcUltimateBeamBondDirectionDemand, RcUltimateBeamBondSection, RcUltimateBeamBondTensionSide,
     RcUltimateBondAxis, RcUltimateBondBar, RcUltimateBondConfinement, RcUltimateBondDemand,
     RcUltimateBondElasticStress, RcUltimateBondInput, RcUltimateBondMomentDistribution,
     RcUltimateBondPlacement, RcUltimateBondStress, RcUltimateBondTransverseRebar,
