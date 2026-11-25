@@ -193,20 +193,124 @@ fn unverified_middle_bracing_retains_only_independently_proven_bending_failure()
 }
 
 #[test]
-fn unbounded_brace_input_is_reported_as_unavailable() {
-    let mut model = input::simply_supported_with_middle_brace(2_000.0, 150_000.0);
-    model.steel_design_attrs[0].lateral_brace_count = Some(u32::MAX);
-    let solved = Analysis::prepare(&model)
-        .unwrap()
-        .linear_static(input::DEAD)
-        .unwrap();
+fn brace_count_limit_applies_even_to_very_short_calculated_lengths() {
+    for length in [input::LENGTH_MM, 1.0] {
+        let mut model = input::simply_supported_with_middle_brace(length / 4.0, 150.0);
+        model.nodes[1].coord[0] = length;
+        model.steel_design_attrs[0].lateral_brace_count = Some(u32::MAX);
+        let solved = Analysis::prepare(&model)
+            .unwrap()
+            .linear_static(input::DEAD)
+            .unwrap();
+        let terms = [(input::DEAD, 1.0)];
+        let rows = check(&model, &solved, LoadTerm::Short, Some(&terms));
+        assert!(
+            rows.iter()
+                .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+            if reason.contains("等間隔横補剛本数が通常検定の上限"))),
+            "{rows:?}"
+        );
+        assert!(
+            !rows.iter().any(|(xi, row)| *xi == 0.5
+                && matches!(row, CheckOutcome::Checked(result) if result.ok())),
+            "{rows:?}"
+        );
+
+        model.steel_design_attrs[0].lb_direct = Some((0.0, 0.0, 0.0));
+        let direct = check(&model, &solved, LoadTerm::Short, None);
+        assert!(direct
+            .iter()
+            .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))));
+        assert!(at(&direct, 0.5)
+            .components
+            .iter()
+            .any(|c| c.kind == CheckKind::Bending && c.detail.contains("lb=0 mm")));
+    }
+}
+
+#[test]
+fn uniform_load_checks_both_intervals_at_the_zero_shear_brace() {
+    let mut model = input::simply_supported_with_middle_brace(4_000.0, 1.0);
+    model.load_cases[0].member[0].kind = MemberLoadKind::Distributed {
+        a: 0.0,
+        b: input::LENGTH_MM,
+        w1: -8.0,
+        w2: -8.0,
+    };
     let terms = [(input::DEAD, 1.0)];
-    let rows = check(&model, &solved, LoadTerm::Short, Some(&terms));
+    let report = |shear_residual_n: f64| {
+        use sepika_element::frame::beam::MemberForces;
+
+        // R=wL/2=32 kN、Q(L/2)=0、M(L/2)=wL²/8=64 kN·m。
+        let forces = [
+            (0.0, 32_000.0, 0.0),
+            (0.5, 0.0, 64e6),
+            (1.0, -32_000.0, 0.0),
+        ];
+        let raw = MemberForces {
+            at: forces
+                .into_iter()
+                .map(|(xi, q, m)| {
+                    (
+                        xi,
+                        [
+                            0.0,
+                            q + shear_residual_n,
+                            0.0,
+                            0.0,
+                            0.0,
+                            m + shear_residual_n * xi * input::LENGTH_MM,
+                        ],
+                    )
+                })
+                .collect(),
+        };
+        run_member_design_checks(
+            &model,
+            &[(input::BEAM, raw)],
+            &[],
+            &MemberDesignCheckOptions {
+                term: LoadTerm::Long,
+                steel_beam_span_load_terms: Some(&terms),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .member_checks
+        .into_iter()
+        .map(|(_, xi, row)| (xi, row))
+        .collect::<Vec<_>>()
+    };
+    let results = report(0.0);
     assert!(
-        rows.iter()
+        results
+            .iter()
+            .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))),
+        "{results:?}"
+    );
+    let brace = results
+        .iter()
+        .filter_map(|(pos, row)| match row {
+            CheckOutcome::Checked(result) if *pos == 0.5 => Some(result),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(brace.len(), 2, "{results:?}");
+    for (row, interval) in brace
+        .iter()
+        .zip(["[0.000, 4000.000]", "[4000.000, 8000.000]"])
+    {
+        assert!(row.detail.contains(interval));
+        check_bending(row, 0.385_503_863_825, "fb=144.5830");
+    }
+
+    let ambiguous = report(-1e-11);
+    assert!(
+        ambiguous
+            .iter()
             .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
-        if reason.contains("等間隔横補剛本数が通常検定の上限"))),
-        "{rows:?}"
+        if reason.contains("[0.000, 4000.000]") && reason.contains("強軸曲げ分布を確認できず"))),
+        "{ambiguous:?}"
     );
 }
 

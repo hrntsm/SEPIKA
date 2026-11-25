@@ -249,9 +249,9 @@ impl<'a> StrongBendingResponse<'a> {
                 let magnitude = (a * t * t).abs() + (b * t).abs() + c.abs();
                 let confirmed_zero = t == 1.0
                     && q == 0.0
-                    && hi == self.length_mm
+                    && hi == span_hi
                     && end[1] == 0.0
-                    && self.observed_end[1] == 0.0;
+                    && (span_hi != self.length_mm || self.observed_end[1] == 0.0);
                 uncertain_shear_sign |= !confirmed_zero
                     && magnitude > 0.0
                     && q.abs() <= 64.0 * f64::EPSILON * magnitude;

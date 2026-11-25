@@ -168,3 +168,37 @@ fn steel_beam_middle_brace_preserves_distinct_checks_at_the_same_position_after_
         );
     }
 }
+
+#[test]
+fn steel_beam_span_without_brace_positions_is_not_shown_as_passing() {
+    let mut model = input::simply_supported_with_middle_brace(2_000.0, 150_000.0);
+    model.steel_design_attrs[0].lateral_brace_count = None;
+    model.steel_design_attrs[0].lb_direct = Some((4_000.0, 4_000.0, 4_000.0));
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.run_linear_static(input::DEAD);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let results = app.current_design_results().unwrap();
+    let rows = &results
+        .member_checks
+        .iter()
+        .find(|member| member.elem == input::BEAM)
+        .unwrap()
+        .positions;
+    assert!(
+        rows.iter().any(
+            |row| matches!(&row.outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("補剛端の位置を確認できません"))
+        ),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter()
+            .all(|row| row.xi != 0.5 || matches!(row.outcome, CheckOutcome::Skipped { .. })),
+        "{rows:?}"
+    );
+}

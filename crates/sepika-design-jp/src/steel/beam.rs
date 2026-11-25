@@ -335,7 +335,9 @@ pub(crate) fn check_beam(
             if !lb.is_finite() || lb < 0.0 {
                 return Err("横座屈長さが負または非有限です".into());
             }
-            let stress = if lb <= 1e-9 {
+            let unverified_bracing =
+                ctx.steel_beam_moment_diagram == super::SteelBeamMomentDiagram::UnverifiedBracing;
+            let stress = if lb == 0.0 || !unverified_bracing && lb <= 1e-9 {
                 ft_val
             } else if let Some((c, p_lambda_b)) = match ctx.steel_beam_moment_diagram {
                 super::SteelBeamMomentDiagram::UnverifiedBracing => None,
@@ -353,9 +355,7 @@ pub(crate) fn check_beam(
                 steel_fb_h_asd2019(f, term, lb, iz, iw, j, e, g, z_strong, c, p_lambda_b)
             } else {
                 if forces.mz != 0.0 {
-                    let reason = if ctx.steel_beam_moment_diagram
-                        == super::SteelBeamMomentDiagram::UnverifiedBracing
-                    {
+                    let reason = if unverified_bracing {
                         "各補剛区間の強軸曲げ分布を確認できず、横座屈を考慮した強軸曲げは未算定です"
                     } else {
                         "単一補剛区間の強軸曲げ分布を確認できず、横座屈を考慮した強軸曲げは未算定です"
@@ -368,7 +368,10 @@ pub(crate) fn check_beam(
                 }
                 ft_val
             };
-            (stress, (fb_label != "fb上限").then_some(lb))
+            (
+                stress,
+                (!unverified_bracing || fb_label != "fb上限").then_some(lb),
+            )
         }
         _ => (ft_val, None),
     };

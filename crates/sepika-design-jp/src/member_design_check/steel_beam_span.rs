@@ -25,13 +25,19 @@ pub(super) fn requires_bending_span(
     structure == StructureKind::S
         && ctx.kind == MemberKind::Girder
         && crate::steel::is_symmetric_h_section(sec)
-        && has_positive_buckling_length(ctx)
+        && (has_equal_brace_count(ctx) || has_positive_buckling_length(ctx))
 }
 
-pub(super) fn has_positive_buckling_length(ctx: &DesignCtx) -> bool {
+fn has_equal_brace_count(ctx: &DesignCtx) -> bool {
+    ctx.steel_attr.as_ref().is_some_and(|attr| {
+        attr.lb_direct.is_none() && attr.lateral_brace_count.is_some_and(|n| n > 0)
+    })
+}
+
+fn has_positive_buckling_length(ctx: &DesignCtx) -> bool {
     [0.0, 0.5, 1.0]
         .into_iter()
-        .any(|pos| beam_lateral_buckling_length(ctx, pos).0 > 1e-9)
+        .any(|pos| beam_lateral_buckling_length(ctx, pos).0 > 0.0)
 }
 
 pub(super) fn has_middle_bracing(ctx: &DesignCtx) -> bool {
@@ -40,7 +46,7 @@ pub(super) fn has_middle_bracing(ctx: &DesignCtx) -> bool {
         .is_some_and(|attr| attr.lateral_brace_count.is_some_and(|n| n > 0))
         || [0.0, 0.5, 1.0].into_iter().any(|pos| {
             let (lb, partial) = beam_lateral_buckling_length(ctx, pos);
-            lb > 1e-9 && partial
+            lb > 0.0 && partial
         })
 }
 
