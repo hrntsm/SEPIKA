@@ -296,6 +296,9 @@ fn concentrated_load_at_midcut_preserves_material_i_side_limit_under_end_reversa
     for reversed in [false, true] {
         for a in [1499., 1500., 1501.] {
             let mut model = super::tests::single_column_model(1e8, 0.);
+            // 断面切断の検証に使う Euler–Bernoulli の閉形式に合わせ、せん断変形を無視できる値にする。
+            model.sections[0].as_y = 1e15;
+            model.sections[0].as_z = 1e15;
             model.nodes[1].restraint = Dof6Mask::FIXED;
             if reversed {
                 model.elements[0].nodes.reverse();
@@ -392,6 +395,9 @@ fn concentrated_load_at_midcut_preserves_material_i_side_limit_under_end_reversa
 #[test]
 fn partial_tapered_load_uses_exact_resultant_and_upper_cut_load() {
     let mut model = super::tests::single_column_model(1e8, 0.);
+    // 断面切断の検証に使う Euler–Bernoulli の閉形式に合わせ、せん断変形を無視できる値にする。
+    model.sections[0].as_y = 1e15;
+    model.sections[0].as_z = 1e15;
     model.nodes[1].restraint = Dof6Mask::FIXED;
     let mut source = super::loads::PhysicalPushoverLoads::empty().reference;
     source.member.push(MemberLoad::manual(

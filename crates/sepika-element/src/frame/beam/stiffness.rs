@@ -7,13 +7,19 @@ use smallvec::SmallVec;
 
 impl BeamElement {
     pub fn local_stiffness_raw(&self) -> LocalMat {
-        let (e, g, iy, iz, l) = (self.e, self.g, self.iy, self.iz, self.length);
+        let l = self.length;
         if l < 1e-12 {
             return LocalMat::zeros(12);
         }
-        let phiz = 12.0 * e * iz / (g * self.as_y * l * l);
-        let phiy = 12.0 * e * iy / (g * self.as_z * l * l);
+        let [phiz, phiy] = self.bending_shear_factors(l);
         self.local_stiffness_with_shear_factors(phiz, phiy)
+    }
+
+    pub(super) fn bending_shear_factors(&self, l: f64) -> [f64; 2] {
+        [
+            12.0 * self.e * self.iz / (self.g * self.as_y * l * l),
+            12.0 * self.e * self.iy / (self.g * self.as_z * l * l),
+        ]
     }
 
     fn local_stiffness_with_shear_factors(&self, phiz: f64, phiy: f64) -> LocalMat {

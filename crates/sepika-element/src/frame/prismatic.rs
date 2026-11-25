@@ -393,17 +393,17 @@ fn add_bending_mass(
     }
 }
 
-fn timoshenko_shape_functions(s: f64, l: f64, phi: f64) -> ([f64; 4], [f64; 4]) {
+pub(super) fn timoshenko_shape_functions(s: f64, l: f64, phi: f64) -> ([f64; 4], [f64; 4]) {
     let phi = phi.max(0.0);
     let inv = 1.0 / (1.0 + phi);
-    let s2 = s * s;
-    let s3 = s2 * s;
-    let s_one_minus = s * (1.0 - s);
+    let t = 1.0 - s;
+    let shear_weight = phi * inv;
+    let s_one_minus = s * t;
     let n_v = [
-        (1.0 + phi - phi * s - 3.0 * s2 + 2.0 * s3) * inv,
-        l * (s - s2 / 2.0 - (1.5 * s2 - s3) * inv - phi * s * inv / 2.0),
-        (phi * s + 3.0 * s2 - 2.0 * s3) * inv,
-        l * (s2 / 2.0 - (1.5 * s2 - s3) * inv - phi * s * inv / 2.0),
+        t * (t * (1.0 + 2.0 * s) * inv + shear_weight),
+        l * s_one_minus * (t * inv + 0.5 * shear_weight),
+        s * (s * (1.0 + 2.0 * t) * inv + shear_weight),
+        -l * s_one_minus * (s * inv + 0.5 * shear_weight),
     ];
     let n_theta = [
         -6.0 * s_one_minus * inv / l,

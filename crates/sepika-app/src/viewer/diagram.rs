@@ -163,8 +163,12 @@ pub(crate) fn diagram_fill_polygons(samples: &[(f64, f64)], subdiv: usize) -> Ve
             let tb = (k + 1) as f64 / subdiv as f64;
             let xa = x0 + (x1 - x0) * ta;
             let xb = x0 + (x1 - x0) * tb;
-            let va = v0 + (v1 - v0) * ta;
-            let vb = v0 + (v1 - v0) * tb;
+            let va = if k == 0 { v0 } else { v0 + (v1 - v0) * ta };
+            let vb = if k + 1 == subdiv {
+                v1
+            } else {
+                v0 + (v1 - v0) * tb
+            };
             push_segment_fill(xa, va, xb, vb, &mut polys);
         }
     }
@@ -182,11 +186,16 @@ fn push_segment_fill(x0: f64, v0: f64, x1: f64, v1: f64, out: &mut Vec<Vec<(f64,
         out.push(vec![(x0, 0.0), (x0, v0), (x1, v1), (x1, 0.0)]);
     } else {
         let xc = x0 + (x1 - x0) * v0 / (v0 - v1);
-        if !xc.is_finite() || xc <= x0 || xc >= x1 {
+        if !xc.is_finite() {
             return;
         }
-        out.push(vec![(x0, 0.0), (x0, v0), (xc, 0.0)]);
-        out.push(vec![(xc, 0.0), (x1, v1), (x1, 0.0)]);
+        // 交点が丸めで区間端に一致しても、幅のある側は省かない。
+        if xc > x0 {
+            out.push(vec![(x0, 0.0), (x0, v0), (xc, 0.0)]);
+        }
+        if xc < x1 {
+            out.push(vec![(xc, 0.0), (x1, v1), (x1, 0.0)]);
+        }
     }
 }
 
@@ -736,6 +745,15 @@ mod tests {
             polys.iter().map(|poly| polygon_area(poly)).sum::<f64>(),
             1.0
         );
+    }
+
+    #[test]
+    fn diagram_fill_keeps_nonzero_area_when_crossing_rounds_to_segment_end() {
+        for values in [[2.0, -1e-20], [1e-20, -2.0]] {
+            let polygons = diagram_fill_polygons(&[(0.5, values[0]), (1.0, values[1])], 1);
+            assert_eq!(polygons.len(), 1);
+            assert_eq!(polygon_area(&polygons[0]), 0.5);
+        }
     }
 
     #[test]
