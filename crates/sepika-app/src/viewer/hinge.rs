@@ -1892,6 +1892,7 @@ mod tests {
         let shape = sec.shape.clone().unwrap();
         let strength = StrengthParams {
             steel_fy: 235.0,
+            src_web_fy: None,
             rebar_fy: 345.0,
             concrete_fc: 24.0,
             steel_e: 205_000.0,
@@ -1955,6 +1956,7 @@ mod tests {
         let shape = sec.shape.clone().unwrap();
         let strength = StrengthParams {
             steel_fy: 235.0,
+            src_web_fy: None,
             rebar_fy: 345.0,
             concrete_fc: 24.0,
             steel_e: 205_000.0,
