@@ -30,6 +30,10 @@ ST-Bridge に関する各レポートは [ADR 0141](../adr/0141-remove-st-bridge
 
 [原典・独立算術・公開検定の照合](RC矩形梁のQD1両端降伏_Issue1851_検証.md)に、上下異配筋の両端降伏、適用条件を満たさない場合とQD2の独立性、通常／時刻歴簡易検定の確認条件を記録する。状態🔶。
 
+## RC梁の方向別両端降伏せん断（#1582）
+
+[原典・独立釣合い・公開終局検定の照合](RC梁の方向別両端降伏せん断_Issue1582_検証.md)に、実支持フェース間の正負の両端降伏と常時荷重、相殺に対する絶対需要上限、既存の確定総応答・付着への非干渉を記録する。状態🔶。
+
 ## 非降伏RC梁の方向別終局付着（#1872）
 
 [正負地震荷重の独立断面計算・公開検定・実建物の回帰](RC梁の方向別終局付着_Issue1872_検証.md)に、採用主筋と安全性検討用引張応力度の照合、未算定と独立した不適合、通常の設計タブの確認範囲を記録する。
@@ -634,6 +638,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [SRC柱RC梁接合部短期許容せん断_Issue1512_原典照合.md](SRC柱RC梁接合部短期許容せん断_Issue1512_原典照合.md) | SRC柱・RC梁の短期許容せん断、ウェブの有効高さ、応力伝達 | 🔶（原典の有限照合。RC梁の短期許容値は未確定） |
 | [SRC柱梁接合部帯筋_Issue1513_原典照合.md](SRC柱梁接合部帯筋_Issue1513_原典照合.md) | SRC柱梁接合部の構面別帯筋比と短期せん断補強用許容引張応力度 | 🔶（原典と検定入力の有限照合） |
 | [異形鉄筋の公称値_Issue1580_照合記録.md](異形鉄筋の公称値_Issue1580_照合記録.md) | 標準呼び名と任意径、断面積・周長・直径の使い分け、D19とD10の適否反転 | 🔶（原典と公開入口の有限Verification。[是正・未検証範囲](未検証一覧.md#異形鉄筋の公称値1580)） |
+| [RC梁の方向別両端降伏せん断（#1582）](RC梁の方向別両端降伏せん断_Issue1582_検証.md) | 実フェースの自由体釣合い、曲げ耐力上限と常時荷重の相殺、公開検定と既存判定の分離 | 🔶（公開入口で照合。実建物の機構同定・GUI入力は範囲外） |
 | [RC梁両端曲げ降伏時せん断力_Issue1497_確認記録.md](RC梁両端曲げ降伏時せん断力_Issue1497_確認記録.md) | 左右の曲げ終局耐力の釣合い、長期曲げによる上下の選択、反対側の比較、片持ち梁 | 🔶（原典と有限例を照合。支持条件の判定、方向別の梁端と付着は後続） |
 | [RC梁・柱の異形鉄筋1段の終局付着（#1805）](RC梁柱の異形鉄筋1段の終局付着_Issue1805_照合記録.md) | 公開検定と No.197 の付着信頼強度を使った感度、梁上端・下端と矩形柱の独立せん断 | 🔶（梁では付着の判定差を確認。両指針刊行版と実験Validationは未確認） |
 | [形状算定面積_Issue1565_確認記録.md](形状算定面積_Issue1565_確認記録.md) | 形状と記録面積の不一致、OVIKA・準備・軸剛性・自重の公開入口 | ✅（丸角鋼管の独立算術と公開入口のVerification） |
@@ -1100,6 +1105,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 1843 | RC柱の方向別長期最大せん断力 | sepika-element / sepika-design-jp / sepika-app | frame/member_load/shear_envelope.rs、member_design_check/rc_column_long_term_shear.rs、rc/column/mod.rs、app/actions/design/check.rs | [公開解析・検定と独立釣合い](RC柱の長期せん断需要_Issue1843_検証.md) | 一次設計・保存 | 🔶（方向別の需要・位置・不適合と未算定。実験Validationは未確認） |
 | 1841 | RC柱の長期許容せん断力の割増係数 | sepika-job / sepika-design-jp | member_design_check.rs、rc/column/mod.rs、rc/shear_capacity.rs | [是正前の照合](RC柱の長期許容せん断力_Issue1841_照合記録.md) | 一次設計 | 🔶（矩形・円形の単軸の有限例） |
 | 1854 | RC柱の長期許容せん断力の二段階判定 | sepika-element / sepika-design-jp / sepika-job / sepika-app | frame/member_load/shear_envelope.rs、rc/column/long_term_shear.rs、member_design_check.rs | [是正後の公開解析・検定と独立計算](RC柱の長期許容せん断力_Issue1854_検証.md) | 一次設計・保存 | 🔶（両材端支配、有限二方向と未算定。せん断の二方向相関と実験Validationは未確認） |
+| 1582 | RC梁の方向別両端降伏せん断 | sepika-design-jp | ultimate/rc_beam_hinge_shear.rs、tests/rc_ultimate_beam_hinge_shear.rs、tests/rc_ultimate_beam_bond_direction.rs | [独立した自由体と公開入口](RC梁の方向別両端降伏せん断_Issue1582_検証.md#公開入口での照合) | 二次設計 | 🔶（実建物の機構同定・GUI入力は範囲外） |
 | 1857 | RC梁の非有限なあばら筋間隔による終局検定 | sepika-design-jp | ultimate/rc_check.rs、tests/rc_ultimate_beam_hinge.rs | [独立算術と公開検定](RC梁の非有限なあばら筋間隔による終局検定_Issue1857_検証.md#独立算術と公開検定) | 二次設計 | 🔶（両方式・両需要の未算定と独立したNG。実験Validationは未確認） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
 | 945 | USD685主筋の認定条件 | sepika-core / sepika-design-jp | material_grade.rs・material_strength/rebar.rs・rc/beam.rs | [指定値・入力経路・直接観測](USD685主筋_Issue945_認定条件照合.md) | 一次設計・入力 | 🔶（MSRB-0117長期差#991、他認定・使用条件・Validation未） |

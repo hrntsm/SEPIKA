@@ -20,6 +20,7 @@ mod rc_bond;
 mod cft_check;
 mod demand_diagnostic;
 mod options;
+mod rc_beam_hinge_shear;
 mod rc_check;
 #[allow(dead_code)]
 pub(crate) mod rc_props;
@@ -43,6 +44,10 @@ pub use options::{
     UltimateShearOptions,
 };
 pub use rc_axial::{rc_axial_margin, rc_column_axial_ultimate, RcAxialUltimate};
+pub use rc_beam_hinge_shear::{
+    RcUltimateBeamHingeShear, RcUltimateBeamHingeShearChecks, RcUltimateBeamHingeShearDemand,
+    RcUltimateBeamHingeShearDirectionDemand,
+};
 pub use rc_bond::{
     RcUltimateBeamBondChecks, RcUltimateBeamBondDemand, RcUltimateBeamBondDirectionCheck,
     RcUltimateBeamBondDirectionDemand, RcUltimateBeamBondSection, RcUltimateBeamBondTensionSide,

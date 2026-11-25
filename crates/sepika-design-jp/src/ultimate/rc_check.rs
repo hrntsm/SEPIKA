@@ -3,6 +3,7 @@
 //! - [`UltimateCheck`] — 1 部材分の終局検定結果。
 //! - [`collect_rc_ultimate_checks`] — モデルの RC梁・矩形柱・円形柱を一括検定する。
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use num_rational::BigRational;
@@ -26,6 +27,9 @@ use super::options::{
     UltimateShearOptions,
 };
 use super::rc_axial::{rc_column_axial_ultimate, RcAxialUltimate};
+use super::rc_beam_hinge_shear::{
+    self, has_haunch, RcUltimateBeamHingeShearChecks, BOND_HINGE_CONFLICT,
+};
 use super::rc_bond::{
     RcUltimateBeamBondChecks, RcUltimateBeamBondDirectionCheck, RcUltimateBeamBondDirectionDemand,
     RcUltimateBeamBondSection, RcUltimateBeamBondTensionSide, RcUltimateBondAxis,
@@ -58,6 +62,8 @@ pub struct UltimateCheck {
     pub bond_stress: Option<RcUltimateBondStress>,
     /// 方向別入力に対する非降伏RC梁の照査。付着無効または方向別入力なしでは None。
     pub beam_bond: Option<RcUltimateBeamBondChecks>,
+    /// 両端曲げ降伏の方向別せん断需要。入力なしは None。従来の需要・耐力・適否には反映しない。
+    pub beam_hinge_shear: Option<RcUltimateBeamHingeShearChecks>,
     /// 応力度とは独立したカットオフ筋の必要延長の適否。対象外または適否未確認は None。
     /// 個別に確認できた延長不足は Some(false)。方向別照査では全対象の適否を確認した場合だけ Some(true)。
     pub bond_development_length_ok: Option<bool>,
@@ -152,6 +158,7 @@ fn unchecked_member(elem: ElemId, kind: MemberKind, reason: &str) -> UltimateChe
         weak_shear_n: None,
         bond_stress: None,
         beam_bond: None,
+        beam_hinge_shear: None,
         bond_development_length_ok: None,
         shear_margin: f64::NAN,
         weak_shear_margin: None,
@@ -479,14 +486,7 @@ fn check_member(
             .any(|group| group.len() >= min_elements && group.contains(&elem.id))
     };
     let supports_slab = || beam_supports_slab(model, elem);
-    let has_section_haunch = || {
-        model.member_detail(elem.id).is_some_and(|detail| {
-            [detail.haunch_i, detail.haunch_j]
-                .into_iter()
-                .flatten()
-                .any(|haunch| haunch.depth_increase != 0.0 || haunch.width_increase != 0.0)
-        })
-    };
+    let has_section_haunch = || has_haunch(model, elem.id);
     let check_bond_input = |input: RcUltimateBondInput,
                             section: Option<RcUltimateBeamBondSection>| {
         let l_clear = *l_clear
@@ -596,7 +596,15 @@ fn check_member(
         } else {
             None
         };
-        let check_direction = |input: Option<RcUltimateBeamBondDirectionDemand>| {
+        let hinge = demand
+            .beam_hinge_shear
+            .filter(|hinge| hinge.seismic_axis == by_direction.seismic_axis);
+        let positive_conflict =
+            by_direction.positive.is_some() && hinge.is_some_and(|hinge| hinge.positive.is_some());
+        let negative_conflict =
+            by_direction.negative.is_some() && hinge.is_some_and(|hinge| hinge.negative.is_some());
+        let check_direction = |input: Option<RcUltimateBeamBondDirectionDemand>,
+                               hinge_conflict: bool| {
             let Some(input) = input else {
                 return RcUltimateBeamBondDirectionCheck {
                     unchecked_reason: Some(
@@ -613,6 +621,7 @@ fn check_member(
                     ..Default::default()
                 };
             }
+            let conflict = conflict.or(hinge_conflict.then_some(BOND_HINGE_CONFLICT));
             let mut result =
                 RcUltimateBeamBondDirectionCheck::from_bars(input.bars, section, conflict, |bar| {
                     check_bond_input(bar, section)
@@ -624,8 +633,8 @@ fn check_member(
             }
             result
         };
-        let positive = check_direction(by_direction.positive);
-        let negative = check_direction(by_direction.negative);
+        let positive = check_direction(by_direction.positive, positive_conflict);
+        let negative = check_direction(by_direction.negative, negative_conflict);
         beam_bond = Some(RcUltimateBeamBondChecks {
             seismic_axis: by_direction.seismic_axis,
             positive,
@@ -648,6 +657,8 @@ fn check_member(
         {
             Some(false)
         } else if conflict.is_none()
+            && !positive_conflict
+            && !negative_conflict
             && direction_lengths.iter().any(|(_, ok)| *ok == Some(true))
             && direction_lengths.iter().all(|(input, ok)| {
                 input.is_some_and(|input| {
@@ -1212,6 +1223,7 @@ fn check_member(
         qmu,
         qsu,
         weak_shear_n,
+        beam_hinge_shear: None,
         bond_stress,
         beam_bond,
         bond_development_length_ok,
@@ -1230,6 +1242,7 @@ fn check_member(
 /// RC梁・柱の終局検定。必須需要・材料・配筋・寸法の不足は部材ID付きのエラーを返す。
 /// 上限強度倍率は静的・両端ヒンジ略算で有限の正値、確定総応答で 1.0 を要し、違反時は部材ID付きのエラーを返す。
 /// 鉄筋の材料区分や内法長さ等の適用条件を満たさない部材は、未検定理由を保持する。
+/// 梁の確認済み両端降伏による方向別せん断需要は `UltimateCheck::beam_hinge_shear` に返す。
 /// 非降伏RC梁の付着は `MemberDemand::beam_bond` を用い、方向別の結果を `UltimateCheck::beam_bond` に返す。
 pub fn collect_rc_ultimate_checks(
     model: &Model,
@@ -1237,6 +1250,7 @@ pub fn collect_rc_ultimate_checks(
     opts: &UltimateShearOptions,
 ) -> Result<Vec<UltimateCheck>, String> {
     let connection_counts = node_connection_counts(model);
+    let hinge_adjacency = OnceCell::new();
     let mut out = Vec::new();
     for elem in &model.elements {
         let Some(sec) = elem.section.and_then(|sid| model.sections.get(sid.index())) else {
@@ -1335,6 +1349,11 @@ pub fn collect_rc_ultimate_checks(
                 sepika_core::load_combo::ultimate_gravity_terms(model)?,
                 check.detail
             );
+            check.beam_hinge_shear =
+                rc_beam_hinge_shear::check(model, elem, check.kind, demand, &hinge_adjacency);
+            if let Some(by_direction) = &check.beam_hinge_shear {
+                by_direction.append_detail(&mut check.detail);
+            }
             out.push(check);
         }
     }
