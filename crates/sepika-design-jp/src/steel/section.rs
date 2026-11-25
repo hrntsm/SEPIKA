@@ -220,35 +220,51 @@ mod tests {
     use sepika_core::model::SteelDesignAttr;
 
     #[test]
-    fn test_asd2019_e_lambda_b_and_short_term_factor() {
-        let f = 235.0;
-        let long = steel_fb_h_asd2019(
-            f,
-            LoadTerm::Long,
-            20_000.0,
-            1.0e7,
-            1.0e12,
-            1.0e5,
-            205_000.0,
-            79_000.0,
-            1.0e6,
-            1.0,
-            0.3,
-        );
-        let short = steel_fb_h_asd2019(
-            f,
-            LoadTerm::Short,
-            20_000.0,
-            1.0e7,
-            1.0e12,
-            1.0e5,
-            205_000.0,
-            79_000.0,
-            1.0e6,
-            1.0,
-            0.3,
-        );
-        assert!((short - (long * 1.5).min(f)).abs() < 1e-9);
+    fn asd2019_fb_uses_the_unrounded_elastic_limit_in_both_load_terms() {
+        // 独立計算で λb = 0.29、1.2905、1.2911 に対応する lb と許容値を求めた。
+        for (lb_mm, long_mpa, short_mpa) in [
+            (1_516.566_835_334, 153.230_223_521, 229.845_335_281),
+            (7_037.978_070_644, 65.113_913_326, 97.670_869_989),
+            (7_041.539_016_985, 64.966_334_840, 97.449_502_261),
+        ] {
+            for (term, expected_mpa) in [(LoadTerm::Long, long_mpa), (LoadTerm::Short, short_mpa)] {
+                let actual_mpa = steel_fb_h_asd2019(
+                    235.0, term, lb_mm, 1.0e7, 1.0e12, 1.0e5, 205_000.0, 79_000.0, 1.0e6, 1.0, 0.3,
+                );
+                assert!(
+                    (actual_mpa - expected_mpa).abs() < 1e-8,
+                    "lb={lb_mm} mm, {term:?}: fb={actual_mpa}, expected={expected_mpa}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn asd2019_fb_at_the_elastic_limit_uses_the_inelastic_branch() {
+        // 等号の数値照査用に Me=1、My=235/141 とし、λb²=1/0.6 となるようにした。
+        let lb_mm = std::f64::consts::PI;
+        for (term, expected_mpa) in [
+            (LoadTerm::Long, 65.076_923_077),
+            (LoadTerm::Short, 97.615_384_615),
+        ] {
+            let actual_mpa = steel_fb_h_asd2019(
+                235.0,
+                term,
+                lb_mm,
+                1.0,
+                0.0,
+                1.0,
+                1.0,
+                1.0,
+                1.0 / 141.0,
+                1.0,
+                0.3,
+            );
+            assert!(
+                (actual_mpa - expected_mpa).abs() < 1e-8,
+                "{term:?}: fb={actual_mpa}"
+            );
+        }
     }
 
     #[test]
