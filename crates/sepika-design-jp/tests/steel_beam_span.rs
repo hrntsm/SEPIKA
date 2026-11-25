@@ -860,3 +860,69 @@ fn split_girder_keeps_zero_and_positive_partial_bracing_in_separate_positions() 
         .iter()
         .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))));
 }
+
+#[test]
+fn later_element_verifies_saved_cut_before_rounding_into_global_coordinates() {
+    let split_mm = 4_096.4;
+    let local_load_mm = 1_951.8;
+    let load_mm = split_mm + local_load_mm;
+    let whole = input::cantilever(
+        60_000.0,
+        0.0,
+        Some(MemberLoadKind::Point {
+            a: load_mm,
+            p: -80_000.0,
+        }),
+    );
+    let mut split = split_cantilever(input::cantilever(60_000.0, 0.0, None), split_mm);
+    split.load_cases[0].member.push(MemberLoad::manual(
+        SECOND_BEAM,
+        [0.0, 0.0, 1.0],
+        MemberLoadKind::Point {
+            a: local_load_mm,
+            p: -80_000.0,
+        },
+    ));
+    let solve = |model: &Model| {
+        Analysis::prepare(model)
+            .unwrap()
+            .linear_static(input::DEAD)
+            .unwrap()
+    };
+    let whole_response = solve(&whole);
+    let split_response = solve(&split);
+    near(split_response.member_forces[1].1.at[1].1[1], -60_000.0);
+    let terms = [(input::DEAD, 1.0)];
+    for (term, ratio, fb) in [
+        (LoadTerm::Long, 1.556_098_048, "fb=65.5414"),
+        (LoadTerm::Short, 1.037_398_699, "fb=98.3121"),
+    ] {
+        for (model, response, id, xi) in [
+            (
+                &whole,
+                &whole_response,
+                input::BEAM,
+                load_mm / input::LENGTH_MM,
+            ),
+            (&split, &split_response, SECOND_BEAM, 0.5),
+        ] {
+            let results = check_member(model, response, term, Some(&terms), id);
+            let peak = at(&results, xi);
+            assert!(!peak.ok());
+            check_bending(peak, ratio, fb);
+        }
+    }
+    let mut inconsistent = split_response;
+    inconsistent.member_forces[1].1.at[1].1[1] = 20_000.0;
+    let later = check_member(
+        &split,
+        &inconsistent,
+        LoadTerm::Short,
+        Some(&terms),
+        SECOND_BEAM,
+    );
+    assert!(later
+        .iter()
+        .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+        if reason.contains("釣合いを確認できません"))));
+}

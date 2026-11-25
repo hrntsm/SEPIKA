@@ -9,7 +9,8 @@ use sepika_core::model::{
 use sepika_core::structure_kind::StructureKind;
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::frame::member_load::{
-    frame_strong_bending_span, frame_strong_bending_span_mm, FrameStrongBendingPeak,
+    frame_strong_bending_span, frame_strong_bending_span_mm, verify_frame_bending_stations_mm,
+    FrameStrongBendingPeak,
 };
 use sepika_element::transform::LocalFrame;
 
@@ -135,6 +136,7 @@ pub(super) enum GroupBending {
 struct GroupMember<'a> {
     elem: &'a ElementData,
     attr: Option<&'a SteelDesignAttr>,
+    frame: LocalFrame,
     start_mm: f64,
     end_mm: f64,
     length_mm: f64,
@@ -262,6 +264,7 @@ fn grouped_bending_span(
         members.push(GroupMember {
             elem,
             attr,
+            frame,
             start_mm: total_mm,
             end_mm,
             length_mm,
@@ -367,14 +370,9 @@ fn grouped_bending_span(
         let Some(&(1.0, end)) = mf.at.last() else {
             return Err("一本部材の要素j端の解析断面力がありません".into());
         };
-        if !mf
-            .at
-            .iter()
-            .all(|(xi, f)| (0.0..=1.0).contains(xi) && f.iter().all(|v| v.is_finite()))
-            || mf.at.windows(2).any(|pair| pair[0].0 >= pair[1].0)
-        {
-            return Err("一本部材の解析断面力または評価位置が不正です".into());
-        }
+        let local_loads = beam_loads.0.get(id).map_or(&[][..], Vec::as_slice);
+        let local_stations: Vec<_> = mf.at.iter().map(|&(xi, f)| (xi * length_mm, f)).collect();
+        verify_frame_bending_stations_mm(&member.frame, length_mm, local_loads, &local_stations)?;
         if let Some(prev_end) = previous_end {
             if prev_end
                 .into_iter()
@@ -384,7 +382,7 @@ fn grouped_bending_span(
                 return Err("一本部材の要素境界で解析断面力が連続していません".into());
             }
         }
-        for &(factor, original) in beam_loads.0.get(id).into_iter().flatten() {
+        for &(factor, original) in local_loads {
             original.validate_extent(length_mm)?;
             let mut load = original.clone();
             match &mut load.kind {
@@ -408,13 +406,11 @@ fn grouped_bending_span(
             load.extent = MemberLoadExtent::FixedDistance;
             loads.push((factor, load));
         }
-        // 同じ境界の二つの保存応答は照合済みなので、全長分布には一行だけを渡す。
-        rows.extend(
-            mf.at
-                .iter()
-                .skip(usize::from(index != 0))
-                .map(|(xi, f)| (start_mm + xi * length_mm, *f)),
-        );
+        // 集中荷重の前後が全長座標への加算で同じ値に丸まるため、局所で照合した内部断面は再照合しない。
+        if index == 0 {
+            rows.push((start_mm, start));
+        }
+        rows.push((member.end_mm, end));
         previous_end = Some(end);
     }
 
