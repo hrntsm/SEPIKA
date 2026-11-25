@@ -264,7 +264,7 @@ pub(crate) fn beam_supports_slab(model: &Model, elem: &ElementData) -> bool {
         })
 }
 
-pub(super) fn transmits_bending(condition: EndCondition) -> bool {
+pub(crate) fn transmits_bending(condition: EndCondition) -> bool {
     match condition {
         EndCondition::Fixed => true,
         EndCondition::Pinned => false,
@@ -272,7 +272,7 @@ pub(super) fn transmits_bending(condition: EndCondition) -> bool {
     }
 }
 
-pub(super) fn restrains_direction(node: &Node, direction: [f64; 3], dofs: [Dof; 3]) -> bool {
+pub(crate) fn restrains_direction(node: &Node, direction: [f64; 3], dofs: [Dof; 3]) -> bool {
     direction.into_iter().zip(dofs).all(|(component, dof)| {
         component.abs() < 1e-9
             || node.restraint.is_fixed(dof)
@@ -283,7 +283,7 @@ pub(super) fn restrains_direction(node: &Node, direction: [f64; 3], dofs: [Dof; 
     })
 }
 
-pub(super) fn column_transmits_bending(
+pub(crate) fn column_transmits_bending(
     model: &Model,
     column: &ElementData,
     near: &Node,
@@ -313,7 +313,7 @@ pub(super) fn column_transmits_bending(
             && restrains_direction(far, rotation_axis, [Dof::Rx, Dof::Ry, Dof::Rz]))
 }
 
-fn frame_end_positions(model: &Model, elem: &ElementData) -> Option<[[f64; 3]; 2]> {
+pub(crate) fn frame_end_positions(model: &Model, elem: &ElementData) -> Option<[[f64; 3]; 2]> {
     match model.primary_frame_axis_end_positions(elem).ok()? {
         Some(ends) => Some(ends),
         None => {

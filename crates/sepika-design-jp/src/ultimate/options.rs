@@ -83,6 +83,8 @@ pub struct MemberDemand {
     pub bond: Option<super::rc_bond::RcUltimateBondDemand>,
     /// 非降伏RC梁の方向別付着照査。確認できない方向は None。梁では `bond` と併用しない。
     pub beam_bond: Option<super::rc_bond::RcUltimateBeamBondDemand>,
+    /// 確認済みの方向別RC梁両端降伏せん断需要。既定の None では独立結果を求めない。
+    pub beam_hinge_shear: Option<super::rc_beam_hinge_shear::RcUltimateBeamHingeShearDemand>,
     /// 確定応答の部材変形角 [rad]。
     pub rp: Option<f64>,
     /// 強軸の長期せん断力 QL `[N]`。静的ヒンジでは必須、確定総応答では `None`（追加なし）。

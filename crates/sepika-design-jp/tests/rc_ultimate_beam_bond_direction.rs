@@ -7,10 +7,11 @@ use sepika_core::section_shape::{BeamStirrup, RebarSize, SectionShape, StandardR
 use sepika_design_jp::ultimate::{
     collect_rc_ultimate_checks, MemberDemand, RcUltimateBeamBondDemand,
     RcUltimateBeamBondDirectionDemand, RcUltimateBeamBondSection, RcUltimateBeamBondTensionSide,
-    RcUltimateBondAxis, RcUltimateBondBar, RcUltimateBondConfinement, RcUltimateBondDemand,
+    RcUltimateBeamHingeShearDemand, RcUltimateBeamHingeShearDirectionDemand, RcUltimateBondAxis,
+    RcUltimateBondBar, RcUltimateBondConfinement, RcUltimateBondDemand,
     RcUltimateBondElasticStress, RcUltimateBondInput, RcUltimateBondMomentDistribution,
-    RcUltimateBondPlacement, RcUltimateCutoffBarStress, RcUltimateThroughBarYield, UltimateCheck,
-    UltimateShearOptions,
+    RcUltimateBondPlacement, RcUltimateCutoffBarStress, RcUltimateThroughBarYield,
+    StaticBeamHingeMechanism, UltimateCheck, UltimateShearOptions,
 };
 use sepika_solver::statics::analysis::SeismicDir;
 
@@ -867,5 +868,69 @@ fn directional_bond_requires_a_uniform_standalone_section_and_one_beam_element()
         assert!(legacy.beam_bond.is_none() && legacy.bond_stress.is_some());
         assert_eq!(legacy.bond_development_length_ok, Some(true));
         assert!(legacy.qsu.is_nan() && result.qsu.is_nan());
+    }
+}
+
+#[test]
+fn directional_hinge_input_conflicts_only_with_bond_on_the_same_axis_and_direction() {
+    let mut bond = demand();
+    let mut positive = bond.positive.unwrap();
+    positive.bars = RcUltimateBondDemand::Single(input(
+        RcUltimateBondBar::Cutoff {
+            development_length_mm: 310.0,
+            clear_span_mm: 3000.0,
+            unnecessary_distance_mm: 200.0,
+            stress: RcUltimateCutoffBarStress::WithoutFlexuralYield(top_stress()),
+        },
+        RcUltimateBeamBondTensionSide::Top,
+    ));
+    bond.positive = Some(positive);
+    let baseline = directional(&model(), bond);
+    assert_eq!(baseline.bond_development_length_ok, Some(false));
+    for seismic_axis in [SeismicDir::X, SeismicDir::Y] {
+        let checked = check(
+            &model(),
+            MemberDemand {
+                beam_bond: Some(bond),
+                beam_hinge_shear: Some(RcUltimateBeamHingeShearDemand {
+                    seismic_axis,
+                    face_positions_mm: [0.0, 3000.0],
+                    q0_n: [0.0; 2],
+                    end_envelope_confirmed: true,
+                    positive: Some(RcUltimateBeamHingeShearDirectionDemand {
+                        mechanism: StaticBeamHingeMechanism::ITopJBottom,
+                        yield_moment_bounds_nmm: [100e6; 2],
+                        support_transfer_confirmed: true,
+                    }),
+                    negative: None,
+                }),
+                ..total()
+            },
+        );
+        assert_eq!(checked.bond_development_length_ok, Some(false));
+        assert!(!checked.ok && checked.unchecked_reason.is_none());
+        let by_direction = checked.beam_bond.unwrap();
+        let hinge = checked.beam_hinge_shear.unwrap();
+        let positive_reason = hinge.positive.unwrap_err();
+        if seismic_axis == SeismicDir::X {
+            assert!(positive_reason.contains("非降伏と両端曲げ降伏"));
+            assert!(by_direction
+                .positive
+                .unchecked_reason
+                .unwrap()
+                .contains("非降伏と両端曲げ降伏"));
+            assert!(by_direction.positive.stress.is_none());
+        } else {
+            assert!(positive_reason.contains("接続柱がありません"));
+            assert!(by_direction.positive.unchecked_reason.is_none());
+            assert!(by_direction.positive.stress.is_some());
+        }
+        assert_eq!(by_direction.positive.development_length_ok, Some(false));
+        assert_eq!(by_direction.negative.through_sigma_d_mpa, Some(380.0));
+        assert!(by_direction.negative.unchecked_reason.is_none());
+        assert!(hinge
+            .negative
+            .unwrap_err()
+            .contains("この方向の両端曲げ降伏"));
     }
 }
