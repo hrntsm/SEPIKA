@@ -216,21 +216,43 @@ fn rc_allowable_usd685_grades_withhold_main_bar_checks_and_keep_shear_failure() 
         model.materials[main].fy = Some(685.0);
         for grade in ["USD685", "USD685A", "USD685B"] {
             model.materials[main].name = grade.into();
-            let outcomes = allowable_checks_with_demand(&model, demand, &short_term());
-            assert!(
-                outcomes.iter().any(|(_, _, outcome)| matches!(
-                    outcome, CheckOutcome::Skipped { reason } if reason.contains("USD685系主筋")
-                )),
-                "{grade}: {outcomes:?}"
-            );
-            assert!(outcomes
-                .into_iter()
-                .filter_map(|(_, _, outcome)| match outcome {
-                    CheckOutcome::Checked(result) => Some(result.components),
-                    CheckOutcome::Skipped { .. } => None,
-                })
-                .flatten()
-                .any(|row| row.kind == CheckKind::Shear && row.ratio > 1.0));
+            for term in [LoadTerm::Long, LoadTerm::Short] {
+                let options = MemberDesignCheckOptions {
+                    term,
+                    rc_column_long_term_shear:
+                        sepika_design_jp::RcColumnLongTermShearInput::SingleCase,
+                    ..Default::default()
+                };
+                let outcomes = allowable_checks_with_demand(&model, demand, &options);
+                assert!(
+                    outcomes.iter().any(|(elem, _, outcome)| *elem == ElemId(0) && matches!(
+                        outcome, CheckOutcome::Skipped { reason } if reason.contains(&model.sections[0].name)
+                            && reason.contains("USD685系主筋の認定に基づく許容応力度")
+                    )),
+                    "{grade}, {term:?}: {outcomes:?}"
+                );
+                let components: Vec<_> = outcomes
+                    .into_iter()
+                    .filter_map(|(_, _, outcome)| match outcome {
+                        CheckOutcome::Checked(result) => Some(result.components),
+                        CheckOutcome::Skipped { .. } => None,
+                    })
+                    .flatten()
+                    .collect();
+                assert!(
+                    components.iter().all(|row| !matches!(
+                        row.kind,
+                        CheckKind::Bending | CheckKind::Axial | CheckKind::AxialBending
+                    )),
+                    "{grade}, {term:?}: {components:?}"
+                );
+                assert!(
+                    components
+                        .iter()
+                        .any(|row| row.kind == CheckKind::Shear && row.ratio > 1.0),
+                    "{grade}, {term:?}: {components:?}"
+                );
+            }
         }
     }
 }

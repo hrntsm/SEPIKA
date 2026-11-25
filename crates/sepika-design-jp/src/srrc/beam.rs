@@ -64,11 +64,11 @@ pub(crate) fn src_beam_check(
             ),
         );
     }
-    if !main_rebar_valid {
-        return (result, None);
-    }
     let grade = main_rebar_grade(ctx.rebar_material.as_ref());
-    let ft = rebar_allowable_tension(grade, main_dia, long_term);
+    let Some(ft) = rebar_allowable_tension(grade, main_dia, long_term).filter(|_| main_rebar_valid)
+    else {
+        return (result, None);
+    };
     let fc = concrete_allowable_compression(fc_raw, long_term);
     let n_ratio = young_ratio_n(fc_raw);
     let gamma = props.ac / props.at;
@@ -197,7 +197,7 @@ mod tests {
             _ => unreachable!(),
         };
         let props = beam_axis_props(400.0, 700.0, &rebar, false);
-        let ft = rebar_allowable_tension("SD345", 22.0, true);
+        let ft = rebar_allowable_tension("SD345", 22.0, true).unwrap();
         let (_sa, sz, _) = steel_h_props(500.0, 200.0, 9.0, 14.0);
         let f_value = steel_f_value_prefix("SN400B", 14.0).unwrap();
         let s_ft = steel_ft(f_value, LoadTerm::Long);

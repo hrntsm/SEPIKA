@@ -405,10 +405,9 @@ pub(crate) fn beam_check(
         .expect("梁の断面諸元を算定できる形状のみ来る");
     let info =
         rebar_info_from_shape(shape, tension_is_top).expect("梁の鉄筋情報を算定できる形状のみ来る");
-    let ft = main_rebar_valid.then(|| {
-        let grade = main_rebar_grade(ctx.rebar_material.as_ref());
-        rebar_allowable_tension(grade, info.main_dia.designation_or_diameter_mm(), long_term)
-    });
+    let grade = main_rebar_grade(ctx.rebar_material.as_ref());
+    let ft = rebar_allowable_tension(grade, info.main_dia.designation_or_diameter_mm(), long_term)
+        .filter(|_| main_rebar_valid);
     let mut components = Vec::new();
     if let Some(ft) = ft {
         match bending_component(forces, ctx, rebar, &props, tension_is_top, ft, &allow) {
@@ -736,7 +735,7 @@ mod tests {
             false,
         )
         .unwrap();
-        let ft = rebar_allowable_tension("SD345", 19.0, true);
+        let ft = rebar_allowable_tension("SD345", 19.0, true).unwrap();
         let fc = super::super::concrete_allowable_compression(24.0, true);
         let n_ratio = super::super::young_ratio_n(24.0);
         let bm = beam_moment_capacity(&props, ft, fc, n_ratio).unwrap();
@@ -756,7 +755,7 @@ mod tests {
             false,
         )
         .unwrap();
-        let ft = rebar_allowable_tension("SD345", 32.0, true);
+        let ft = rebar_allowable_tension("SD345", 32.0, true).unwrap();
         let fc = super::super::concrete_allowable_compression(24.0, true);
         let n_ratio = super::super::young_ratio_n(24.0);
         let bm = beam_moment_capacity(&props, ft, fc, n_ratio).unwrap();

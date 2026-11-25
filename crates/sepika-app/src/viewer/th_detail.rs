@@ -1730,6 +1730,40 @@ mod tests {
     }
 
     #[test]
+    fn usd685_main_bar_reason_does_not_hide_independent_time_history_shear_ng() {
+        use crate::app::rc_column_boundary_tests::input;
+        use sepika_core::ids::MaterialId;
+
+        for grade in ["USD685", "USD685A", "USD685B"] {
+            let mut model = input::column_model(false, 0.0);
+            let mut main = model.materials[1].clone();
+            main.id = MaterialId(2);
+            main.name = grade.into();
+            main.fy = Some(685.0);
+            model.sections[0].rebar_material = Some(main.id);
+            model.materials.push(main);
+
+            let mut app = App::default();
+            assert!(app.load_model(model));
+            let text = peak_check_text(&app, 0, [-100_000.0, 10_000_000.0, 0.0, 0.0, 0.0, 1e6]);
+            assert!(
+                text.lines().any(|row| row.starts_with("検定不能:")
+                    && row.contains("許容軸力境界のRC柱")
+                    && row.contains("USD685系主筋の認定に基づく許容応力度")),
+                "{grade}: {text}"
+            );
+            assert!(
+                text.contains("(NG)") && text.contains("せん断"),
+                "{grade}: {text}"
+            );
+            assert!(
+                !text.contains("(OK)") && !text.contains("軸+曲げ "),
+                "{grade}: {text}"
+            );
+        }
+    }
+
+    #[test]
     fn steel_peak_check_shows_the_reason_for_unchecked_torsion() {
         use crate::app::steel_column_k_tests::input;
         let mut app = App::default();

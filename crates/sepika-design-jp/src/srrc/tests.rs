@@ -425,15 +425,38 @@ fn src_strength_checks_do_not_extrapolate_beyond_the_concrete_strength_table() {
 
 #[test]
 fn src_main_rebar_does_not_use_unknown_or_non_table_strengths() {
-    let section = make_section(src_column_shape());
     let material = make_material(24.0, "Fc24");
-    let mut context = ctx_column(LoadTerm::Long);
-    for grade in ["USD685", "未登録材種", "SR295"] {
-        context.rebar_material = Some(make_rebar_material(grade, 685.0));
-        let outcome = SrcDesign.check(&zero_forces(), &section, &material, &context);
-        assert!(
-            matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(grade) && reason.contains("異形主筋"))
-        );
+    for (shape, context) in [
+        (
+            src_beam_rect_shape(
+                500.0,
+                600.0,
+                22.0,
+                vec![4],
+                vec![4],
+                40.0,
+                10.0,
+                100.0,
+                2,
+                300.0,
+                200.0,
+                9.0,
+                14.0,
+            ),
+            ctx_beam as fn(LoadTerm) -> DesignCtx,
+        ),
+        (src_column_shape(), ctx_column),
+    ] {
+        let section = make_section(shape);
+        for term in [LoadTerm::Long, LoadTerm::Short] {
+            let mut context = context(term);
+            for grade in ["USD685", "USD685A", "USD685B", "未登録材種", "SR295"] {
+                context.rebar_material = Some(make_rebar_material(grade, 685.0));
+                let outcome = SrcDesign.check(&zero_forces(), &section, &material, &context);
+                assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains(&section.name) && reason.contains(grade) && reason.contains("異形主筋")));
+            }
+        }
     }
 }
 
