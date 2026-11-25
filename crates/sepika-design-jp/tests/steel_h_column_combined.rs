@@ -21,8 +21,104 @@ const ISSUE_FORCES: MemberForcesAt = MemberForcesAt {
 
 const UNAVAILABLE: &str = "フランジ内の設計用公称応力度の分布を規準から確定できず";
 
+#[test]
+fn issue_1484_uses_the_larger_of_tension_and_lateral_buckling_checks() {
+    let model = issue_model();
+    // R0 の A=8192、Z=1148243.413333333、短期 ft=235、fb=192.38541862520228 から独立算定。
+    for (term, n, mz, expected, details) in [
+        (
+            LoadTerm::Short,
+            77_000.0,
+            215e6,
+            0.924_410_569_513_599_1,
+            [
+                "ft=235.0000",
+                "fbX=192.3854",
+                "引張側=0.8368",
+                "曲げ圧縮側=0.9244",
+            ],
+        ),
+        (
+            LoadTerm::Long,
+            77_000.0,
+            215e6,
+            1.386_615_854_270_398_6,
+            [
+                "ft=156.6667",
+                "fbX=128.2569",
+                "引張側=1.2552",
+                "曲げ圧縮側=1.3866",
+            ],
+        ),
+        (
+            LoadTerm::Short,
+            400_000.0,
+            -44e6,
+            0.370_840_536_907_217_36,
+            [
+                "ft=235.0000",
+                "fbX=192.3854",
+                "引張側=0.3708",
+                "曲げ圧縮側=-0.0546",
+            ],
+        ),
+    ] {
+        let forces = MemberForcesAt {
+            n,
+            mz,
+            qz: 0.0,
+            ..ISSUE_FORCES
+        };
+        let outcome = check(
+            &model,
+            &model.sections[0],
+            &forces,
+            term,
+            MemberKind::Column,
+        );
+        let CheckOutcome::Checked(result) = outcome else {
+            panic!("{outcome:?}");
+        };
+        let component = &result.components[0];
+        assert_eq!(component.kind, CheckKind::AxialBending);
+        assert!((component.ratio - expected).abs() < 1e-12, "{result:?}");
+        assert_eq!(result.ok(), expected <= 1.0, "{result:?}");
+        for detail in ["A_N=8192.0000", "Zt=Zc=1148243.4133", "式(6.3)", "式(6.4)"]
+            .into_iter()
+            .chain(details)
+        {
+            assert!(component.detail.contains(detail), "{component:?}");
+        }
+    }
+}
+
 fn issue_model() -> Model {
     input::cantilever(ISSUE_FORCES.n, ISSUE_FORCES.mz, ISSUE_FORCES.qz)
+}
+
+fn column_context(model: &Model, term: LoadTerm) -> DesignCtx {
+    DesignCtx {
+        term,
+        kind: MemberKind::Column,
+        length: 3000.0,
+        lk_y: Some(3000.0),
+        lk_z: Some(3000.0),
+        column_lateral_buckling_length: Some(Ok(3000.0)),
+        lb: Some(1000.0),
+        steel_attr: Some(sepika_core::model::SteelDesignAttr {
+            elem: model.elements[0].id,
+            joint_flange_loss: 0.0,
+            joint_web_loss: 0.0,
+            scallop_web_loss: 0.0,
+            lb_direct: None,
+            lateral_brace_count: None,
+            column_lateral_buckling_end_supports: None,
+            lk_y_direct: None,
+            lk_z_direct: None,
+            c_direct: None,
+        }),
+        ..Default::default()
+    }
 }
 
 fn check(
@@ -37,28 +133,90 @@ fn check(
         section,
         &model.materials[0],
         &DesignCtx {
-            term,
             kind,
-            length: 3000.0,
-            lk_y: Some(3000.0),
-            lk_z: Some(3000.0),
-            column_lateral_buckling_length: Some(Ok(3000.0)),
-            lb: Some(1000.0),
-            steel_attr: Some(sepika_core::model::SteelDesignAttr {
-                elem: model.elements[0].id,
-                joint_flange_loss: 0.0,
-                joint_web_loss: 0.0,
-                scallop_web_loss: 0.0,
-                lb_direct: None,
-                lateral_brace_count: None,
-                column_lateral_buckling_end_supports: None,
-                lk_y_direct: None,
-                lk_z_direct: None,
-                c_direct: None,
-            }),
-            ..Default::default()
+            ..column_context(model, term)
         },
     )
+}
+
+#[test]
+fn other_tension_cases_keep_their_ratios_without_reporting_the_strong_axis_formulas() {
+    let model = issue_model();
+    for (my, mz, expected) in [
+        (0.0, 0.0, 0.039_997_506_648_936_17),
+        (3e6, 0.0, 0.113_579_520_415_849_69),
+        (f64::MIN_POSITIVE, 215e6, 1.013_265_282_335_793),
+    ] {
+        let forces = MemberForcesAt {
+            my,
+            mz,
+            qz: 0.0,
+            ..ISSUE_FORCES
+        };
+        let outcome = check(
+            &model,
+            &model.sections[0],
+            &forces,
+            LoadTerm::Short,
+            MemberKind::Column,
+        );
+        let CheckOutcome::Checked(result) = outcome else {
+            panic!("{outcome:?}");
+        };
+        assert!((result.ratio() - expected).abs() < 1e-12, "{result:?}");
+        assert!(!result.basis.contains("式(6.3)"), "{result:?}");
+        assert!(
+            !result.components[0].detail.contains("式(6.4)"),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn tension_and_strong_bending_keep_the_section_loss_and_lateral_support_limits() {
+    let model = issue_model();
+    let forces = MemberForcesAt {
+        mz: 215e6,
+        qz: 0.0,
+        ..ISSUE_FORCES
+    };
+    let mut ctx = column_context(&model, LoadTerm::Short);
+    ctx.steel_attr.as_mut().unwrap().joint_flange_loss = 5.0;
+    let outcome = SteelDesign.check(&forces, &model.sections[0], &model.materials[0], &ctx);
+    assert!(matches!(outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("断面欠損") && reason.contains("有効断面積") && reason.contains("断面係数")));
+
+    ctx.steel_attr.as_mut().unwrap().joint_flange_loss = 0.0;
+    let support_reason = "横座屈長さは未算定です";
+    ctx.column_lateral_buckling_length = Some(Err(support_reason));
+    let outcome = SteelDesign.check(&forces, &model.sections[0], &model.materials[0], &ctx);
+    assert!(matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(support_reason)));
+
+    let outcome = SteelDesign.check(
+        &MemberForcesAt {
+            mz: 300e6,
+            ..forces
+        },
+        &model.sections[0],
+        &model.materials[0],
+        &ctx,
+    );
+    let CheckOutcome::Checked(result) = outcome else {
+        panic!("{outcome:?}");
+    };
+    assert!(result.basis.contains(support_reason), "{result:?}");
+    assert!(
+        (result.ratio() - 1.151_778_972_022_13).abs() < 1e-12,
+        "{result:?}"
+    );
+    for detail in [
+        "fbX上限=235.0000",
+        "式(6.3) 引張側=1.1518",
+        "式(6.4) 曲げ圧縮側=未算定",
+        "軸曲げ比の下限=1.1518",
+    ] {
+        assert!(result.components[0].detail.contains(detail), "{result:?}");
+    }
 }
 
 #[test]
