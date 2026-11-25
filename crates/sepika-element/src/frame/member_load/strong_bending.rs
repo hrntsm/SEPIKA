@@ -3,15 +3,15 @@ use crate::frame::beam::MemberForces;
 use crate::transform::LocalFrame;
 use sepika_core::model::{MemberLoad, MemberLoadKind};
 
-/// 実材軸全長の符号付き強軸曲げと、指定区間の最大絶対値位置の断面力。
+/// 補剛区間の符号付き強軸曲げ分布と、指定した需要範囲の断面力。
 pub struct FrameStrongBendingSpan {
-    /// i/j端の曲げモーメント [N·mm]。
+    /// 補剛区間のi/j側端の曲げモーメント [N·mm]。
     pub end_moments_nmm: [f64; 2],
-    /// 符号付き曲げが全長で非減少または非増加と確認できた場合にtrue。
+    /// 符号付き曲げが補剛区間で非減少または非増加と確認できた場合にtrue。
     pub monotonic: bool,
     /// 区間内部で端部以上の曲げ絶対値を確認できた場合にtrue。
     pub interior_maximum: bool,
-    /// 指定区間で最大絶対値と数値上区別できない強軸曲げ位置を位置順に返す。
+    /// 需要範囲で絶対値最大に達する断面。複数区間の照査では需要範囲の両端も含む。
     pub demand_peaks: Vec<FrameStrongBendingPeak>,
 }
 
@@ -25,9 +25,9 @@ pub struct FrameStrongBendingPeak {
     /// i端フェースまたは区間内部で集中荷重による断面力の跳びがある場合の右極限。
     /// 断面力が非有限なら理由付きエラー。
     pub right: Result<Option<[f64; 6]>, String>,
-    /// 検定区間のi端フェースに一致する位置。
+    /// 補剛端または材端フェースで決まる需要範囲のi側端。
     pub is_i_face: bool,
-    /// 検定区間のj端フェースに一致する位置。
+    /// 補剛端または材端フェースで決まる需要範囲のj側端。
     pub is_j_face: bool,
 }
 
@@ -40,17 +40,7 @@ pub fn frame_strong_bending_span(
     loads: &[(f64, &MemberLoad)],
     forces: &MemberForces,
 ) -> Result<FrameStrongBendingSpan, String> {
-    if forces.at.first().is_none_or(|(xi, _)| *xi != 0.0) {
-        return Err("i端の解析断面力がありません".into());
-    }
-    if forces.at.last().is_none_or(|(xi, _)| *xi != 1.0) {
-        return Err("j端の解析断面力がありません".into());
-    }
-    let stations_mm: Vec<_> = forces
-        .at
-        .iter()
-        .map(|&(xi, force)| (xi * length_mm, force))
-        .collect();
+    let stations_mm = bending_stations_mm(length_mm, forces)?;
     frame_strong_bending_span_mm(
         frame,
         length_mm,
@@ -58,6 +48,55 @@ pub fn frame_strong_bending_span(
         loads,
         &stations_mm,
     )
+}
+
+fn bending_stations_mm(
+    length_mm: f64,
+    forces: &MemberForces,
+) -> Result<Vec<(f64, [f64; 6])>, String> {
+    if forces.at.first().is_none_or(|(xi, _)| *xi != 0.0) {
+        return Err("i端の解析断面力がありません".into());
+    }
+    if forces.at.last().is_none_or(|(xi, _)| *xi != 1.0) {
+        return Err("j端の解析断面力がありません".into());
+    }
+    Ok(forces
+        .at
+        .iter()
+        .map(|&(xi, force)| (xi * length_mm, force))
+        .collect())
+}
+
+/// 実材軸i端起点の境界 [mm] で区切った各区間の符号付き強軸曲げ分布を確認する。
+/// 境界には両実材端を含める。全長の荷重と断面力を照合し、指定需要範囲で各区間の両端・最大を評価する。
+pub fn frame_strong_bending_intervals(
+    frame: &LocalFrame,
+    length_mm: f64,
+    demand_extent_mm: [f64; 2],
+    boundaries_mm: &[f64],
+    loads: &[(f64, &MemberLoad)],
+    forces: &MemberForces,
+) -> Result<Vec<FrameStrongBendingSpan>, String> {
+    let [lo, hi] = demand_extent_mm;
+    if !(0.0 <= lo && lo < hi && hi <= length_mm)
+        || boundaries_mm.len() < 2
+        || boundaries_mm.first() != Some(&0.0)
+        || boundaries_mm.last() != Some(&length_mm)
+    {
+        return Err("補剛区間の境界または需要範囲が不正です".into());
+    }
+    let stations = bending_stations_mm(length_mm, forces)?;
+    let response = verified_frame_bending_response_mm(frame, length_mm, loads, &stations)?;
+    let observed_end = stations.last().expect("照合済みj端").1;
+    let bending = StrongBendingResponse::new(frame, length_mm, &response, observed_end);
+    boundaries_mm
+        .windows(2)
+        .map(|w| {
+            let interval = [w[0], w[1]];
+            let demand = [w[0].max(demand_extent_mm[0]), w[1].min(demand_extent_mm[1])];
+            bending.span(interval, demand, true)
+        })
+        .collect()
 }
 
 /// i端からの実距離 [mm] で両端と保存断面力を照合する。集中部材荷重と同じ位置の断面力は左極限とする。
@@ -69,160 +108,213 @@ pub fn frame_strong_bending_span_mm(
     loads: &[(f64, &MemberLoad)],
     stations_mm: &[(f64, [f64; 6])],
 ) -> Result<FrameStrongBendingSpan, String> {
-    if !(0.0 <= demand_lo && demand_lo < demand_hi && demand_hi <= length_mm) {
-        return Err("強軸曲げの需要を評価する区間が不正です".into());
-    }
     let response = verified_frame_bending_response_mm(frame, length_mm, loads, stations_mm)?;
     let observed_end = stations_mm.last().expect("照合済みj端").1;
-    let loads = &response.map.loads;
+    StrongBendingResponse::new(frame, length_mm, &response, observed_end).span(
+        [0.0, length_mm],
+        [demand_lo, demand_hi],
+        false,
+    )
+}
 
-    let strong_loads: Vec<_> = loads
-        .iter()
-        .filter_map(|load| resolve(load, frame)[1])
-        .collect();
-    let mut breaks = vec![0.0, length_mm];
-    for load in loads {
-        match load.kind {
-            MemberLoadKind::Point { a, .. } => breaks.push(a),
-            MemberLoadKind::Distributed { a, b, .. } => breaks.extend([a, b]),
-        }
-    }
-    breaks.sort_by(f64::total_cmp);
-    breaks.dedup();
+struct StrongBendingResponse<'a> {
+    response: &'a LoadedFrameSection,
+    length_mm: f64,
+    strong_loads: Vec<Comp>,
+    breaks: Vec<f64>,
+    observed_end: [f64; 6],
+}
 
-    let start = response.at(0.0)?;
-    let end = response.at(1.0)?;
-    let mut candidates = vec![
-        (demand_lo, response.at_mm(demand_lo)?),
-        (demand_hi, response.at_mm(demand_hi)?),
-    ];
-    let end_abs = start[5].abs().max(end[5].abs());
-    let mut has_positive_shear = false;
-    let mut has_negative_shear = false;
-    let mut uncertain_shear_sign = false;
-    let mut interior_maximum = false;
-    let mut record_candidate = |x_mm: f64, on_plateau: bool| {
-        if !(0.0 < x_mm && x_mm < length_mm) {
-            return Ok(());
-        }
-        let force = response.at_mm(x_mm)?;
-        let abs = force[5].abs();
-        let discernible = 64.0 * f64::EPSILON * abs.max(end_abs);
-        interior_maximum |= abs - end_abs > discernible || (on_plateau && abs == end_abs);
-        if !on_plateau && demand_lo < x_mm && x_mm < demand_hi {
-            candidates.push((x_mm, force));
-        }
-        Ok::<_, String>(())
-    };
-    for interval in breaks.windows(2) {
-        let (lo, hi) = (interval[0], interval[1]);
-        if lo > 0.0 {
-            record_candidate(lo, false)?;
-        }
-        let width = hi - lo;
-        let q0 = response.at_mm(lo)?[1] + response.point_load_jump(lo)[1];
-        let mut w_lo = 0.0;
-        let mut w_hi = 0.0;
-        for &load in &strong_loads {
-            match load {
-                Comp::Dist { a, b, w1, w2 } if a <= lo && hi <= b => {
-                    w_lo += distributed_intensity(a, b, w1, w2, lo);
-                    w_hi += distributed_intensity(a, b, w1, w2, hi);
-                }
-                _ => {}
+impl<'a> StrongBendingResponse<'a> {
+    fn new(
+        frame: &LocalFrame,
+        length_mm: f64,
+        response: &'a LoadedFrameSection,
+        observed_end: [f64; 6],
+    ) -> Self {
+        let loads = &response.map.loads;
+        let strong_loads = loads
+            .iter()
+            .filter_map(|load| resolve(load, frame)[1])
+            .collect();
+        let mut breaks = vec![];
+        for load in loads {
+            match load.kind {
+                MemberLoadKind::Point { a, .. } => breaks.push(a),
+                MemberLoadKind::Distributed { a, b, .. } => breaks.extend([a, b]),
             }
         }
+        breaks.sort_by(f64::total_cmp);
+        breaks.dedup();
+        Self {
+            response,
+            length_mm,
+            strong_loads,
+            breaks,
+            observed_end,
+        }
+    }
 
-        // Mzの微分はQy。荷重境界ではせん断が不連続なので区間内側の符号を用いる。
-        let q1 = width * w_lo;
-        let q2 = width * (w_hi * 0.5 - w_lo * 0.5);
-        if ![q0, q1, q2].into_iter().all(f64::is_finite) {
-            return Err("強軸曲げ区間のせん断力を有限値として確認できません".into());
-        }
-        let scale = q0.abs().max(q1.abs()).max(q2.abs());
-        if scale == 0.0 {
-            record_candidate(lo.midpoint(hi), true)?;
-            continue;
-        }
-        let (c, b, a) = (q0 / scale, q1 / scale, q2 / scale);
-        if [(q0, c), (q1, b), (q2, a)]
-            .into_iter()
-            .any(|(value, normalized)| value != 0.0 && normalized == 0.0)
+    fn span(
+        &self,
+        [span_lo, span_hi]: [f64; 2],
+        [demand_lo, demand_hi]: [f64; 2],
+        include_ends: bool,
+    ) -> Result<FrameStrongBendingSpan, String> {
+        if !(0.0 <= span_lo
+            && span_lo <= demand_lo
+            && demand_lo < demand_hi
+            && demand_hi <= span_hi
+            && span_hi <= self.length_mm)
         {
-            return Err("強軸曲げ区間のせん断力の符号を確認できません".into());
+            return Err("強軸曲げの需要を評価する区間が不正です".into());
         }
-        let vertex = -0.5 * b / a;
-        for t in [
-            Some(0.0),
-            Some(1.0),
-            (0.0 < vertex && vertex < 1.0).then_some(vertex),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let q = (a * t).mul_add(t, b.mul_add(t, c));
-            has_positive_shear |= q > 0.0;
-            has_negative_shear |= q < 0.0;
-            let magnitude = (a * t * t).abs() + (b * t).abs() + c.abs();
-            let confirmed_zero =
-                t == 1.0 && q == 0.0 && hi == length_mm && end[1] == 0.0 && observed_end[1] == 0.0;
-            uncertain_shear_sign |=
-                !confirmed_zero && magnitude > 0.0 && q.abs() <= 64.0 * f64::EPSILON * magnitude;
-        }
-        for t in quadratic_roots(a, b, c)
+        let response = self.response;
+        let start = response.at_mm(span_lo)?;
+        let end = response.at_mm(span_hi)?;
+        let mut candidates = vec![
+            (demand_lo, response.at_mm(demand_lo)?),
+            (demand_hi, response.at_mm(demand_hi)?),
+        ];
+        let end_abs = start[5].abs().max(end[5].abs());
+        let mut has_positive_shear = false;
+        let mut has_negative_shear = false;
+        let mut uncertain_shear_sign = false;
+        let mut interior_maximum = false;
+        let mut record_candidate = |x_mm: f64, on_plateau: bool| {
+            if !(span_lo < x_mm && x_mm < span_hi) {
+                return Ok(());
+            }
+            let force = response.at_mm(x_mm)?;
+            let abs = force[5].abs();
+            let discernible = 64.0 * f64::EPSILON * abs.max(end_abs);
+            interior_maximum |= abs - end_abs > discernible || (on_plateau && abs == end_abs);
+            if !on_plateau && demand_lo < x_mm && x_mm < demand_hi {
+                candidates.push((x_mm, force));
+            }
+            Ok::<_, String>(())
+        };
+        let inner_breaks = &self.breaks[self.breaks.partition_point(|&x| x <= span_lo)
+            ..self.breaks.partition_point(|&x| x < span_hi)];
+        let mut lo = span_lo;
+        for hi in inner_breaks.iter().copied().chain([span_hi]) {
+            if lo > span_lo {
+                record_candidate(lo, false)?;
+            }
+            let width = hi - lo;
+            let q0 = response.at_mm(lo)?[1] + response.point_load_jump(lo)[1];
+            let mut w_lo = 0.0;
+            let mut w_hi = 0.0;
+            for &load in &self.strong_loads {
+                match load {
+                    Comp::Dist { a, b, w1, w2 } if a <= lo && hi <= b => {
+                        w_lo += distributed_intensity(a, b, w1, w2, lo);
+                        w_hi += distributed_intensity(a, b, w1, w2, hi);
+                    }
+                    _ => {}
+                }
+            }
+
+            // Mzの微分はQy。荷重境界ではせん断が不連続なので区間内側の符号を用いる。
+            let q1 = width * w_lo;
+            let q2 = width * (w_hi * 0.5 - w_lo * 0.5);
+            if ![q0, q1, q2].into_iter().all(f64::is_finite) {
+                return Err("強軸曲げ区間のせん断力を有限値として確認できません".into());
+            }
+            let scale = q0.abs().max(q1.abs()).max(q2.abs());
+            if scale == 0.0 {
+                record_candidate(lo.midpoint(hi), true)?;
+                lo = hi;
+                continue;
+            }
+            let (c, b, a) = (q0 / scale, q1 / scale, q2 / scale);
+            if [(q0, c), (q1, b), (q2, a)]
+                .into_iter()
+                .any(|(value, normalized)| value != 0.0 && normalized == 0.0)
+            {
+                return Err("強軸曲げ区間のせん断力の符号を確認できません".into());
+            }
+            let vertex = -0.5 * b / a;
+            for t in [
+                Some(0.0),
+                Some(1.0),
+                (0.0 < vertex && vertex < 1.0).then_some(vertex),
+            ]
             .into_iter()
             .flatten()
-            .filter(|&t| 0.0 < t && t < 1.0)
-        {
-            record_candidate(t.mul_add(width, lo), false)?;
-        }
-    }
-
-    let maximum = candidates
-        .iter()
-        .map(|(_, force)| force[5].abs())
-        .fold(0.0, f64::max);
-    let tolerance = 64.0 * f64::EPSILON * maximum;
-    candidates.sort_by(|(x, _), (y, _)| x.total_cmp(y));
-    candidates.dedup_by(|(x, _), (y, _)| *x == *y);
-    let demand_peaks = candidates
-        .into_iter()
-        .filter(|(_, force)| maximum - force[5].abs() <= tolerance)
-        .map(|(x, left)| {
-            let right = if x < demand_hi {
-                let jump = response.point_load_jump(x);
-                if jump == [0.0; 3] {
-                    Ok(None)
-                } else {
-                    let mut right = left;
-                    for (force, jump) in right.iter_mut().zip(jump) {
-                        *force += jump;
-                    }
-                    if right.iter().all(|value| value.is_finite()) {
-                        Ok(Some(right))
-                    } else {
-                        Err("集中荷重の右側の断面力が非有限です".into())
-                    }
-                }
-            } else {
-                Ok(None)
-            };
-            FrameStrongBendingPeak {
-                xi: x / length_mm,
-                x_mm: x,
-                left,
-                right,
-                is_i_face: x == demand_lo,
-                is_j_face: x == demand_hi,
+            {
+                let q = (a * t).mul_add(t, b.mul_add(t, c));
+                has_positive_shear |= q > 0.0;
+                has_negative_shear |= q < 0.0;
+                let magnitude = (a * t * t).abs() + (b * t).abs() + c.abs();
+                let confirmed_zero = t == 1.0
+                    && q == 0.0
+                    && hi == self.length_mm
+                    && end[1] == 0.0
+                    && self.observed_end[1] == 0.0;
+                uncertain_shear_sign |= !confirmed_zero
+                    && magnitude > 0.0
+                    && q.abs() <= 64.0 * f64::EPSILON * magnitude;
             }
+            for t in quadratic_roots(a, b, c)
+                .into_iter()
+                .flatten()
+                .filter(|&t| 0.0 < t && t < 1.0)
+            {
+                record_candidate(t.mul_add(width, lo), false)?;
+            }
+            lo = hi;
+        }
+
+        let maximum = candidates
+            .iter()
+            .map(|(_, force)| force[5].abs())
+            .fold(0.0, f64::max);
+        let tolerance = 64.0 * f64::EPSILON * maximum;
+        candidates.sort_by(|(x, _), (y, _)| x.total_cmp(y));
+        candidates.dedup_by(|(x, _), (y, _)| *x == *y);
+        let demand_peaks = candidates
+            .into_iter()
+            .filter(|(x, force)| {
+                maximum - force[5].abs() <= tolerance
+                    || include_ends && (*x == demand_lo || *x == demand_hi)
+            })
+            .map(|(x, left)| {
+                let right = if x < demand_hi {
+                    let jump = response.point_load_jump(x);
+                    if jump == [0.0; 3] {
+                        Ok(None)
+                    } else {
+                        let mut right = left;
+                        for (force, jump) in right.iter_mut().zip(jump) {
+                            *force += jump;
+                        }
+                        if right.iter().all(|value| value.is_finite()) {
+                            Ok(Some(right))
+                        } else {
+                            Err("集中荷重の右側の断面力が非有限です".into())
+                        }
+                    }
+                } else {
+                    Ok(None)
+                };
+                FrameStrongBendingPeak {
+                    xi: x / self.length_mm,
+                    x_mm: x,
+                    left,
+                    right,
+                    is_i_face: x == demand_lo,
+                    is_j_face: x == demand_hi,
+                }
+            })
+            .collect();
+        Ok(FrameStrongBendingSpan {
+            end_moments_nmm: [start[5], end[5]],
+            monotonic: !(uncertain_shear_sign || has_positive_shear && has_negative_shear),
+            interior_maximum,
+            demand_peaks,
         })
-        .collect();
-    Ok(FrameStrongBendingSpan {
-        end_moments_nmm: [start[5], end[5]],
-        monotonic: !(uncertain_shear_sign || has_positive_shear && has_negative_shear),
-        interior_maximum,
-        demand_peaks,
-    })
+    }
 }
 
 /// 線形静的応答から、i端起点の実距離 [mm] と局所断面力 [N, N·mm] を照合する。

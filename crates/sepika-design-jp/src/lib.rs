@@ -375,7 +375,7 @@ pub struct DesignCtx {
     /// 部材中央（pos=0.5）の強軸まわり曲げモーメント [N·mm]（符号付き）。
     /// 鋼柱の横座屈修正係数 C と RC 梁の構造規定に用いる。
     pub mid_moment_z: Option<f64>,
-    /// 全長を単一の補剛区間とする一般H形鋼梁の、確認済みの強軸曲げ分布。
+    /// 一般H形鋼梁の、照査する補剛区間の強軸曲げ分布。
     pub steel_beam_moment_diagram: steel::SteelBeamMomentDiagram,
     /// 地震時短期の設計用せん断力 QD = min(QD1, QD2) の算定文脈（RC）。
     /// None の場合は解析せん断力をそのまま用いる。

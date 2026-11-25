@@ -82,6 +82,152 @@ fn check_bending(result: &CheckResult, ratio: f64, detail: &str) {
 }
 
 #[test]
+fn middle_brace_checks_both_intervals_against_their_own_long_and_short_allowables() {
+    let model = input::simply_supported_with_middle_brace(2_000.0, 150_000.0);
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let terms = [(input::DEAD, 1.0)];
+    let raw = &solved.member_forces[0].1.at;
+    assert_eq!(raw.len(), 3);
+    assert!(raw.iter().all(|(xi, _)| *xi != 0.25));
+    near(raw[1].1[5].abs() / 1e6, 150.0);
+
+    // M(L/4)=3PL/16=225 kN·m、M(L/2)=PL/8=150 kN·m。
+    // 左は区間内最大、右は単調で端部比0。Z=1,148,243.4133 mm³。
+    for (term, left_fb, right_fb, left_peak, left_end, right_end) in [
+        (
+            LoadTerm::Long,
+            "fb=112.3707",
+            "fb=144.5830",
+            1.743_795_729,
+            1.162_530_486,
+            0.903_524_681,
+        ),
+        (
+            LoadTerm::Short,
+            "fb=168.5560",
+            "fb=216.8745",
+            1.162_530_486,
+            0.775_020_324,
+            0.602_349_787,
+        ),
+    ] {
+        let rows = check(&model, &solved, term, Some(&terms));
+        assert!(
+            rows.iter()
+                .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))),
+            "{rows:?}"
+        );
+        for (pos, interval, count, ratio, fb) in [
+            (0.0, "[0.000, 4000.000]", 1, 0.0, left_fb),
+            (0.25, "[0.000, 4000.000]", 2, left_peak, left_fb),
+            (0.5, "[0.000, 4000.000]", 1, left_end, left_fb),
+            (0.5, "[4000.000, 8000.000]", 1, right_end, right_fb),
+            (1.0, "[4000.000, 8000.000]", 1, 0.0, right_fb),
+        ] {
+            let matching = rows
+                .iter()
+                .filter_map(|(xi, row)| match row {
+                    CheckOutcome::Checked(result)
+                        if *xi == pos && result.detail.contains(interval) =>
+                    {
+                        Some(result)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(matching.len(), count, "{rows:?}");
+            for result in matching {
+                check_bending(result, ratio, fb);
+                check_bending(result, ratio, "lb=4000 mm");
+            }
+        }
+    }
+}
+
+#[test]
+fn unverified_middle_bracing_retains_only_independently_proven_bending_failure() {
+    let terms = [(input::DEAD, 1.0)];
+    for (point_load, expect_ng) in [(150_000.0, false), (320_000.0, true)] {
+        let model = input::simply_supported_with_middle_brace(2_000.0, point_load);
+        let solved = Analysis::prepare(&model)
+            .unwrap()
+            .linear_static(input::DEAD)
+            .unwrap();
+        let mut direct = model.clone();
+        direct.steel_design_attrs[0].lateral_brace_count = None;
+        direct.steel_design_attrs[0].lb_direct = Some((4_000.0, 4_000.0, 4_000.0));
+        let mut conflicting = model.clone();
+        conflicting.steel_design_attrs[0].lb_direct = Some((3_000.0, 3_000.0, 3_000.0));
+        for (input, load_terms, reason) in [
+            (&model, None, "荷重組合せの由来が未確認"),
+            (&direct, Some(&terms[..]), "補剛端の位置を確認できません"),
+            (
+                &conflicting,
+                Some(&terms[..]),
+                "補剛端の位置を確認できません",
+            ),
+        ] {
+            let rows = check(input, &solved, LoadTerm::Short, load_terms);
+            assert!(
+                rows.iter().any(|(_, row)| matches!(row,
+                CheckOutcome::Skipped { reason: detail } if detail.contains(reason))),
+                "{rows:?}"
+            );
+            assert!(!rows.iter().any(|(xi, _)| *xi == 0.25), "{rows:?}");
+            let bending_ng = rows
+                .iter()
+                .filter_map(|(xi, row)| match row {
+                    CheckOutcome::Checked(result) if *xi == 0.5 => Some(result),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(bending_ng.len(), usize::from(expect_ng), "{rows:?}");
+            if let Some(result) = bending_ng.first() {
+                check_bending(result, 1.185_900_230, "fb上限=235.0000");
+            }
+        }
+    }
+}
+
+#[test]
+fn unbounded_brace_input_is_reported_as_unavailable() {
+    let mut model = input::simply_supported_with_middle_brace(2_000.0, 150_000.0);
+    model.steel_design_attrs[0].lateral_brace_count = Some(u32::MAX);
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let terms = [(input::DEAD, 1.0)];
+    let rows = check(&model, &solved, LoadTerm::Short, Some(&terms));
+    assert!(
+        rows.iter()
+            .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+        if reason.contains("等間隔横補剛本数が通常検定の上限"))),
+        "{rows:?}"
+    );
+}
+
+#[test]
+fn point_load_at_the_brace_uses_each_intervals_inner_cut() {
+    let model = input::simply_supported_with_middle_brace(4_000.0, 100_000.0);
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let terms = [(input::DEAD, 1.0)];
+    let rows = check(&model, &solved, LoadTerm::Short, Some(&terms));
+    let brace = rows.iter().filter(|(xi, _)| *xi == 0.5).collect::<Vec<_>>();
+    assert_eq!(brace.len(), 2, "{rows:?}");
+    assert!(matches!(&brace[0].1, CheckOutcome::Checked(result)
+        if result.detail.contains("[0.000, 4000.000]") && !result.detail.contains("集中荷重の右側")));
+    assert!(matches!(&brace[1].1, CheckOutcome::Checked(result)
+        if result.detail.contains("[4000.000, 8000.000]") && result.detail.contains("集中荷重の右側")));
+}
+
+#[test]
 fn point_load_between_design_sections_makes_the_saved_short_combination_fail_bending() {
     let model = input::short_point_combination();
     let combo = &model.combinations[0];
@@ -304,7 +450,10 @@ fn missing_and_duplicate_member_rows_have_distinct_unavailable_outcomes() {
             lk_z_direct: None,
             c_direct: None,
         });
-    assert!(check(&partial, &solved, LoadTerm::Short, None).is_empty());
+    assert!(matches!(
+        &check(&partial, &solved, LoadTerm::Short, None)[..],
+        [(_, CheckOutcome::Skipped { reason })] if reason.contains("鋼梁の解析断面力がありません")
+    ));
 }
 
 #[test]
@@ -735,28 +884,16 @@ fn verified_full_span_uses_its_own_length_with_or_without_caller_group_override(
 }
 
 #[test]
-fn split_girder_keeps_explicit_zero_and_positive_partial_bracing_without_a_full_span_diagram() {
+fn split_girder_preserves_zero_section_checks_but_positive_lengths_do_not_prove_brace_positions() {
     let model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
     let solved = Analysis::prepare(&model)
         .unwrap()
         .linear_static(input::DEAD)
         .unwrap();
-    for (direct, count, ratio, fb, lb) in [
-        (
-            Some((0.0, 0.0, 0.0)),
-            None,
-            0.277_945_366,
-            "fb=235.0000",
-            "lb=0 mm",
-        ),
-        (
-            Some((4_000.0, 4_000.0, 4_000.0)),
-            None,
-            0.387_510_162,
-            "fb=168.5560",
-            "lb=4000 mm",
-        ),
-        (None, Some(1), 0.387_510_162, "fb=168.5560", "lb=4000 mm"),
+    for (direct, count) in [
+        (Some((0.0, 0.0, 0.0)), None),
+        (Some((4_000.0, 4_000.0, 4_000.0)), None),
+        (None, Some(1)),
     ] {
         let mut model = model.clone();
         for attr in &mut model.steel_design_attrs {
@@ -764,17 +901,29 @@ fn split_girder_keeps_explicit_zero_and_positive_partial_bracing_without_a_full_
             attr.lateral_brace_count = count;
         }
         let results = check(&model, &solved, LoadTerm::Short, None);
-        let start = at(&results, 0.0);
-        check_bending(start, ratio, fb);
-        check_bending(start, ratio, lb);
-        assert!(!results
-            .iter()
-            .any(|(_, outcome)| matches!(outcome, CheckOutcome::Skipped { .. })));
+        if direct == Some((0.0, 0.0, 0.0)) {
+            let start = at(&results, 0.0);
+            check_bending(start, 0.277_945_366, "lb=0 mm");
+            assert!(results
+                .iter()
+                .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))));
+        } else {
+            assert!(
+                results
+                    .iter()
+                    .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+                if reason.contains("補剛端の位置を確認できません"))),
+                "{results:?}"
+            );
+            assert!(results
+                .iter()
+                .all(|(_, row)| matches!(row, CheckOutcome::Skipped { .. })));
+        }
     }
 }
 
 #[test]
-fn a_single_elements_partial_bracing_does_not_verify_the_unset_part_of_the_girder() {
+fn a_single_elements_partial_bracing_does_not_verify_either_part_of_the_girder() {
     let mut model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
     model.steel_design_attrs[0].lb_direct = None;
     model.steel_design_attrs[0].lateral_brace_count = Some(1);
@@ -784,14 +933,20 @@ fn a_single_elements_partial_bracing_does_not_verify_the_unset_part_of_the_girde
         .linear_static(input::DEAD)
         .unwrap();
     let first = check(&model, &solved, LoadTerm::Short, None);
-    check_bending(at(&first, 0.0), 0.387_510_162, "lb=4000 mm");
+    assert!(
+        first
+            .iter()
+            .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+        if reason.contains("補剛端の位置を確認できません"))),
+        "{first:?}"
+    );
     let second = check_member(&model, &solved, LoadTerm::Short, None, SECOND_BEAM);
     assert!(second.iter().any(|(_, outcome)| matches!(outcome,
         CheckOutcome::Skipped { reason } if reason.contains("共通の単一補剛区間が指定されていません"))));
-    assert!(
-        second.iter().all(|(_, outcome)| !matches!(outcome,
-        CheckOutcome::Checked(row) if row.components.iter().any(|c| c.kind == CheckKind::Bending)))
-    );
+    assert!(first
+        .iter()
+        .chain(&second)
+        .all(|(_, row)| matches!(row, CheckOutcome::Skipped { .. })));
 }
 
 #[test]
@@ -853,12 +1008,13 @@ fn split_girder_keeps_zero_and_positive_partial_bracing_in_separate_positions() 
     let start = at(&results, 0.0);
     check_bending(start, 0.277_945_366, "fb=235.0000");
     check_bending(start, 0.277_945_366, "lb=0 mm");
-    let center = at(&results, 0.5);
-    check_bending(center, 0.232_506_097, "fb=168.5560");
-    check_bending(center, 0.232_506_097, "lb=4000 mm");
-    assert!(results
-        .iter()
-        .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))));
+    for target in [0.5, 1.0] {
+        assert!(results.iter().any(|(xi, row)| *xi == target
+            && matches!(row, CheckOutcome::Skipped { reason } if reason.contains("横座屈"))));
+        assert!(!results
+            .iter()
+            .any(|(xi, row)| *xi == target && matches!(row, CheckOutcome::Checked(_))));
+    }
 }
 
 #[test]
@@ -928,7 +1084,7 @@ fn later_element_verifies_saved_cut_before_rounding_into_global_coordinates() {
 }
 
 #[test]
-fn invalid_group_does_not_override_independent_local_direct_bracing() {
+fn invalid_group_and_local_lengths_do_not_confirm_brace_positions() {
     let mut model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
     let solved = Analysis::prepare(&model)
         .unwrap()
@@ -939,12 +1095,16 @@ fn invalid_group_does_not_override_independent_local_direct_bracing() {
         attr.lb_direct = Some((2_000.0, 2_000.0, 2_000.0));
     }
     let independent = check(&model, &solved, LoadTerm::Short, None);
-    let start = at(&independent, 0.0);
-    check_bending(start, 0.300_217_044, "fb=217.5665");
-    check_bending(start, 0.300_217_044, "lb=2000 mm");
+    assert!(
+        independent
+            .iter()
+            .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+        if reason.contains("補剛端の位置を確認できません"))),
+        "{independent:?}"
+    );
     assert!(independent
         .iter()
-        .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))));
+        .all(|(_, row)| matches!(row, CheckOutcome::Skipped { .. })));
 
     for (direct, count) in [
         (None, None),

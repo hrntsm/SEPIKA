@@ -9,8 +9,8 @@ use sepika_core::model::{
 use sepika_core::structure_kind::StructureKind;
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::frame::member_load::{
-    frame_strong_bending_span, frame_strong_bending_span_mm, verify_frame_bending_stations_mm,
-    FrameStrongBendingPeak,
+    frame_strong_bending_intervals, frame_strong_bending_span, frame_strong_bending_span_mm,
+    verify_frame_bending_stations_mm, FrameStrongBendingPeak,
 };
 use sepika_element::transform::LocalFrame;
 
@@ -25,9 +25,22 @@ pub(super) fn requires_bending_span(
     structure == StructureKind::S
         && ctx.kind == MemberKind::Girder
         && crate::steel::is_symmetric_h_section(sec)
-        && [0.0, 0.5, 1.0].into_iter().any(|pos| {
+        && has_positive_buckling_length(ctx)
+}
+
+pub(super) fn has_positive_buckling_length(ctx: &DesignCtx) -> bool {
+    [0.0, 0.5, 1.0]
+        .into_iter()
+        .any(|pos| beam_lateral_buckling_length(ctx, pos).0 > 1e-9)
+}
+
+pub(super) fn has_middle_bracing(ctx: &DesignCtx) -> bool {
+    ctx.steel_attr
+        .as_ref()
+        .is_some_and(|attr| attr.lateral_brace_count.is_some_and(|n| n > 0))
+        || [0.0, 0.5, 1.0].into_iter().any(|pos| {
             let (lb, partial) = beam_lateral_buckling_length(ctx, pos);
-            lb > 1e-9 && !partial
+            lb > 1e-9 && partial
         })
 }
 
@@ -63,19 +76,24 @@ impl<'a> BeamSpanLoads<'a> {
         elem: &ElementData,
         forces: &MemberForces,
         ctx: &DesignCtx,
-    ) -> Result<SteelBeamSpan, String> {
-        if [0.0, 0.5, 1.0].into_iter().any(|pos| {
-            let (lb, partial) = beam_lateral_buckling_length(ctx, pos);
-            partial || !lb.is_finite() || (lb - ctx.length).abs() > 1e-9
-        }) {
-            return Err("補剛区間と実材軸全長が一致しません".into());
-        }
-        if ctx
+    ) -> Result<RecoveredBending, String> {
+        let count = ctx
             .steel_attr
             .as_ref()
-            .is_some_and(|a| a.lateral_brace_count.is_some_and(|n| n > 0))
+            .and_then(|a| a.lateral_brace_count)
+            .unwrap_or(0);
+        if count == 0
+            && [0.0, 0.5, 1.0].into_iter().any(|pos| {
+                let (lb, partial) = beam_lateral_buckling_length(ctx, pos);
+                partial || !lb.is_finite() || (lb - ctx.length).abs() > 1e-9
+            })
+            || count > 0
+                && ctx
+                    .steel_attr
+                    .as_ref()
+                    .is_some_and(|a| a.lb_direct.is_some())
         {
-            return Err("中間横補剛の設定と単一補剛区間が一致しません".into());
+            return Err("指定した横座屈長さから補剛端の位置を確認できません".into());
         }
         let [i, j] = model
             .primary_frame_axis_ends(elem)?
@@ -101,9 +119,36 @@ impl<'a> BeamSpanLoads<'a> {
         {
             return Err("鋼梁の材端フェース間に正の区間を確認できません".into());
         }
-        let span =
-            frame_strong_bending_span(&frame, ctx.length, [face_i_mm, end_mm], loads, forces)?;
-        Ok(SteelBeamSpan::from(span))
+        let demand = [face_i_mm, end_mm];
+        if count == 0 {
+            let span = frame_strong_bending_span(&frame, ctx.length, demand, loads, forces)?;
+            return Ok(RecoveredBending::Single(span.into()));
+        }
+        if count > 10_000 {
+            return Err("等間隔横補剛本数が通常検定の上限（10,000）を超えています".into());
+        }
+        let sections = f64::from(count) + 1.0;
+        let length_mm = ctx.length / sections;
+        if length_mm <= 1e-9 || !(face_i_mm < length_mm && end_mm > ctx.length - length_mm) {
+            return Err("材端フェース間で各等間隔補剛区間の正の検定範囲を確認できません".into());
+        }
+        let boundaries = (0..=u64::from(count) + 1)
+            .map(|index| ctx.length * (index as f64 / sections))
+            .collect::<Vec<_>>();
+        let spans =
+            frame_strong_bending_intervals(&frame, ctx.length, demand, &boundaries, loads, forces)?;
+        Ok(RecoveredBending::Multiple(
+            spans
+                .into_iter()
+                .zip(boundaries.windows(2))
+                .map(|(span, bounds)| SteelBeamInterval {
+                    bounds_mm: [bounds[0], bounds[1]],
+                    bounds_xi: [bounds[0] / ctx.length, bounds[1] / ctx.length],
+                    length_mm,
+                    span: span.into(),
+                })
+                .collect(),
+        ))
     }
 }
 
@@ -126,6 +171,18 @@ impl From<sepika_element::frame::member_load::FrameStrongBendingSpan> for SteelB
 pub(super) struct SteelBeamSpan {
     pub diagram: SteelBeamMomentDiagram,
     pub demand_peaks: Vec<FrameStrongBendingPeak>,
+}
+
+pub(super) enum RecoveredBending {
+    Single(SteelBeamSpan),
+    Multiple(Vec<SteelBeamInterval>),
+}
+
+pub(super) struct SteelBeamInterval {
+    pub bounds_mm: [f64; 2],
+    pub bounds_xi: [f64; 2],
+    pub length_mm: f64,
+    pub span: SteelBeamSpan,
 }
 
 pub(super) enum GroupBending {
