@@ -1,4 +1,5 @@
 use sepika_core::units::ConcreteClass;
+use sepika_solver::statics::analysis::SeismicDir;
 
 /// 大地震時の配筋区分。付着長さと不要断面までの距離 [mm] は付着検定断面から測る。
 #[derive(Clone, Copy, Debug)]
@@ -97,6 +98,21 @@ pub enum RcUltimateBondDemand {
 }
 
 impl RcUltimateBondDemand {
+    pub(super) fn has_cutoff(self) -> bool {
+        matches!(
+            self,
+            Self::ThroughAndCutoff { .. }
+                | Self::Single(RcUltimateBondInput {
+                    bar: RcUltimateBondBar::Cutoff { .. }
+                        | RcUltimateBondBar::Through {
+                            cutoff_unnecessary_distance_mm: Some(_),
+                            ..
+                        },
+                    ..
+                })
+        )
+    }
+
     pub(super) fn inputs(self) -> ([Option<RcUltimateBondInput>; 2], Option<&'static str>) {
         match self {
             Self::Single(input) => {
@@ -150,6 +166,241 @@ impl RcUltimateBondDemand {
     }
 }
 
+/// 同じ水平載荷軸の正・負地震荷重ごとの非降伏RC梁の照査入力。
+/// 内法で一定の矩形単独断面を持ち、1要素で表す梁に限る。
+#[derive(Clone, Copy, Debug)]
+pub struct RcUltimateBeamBondDemand {
+    /// 地震荷重の全体座標系の軸。梁の局所曲げ軸・符号とは異なる。
+    pub seismic_axis: SeismicDir,
+    pub positive: Option<RcUltimateBeamBondDirectionDemand>,
+    pub negative: Option<RcUltimateBeamBondDirectionDemand>,
+}
+
+/// 一つの地震荷重方向で曲げ非降伏を確認した矩形RC梁の付着照査入力。
+#[derive(Clone, Copy, Debug)]
+pub struct RcUltimateBeamBondDirectionDemand {
+    pub section: RcUltimateBeamBondSection,
+    /// この方向の必要な照査を指定断面・主筋で代表できることを別途確認した場合だけ true。
+    pub represents_all_bond_checks: bool,
+    /// 検定断面の採用主筋の組。応力度は同じ主筋の確認済み存在応力度、カットオフ筋の距離は
+    /// 検定断面から対象の鉄筋端・不要断面が実在する側へ測った確認済みの値を指定する。
+    pub bars: RcUltimateBondDemand,
+}
+
+/// 長期と割増水平荷重を合わせて最大絶対強軸曲げとなる、確認済みの付着検定断面。
+/// 単軸曲げで採用主筋が引張となり、軸力・弱軸曲げで応力度が変わらない範囲を対象とする。
+#[derive(Clone, Copy, Debug)]
+pub struct RcUltimateBeamBondSection {
+    /// i端内法面からの距離 [mm]。
+    pub distance_from_i_face_mm: f64,
+    /// 同断面の長期荷重時、水平荷重時それぞれの強軸曲げ [N·mm]。正は下端引張。
+    pub long_term_mz_nmm: f64,
+    pub lateral_mz_nmm: f64,
+    /// 付着照査入力と存在応力度がともに対応する主筋。
+    pub tension_side: RcUltimateBeamBondTensionSide,
+}
+
+/// RC梁の断面内で付着照査の対象とする上端または下端の主筋。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RcUltimateBeamBondTensionSide {
+    Top,
+    Bottom,
+}
+
+/// 正・負地震荷重それぞれの付着照査結果。
+#[derive(Clone, Copy, Debug)]
+pub struct RcUltimateBeamBondChecks {
+    pub seismic_axis: SeismicDir,
+    pub positive: RcUltimateBeamBondDirectionCheck,
+    pub negative: RcUltimateBeamBondDirectionCheck,
+}
+
+/// 一つの地震荷重方向の結果。他方向の未算定にかかわらず保持する。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RcUltimateBeamBondDirectionCheck {
+    /// 照査に指定された検定断面と主筋。入力なしは None。
+    pub section: Option<RcUltimateBeamBondSection>,
+    /// 通し筋の安全性検討用引張応力度 [N/mm²]。未算定または該当なしは None。
+    pub through_sigma_d_mpa: Option<f64>,
+    /// カットオフ筋の安全性検討用引張応力度 [N/mm²]。未算定または該当なしは None。
+    pub cutoff_sigma_d_mpa: Option<f64>,
+    /// 算定できた組のうち最小余裕度に対応する付着応力度と許容値。算定なしは None。
+    pub stress: Option<RcUltimateBondStress>,
+    /// 付着応力度とは独立した必要延長の判定。該当なしまたは未確認は None。
+    pub development_length_ok: Option<bool>,
+    /// 未算定の理由。確認済みの不適合がある場合も保持する。
+    pub unchecked_reason: Option<&'static str>,
+}
+
+impl RcUltimateBeamBondDirectionCheck {
+    pub(super) fn from_bars(
+        bars: RcUltimateBondDemand,
+        section: Option<RcUltimateBeamBondSection>,
+        directional_conflict: Option<&'static str>,
+        check_input: impl Fn(RcUltimateBondInput) -> Result<RcUltimateBondCheck, &'static str>,
+    ) -> Self {
+        let (inputs, grouping_issue) = bars.inputs();
+        let factor_issue = match (section, inputs) {
+            (Some(_), [Some(a), Some(b)]) => a
+                .bar
+                .elastic_stress()
+                .zip(b.bar.elastic_stress())
+                .filter(|(a, b)| a.lateral_factor != b.lateral_factor)
+                .map(|_| "同じ地震荷重方向の通し筋とカットオフ筋で水平荷重の割増が一致しません"),
+            _ => None,
+        };
+        let inconsistent_pair = (grouping_issue.is_some() || factor_issue.is_some())
+            && matches!(bars, RcUltimateBondDemand::ThroughAndCutoff { .. });
+        let mut result = Self {
+            section,
+            unchecked_reason: grouping_issue.or(factor_issue).or(directional_conflict),
+            ..Self::default()
+        };
+        for input in inputs.into_iter().flatten() {
+            let check = match check_input(input) {
+                Ok(check) => check,
+                Err(reason) => {
+                    result.unchecked_reason.get_or_insert(reason);
+                    continue;
+                }
+            };
+            if let Some(length_ok) = check
+                .development_length_ok
+                .filter(|&ok| !inconsistent_pair || !ok)
+            {
+                result.development_length_ok =
+                    Some(result.development_length_ok.unwrap_or(true) && length_ok);
+            }
+            if inconsistent_pair || directional_conflict.is_some() {
+                continue;
+            }
+            match check.stress {
+                Ok(stress) => {
+                    if result
+                        .stress
+                        .is_none_or(|current| stress.margin() < current.margin())
+                    {
+                        result.stress = Some(stress);
+                    }
+                    match input.bar {
+                        RcUltimateBondBar::Through { .. } => {
+                            result.through_sigma_d_mpa = check.sigma_d_mpa
+                        }
+                        RcUltimateBondBar::Cutoff { .. } => {
+                            result.cutoff_sigma_d_mpa = check.sigma_d_mpa
+                        }
+                    }
+                }
+                Err(reason) => {
+                    result.unchecked_reason.get_or_insert(reason);
+                }
+            }
+        }
+        result
+    }
+
+    pub(super) fn detail(self, direction: &str) -> String {
+        let mut detail = format!("{direction}地震荷重");
+        if let Some(section) = self.section {
+            let side = match section.tension_side {
+                RcUltimateBeamBondTensionSide::Top => "上端主筋",
+                RcUltimateBeamBondTensionSide::Bottom => "下端主筋",
+            };
+            detail.push_str(&format!(
+                " i端内法面から {:.3} mm、{side}、ML={:.3} N·mm、ME={:.3} N·mm",
+                section.distance_from_i_face_mm, section.long_term_mz_nmm, section.lateral_mz_nmm
+            ));
+        }
+        for (bar, sigma_d) in [
+            ("通し筋", self.through_sigma_d_mpa),
+            ("カットオフ筋", self.cutoff_sigma_d_mpa),
+        ] {
+            if let Some(value) = sigma_d {
+                detail.push_str(&format!("、{bar} σD={value:.3} N/mm²"));
+            }
+        }
+        if let Some(reason) = self.unchecked_reason {
+            detail.push_str(&format!("、付着応力度の未算定あり（{reason}）"));
+        }
+        if self.development_length_ok == Some(false) {
+            detail.push_str("、カットオフ筋の必要延長不足");
+        }
+        detail
+    }
+}
+
+impl RcUltimateBeamBondSection {
+    pub(super) fn check_lengths(
+        self,
+        clear_span_mm: f64,
+        bar: RcUltimateBondBar,
+    ) -> Result<(), &'static str> {
+        let x_mm = self.distance_from_i_face_mm;
+        if !(0.0..=clear_span_mm).contains(&x_mm) {
+            return Err("付着検定断面の位置が部材の内法区間にありません");
+        }
+        let max_distance_mm = x_mm.max(clear_span_mm - x_mm);
+        let reachable = |distance_mm| (0.0..=max_distance_mm).contains(&distance_mm);
+        match bar {
+            RcUltimateBondBar::Cutoff { development_length_mm, .. }
+                if !reachable(development_length_mm) =>
+            {
+                Err("カットオフ筋の付着長さが付着検定断面から到達できる内法区間を外れています")
+            }
+            RcUltimateBondBar::Cutoff { unnecessary_distance_mm, .. }
+            | RcUltimateBondBar::Through {
+                cutoff_unnecessary_distance_mm: Some(unnecessary_distance_mm),
+                ..
+            } if !reachable(unnecessary_distance_mm) => {
+                Err("カットオフ筋の不要断面までの距離が付着検定断面から到達できる内法区間を外れています")
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub(super) fn check_stress(
+        self,
+        stress: RcUltimateBondElasticStress,
+        design_yield_stress_mpa: f64,
+    ) -> Result<(), &'static str> {
+        if stress.long_term_tensile_stress_mpa + stress.lateral_tensile_stress_mpa
+            >= design_yield_stress_mpa
+        {
+            return Err("割増前の鉄筋応力度が設計用降伏応力度に達し、曲げ非降伏の条件と矛盾します");
+        }
+        let long = self.long_term_mz_nmm;
+        let lateral = self.lateral_mz_nmm;
+        let design = long + stress.lateral_factor * lateral;
+        if ![long, lateral, design].into_iter().all(f64::is_finite) || design == 0.0 {
+            return Err(
+                "付着検定断面の長期・水平荷重時の強軸曲げまたは設計曲げの符号を確認できません",
+            );
+        }
+        let side = if design < 0.0 {
+            RcUltimateBeamBondTensionSide::Top
+        } else {
+            RcUltimateBeamBondTensionSide::Bottom
+        };
+        if self.tension_side != side {
+            return Err("長期と割増水平荷重を合わせた曲げの引張側と採用主筋が一致しません");
+        }
+        if [long, lateral]
+            .into_iter()
+            .any(|m| m * design.signum() < 0.0)
+        {
+            return Err(
+                "長期荷重または水平荷重で採用主筋が圧縮側となる場合の存在応力度は未算定です",
+            );
+        }
+        if (long == 0.0) != (stress.long_term_tensile_stress_mpa == 0.0)
+            || (lateral == 0.0) != (stress.lateral_tensile_stress_mpa == 0.0)
+        {
+            return Err("曲げと鉄筋応力度の一方のみがゼロで、単軸曲げの照査条件を確認できません");
+        }
+        Ok(())
+    }
+}
+
 /// 検討対象を代表する異形鉄筋一組の付着照査入力。
 /// 応力度と付着割裂の基準強度は [N/mm²]、呼び径と有効せいは [mm]。
 #[derive(Clone, Copy, Debug)]
@@ -172,11 +423,34 @@ pub struct RcUltimateBondStress {
     pub capacity_mpa: f64,
 }
 
+impl RcUltimateBondStress {
+    pub(super) fn margin(self) -> f64 {
+        self.capacity_mpa / self.demand_mpa
+    }
+}
+
 /// 大地震時の付着応力度と独立したカットオフ筋の必要延長の照査。
 #[derive(Clone, Copy, Debug)]
 pub(super) struct RcUltimateBondCheck {
     pub(super) stress: Result<RcUltimateBondStress, &'static str>,
     pub(super) development_length_ok: Option<bool>,
+    pub(super) sigma_d_mpa: Option<f64>,
+}
+
+impl RcUltimateBondBar {
+    pub(super) fn elastic_stress(self) -> Option<RcUltimateBondElasticStress> {
+        match self {
+            Self::Through {
+                yielding: RcUltimateThroughBarYield::WithoutFlexuralYield { stress, .. },
+                ..
+            }
+            | Self::Cutoff {
+                stress: RcUltimateCutoffBarStress::WithoutFlexuralYield(stress),
+                ..
+            } => Some(stress),
+            _ => None,
+        }
+    }
 }
 
 impl RcUltimateBondInput {
@@ -205,6 +479,10 @@ impl RcUltimateBondInput {
             .design_yield_stress_mpa
             .filter(|value| positive(*value))
             .ok_or("付着照査の実降伏強度または強度上昇を見込んだ設計用降伏応力度を確認できません");
+        let elastic_sigma_d_mpa = self
+            .bar
+            .elastic_stress()
+            .map(|stress| design_yield_stress_mpa.and_then(|fy| stress.limited_stress_mpa(fy)));
         let (length, development_length_ok, tensile) = match self.bar {
             RcUltimateBondBar::Through {
                 cutoff_unnecessary_distance_mm,
@@ -222,17 +500,15 @@ impl RcUltimateBondInput {
                     RcUltimateThroughBarYield::OneEndWithOtherElastic => design_yield_stress_mpa,
                     RcUltimateThroughBarYield::WithoutFlexuralYield {
                         moment_distribution,
-                        stress,
+                        ..
                     } => {
                         let coefficient = match moment_distribution {
                             RcUltimateBondMomentDistribution::NearAntisymmetric => 2.0,
                             RcUltimateBondMomentDistribution::NearPinnedEnd => 1.0,
                         };
-                        design_yield_stress_mpa.and_then(|fy| {
-                            stress
-                                .limited_stress_mpa(fy)
-                                .map(|sigma_d| coefficient * sigma_d)
-                        })
+                        elastic_sigma_d_mpa
+                            .unwrap()
+                            .map(|sigma_d| coefficient * sigma_d)
                     }
                     RcUltimateThroughBarYield::Unverified => {
                         Err("通し筋の曲げ降伏状態を確認できません")
@@ -258,8 +534,8 @@ impl RcUltimateBondInput {
                     ),
                     match stress {
                         RcUltimateCutoffBarStress::FlexuralYield => design_yield_stress_mpa,
-                        RcUltimateCutoffBarStress::WithoutFlexuralYield(stress) => {
-                            design_yield_stress_mpa.and_then(|fy| stress.limited_stress_mpa(fy))
+                        RcUltimateCutoffBarStress::WithoutFlexuralYield(_) => {
+                            elastic_sigma_d_mpa.unwrap()
                         }
                         RcUltimateCutoffBarStress::Unverified => {
                             Err("カットオフ筋の曲げ降伏状態を確認できません")
@@ -276,6 +552,7 @@ impl RcUltimateBondInput {
                 concrete_class,
             ),
             development_length_ok,
+            sigma_d_mpa: elastic_sigma_d_mpa.and_then(Result::ok),
         })
     }
 

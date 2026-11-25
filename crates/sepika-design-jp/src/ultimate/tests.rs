@@ -1183,9 +1183,11 @@ fn bond_stress_can_fail_independently_of_unavailable_shear() {
 #[test]
 fn ultimate_bond_uses_yield_stress_and_keeps_an_independent_cutoff_length_failure() {
     use super::{
-        RcUltimateBondAxis, RcUltimateBondBar, RcUltimateBondConfinement, RcUltimateBondDemand,
-        RcUltimateBondElasticStress, RcUltimateBondInput, RcUltimateBondMomentDistribution,
-        RcUltimateBondPlacement, RcUltimateCutoffBarStress, RcUltimateThroughBarYield,
+        RcUltimateBeamBondDemand, RcUltimateBeamBondDirectionDemand, RcUltimateBeamBondSection,
+        RcUltimateBeamBondTensionSide, RcUltimateBondAxis, RcUltimateBondBar,
+        RcUltimateBondConfinement, RcUltimateBondDemand, RcUltimateBondElasticStress,
+        RcUltimateBondInput, RcUltimateBondMomentDistribution, RcUltimateBondPlacement,
+        RcUltimateCutoffBarStress, RcUltimateThroughBarYield,
     };
 
     let mut shape = beam_rect_shape();
@@ -1211,16 +1213,52 @@ fn ultimate_bond_uses_yield_stress_and_keeps_an_independent_cutoff_length_failur
             transverse_rebar: None,
         }),
     };
+    let with_bond = |demand, bond: RcUltimateBondDemand| {
+        let (bars, _) = bond.inputs();
+        let elastic = bars
+            .into_iter()
+            .flatten()
+            .find_map(|input| input.bar.elastic_stress());
+        if let Some(stress) = elastic {
+            let direction = |distance_from_i_face_mm| RcUltimateBeamBondDirectionDemand {
+                section: RcUltimateBeamBondSection {
+                    distance_from_i_face_mm,
+                    long_term_mz_nmm: if stress.long_term_tensile_stress_mpa != 0.0 {
+                        1e6
+                    } else {
+                        0.0
+                    },
+                    lateral_mz_nmm: if stress.lateral_tensile_stress_mpa != 0.0 {
+                        1e6
+                    } else {
+                        0.0
+                    },
+                    tension_side: RcUltimateBeamBondTensionSide::Bottom,
+                },
+                represents_all_bond_checks: true,
+                bars: bond,
+            };
+            MemberDemand {
+                beam_bond: Some(RcUltimateBeamBondDemand {
+                    seismic_axis: sepika_solver::statics::analysis::SeismicDir::X,
+                    positive: Some(direction(0.0)),
+                    negative: Some(direction(6000.0)),
+                }),
+                ..demand
+            }
+        } else {
+            MemberDemand {
+                bond: Some(bond),
+                ..demand
+            }
+        }
+    };
     let run_bond_with_strength =
         |model: &Model, bar, placement, demand, design_yield_stress_mpa| {
-            let demand = MemberDemand {
-                bond: Some(RcUltimateBondDemand::Single(bond_input(
-                    bar,
-                    placement,
-                    design_yield_stress_mpa,
-                ))),
-                ..demand
-            };
+            let demand = with_bond(
+                demand,
+                RcUltimateBondDemand::Single(bond_input(bar, placement, design_yield_stress_mpa)),
+            );
             collect_rc_ultimate_checks(
                 model,
                 &[(ElemId(0), demand)],
@@ -1273,13 +1311,7 @@ fn ultimate_bond_uses_yield_stress_and_keeps_an_independent_cutoff_length_failur
     let check_pair_with = |bond, include_bond| {
         collect_rc_ultimate_checks(
             &model,
-            &[(
-                ElemId(0),
-                MemberDemand {
-                    bond: Some(bond),
-                    ..pair_demand
-                },
-            )],
+            &[(ElemId(0), with_bond(pair_demand, bond))],
             &UltimateShearOptions {
                 include_bond,
                 ..Default::default()
@@ -1330,8 +1362,8 @@ fn ultimate_bond_uses_yield_stress_and_keeps_an_independent_cutoff_length_failur
             |cutoff| check_pair(RcUltimateBondDemand::ThroughAndCutoff { through, cutoff });
         let low_cutoff_stress =
             RcUltimateCutoffBarStress::WithoutFlexuralYield(RcUltimateBondElasticStress {
-                long_term_tensile_stress_mpa: 100.0,
-                lateral_tensile_stress_mpa: 0.0,
+                long_term_tensile_stress_mpa: 85.0,
+                lateral_tensile_stress_mpa: 10.0,
                 lateral_factor: 1.5,
             });
         let result = combined(cutoff(3500.0, l_prime, low_cutoff_stress));
@@ -1369,8 +1401,8 @@ fn ultimate_bond_uses_yield_stress_and_keeps_an_independent_cutoff_length_failur
             3000.0,
             l_prime,
             RcUltimateCutoffBarStress::WithoutFlexuralYield(RcUltimateBondElasticStress {
-                long_term_tensile_stress_mpa: 300.0,
-                lateral_tensile_stress_mpa: 0.0,
+                long_term_tensile_stress_mpa: 285.0,
+                lateral_tensile_stress_mpa: 10.0,
                 lateral_factor: 1.5,
             }),
         ));
@@ -1613,8 +1645,8 @@ fn ultimate_bond_uses_yield_stress_and_keeps_an_independent_cutoff_length_failur
         ),
         StaticBeamBending::Signed,
     );
-    assert_eq!(zero.bond_stress.unwrap().demand_mpa, 0.0);
-    assert_eq!(zero.bond_margin, f64::INFINITY);
+    assert!(zero.bond_stress.is_none());
+    assert!(zero.bond_margin.is_nan());
     assert_eq!(zero.bond_development_length_ok, Some(true));
     let unverified = check(cutoff(1000.0, elastic(1.49)), StaticBeamBending::Signed);
     assert!(

@@ -1949,6 +1949,12 @@ fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
         );
         assert!(reason.contains("ultimate_beam_mz_mixed_signs:"), "{reason}");
         assert!(
+            reason.contains("正負地震荷重ごとの梁端の曲げ降伏状態")
+                && reason.contains("検定断面の採用主筋・鉄筋応力度"),
+            "{reason}"
+        );
+        assert!(check.beam_bond.is_none());
+        assert!(
             reason.contains(&format!("member={} ", check.elem.0)),
             "{reason}"
         );
