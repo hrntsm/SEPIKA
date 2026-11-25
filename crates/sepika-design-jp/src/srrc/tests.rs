@@ -274,7 +274,7 @@ fn test_src_column_short_rc_allowable_has_no_alpha() {
         2.0,
         0.0,
         Some(SrcShortShearDemand {
-            steel_n: 0.0,
+            steel_n: Some(0.0),
             rc_n: Some(100_000.0),
         }),
         LoadTerm::Short,

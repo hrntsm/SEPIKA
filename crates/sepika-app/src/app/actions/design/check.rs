@@ -326,6 +326,7 @@ impl App {
                     rc_damage_control: self.core.analysis_cfg.rc_damage_control,
                     bond_method: self.core.analysis_cfg.bond_method,
                     qd_method: self.core.analysis_cfg.qd_method,
+                    src_column_route21_shear: None,
                     long_member_forces,
                     q_simple_by_elem: Some(&q0_by_elem),
                     girder_group_overrides: Some(&group_overrides),

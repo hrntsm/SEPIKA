@@ -34,6 +34,7 @@ use crate::design_position::{design_positions, is_near_design_position};
 use crate::{
     beam_has_attached_slab, checker_for, girder_deflection, BondMethod, CheckOutcome, CheckResult,
     DesignCheck, DesignCtx, LoadTerm, MemberForcesAt, MemberKind, QdMethod, SeismicQd,
+    SrcColumnRoute21Shear,
 };
 
 /// 一本部材グループ合成値（断面検定の採用応力上書き用）。
@@ -88,6 +89,10 @@ pub struct MemberDesignCheckOptions<'a> {
     pub bond_method: BondMethod,
     /// 地震時短期 QD の決定方法（`long_member_forces` が与えられた場合のみ有効）。
     pub qd_method: QdMethod,
+    /// 今回の短期地震荷重組合せのSRC柱ルート2-1確認済み入力（部材 ID → 入力）。
+    /// 呼出側が解析対象の組合せ・部材・局所加力の向きとの一致を確認する。
+    /// Some は当該組合せのルート2-1検定を指定し、該当部材の入力がなければ未算定とする。
+    pub src_column_route21_shear: Option<&'a HashMap<ElemId, SrcColumnRoute21Shear>>,
     /// 地震時短期 QD 用の長期（DL+LL 等）内力。None なら QD 割増なし。
     pub long_member_forces: Option<&'a [(ElemId, MemberForces)]>,
     /// RC 梁 QD1 用の単純梁せん断 Q0 `[N]`（部材 ID → 絶対値）。RC梁のQD1で不足すれば未検定。
@@ -371,22 +376,44 @@ pub fn run_member_design_checks(
     for (id, _) in member_forces {
         *force_rows.entry(*id).or_default() += 1;
     }
+    let route21_inputs = options
+        .src_column_route21_shear
+        .filter(|_| options.term == LoadTerm::Short);
+    let mut unavailable_src_ids = HashSet::new();
     let mut unavailable_beam_ids = HashSet::new();
     for elem in model
         .elements
         .iter()
         .filter(|elem| frame_check_target(elem))
     {
-        let reason = match force_rows.get(&elem.id) {
-            None => "鋼梁の解析断面力がありません",
-            Some(1) => continue,
-            Some(_) => "鋼梁の解析断面力が重複し、一意の解析応答を確認できません",
-        };
+        let row_count = force_rows.get(&elem.id).copied().unwrap_or_default();
+        if row_count == 1 {
+            continue;
+        }
         let (Some(sec), Some(mat)) = (model.element_section(elem), model.element_material(elem))
         else {
             continue;
         };
         let structure = structure_kind_of(Some(sec), Some(mat.category));
+        if route21_inputs.is_some()
+            && structure == StructureKind::Src
+            && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
+            && unavailable_src_ids.insert(elem.id)
+        {
+            let reason = if row_count == 0 {
+                "ルート2-1のSRC柱の解析断面力がありません"
+            } else {
+                "ルート2-1のSRC柱の解析断面力が重複し、一意の解析応答を確認できません"
+            };
+            member_checks.push((
+                elem.id,
+                0.5,
+                CheckOutcome::Skipped {
+                    reason: reason.into(),
+                },
+            ));
+            continue;
+        }
         if structure != StructureKind::S || !crate::steel::is_symmetric_h_section(sec) {
             continue;
         }
@@ -410,6 +437,11 @@ pub fn run_member_design_checks(
         if steel_beam_span::requires_bending_span(sec, structure, &ctx)
             && unavailable_beam_ids.insert(elem.id)
         {
+            let reason = if row_count == 0 {
+                "鋼梁の解析断面力がありません"
+            } else {
+                "鋼梁の解析断面力が重複し、一意の解析応答を確認できません"
+            };
             member_checks.push((
                 elem.id,
                 0.5,
@@ -421,7 +453,7 @@ pub fn run_member_design_checks(
     }
 
     for (elem_id, mf) in member_forces {
-        if unavailable_beam_ids.contains(elem_id) {
+        if unavailable_beam_ids.contains(elem_id) || unavailable_src_ids.contains(elem_id) {
             continue;
         }
         let Some(elem) = elem_by_id.get(elem_id).copied() else {
@@ -740,6 +772,14 @@ pub fn run_member_design_checks(
             steel_beam_moment_diagram: crate::steel::SteelBeamMomentDiagram::Unverified,
             seismic_qd,
             src_column_seismic_bending: None,
+            src_column_route21_shear: route21_inputs
+                .filter(|_| structure == StructureKind::Src && kind == MemberKind::Column)
+                .map(|inputs| {
+                    inputs
+                        .get(elem_id)
+                        .cloned()
+                        .ok_or("ルート2-1の確認済み入力が対象SRC柱にありません")
+                }),
             column_sum_my,
             beam_has_slab: kind == MemberKind::Girder && beam_has_attached_slab(model, elem),
             rc_beam_qd1_issue: rc_beam_qd1.and_then(Result::err),
@@ -787,6 +827,28 @@ pub fn run_member_design_checks(
         let checker: Box<dyn DesignCheck> = checker_for(structure);
 
         let positions = design_positions(elem, model, length);
+        let route21_matches = ctx.src_column_route21_shear.as_ref().map(|_| {
+            let mut counts = vec![0; positions.len()];
+            let stations: Vec<_> = mf
+                .at
+                .iter()
+                .map(|(pos, _)| {
+                    let nearest = positions
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, target)| {
+                            is_near_design_position(*pos, std::slice::from_ref(*target))
+                        })
+                        .min_by(|(_, a), (_, b)| (*pos - *a).abs().total_cmp(&(*pos - *b).abs()))
+                        .map(|(i, _)| i);
+                    if let Some(i) = nearest {
+                        counts[i] += 1;
+                    }
+                    nearest
+                })
+                .collect();
+            (stations, counts)
+        });
         let missing_positions = if long_term_shear.is_some() {
             missing_design_positions(&positions, mf)
         } else {
@@ -835,8 +897,13 @@ pub fn run_member_design_checks(
         let section_forces = mf
             .at
             .iter()
-            .filter(|(pos, _)| {
-                is_near_design_position(*pos, &positions)
+            .enumerate()
+            .filter(|(row, (pos, _))| {
+                let selected_position = match &route21_matches {
+                    Some((stations, counts)) => stations[*row].is_some_and(|i| counts[i] == 1),
+                    None => is_near_design_position(*pos, &positions),
+                };
+                selected_position
                     && !repeated_stations.contains(&station_key(*pos))
                     && !beam_peaks.iter().any(|peak| {
                         peak.left[5] != 0.0
@@ -846,7 +913,7 @@ pub fn run_member_design_checks(
                                     && (peak.xi - pos).abs() <= f64::EPSILON))
                     })
             })
-            .map(|&(pos, forces)| (pos, forces, None))
+            .map(|(_, &(pos, forces))| (pos, forces, None))
             .chain(peak_sections);
         for (pos, forces, cut_side) in section_forces {
             let mfa = MemberForcesAt::from_local(pos, forces);
@@ -1047,6 +1114,24 @@ pub fn run_member_design_checks(
                     let result = crate::rc::shear_check_result("RC柱の長期せん断", shear.clone());
                     member_checks.push((*elem_id, *xi, CheckOutcome::Checked(result)));
                 }
+            }
+        }
+        if let Some((_, counts)) = route21_matches {
+            for (pos, count) in positions.iter().copied().zip(counts) {
+                let reason = match count {
+                    0 => "ルート2-1のSRC柱の検定位置の解析断面力がありません",
+                    1 => continue,
+                    _ => {
+                        "ルート2-1のSRC柱の検定位置で解析断面力が重複し、一意の応答を確認できません"
+                    }
+                };
+                member_checks.push((
+                    *elem_id,
+                    pos,
+                    CheckOutcome::Skipped {
+                        reason: reason.into(),
+                    },
+                ));
             }
         }
         if !missing_positions.is_empty() {
