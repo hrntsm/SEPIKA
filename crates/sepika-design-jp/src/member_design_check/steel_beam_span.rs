@@ -8,7 +8,9 @@ use sepika_core::model::{
 };
 use sepika_core::structure_kind::StructureKind;
 use sepika_element::frame::beam::MemberForces;
-use sepika_element::frame::member_load::{frame_strong_bending_span, FrameStrongBendingPeak};
+use sepika_element::frame::member_load::{
+    frame_strong_bending_span, frame_strong_bending_span_mm, FrameStrongBendingPeak,
+};
 use sepika_element::transform::LocalFrame;
 
 use crate::steel::{beam_lateral_buckling_length, SteelBeamMomentDiagram};
@@ -278,7 +280,7 @@ fn grouped_bending_span(
         };
         [0.0, 0.5, 1.0].into_iter().all(|pos| {
             let (lb, partial) = beam_lateral_buckling_length(&ctx, pos);
-            lb.is_finite() && lb > 1e-9 && partial
+            lb.is_finite() && (lb == 0.0 || lb > 0.0 && partial)
         })
     };
     for member in &members {
@@ -416,20 +418,14 @@ fn grouped_bending_span(
         previous_end = Some(end);
     }
 
-    let whole = MemberForces {
-        at: rows
-            .into_iter()
-            .map(|(x_mm, f)| (x_mm / total_mm, f))
-            .collect(),
-    };
     let demand = [faces[0], total_mm - faces[1]];
     let loads: Vec<_> = loads.iter().map(|(factor, load)| (*factor, load)).collect();
-    let span = SteelBeamSpan::from(frame_strong_bending_span(
+    let span = SteelBeamSpan::from(frame_strong_bending_span_mm(
         &outer_frame.expect("一本部材の構成要素あり"),
         total_mm,
         demand,
         &loads,
-        &whole,
+        &rows,
     )?);
     spans.extend(members.into_iter().map(|member| {
         let demand_peaks = span

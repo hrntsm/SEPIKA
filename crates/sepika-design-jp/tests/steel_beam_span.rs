@@ -793,3 +793,70 @@ fn a_single_elements_partial_bracing_does_not_verify_the_unset_part_of_the_girde
         CheckOutcome::Checked(row) if row.components.iter().any(|c| c.kind == CheckKind::Bending)))
     );
 }
+
+#[test]
+fn split_girder_preserves_the_left_cut_at_a_saved_point_load_station() {
+    let load_mm = 2_000.5;
+    let whole = input::cantilever(
+        22_500.0,
+        0.0,
+        Some(MemberLoadKind::Point {
+            a: load_mm,
+            p: -40_000.0,
+        }),
+    );
+    let split = split_cantilever(whole.clone(), 4_001.0);
+    let terms = [(input::DEAD, 1.0)];
+    for (model, xi) in [(&whole, load_mm / input::LENGTH_MM), (&split, 0.5)] {
+        let solved = Analysis::prepare(model)
+            .unwrap()
+            .linear_static(input::DEAD)
+            .unwrap();
+        for (term, expected, fb) in [
+            (LoadTerm::Long, 1.793_692_407, "fb=65.5414"),
+            (LoadTerm::Short, 1.195_794_938, "fb=98.3121"),
+        ] {
+            let results = check(model, &solved, term, Some(&terms));
+            check_bending(at(&results, xi), expected, fb);
+            let cuts: Vec<_> = results
+                .iter()
+                .filter_map(|(pos, row)| match row {
+                    CheckOutcome::Checked(row) if (pos - xi).abs() < 1e-12 => {
+                        Some(row.detail.as_str())
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                cuts.iter().any(|detail| detail.contains("集中荷重の左側")),
+                "{results:?}"
+            );
+            assert!(
+                cuts.iter().any(|detail| detail.contains("集中荷重の右側")),
+                "{results:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn split_girder_keeps_zero_and_positive_partial_bracing_in_separate_positions() {
+    let mut model = split_cantilever(input::cantilever(12_500.0, 25e6, None), SPLIT_MM);
+    for attr in &mut model.steel_design_attrs {
+        attr.lb_direct = Some((0.0, 4_000.0, 4_000.0));
+    }
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .linear_static(input::DEAD)
+        .unwrap();
+    let results = check(&model, &solved, LoadTerm::Short, None);
+    let start = at(&results, 0.0);
+    check_bending(start, 0.277_945_366, "fb=235.0000");
+    check_bending(start, 0.277_945_366, "lb=0 mm");
+    let center = at(&results, 0.5);
+    check_bending(center, 0.232_506_097, "fb=168.5560");
+    check_bending(center, 0.232_506_097, "lb=4000 mm");
+    assert!(results
+        .iter()
+        .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))));
+}
