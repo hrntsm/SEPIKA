@@ -68,3 +68,35 @@ pub fn short_point_combination() -> Model {
     }];
     model
 }
+
+pub fn simply_supported_with_middle_brace(point_mm: f64, load_n: f64) -> Model {
+    use sepika_core::dof::{Dof, Dof6Mask};
+    use sepika_core::model::SteelDesignAttr;
+
+    let mut model = cantilever(
+        0.0,
+        0.0,
+        Some(MemberLoadKind::Point {
+            a: point_mm,
+            p: -load_n,
+        }),
+    );
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask::PINNED;
+    }
+    model.nodes[0].restraint.set_fixed(Dof::Rx);
+    model.load_cases[0].nodal.clear();
+    model.steel_design_attrs.push(SteelDesignAttr {
+        elem: BEAM,
+        lateral_brace_count: Some(1),
+        lb_direct: None,
+        c_direct: None,
+        lk_y_direct: None,
+        lk_z_direct: None,
+        column_lateral_buckling_end_supports: None,
+        joint_flange_loss: 0.0,
+        joint_web_loss: 0.0,
+        scallop_web_loss: 0.0,
+    });
+    model
+}

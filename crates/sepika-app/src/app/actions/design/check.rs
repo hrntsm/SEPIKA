@@ -233,12 +233,18 @@ impl App {
         let long_member_forces = gravity_long_owned.as_deref().filter(|_| is_seismic_combo);
         let group_overrides =
             sepika_design_jp::girder_group_overrides(&self.core.model, &results.member_forces);
-        let q0_by_elem = if !damage_control
+        let (q0_by_elem, grouped_rc_q0) = if !damage_control
             && long_member_forces.is_some()
             && self.core.analysis_cfg.qd_method != sepika_design_jp::QdMethod::Qd2
         {
             match sepika_job::simple_beam_q0_by_terms(&self.core.model, &gravity_terms) {
-                Ok(q0) => q0,
+                Ok(q0) => (
+                    q0,
+                    sepika_job::design_q0::rc_grouped_beam_q0_by_terms(
+                        &self.core.model,
+                        &gravity_terms,
+                    ),
+                ),
                 Err(reason) => {
                     self.report_error(reason);
                     return;
@@ -343,6 +349,7 @@ impl App {
                     src_column_route21_shear: route21.as_ref(),
                     long_member_forces,
                     q_simple_by_elem: Some(&q0_by_elem),
+                    rc_grouped_beam_q0: Some(&grouped_rc_q0),
                     girder_group_overrides: Some(&group_overrides),
                     rc_column_ductility_applicability: None,
                 },

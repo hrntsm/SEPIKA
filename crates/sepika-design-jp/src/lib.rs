@@ -375,7 +375,7 @@ pub struct DesignCtx {
     /// 部材中央（pos=0.5）の強軸まわり曲げモーメント [N·mm]（符号付き）。
     /// 鋼柱の横座屈修正係数 C と RC 梁の構造規定に用いる。
     pub mid_moment_z: Option<f64>,
-    /// 全長を単一の補剛区間とする一般H形鋼梁の、確認済みの強軸曲げ分布。
+    /// 一般H形鋼梁の、照査する補剛区間の強軸曲げ分布。
     pub steel_beam_moment_diagram: steel::SteelBeamMomentDiagram,
     /// 地震時短期の設計用せん断力 QD = min(QD1, QD2) の算定文脈（RC）。
     /// None の場合は解析せん断力をそのまま用いる。
@@ -395,6 +395,8 @@ pub struct DesignCtx {
     /// RC矩形梁のQD1を適用できない理由。QD1/minで `None` を渡す呼出側は、
     /// 両端の強軸曲げ伝達、有限で正のフェース間内法、両端が同じ断面であることを確認する。
     pub rc_beam_qd1_issue: Option<String>,
+    /// 一本部材の外端断面から確認した正負方向の降伏曲げ和の最大値 [N·mm]。
+    pub rc_grouped_beam_qd1_sum_my_nmm: Option<f64>,
     /// S 造部材の断面検定属性（継手・スカラップ欠損率、横座屈長さ入力）。
     /// `Model::steel_design_attrs` 由来。None は欠損なし。一般H形鋼柱の横座屈支点は未確認。
     pub steel_attr: Option<SteelDesignAttr>,
@@ -428,6 +430,7 @@ impl Default for DesignCtx {
             column_sum_my: None,
             beam_has_slab: false,
             rc_beam_qd1_issue: None,
+            rc_grouped_beam_qd1_sum_my_nmm: None,
             steel_attr: None,
         }
     }

@@ -22,6 +22,10 @@ ST-Bridge に関する各レポートは [ADR 0141](../adr/0141-remove-st-bridge
 
 [独立釣合い・許容値・通常検定の照合](H形鋼梁の補剛区間内最大曲げ_Issue1886_検証.md)に、中央外の集中荷重と非対称分布荷重、単調な分布との区別、保存検定の確認範囲を記録する。中間横補剛による複数区間の需要は [#1897](https://github.com/hrntsm/SEPIKA/issues/1897) で追跡する。
 
+## STKN490Wの標準材種としての取扱いと基準強度（#1618）
+
+[原典・独立算術・公開検定との照合](鋼管材種STKN490W_Issue1618_確認記録.md)に、標準物性の復元と鋼管・CFT検定の基準強度の再解決、未登録名称に明示された強度の取扱いを記録する。状態🔶。個別認定品の適用・実験Validationは未確認。
+
 ## S造・SRC造の計算根拠の棚卸し
 
 [原典・製品文書・関連Issueの照合先](S造_SRC造計算根拠の棚卸し.md)に、S造・SRC造の算定根拠とCFTに影響する共通処理を記録する。
@@ -45,6 +49,10 @@ ST-Bridge に関する各レポートは [ADR 0141](../adr/0141-remove-st-bridge
 ## RC柱QD1で用いる大梁の曲げ軸（#1907）
 
 [原典・実軸と公開検定との照合](RC柱QD1の大梁曲げ軸_Issue1907_照合記録.md)に、断面回転・斜交・傾斜による曲げ伝達、従来候補と新規候補の需要差、通常・時刻歴簡易検定の条件を記録する。状態🔶。
+
+## RC分割梁の全スパンQD1（#1881）
+
+[原典・全スパンの独立釣合い・通常／時刻歴簡易検定](RC分割梁の全スパンQD1_Issue1881_検証.md)に、一本部材に指定したRC矩形梁の分割前後と未算定境界を記録する。
 
 ## RC梁の方向別両端降伏せん断（#1582）
 
@@ -653,6 +661,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 | レポート | 対象 | 状態 |
 |---|---|---|
+| [STKN490Wの標準材種と基準強度](鋼管材種STKN490W_Issue1618_確認記録.md) | 指定原典、実板厚40・41 mmのF、明示強度と未入力診断 | 🔶（通常鋼管・CFTの公開入口のVerification。個別認定・実験Validation未） |
 | [一般階のRC柱QD1の候補比較](RC柱QD1の崩壊メカニズム_Issue1817_検証.md) | 係数適用後の候補比較、柱脚梁の適用境界、通常・時刻歴簡易検定、保存検定 | 🔶（原典と有限例の照合。実分担・実験Validationは未確認） |
 | [RC柱QD1で用いる大梁の曲げ軸](RC柱QD1の大梁曲げ軸_Issue1907_照合記録.md) | 原典と軸変換、従来候補と軸確認済み候補の方向別需要 | 🔶（限定Verification。従来候補の是正は[#1970](https://github.com/hrntsm/SEPIKA/issues/1970)） |
 | [RC柱QD1の床板付き梁候補保留](RC柱QD1の床板付き梁候補保留_Issue1936_検証.md) | 最上階・一般階、通常・時刻歴簡易検定での需要と理由、独立候補とQD2単独の保持 | 🔶（原典と対照架構の照合。床板筋の実寄与は未確認） |
@@ -1134,6 +1143,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 872 | Ds/Qu採用条件 | sepika-app | actions/design/holding_adoption.rs・holding.rs、summary.rs | [公開入口の要素→試験索引](DsQu採用条件_Issue872_確認記録.md#要素試験索引) | 二次設計 | 🔶（採用保留Verification、証拠保存・Validation未） |
 | 885 | SRC耐震ルート・柱区分とDs適用 | sepika-design-jp / sepika-app | secondary/src_rank.rs・ds_group.rs、actions/design/holding.rs | [原典セル・独立境界・公開probe索引](SRC耐震ルート_Issue885_原典照合.md#独立数値境界と要素証拠索引) | 二次設計 | 🔶（分類Verification、SRC表選択・適用条件未対応、Validation未） |
 | 1417 | SRC柱の部材種別に用いる内蔵鉄骨の材料 | sepika-design-jp / sepika-app | tests/src_column_rank.rs、actions/design/holding.rs | [独立数値と公開入口](SRC柱部材種別材料_Issue1417_確認記録.md) | 二次設計 | 🔶（材料契約Verification、耐力と破壊状況のValidation未） |
+| 1618 | 鋼管材種STKN490Wの標準認識と基準強度 | sepika-core / sepika-solver / sepika-design-jp | material_grade.rs、standard_material.rs、tests/stkn490w_material.rs | [独立算術と公開入口](鋼管材種STKN490W_Issue1618_確認記録.md#材料入力と検定) | 解析準備／一次設計／CFT終局 | 🔶（有限Verification。個別認定・GUI操作・OVIKA・実験Validation未） |
 | 1613 | SRC柱の部材種別候補に用いる断面幾何 | sepika-core / sepika-design-jp / sepika-app | section_shape/types.rs、tests/src_column_rank.rs、actions/design/holding.rs | [独立値と通常の製品入口](SRC柱部材種別の断面幾何_Issue1613_確認記録.md) | 二次設計 | 🔶（候補APIと準備・解析・自動判定のVerification、規準細則・Ds適用・実験Validation未） |
 | 922 | コンクリート長期許容せん断 | sepika-design-jp / sepika-core / sepika-app | material_strength・rc・srrc、result_contract、src_ql_acceptance_tests | [独立値・経路・保存失効](コンクリート長期せん断_Issue922_是正記録.md#独立期待値と要素からの証拠索引) | 一次設計・保存 | 🔶（限定Verification、全規準・Validation未） |
 | 1836 | RC柱の長期せん断需要 | sepika-job / sepika-solver / sepika-element / sepika-design-jp | prepare.rs、statics/analysis/combination.rs、frame/beam/construct.rs、member_design_check.rs・rc/column/mod.rs | [公開解析・検定の再現手順](RC柱の長期せん断需要_Issue1836_照合記録.md#再現手順) | 一次設計 | 🔶（矩形・円形の単軸の有限例。二軸相関・実験Validation未） |
@@ -1305,3 +1315,7 @@ USD685は[#945の認定条件照合](USD685主筋_Issue945_認定条件照合.md
 ## H形鋼一本部材の単一補剛区間（#1898）
 
 [分割前後の静的釣合い・許容値と未算定境界](H形鋼一本部材の単一補剛区間_Issue1898_検証.md)を照合した。
+
+## H形鋼梁の等間隔中間横補剛（#1897）
+
+[区間別の長短期許容値・最大曲げ・未算定境界](H形鋼梁の中間横補剛_Issue1897_検証.md)に、単純梁の独立解と、補剛端の同一位置に属する区間別検定の保存・再検定を記録する。実補剛材の有効性や耐力のValidationは対象外。

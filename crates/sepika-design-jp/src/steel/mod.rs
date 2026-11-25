@@ -543,7 +543,7 @@ fn check_compression_slenderness(
 /// 非零または非有限のねじりモーメントでは応力度検定を未算定とし、法定細長比の不適合時も理由を併記する。
 pub struct SteelDesign;
 
-/// 一般H形鋼梁の単一補剛区間全体に対して成立する符号付きの強軸曲げ分布。
+/// 一般H形鋼梁の補剛区間全体に対して成立する符号付きの強軸曲げ分布。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum SteelBeamMomentDiagram {
     /// 区間内で符号付き曲げが単調。材軸 i/j 順の端部曲げモーメント [N·mm]。
@@ -555,6 +555,8 @@ pub enum SteelBeamMomentDiagram {
     Unverified,
     /// 一本部材の補剛区間が未確認。要素単体の長さや部分区間指定で代替しない。
     UnverifiedGroup,
+    /// 中間横補剛の位置または区間分布を確認できていない。
+    UnverifiedBracing,
 }
 
 pub(crate) use beam::beam_lateral_buckling_length;

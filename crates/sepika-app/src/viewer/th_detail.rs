@@ -998,6 +998,7 @@ fn draw_peak_check<'a>(
         beam_has_slab: kind == MemberKind::Girder
             && sepika_design_jp::beam_has_attached_slab(&app.core.model, elem),
         rc_beam_qd1_issue: rc_beam_qd1.and_then(Result::err),
+        rc_grouped_beam_qd1_sum_my_nmm: None,
         seismic_qd,
         ..Default::default()
     };
