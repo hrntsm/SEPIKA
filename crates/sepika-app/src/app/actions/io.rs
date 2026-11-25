@@ -222,6 +222,7 @@ impl App {
         let analysis_settings = Some(rmp_serde::to_vec_named(&SavedAnalysisSettings {
             references: Some(self.saved_references()),
             design_settings: Some(study::StudySettings::capture(&self.core)),
+            src_column_route21: self.core.scoped.route21_registrations.clone(),
             cfg: self.core.analysis_cfg,
             wave_name: self.core.scoped.wave_library_selection.clone(),
             wave_sha256: self.core.scoped.wave_library_selected_sha256.clone(),
@@ -376,6 +377,7 @@ impl App {
                     if let Some(settings) = saved.design_settings {
                         settings.apply(&mut self.core);
                     }
+                    self.core.scoped.route21_registrations = saved.src_column_route21;
                     self.core.analysis_cfg = saved.cfg;
                     self.core.analysis_cfg.mass_method = self.core.model.mass_method;
                     self.restore_references(saved.references);

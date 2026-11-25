@@ -1029,6 +1029,9 @@ pub fn run_member_design_checks(
                 check_incomplete = combine_incomplete_reasons(check_incomplete, Some(&reason));
             }
             let mut incomplete = combine_incomplete_reasons(check_incomplete, torsion_reason(&mfa));
+            if structure == StructureKind::Src {
+                crate::srrc::preserve_route21_shear_detail(sec, &ctx, &outcome, &mut incomplete);
+            }
             if long_term_shear.is_some() {
                 for (value, reason) in [
                     (mfa.n, "軸力Nが非有限のため、軸力・曲げを検定できません"),

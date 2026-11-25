@@ -504,6 +504,8 @@ pub struct SavedResults {
 pub struct SavedAnalysisSettings {
     #[serde(default)]
     pub references: Option<references::ProjectReferences>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) src_column_route21: Vec<src_column_route21::Route21Registration>,
     pub cfg: AnalysisSettings,
     #[serde(default)]
     pub design_settings: Option<study::StudySettings>,
@@ -944,6 +946,7 @@ impl Default for AppCore {
 /// [`App::load_model`] が `Default::default()` の代入で丸ごと破棄するため、
 /// ここへ足したフィールドは自動的にリセット対象になる。
 pub struct ModelScoped {
+    pub(crate) route21_registrations: Vec<src_column_route21::Route21Registration>,
     pub(crate) reference_preparation_revisions: u64,
     pub reference_session: String,
     pub(crate) applying_result_source: Option<references::InputReference>,
@@ -1060,6 +1063,7 @@ pub struct ModelScoped {
 impl Default for ModelScoped {
     fn default() -> Self {
         Self {
+            route21_registrations: Vec::new(),
             reference_preparation_revisions: 0,
             reference_session: uuid::Uuid::new_v4().to_string(),
             references: references::ProjectReferences::default(),
@@ -1123,6 +1127,8 @@ pub struct UiState {
 /// ドラフト・詳細ウィンドウの選択部材とそのキャッシュ・作成モードの選択節点）を
 /// ここへ置く。[`App::load_model`] が `Default::default()` の代入で丸ごと破棄する。
 pub struct UiModelScoped {
+    #[cfg(feature = "gui")]
+    pub(crate) src_column_route21: crate::design_view::src_column_route21::Route21Draft,
     #[cfg(feature = "gui")]
     pub(crate) search: search::Search,
     #[cfg(feature = "gui")]
@@ -1292,6 +1298,8 @@ impl Default for UiModelScoped {
             reference_snapshot_return: None,
             #[cfg(feature = "gui")]
             result_evidence: None,
+            #[cfg(feature = "gui")]
+            src_column_route21: Default::default(),
             selection: GeometrySelection::default(),
             node_edit: Vec::new(),
             #[cfg(feature = "gui")]
@@ -1786,6 +1794,9 @@ pub mod references;
 #[cfg(feature = "gui")]
 pub mod result_evidence;
 mod result_validity;
+pub(crate) mod src_column_route21;
+#[cfg(test)]
+mod src_column_route21_tests;
 pub mod study;
 pub use result_validity::HoldingCapacitySource;
 pub(crate) use result_validity::ResultInputKey;

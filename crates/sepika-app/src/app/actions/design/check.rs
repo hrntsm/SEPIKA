@@ -1,25 +1,6 @@
 use super::super::*;
 
-// NaNを含む同じ保存応答のコピーは、PartialEqだけでは出所の一致を確認できない。
-fn same_saved_member_forces(
-    expected: &[(ElemId, sepika_element::frame::beam::MemberForces)],
-    observed: &[(ElemId, sepika_element::frame::beam::MemberForces)],
-) -> bool {
-    let same_value = |a: &f64, b: &f64| a == b || a.to_bits() == b.to_bits();
-    expected.len() == observed.len()
-        && expected.iter().zip(observed).all(
-            |((expected_id, expected), (observed_id, observed))| {
-                expected_id == observed_id
-                    && expected.at.len() == observed.at.len()
-                    && expected.at.iter().zip(&observed.at).all(
-                        |((expected_pos, expected), (observed_pos, observed))| {
-                            same_value(expected_pos, observed_pos)
-                                && expected.iter().zip(observed).all(|(a, b)| same_value(a, b))
-                        },
-                    )
-            },
-        )
-}
+use crate::app::result_validity::same_saved_member_forces;
 
 impl App {
     /// 選択対象の保存係数・種別による状態。単独ケースと組合せを区別する。
@@ -296,6 +277,17 @@ impl App {
         } else {
             None
         };
+        let route21 = if load_error.is_none() {
+            match self.selected_route21_inputs() {
+                Ok(inputs) => inputs,
+                Err(reason) => {
+                    self.report_error(reason);
+                    return;
+                }
+            }
+        } else {
+            None
+        };
         let frame_report = if frame_design_requested {
             sepika_design_jp::run_member_design_checks(
                 design_model,
@@ -326,7 +318,7 @@ impl App {
                     rc_damage_control: self.core.analysis_cfg.rc_damage_control,
                     bond_method: self.core.analysis_cfg.bond_method,
                     qd_method: self.core.analysis_cfg.qd_method,
-                    src_column_route21_shear: None,
+                    src_column_route21_shear: route21.as_ref(),
                     long_member_forces,
                     q_simple_by_elem: Some(&q0_by_elem),
                     girder_group_overrides: Some(&group_overrides),

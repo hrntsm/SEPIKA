@@ -105,7 +105,11 @@ fn shear(outcome: &CheckOutcome) -> &CheckComponent {
 }
 
 fn quantity(row: &CheckComponent, direction: &str, label: &str) -> f64 {
-    row.detail
+    detail_quantity(&row.detail, direction, label)
+}
+
+fn detail_quantity(detail: &str, direction: &str, label: &str) -> f64 {
+    detail
         .split_once(direction)
         .unwrap()
         .1
@@ -284,6 +288,47 @@ fn alternative_at_q_equal_to_qs_keeps_the_confirmed_zero_rc_demand() {
     assert_eq!(quantity(shear, "Qy方向", "rQD="), 0.0);
     assert_eq!(quantity(shear, "Qy方向", "rQD/rQA="), 0.0);
     assert!(shear.detail.contains("採用方法=代替式（Qd2、付1.4-2）"));
+}
+
+#[test]
+fn available_direction_is_reported_without_a_pass_when_the_other_direction_is_missing() {
+    let model = column();
+    let mut input = confirmed();
+    input.qz = None;
+    let inputs = HashMap::from([(ID, input)]);
+    let rows = report(
+        &model,
+        &response(-3_300_000.0, -1_000_000.0, 800_000.0),
+        Some(&inputs),
+        LoadTerm::Short,
+    );
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    for row in rows {
+        let CheckOutcome::Skipped { reason } = row else {
+            panic!("{row:?}");
+        };
+        for needle in [
+            "Qz方向のルート2-1の確認済み入力がありません",
+            "Qy方向 鉄骨 sQD=",
+            "sQA=",
+            "sQD/sQA=",
+            "RC rQD=",
+            "rQA=",
+            "rQD/rQA=",
+            "採用方法=曲げ方式（Qd1",
+            "根拠=正加力組合せの強軸単段・両端曲げ降伏の独立計算",
+        ] {
+            assert!(reason.contains(needle), "{needle}: {reason}");
+        }
+        close(
+            detail_quantity(&reason, "Qy方向", "sQD="),
+            134_918.601_066_666_66,
+        );
+        close(
+            detail_quantity(&reason, "Qy方向", "rQD="),
+            381_865.614_267_716_3,
+        );
+    }
 }
 
 #[test]

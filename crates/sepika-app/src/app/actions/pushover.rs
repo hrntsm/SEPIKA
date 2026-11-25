@@ -383,6 +383,7 @@ mod tests {
             app.core.analysis_cfg.push_dir = configured;
             let settings = rmp_serde::to_vec_named(&SavedAnalysisSettings {
                 design_settings: None,
+                src_column_route21: Vec::new(),
                 references: None,
                 cfg: app.core.analysis_cfg,
                 wave_name: None,

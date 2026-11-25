@@ -1,3 +1,4 @@
+pub(crate) mod src_column_route21;
 use crate::app::App;
 mod src_holding;
 
@@ -276,6 +277,7 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
     }
 
     ui.strong("部材検定（許容応力度）");
+    src_column_route21::section(ui, app);
     app.result_origin_ui(ui, crate::app::references::ResultInputKey::Design);
     ui.collapsing("保持された検定結果の位置・根拠（履歴を含む）", |ui| {
         let recorded_model = app.calculation_snapshot(&crate::app::references::ResultInputKey::Design).ok().map(|(_, model)| model);
