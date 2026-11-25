@@ -87,8 +87,7 @@ pub fn frame_strong_bending_intervals(
     }
     let stations = bending_stations_mm(length_mm, forces)?;
     let response = verified_frame_bending_response_mm(frame, length_mm, loads, &stations)?;
-    let observed_end = stations.last().expect("照合済みj端").1;
-    let bending = StrongBendingResponse::new(frame, length_mm, &response, observed_end);
+    let bending = StrongBendingResponse::new(frame, length_mm, &response, &stations);
     boundaries_mm
         .windows(2)
         .map(|w| {
@@ -109,8 +108,7 @@ pub fn frame_strong_bending_span_mm(
     stations_mm: &[(f64, [f64; 6])],
 ) -> Result<FrameStrongBendingSpan, String> {
     let response = verified_frame_bending_response_mm(frame, length_mm, loads, stations_mm)?;
-    let observed_end = stations_mm.last().expect("照合済みj端").1;
-    StrongBendingResponse::new(frame, length_mm, &response, observed_end).span(
+    StrongBendingResponse::new(frame, length_mm, &response, stations_mm).span(
         [0.0, length_mm],
         [demand_lo, demand_hi],
         false,
@@ -122,7 +120,7 @@ struct StrongBendingResponse<'a> {
     length_mm: f64,
     strong_loads: Vec<Comp>,
     breaks: Vec<f64>,
-    observed_end: [f64; 6],
+    stations_mm: &'a [(f64, [f64; 6])],
 }
 
 impl<'a> StrongBendingResponse<'a> {
@@ -130,7 +128,7 @@ impl<'a> StrongBendingResponse<'a> {
         frame: &LocalFrame,
         length_mm: f64,
         response: &'a LoadedFrameSection,
-        observed_end: [f64; 6],
+        stations_mm: &'a [(f64, [f64; 6])],
     ) -> Self {
         let loads = &response.map.loads;
         let strong_loads = loads
@@ -151,8 +149,16 @@ impl<'a> StrongBendingResponse<'a> {
             length_mm,
             strong_loads,
             breaks,
-            observed_end,
+            stations_mm,
         }
+    }
+
+    fn observed_shear_y(&self, x_mm: f64) -> Option<f64> {
+        let index = self.stations_mm.partition_point(|(x, _)| *x < x_mm);
+        self.stations_mm
+            .get(index)
+            .filter(|(x, _)| *x == x_mm)
+            .map(|(_, observed)| observed[1])
     }
 
     fn span(
@@ -202,7 +208,14 @@ impl<'a> StrongBendingResponse<'a> {
                 record_candidate(lo, false)?;
             }
             let width = hi - lo;
-            let q0 = response.at_mm(lo)?[1] + response.point_load_jump(lo)[1];
+            let shear_jump = response.point_load_jump(lo)[1];
+            let q0 = response.at_mm(lo)?[1] + shear_jump;
+            // 保存点は左極限なので、集中荷重を跨ぐ場合はそのままi端の区間内側と比較できない。
+            let start_zero_matches = !include_ends
+                || lo != span_lo
+                || self
+                    .observed_shear_y(lo)
+                    .is_none_or(|left| left + shear_jump == 0.0);
             let mut w_lo = 0.0;
             let mut w_hi = 0.0;
             for &load in &self.strong_loads {
@@ -223,7 +236,14 @@ impl<'a> StrongBendingResponse<'a> {
             }
             let scale = q0.abs().max(q1.abs()).max(q2.abs());
             if scale == 0.0 {
-                record_candidate(lo.midpoint(hi), true)?;
+                let end_zero_matches = !include_ends
+                    || hi != span_hi
+                    || self.observed_shear_y(hi).is_none_or(|left| left == 0.0);
+                if start_zero_matches && end_zero_matches {
+                    record_candidate(lo.midpoint(hi), true)?;
+                } else {
+                    uncertain_shear_sign = true;
+                }
                 lo = hi;
                 continue;
             }
@@ -251,7 +271,8 @@ impl<'a> StrongBendingResponse<'a> {
                     && q == 0.0
                     && hi == span_hi
                     && end[1] == 0.0
-                    && (span_hi != self.length_mm || self.observed_end[1] == 0.0);
+                    && self.observed_shear_y(hi).is_none_or(|left| left == 0.0);
+                uncertain_shear_sign |= t == 0.0 && q == 0.0 && !start_zero_matches;
                 uncertain_shear_sign |= !confirmed_zero
                     && magnitude > 0.0
                     && q.abs() <= 64.0 * f64::EPSILON * magnitude;

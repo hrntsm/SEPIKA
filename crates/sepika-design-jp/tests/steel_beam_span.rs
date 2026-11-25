@@ -238,7 +238,7 @@ fn uniform_load_checks_both_intervals_at_the_zero_shear_brace() {
         w2: -8.0,
     };
     let terms = [(input::DEAD, 1.0)];
-    let report = |shear_residual_n: f64| {
+    let report = |shear_residual_n: f64, saved_center_qy_n: Option<f64>| {
         use sepika_element::frame::beam::MemberForces;
 
         // R=wL/2=32 kN、Q(L/2)=0、M(L/2)=wL²/8=64 kN·m。
@@ -250,12 +250,17 @@ fn uniform_load_checks_both_intervals_at_the_zero_shear_brace() {
         let raw = MemberForces {
             at: forces
                 .into_iter()
+                .filter(|(xi, _, _)| *xi != 0.5 || saved_center_qy_n.is_some())
                 .map(|(xi, q, m)| {
                     (
                         xi,
                         [
                             0.0,
-                            q + shear_residual_n,
+                            if xi == 0.5 {
+                                saved_center_qy_n.unwrap()
+                            } else {
+                                q + shear_residual_n
+                            },
                             0.0,
                             0.0,
                             0.0,
@@ -281,7 +286,7 @@ fn uniform_load_checks_both_intervals_at_the_zero_shear_brace() {
         .map(|(_, xi, row)| (xi, row))
         .collect::<Vec<_>>()
     };
-    let results = report(0.0);
+    let results = report(0.0, Some(0.0));
     assert!(
         results
             .iter()
@@ -304,7 +309,7 @@ fn uniform_load_checks_both_intervals_at_the_zero_shear_brace() {
         check_bending(row, 0.385_503_863_825, "fb=144.5830");
     }
 
-    let ambiguous = report(-1e-11);
+    let ambiguous = report(-1e-11, Some(-1e-11));
     assert!(
         ambiguous
             .iter()
@@ -312,6 +317,24 @@ fn uniform_load_checks_both_intervals_at_the_zero_shear_brace() {
         if reason.contains("[0.000, 4000.000]") && reason.contains("強軸曲げ分布を確認できず"))),
         "{ambiguous:?}"
     );
+
+    let exact_without_saved_center = report(0.0, None);
+    assert_eq!(
+        exact_without_saved_center
+            .iter()
+            .filter(|(xi, row)| *xi == 0.5 && matches!(row, CheckOutcome::Checked(_)))
+            .count(),
+        2
+    );
+
+    let contradictory = report(0.0, Some(-1e-11));
+    for interval in ["[0.000, 4000.000]", "[4000.000, 8000.000]"] {
+        assert!(
+            contradictory.iter().any(|(xi, row)| *xi == 0.5
+                && matches!(row, CheckOutcome::Skipped { reason } if reason.contains(interval))),
+            "{contradictory:?}"
+        );
+    }
 }
 
 #[test]
