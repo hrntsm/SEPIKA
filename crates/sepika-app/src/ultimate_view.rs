@@ -76,7 +76,11 @@ fn demand_source_note(app: &App) -> Result<String, String> {
 
 /// 終局検定表を描画する（設計タブ「終局検定」サブビュー）。
 pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
-    ui.strong("RC部材の終局検定（せん断・付着余裕度）");
+    ui.strong("RC梁・柱の終局検定（せん断・付着余裕度）");
+    ui.label(
+        "終局せん断は適用条件を満たす普通コンクリートの無孔矩形断面が対象です。梁は荒川mean式、柱は修正荒川mean式で算定します。\
+         円形柱は曲げ・軸の照査対象ですが、終局せん断は未算定です。大地震時の付着はRC規準16条の独立照査です。",
+    );
     ui.add_space(4.0);
     let mut selection = app.core.model.ultimate_gravity_combination;
     ui.add_enabled_ui(app.study_is_main(), |ui| {
@@ -168,6 +172,11 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
     ui.label(
         demand_source_note(app).unwrap_or_else(|reason| format!("需要由来は未検定: {reason}")),
     );
+    ui.label(if app.core.ultimate_use_pushover {
+        "終局せん断には、採用ステップの危険断面フェース間の確定内力が必要です。保存応答に記録がなければ増分解析を再実行して採用ステップを指定してください。"
+    } else {
+        "静的・両端ヒンジ略算では終局せん断は未算定です。算定には増分解析の確定総応答を指定してください。"
+    });
     match app.compute_ultimate_checks() {
         Err(msg) => {
             ui.colored_label(crate::theme::UI_MUTED, format!("未検定（{msg}）"));
@@ -363,9 +372,8 @@ pub fn ultimate_table(ui: &mut egui::Ui, app: &mut App) {
             ui.add_space(4.0);
             ui.colored_label(
                 crate::theme::UI_MUTED,
-                "Qsu=荒川mean式の終局せん断耐力。τDは大地震時の付着応力度、Kfbはその許容値。\
-                     余裕度が 1.0 未満（赤）の場合、採用した需要に対して NG。\
-                     対象は RC梁・RC矩形柱・RC円形柱。",
+                "Qsuは終局せん断耐力。τDは大地震時の付着応力度、Kfbはその許容値。\
+                     余裕度が 1.0 未満（赤）の場合、採用した需要に対して NG。",
             );
         }
     }

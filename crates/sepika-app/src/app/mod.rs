@@ -897,13 +897,12 @@ pub struct AppCore {
     /// RC柱の静的・両端ヒンジ略算の参考せん断需要に掛ける倍率（既定 1.0）。
     /// 確定総応答では 1.0 を指定する。
     pub ultimate_upper_factor: f64,
-    /// 確定総応答を用いる矩形RC柱の二軸せん断余裕度を算定するか。
+    /// 確定総応答を用いる矩形RC柱の弱軸単独のせん断余裕度も算定するか。
     pub ultimate_biaxial_shear: bool,
     /// 矩形・円形RC柱の二軸曲げ余裕度を算定するか。
     pub ultimate_biaxial_bending: bool,
-    /// 終局検定の設計用応力（Qmu・需要曲げ）と部材別 Rp を増分解析応答から
-    /// 直接反映するか（false は静的解析応答＋UI 一律 Rp）。増分解析未実行時は
-    /// 自動的に静的応答へフォールバックする。
+    /// 終局検定の需要に増分解析の確定総応答を使うか（false は静的・両端ヒンジ略算）。
+    /// 確定総応答が不足すると未検定になり、静的応答に切り替えない。
     pub ultimate_use_pushover: bool,
     /// 解析タブの設定値
     pub analysis_cfg: AnalysisSettings,
