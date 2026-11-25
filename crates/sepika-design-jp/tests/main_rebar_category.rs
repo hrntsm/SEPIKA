@@ -208,14 +208,27 @@ fn rc_column_pure_tension_uses_steel_above_fc60() {
 }
 
 #[test]
-fn rc_allowable_usd685_grades_withhold_main_bar_checks_and_keep_shear_failure() {
+fn rc_allowable_usd_grades_withhold_main_bar_checks_and_keep_independent_failures() {
     let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1_000_000.0];
     for mut model in rc_members() {
+        match model.sections[0].shape.as_mut().unwrap() {
+            SectionShape::RcBeamRect { rebar, .. } => rebar.cover = 20.0,
+            SectionShape::RcColumnRect { rebar, .. } => rebar.cover = 20.0,
+            SectionShape::RcColumnCircle { rebar, .. } => rebar.cover = 20.0,
+            _ => unreachable!(),
+        }
         assign_main_rebar(&mut model, MaterialCategory::Rebar);
         let main = model.sections[0].rebar_material.unwrap().index();
-        model.materials[main].fy = Some(685.0);
-        for grade in ["USD685", "USD685A", "USD685B"] {
+        for (grade, family, fy) in [
+            ("USD590", "USD590", 590.0),
+            ("USD590A", "USD590", 590.0),
+            ("USD590B", "USD590", 590.0),
+            ("USD685", "USD685", 685.0),
+            ("USD685A", "USD685", 685.0),
+            ("USD685B", "USD685", 685.0),
+        ] {
             model.materials[main].name = grade.into();
+            model.materials[main].fy = Some(fy);
             for term in [LoadTerm::Long, LoadTerm::Short] {
                 let options = MemberDesignCheckOptions {
                     term,
@@ -227,7 +240,7 @@ fn rc_allowable_usd685_grades_withhold_main_bar_checks_and_keep_shear_failure() 
                 assert!(
                     outcomes.iter().any(|(elem, _, outcome)| *elem == ElemId(0) && matches!(
                         outcome, CheckOutcome::Skipped { reason } if reason.contains(&model.sections[0].name)
-                            && reason.contains("USD685系主筋の認定に基づく許容応力度")
+                            && reason.contains(&format!("{family}系主筋の認定に基づく許容応力度"))
                     )),
                     "{grade}, {term:?}: {outcomes:?}"
                 );
@@ -246,11 +259,64 @@ fn rc_allowable_usd685_grades_withhold_main_bar_checks_and_keep_shear_failure() 
                     )),
                     "{grade}, {term:?}: {components:?}"
                 );
+                for kind in [CheckKind::Shear, CheckKind::Provision] {
+                    assert!(
+                        components
+                            .iter()
+                            .any(|row| row.kind == kind && row.ratio > 1.0),
+                        "{grade}, {term:?}, {kind:?}: {components:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn rc_allowable_usd590_beam_bond_requires_an_independently_known_bar_shape() {
+    let mut model = rc_beam::model(false);
+    assign_main_rebar(&mut model, MaterialCategory::Rebar);
+    let main = model.sections[0].rebar_material.unwrap().index();
+    let demand = [0.0, 10_000_000.0, 0.0, 0.0, 0.0, 1.0e9];
+
+    for (size, deformed) in [
+        (RebarSize::Standard(StandardRebar::D19), true),
+        (RebarSize::DiameterMm(19.0), false),
+    ] {
+        let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[0].shape else {
+            unreachable!()
+        };
+        rebar.main_dia = size;
+        for term in [LoadTerm::Long, LoadTerm::Short] {
+            for bond_method in [BondMethod::Rc1991, BondMethod::Rc1999] {
+                let options = MemberDesignCheckOptions {
+                    term,
+                    bond_method,
+                    ..Default::default()
+                };
+                let bond = |model: &Model| {
+                    allowable_checks_with_demand(model, demand, &options)
+                        .into_iter()
+                        .filter_map(|(_, _, outcome)| match outcome {
+                            CheckOutcome::Checked(result) => Some(result.components),
+                            CheckOutcome::Skipped { .. } => None,
+                        })
+                        .flatten()
+                        .find(|row| row.kind == CheckKind::Bond)
+                };
+                model.materials[main].name = "SD345".into();
+                model.materials[main].fy = Some(345.0);
+                let ordinary = bond(&model).expect("既知の異形鉄筋では付着が算定される");
                 assert!(
-                    components
-                        .iter()
-                        .any(|row| row.kind == CheckKind::Shear && row.ratio > 1.0),
-                    "{grade}, {term:?}: {components:?}"
+                    ordinary.ratio > 1.0,
+                    "{term:?} {bond_method:?}: {ordinary:?}"
+                );
+                model.materials[main].name = "USD590".into();
+                model.materials[main].fy = Some(590.0);
+                assert_eq!(
+                    bond(&model),
+                    deformed.then_some(ordinary),
+                    "{size:?} {term:?} {bond_method:?}"
                 );
             }
         }

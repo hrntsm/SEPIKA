@@ -35,9 +35,9 @@ pub(crate) fn shear_rebar_category_issue(
 /// 鉄筋の許容引張・圧縮応力度 ft [N/mm²]。
 ///
 /// `dia` は正の有限な径 `[mm]`。SD345・SD390・SD490 は長期に径28 mm超で低減する。
-/// USD685・USD685A・USD685B は None。その他の表にない材種は SD295 相当値を返す。
+/// USD590系・USD685系は None。その他の表にない材種は SD295 相当値を返す。
 pub fn rebar_allowable_tension(grade: &str, dia: f64, long_term: bool) -> Option<f64> {
-    if is_usd685_main_rebar_grade(grade) {
+    if main_rebar_grade_requiring_approval(grade).is_some() {
         return None;
     }
     let (long, short) =
@@ -45,8 +45,12 @@ pub fn rebar_allowable_tension(grade: &str, dia: f64, long_term: bool) -> Option
     Some(if long_term { long } else { short })
 }
 
-pub(crate) fn is_usd685_main_rebar_grade(grade: &str) -> bool {
-    matches!(grade.trim(), "USD685" | "USD685A" | "USD685B")
+pub(crate) fn main_rebar_grade_requiring_approval(grade: &str) -> Option<&'static str> {
+    match grade.trim() {
+        "USD590" | "USD590A" | "USD590B" => Some("USD590"),
+        "USD685" | "USD685A" | "USD685B" => Some("USD685"),
+        _ => None,
+    }
 }
 
 /// せん断補強筋の許容引張応力度 w_ft [N/mm²]。

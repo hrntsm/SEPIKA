@@ -384,7 +384,7 @@ fn main_rebar_grade(mat: &crate::model::Material) -> Option<&str> {
 }
 
 /// 対応材種の主筋許容引張・圧縮応力度 `[N/mm²]` を長期、短期の順で返す。径は呼び名または `[mm]`。
-/// 名称だけで許容値を確定できないUSD685・USD685A・USD685Bなどは None。
+/// 名称だけで許容値を確定できないUSD590系・USD685系などは None。
 pub fn rebar_tension_limits(grade: &str, diameter: f64) -> Option<(f64, f64)> {
     let high_grade_long = if diameter > 28.0 { 195.0 } else { 215.0 };
     match grade.trim() {
@@ -725,8 +725,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn replacement_of_designation_with_usd685_does_not_supply_main_bar_allowables() {
-        for grade in ["USD685", "USD685A", " USD685B "] {
+    fn usd_grade_designations_do_not_supply_main_bar_allowables() {
+        for grade in [
+            "USD590",
+            "USD590A",
+            " USD590B ",
+            "USD685",
+            "USD685A",
+            " USD685B ",
+        ] {
             for diameter_mm in [19.0, 28.6, 41.0] {
                 assert_eq!(rebar_tension_limits(grade, diameter_mm), None);
             }

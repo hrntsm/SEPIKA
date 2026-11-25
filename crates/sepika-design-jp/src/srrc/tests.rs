@@ -450,7 +450,16 @@ fn src_main_rebar_does_not_use_unknown_or_non_table_strengths() {
         let section = make_section(shape);
         for term in [LoadTerm::Long, LoadTerm::Short] {
             let mut context = context(term);
-            for grade in ["USD685", "USD685A", "USD685B", "未登録材種", "SR295"] {
+            for grade in [
+                "USD590",
+                "USD590A",
+                "USD590B",
+                "USD685",
+                "USD685A",
+                "USD685B",
+                "未登録材種",
+                "SR295",
+            ] {
                 context.rebar_material = Some(make_rebar_material(grade, 685.0));
                 let outcome = SrcDesign.check(&zero_forces(), &section, &material, &context);
                 assert!(matches!(outcome, CheckOutcome::Skipped { reason }
