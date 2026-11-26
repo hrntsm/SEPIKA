@@ -229,6 +229,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0163](0163-rc-beam-qd1-support-path.md) | accepted | RC梁のQD1の算定条件に接続先の支持経路を含めない |
 | [0164](0164-rc-beam-qd1-eccentric-material-end.md) | accepted | 偏心で実柱面を取れないRC梁端は実材端で検定する |
 | [0165](0165-rc-column-qd1-girder-bending-axis.md) | accepted | RC柱QD1の片端梁降伏は検討曲げ軸に対応する場合に採用する |
+| [0171](0171-rc-column-real-girder-face.md) | accepted | RC柱の通常検定では接続大梁が定める実材端面の静的応答を採る |
 
 ## 規約
 
