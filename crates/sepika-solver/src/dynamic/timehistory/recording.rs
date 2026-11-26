@@ -16,22 +16,20 @@ use sepika_element::frame::beam::MemberForces;
 
 /// 時刻歴簡易検定で正負の局所 Mz 極値を記録する対象かを返す。
 pub fn uses_signed_bending_peaks(model: &Model, elem: &ElementData) -> bool {
-    matches!(
-        elem.kind,
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-    ) && model.element_section(elem).is_some_and(|section| {
-        section.frame_use == Some(FrameSectionUse::Column)
-            && section
-                .shape
-                .as_ref()
-                .is_some_and(|shape| shape.is_asymmetric_built_h())
-            && structure_kind_of(
-                Some(section),
-                model
-                    .element_material(elem)
-                    .map(|material| material.category),
-            ) == StructureKind::S
-    })
+    matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber)
+        && model.element_section(elem).is_some_and(|section| {
+            section.frame_use == Some(FrameSectionUse::Column)
+                && section
+                    .shape
+                    .as_ref()
+                    .is_some_and(|shape| shape.is_asymmetric_built_h())
+                && structure_kind_of(
+                    Some(section),
+                    model
+                        .element_material(elem)
+                        .map(|material| material.category),
+                ) == StructureKind::S
+        })
 }
 
 /// 記録フレーム数が概ね 1000 になるよう `record_every`（間引き係数）を自動決定する。
@@ -126,10 +124,7 @@ pub(crate) fn member_forces_nonlinear(
             let required = response.is_some()
                 || matches!(
                     elem.kind,
-                    ElementKind::Beam
-                        | ElementKind::Fiber
-                        | ElementKind::MultiSpring
-                        | ElementKind::Brace { .. }
+                    ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
                 );
             let Some(forces) = forces else {
                 return if required {

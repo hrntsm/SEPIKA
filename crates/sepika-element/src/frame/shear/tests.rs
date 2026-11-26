@@ -89,11 +89,7 @@ fn transverse_mm(y: f64, z: f64) -> LocalVec {
 
 #[test]
 fn elastic_shear_and_loaded_face_forces_remain_identical_through_both_element_routes() {
-    for el in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for el in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = member_model(h_shape(), el);
         model.sections[0].frame_use = Some(FrameSectionUse::Girder);
         model.elements[0].end_offsets_mm = [[0.0, 5.0, 0.0]; 2];

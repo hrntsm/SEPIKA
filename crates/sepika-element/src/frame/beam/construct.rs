@@ -37,9 +37,7 @@ impl BeamElement {
         let beam = Self::resolve_properties(data, model)?;
         if matches!(
             data.kind,
-            sepika_core::model::ElementKind::Beam
-                | sepika_core::model::ElementKind::Fiber
-                | sepika_core::model::ElementKind::MultiSpring
+            sepika_core::model::ElementKind::Beam | sepika_core::model::ElementKind::Fiber
         ) {
             beam.checked_stiffness_flex_raw()?;
         }

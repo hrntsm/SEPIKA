@@ -19,7 +19,6 @@ use crate::frame::fiber::{
     build_gauss_fiber_pair, fiber_strength_params, fiber_yield_covers_shape, resolve_fiber_yield,
     FIBER_ND, FIBER_NW,
 };
-use crate::frame::multi_spring::{MS_ND, MS_NW};
 
 /// 解析が要素ごとに使用する非線形モデルの種別。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,8 +27,6 @@ pub enum AnalysisHingeModel {
     ConcentratedSpring,
     /// ファイバー要素（N-M 曲面）。
     Fiber,
-    /// マルチスプリング要素（N-M 曲面）。
-    MultiSpring,
     /// 非線形ヒンジモデルを持たない（線形・ブレース・壁・その他）。
     Other,
 }
@@ -46,7 +43,7 @@ pub struct HingeView {
     pub unavailability_reason: Option<String>,
     /// N-M 線形相関（材端集中ばね）。持たないモデル・非対応の履歴則は `None`。
     pub mn_linear: Option<MnInteraction>,
-    /// 3D N-M 曲面（ファイバー／MS）。持たないモデルは `None`。
+    /// 3D N-M 曲面（ファイバー）。持たないモデルは `None`。
     pub mn_surface: Option<MnSurface>,
 }
 
@@ -105,7 +102,6 @@ pub fn build_hinge_view(
             }
             ElementKind::Beam => AnalysisHingeModel::Fiber,
             ElementKind::Fiber => AnalysisHingeModel::Fiber,
-            ElementKind::MultiSpring => AnalysisHingeModel::MultiSpring,
             _ => AnalysisHingeModel::Other,
         };
         let mut view = HingeView::none(model_kind);
@@ -123,13 +119,12 @@ pub fn build_hinge_view(
             n_beta,
         ),
         ElementKind::Fiber => fiber_view(data, model, basis, kind, n_alpha, n_beta),
-        ElementKind::MultiSpring => multi_spring_view(data, model, basis, kind, n_alpha, n_beta),
         _ => Ok(HingeView::none(AnalysisHingeModel::Other)),
     }
 }
 
 /// [`build_hinge_view`] が `Beam` に対して材端集中ばね分岐を取るか。
-/// 壁側柱の面内解放がある場合と、ファイバー／MS に解決される場合は `false`。
+/// 壁側柱の面内解放がある場合と、ファイバーに解決される場合は `false`。
 pub fn resolves_to_concentrated_spring(data: &ElementData, model: &Model) -> bool {
     data.kind == ElementKind::Beam
         && !crate::frame::beam::is_elastic_wall_girder(model, data)
@@ -202,51 +197,23 @@ fn fiber_view(
     n_alpha: usize,
     n_beta: usize,
 ) -> Result<HingeView, RebarGeometryError> {
-    Ok(surface_view(
-        AnalysisHingeModel::Fiber,
-        YieldModelKind::MultiFiber,
-        analysis_plastic_fibers(data, model, basis, kind, FIBER_NW, FIBER_ND)?,
-        n_alpha,
-        n_beta,
-    ))
-}
-
-/// マルチスプリング要素（解析の `MS_NW × MS_ND`）の N-M 曲面。
-fn multi_spring_view(
-    data: &ElementData,
-    model: &Model,
-    basis: StrengthBasis,
-    kind: AnalysisKind,
-    n_alpha: usize,
-    n_beta: usize,
-) -> Result<HingeView, RebarGeometryError> {
-    Ok(surface_view(
-        AnalysisHingeModel::MultiSpring,
-        YieldModelKind::MultiSpring,
-        analysis_plastic_fibers(data, model, basis, kind, MS_NW, MS_ND)?,
-        n_alpha,
-        n_beta,
-    ))
-}
-
-fn surface_view(
-    model_kind: AnalysisHingeModel,
-    surface_kind: YieldModelKind,
-    fibers: Option<Vec<PlasticFiber>>,
-    n_alpha: usize,
-    n_beta: usize,
-) -> HingeView {
-    match fibers.filter(|f| !f.is_empty()) {
+    let fibers = analysis_plastic_fibers(data, model, basis, kind)?;
+    Ok(match fibers.filter(|f| !f.is_empty()) {
         Some(fibers) => HingeView {
-            model: model_kind,
+            model: AnalysisHingeModel::Fiber,
             backbone: None,
             total_backbone: None,
             unavailability_reason: None,
             mn_linear: None,
-            mn_surface: Some(build_surface(&fibers, surface_kind, n_alpha, n_beta)),
+            mn_surface: Some(build_surface(
+                &fibers,
+                YieldModelKind::MultiFiber,
+                n_alpha,
+                n_beta,
+            )),
         },
-        None => HingeView::none(model_kind),
-    }
+        None => HingeView::none(AnalysisHingeModel::Fiber),
+    })
 }
 
 /// 解析が実際に生成する端部ファイバ断面を `PlasticFiber` 群へ変換する。
@@ -257,8 +224,6 @@ pub(crate) fn analysis_plastic_fibers(
     model: &Model,
     basis: StrengthBasis,
     kind: AnalysisKind,
-    nw: usize,
-    nd: usize,
 ) -> Result<Option<Vec<PlasticFiber>>, RebarGeometryError> {
     let Some(sec) = data.section.and_then(|sid| model.sections.get(sid.index())) else {
         return Ok(None);
@@ -270,8 +235,9 @@ pub(crate) fn analysis_plastic_fibers(
         return Ok(None);
     }
     let strength = fiber_strength_params(data, model, basis);
-    let [(section, mats), _] =
-        build_gauss_fiber_pair(data, model, basis, kind, sec.width, sec.depth, nw, nd)?;
+    let [(section, mats), _] = build_gauss_fiber_pair(
+        data, model, basis, kind, sec.width, sec.depth, FIBER_NW, FIBER_ND,
+    )?;
     Ok(Some(
         section
             .fibers
@@ -326,8 +292,6 @@ fn to_plastic_fiber(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::behavior::ElementBehavior;
-    use crate::frame::multi_spring::MultiSpringElement;
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId, StoryId};
     use sepika_core::model::{
@@ -752,7 +716,7 @@ mod tests {
         let beam = crate::frame::fiber::FiberBeam::with_plastic_zone(&col, &model, lp, basis, kind);
         let analysis = &beam.gauss_points[0].section.fibers;
 
-        let plastic = analysis_plastic_fibers(&col, &model, basis, kind, FIBER_NW, FIBER_ND)
+        let plastic = analysis_plastic_fibers(&col, &model, basis, kind)
             .expect("配筋は妥当")
             .expect("断面ありはファイバを返す");
         assert_eq!(plastic.len(), analysis.len());
@@ -807,7 +771,7 @@ mod tests {
             basis,
             kind,
         );
-        let plastic = analysis_plastic_fibers(&col, &model, basis, kind, FIBER_NW, FIBER_ND)
+        let plastic = analysis_plastic_fibers(&col, &model, basis, kind)
             .expect("配筋は妥当")
             .expect("断面ありはファイバを返す");
         let (p, (_, mat)) = plastic
@@ -850,10 +814,9 @@ mod tests {
             basis,
             kind,
         );
-        let src_plastic =
-            analysis_plastic_fibers(&src_col, &src_model, basis, kind, FIBER_NW, FIBER_ND)
-                .expect("配筋は妥当")
-                .expect("SRC はファイバを返す");
+        let src_plastic = analysis_plastic_fibers(&src_col, &src_model, basis, kind)
+            .expect("配筋は妥当")
+            .expect("SRC はファイバを返す");
         let (p, (_, mat)) = src_plastic
             .iter()
             .zip(
@@ -867,30 +830,6 @@ mod tests {
             .expect("内蔵鉄骨ファイバー");
         assert_eq!(p.young, 198_000.0);
         assert_eq!(mat.probe(0.0).1, p.young);
-    }
-
-    /// MS の N-M 曲面は解析の `MS_NW × MS_ND` 格子を単一情報源とする。
-    #[test]
-    fn multi_spring_surface_uses_analysis_grid() {
-        let model = make_model(None, None);
-        let ms = elem(ElementKind::MultiSpring, [NodeId(0), NodeId(2)]);
-        let basis = StrengthBasis::Nominal;
-        let kind = AnalysisKind::Incremental;
-
-        let plastic = analysis_plastic_fibers(&ms, &model, basis, kind, MS_NW, MS_ND)
-            .expect("配筋は妥当")
-            .expect("断面ありはファイバを返す");
-        assert_eq!(plastic.len(), MS_NW * MS_ND);
-
-        let element = MultiSpringElement::new(&ms, &model, basis, kind);
-        let states = element
-            .fiber_section_states()
-            .expect("MS 要素はファイバー断面の状態を返す");
-        assert_eq!(states[0].fibers.len(), MS_NW * MS_ND);
-
-        let view = build_hinge_view(&ms, &model, basis, kind, 0.0, 8, 24).expect("配筋は妥当");
-        assert_eq!(view.model, AnalysisHingeModel::MultiSpring);
-        assert!(view.mn_surface.is_some());
     }
 
     /// 断面未定義では曲面を生成せず `None` を返す。
@@ -929,8 +868,6 @@ mod tests {
             &model,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
-            FIBER_NW,
-            FIBER_ND,
         )
         .expect("配筋は妥当")
         .is_none());
@@ -980,10 +917,6 @@ mod tests {
         check(&elem(ElementKind::Beam, [NodeId(0), NodeId(1)]), &model);
         check(&elem(ElementKind::Beam, [NodeId(0), NodeId(2)]), &model);
         check(&elem(ElementKind::Fiber, [NodeId(0), NodeId(2)]), &model);
-        check(
-            &elem(ElementKind::MultiSpring, [NodeId(0), NodeId(2)]),
-            &model,
-        );
 
         let (wall_model, column) = wall_side_column_model();
         check(&column, &wall_model);
@@ -1012,8 +945,6 @@ mod tests {
             &model,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
-            FIBER_NW,
-            FIBER_ND,
         )
         .expect("配筋は妥当")
         .is_none());
@@ -1066,8 +997,6 @@ mod tests {
             &model,
             StrengthBasis::Nominal,
             AnalysisKind::Incremental,
-            FIBER_NW,
-            FIBER_ND,
         )
         .expect("配筋は妥当")
         .is_none());
@@ -1149,8 +1078,6 @@ mod tests {
                         &model,
                         StrengthBasis::Nominal,
                         AnalysisKind::Incremental,
-                        12,
-                        20,
                     )
                     .unwrap()
                     .is_none());

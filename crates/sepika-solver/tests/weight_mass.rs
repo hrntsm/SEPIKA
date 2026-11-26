@@ -188,7 +188,6 @@ fn ダンパー総重量は全体質量行列へ一度だけ計上し両方式�
             tension_only: false,
         },
         ElementKind::Fiber,
-        ElementKind::MultiSpring,
     ] {
         for method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
             for synced in [false, true] {
@@ -253,12 +252,8 @@ fn ダンパー総重量は全体質量行列へ一度だけ計上し両方式�
 }
 
 #[test]
-fn 通常線材は明示fiberとmultispringでも全体行列の公称並進質量が一致する() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+fn 通常線材は明示fiberでも全体行列の公称並進質量が一致する() {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
             let mut model = model(kind, false);
             let generated = generate_stories_with_opts(&model, &[], true, method).unwrap();

@@ -2,6 +2,8 @@
 
 対象は `sepika-element` のmember_load/multi_spring/panel_offset/prismaticのE045–E051である。式・積分/加算順・公差・荷重所有・入力診断順・commit/revert/rollbackを保持する。新たな構造安全性や実験Validationの認証は行わない。
 
+マルチスプリングと専用試験は [#2032](https://github.com/hrntsm/SEPIKA/issues/2032) で廃止した。下表の該当行は試験整理時点の証跡であり、現行の試験入口ではない。
+
 ## 現役の保証
 
 以下のパスは `crates/sepika-element/src/frame/` 配下である。

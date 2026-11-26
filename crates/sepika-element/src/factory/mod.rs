@@ -48,7 +48,7 @@ use sepika_core::model::ForceRegime;
 use springs::{flexural_alpha_y, is_rc_like_section};
 
 /// 線形弾性解析用の要素生成。
-/// 線材（`Beam` / `Fiber` / `MultiSpring`）は `ForceRegime` に依らず常に弾性
+/// 線材（`Beam` / `Fiber`）は `ForceRegime` に依らず常に弾性
 /// [`crate::frame::beam::BeamElement`] を組む。非線形要素の振り分けは
 /// [`build_nonlinear_behavior`] だけが行う。
 /// RC/SRC置換壁の側柱は、壁法線まわりの回転を解放する。
@@ -58,7 +58,7 @@ pub fn build_behavior(data: &ElementData, model: &Model) -> Box<dyn ElementBehav
     build_behavior_with_axial_factor(data, model, 1.0)
 }
 
-/// Beam・Fiber・MultiSpring・Brace の軸剛性だけに正の有限な係数を乗じる。他種別の係数は1に限る。
+/// Beam・Fiber・Brace の軸剛性だけに正の有限な係数を乗じる。他種別の係数は1に限る。
 /// 形状・質量・曲げ・せん断剛性は保持する。
 /// `model` は `Model::validate_local_frames` 済みを前提とする。
 pub fn build_behavior_with_axial_factor(
@@ -70,17 +70,14 @@ pub fn build_behavior_with_axial_factor(
     assert!(
         matches!(
             data.kind,
-            ElementKind::Beam
-                | ElementKind::Fiber
-                | ElementKind::MultiSpring
-                | ElementKind::Brace { .. }
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
         ) || axial_factor == 1.0
     );
     if let Some(issue) = wall_side_column_input_issue(data, model, None) {
         panic!("{issue}");
     }
     match data.kind {
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
+        ElementKind::Beam | ElementKind::Fiber => {
             let mut elem = crate::frame::beam::BeamElement::new(data, model);
             elem.a *= axial_factor;
             let inner: Box<dyn ElementBehavior> = if let Some(axis) =
@@ -315,23 +312,6 @@ pub fn build_nonlinear_behavior(
         }
         ElementKind::Fiber => {
             with_panel_offset(build_connected_fiber(data, model, basis, kind), data, model)
-        }
-        ElementKind::MultiSpring => {
-            let mut member =
-                crate::frame::multi_spring::MultiSpringElement::new(data, model, basis, kind);
-            if let Some(normal) = wall_release_normal(data, model, kind) {
-                member
-                    .configure_wall_release(normal)
-                    .unwrap_or_else(|reason| {
-                        panic!("部材 ID {} の壁側柱接続: {reason}", data.id.0)
-                    });
-                return with_panel_offset(Box::new(member), data, model);
-            }
-            with_panel_offset(
-                with_member_shear(Box::new(member), data, model, kind),
-                data,
-                model,
-            )
         }
         ElementKind::Brace { .. } => crate::frame::eccentric::connect(
             Box::new(crate::frame::truss::TrussElement::new(data, model)),

@@ -10,12 +10,9 @@ use sepika_core::model::{ElementData, ElementKind, Model, WallSideColumnIndex};
 /// 曲げを伝達する線材（柱・梁として扱う要素種別）か。
 ///
 /// 大梁として壁の辺を構成しうるのは線材のみで、ブレース（軸材）・面要素・バネは
-/// 曲げを伝達しないため除く。ファイバー梁・マルチスプリング梁は対象に含める。
+/// 曲げを伝達しないため除く。ファイバー梁は対象に含める。
 pub fn is_line_member(kind: ElementKind) -> bool {
-    matches!(
-        kind,
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-    )
+    matches!(kind, ElementKind::Beam | ElementKind::Fiber)
 }
 
 /// 側柱の物理分類を適用できる線材の種別かを返す。

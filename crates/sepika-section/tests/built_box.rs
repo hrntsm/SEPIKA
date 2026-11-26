@@ -1,5 +1,5 @@
 use sepika_core::section_shape::SectionShape;
-use sepika_section::mn_surface::{plastic_fibers, FiberRegion, StrengthParams, YieldModelKind};
+use sepika_section::mn_surface::{plastic_fibers, FiberRegion, StrengthParams};
 
 #[test]
 fn built_box_fiber_regions_preserve_the_exact_steel_and_filled_areas() {
@@ -22,12 +22,7 @@ fn built_box_fiber_regions_preserve_the_exact_steel_and_filled_areas() {
                     corner_r: Some(0.0),
                 }
             };
-            let fibers = plastic_fibers(
-                &shape,
-                &StrengthParams::default(),
-                YieldModelKind::MultiFiber,
-            )
-            .unwrap();
+            let fibers = plastic_fibers(&shape, &StrengthParams::default()).unwrap();
             let steel: f64 = fibers
                 .iter()
                 .filter(|f| f.region == FiberRegion::Steel)

@@ -456,9 +456,7 @@ pub fn stiffness_breakdown(
 pub fn is_elastic_wall_girder(model: &Model, data: &sepika_core::model::ElementData) -> bool {
     matches!(
         data.kind,
-        sepika_core::model::ElementKind::Beam
-            | sepika_core::model::ElementKind::Fiber
-            | sepika_core::model::ElementKind::MultiSpring
+        sepika_core::model::ElementKind::Beam | sepika_core::model::ElementKind::Fiber
     ) && stiffness_breakdown(model, data).is_ok_and(|b| b.wall_girder > 1.0)
 }
 

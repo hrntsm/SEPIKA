@@ -55,7 +55,7 @@ fn loop_kind_of(kind: &ElementKind) -> LoopKind {
         ElementKind::Brace { .. } | ElementKind::Damper | ElementKind::NodalSpring => {
             LoopKind::Axial
         }
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => LoopKind::Flexural,
+        ElementKind::Beam | ElementKind::Fiber => LoopKind::Flexural,
         ElementKind::Wall | ElementKind::Shell | ElementKind::PanelZone => LoopKind::Unsupported,
     }
 }
@@ -65,7 +65,6 @@ fn kind_label(kind: &ElementKind) -> &'static str {
     match kind {
         ElementKind::Beam => "梁・柱",
         ElementKind::Fiber => "ファイバー梁",
-        ElementKind::MultiSpring => "マルチスプリング梁",
         ElementKind::Wall => "耐震壁",
         ElementKind::PanelZone => "パネルゾーン",
         ElementKind::Brace { .. } => "ブレース",
@@ -189,19 +188,15 @@ fn elem_has_force_recording(rec: &ThRecording, elem_idx: usize) -> bool {
 fn design_member_kind(elem: &ElementData, model: &Model) -> Option<MemberKind> {
     match elem.kind {
         ElementKind::Brace { .. } => Some(MemberKind::Brace),
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
-            Some(MemberKind::of_element(elem, model))
-        }
+        ElementKind::Beam | ElementKind::Fiber => Some(MemberKind::of_element(elem, model)),
         ElementKind::Wall => None,
         _ => None,
     }
 }
 
 fn is_symmetric_h_column(model: &Model, elem: &ElementData) -> bool {
-    matches!(
-        elem.kind,
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-    ) && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
+    matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber)
+        && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
         && model.element_section(elem).is_some_and(|sec| {
             sepika_design_jp::steel::is_symmetric_h_section(sec)
                 && sepika_core::structure_kind::structure_kind_of(
@@ -2347,7 +2342,7 @@ mod tests {
 
         let mut model = input::column_with_opposing_head_girders(
             column::column_model(false, 0.0),
-            ElementKind::MultiSpring,
+            ElementKind::Beam,
         );
         model.elements[input::GIRDER.index()].kind = ElementKind::Fiber;
         let mut continuous = model.clone();

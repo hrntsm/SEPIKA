@@ -11,7 +11,7 @@ mod pushover_column_model;
 use pushover_column_model::rc_hinge_model;
 
 #[test]
-fn direct_input_main_rebar_strength_is_used_by_fiber_ms_and_mn_surface() {
+fn direct_input_main_rebar_strength_is_used_by_fiber_and_mn_surface() {
     use sepika_core::model::AnalysisKind;
     use sepika_element::behavior::{Ctx, LocalVec};
     use sepika_element::factory::{
@@ -43,100 +43,95 @@ fn direct_input_main_rebar_strength_is_used_by_fiber_ms_and_mn_surface() {
     let src_steel_plastic_axial_n = 3_567_450.0;
 
     for (mut model, steel_plastic_axial_n) in [(rc, 0.0), (src, src_steel_plastic_axial_n)] {
-        for (element_kind, view_kind) in [
-            (ElementKind::Fiber, AnalysisHingeModel::Fiber),
-            (ElementKind::MultiSpring, AnalysisHingeModel::MultiSpring),
+        model.elements[0].kind = ElementKind::Fiber;
+        for (name, concrete_factor, rebar_factor, basis, kind, expected_fy) in [
+            (
+                "直接入力主筋",
+                Some(1.2),
+                Some(1.0),
+                StrengthBasis::MaterialStrength,
+                AnalysisKind::Incremental,
+                345.0,
+            ),
+            (
+                "直接入力主筋",
+                None,
+                Some(1.0),
+                StrengthBasis::MaterialStrength,
+                AnalysisKind::Incremental,
+                345.0,
+            ),
+            (
+                "直接入力主筋",
+                Some(1.0),
+                None,
+                StrengthBasis::MaterialStrength,
+                AnalysisKind::Incremental,
+                379.5,
+            ),
+            (
+                "直接入力主筋",
+                Some(1.2),
+                Some(1.05),
+                StrengthBasis::MaterialStrength,
+                AnalysisKind::Incremental,
+                362.25,
+            ),
+            (
+                "直接入力主筋",
+                Some(1.2),
+                Some(1.05),
+                StrengthBasis::Nominal,
+                AnalysisKind::TimeHistory,
+                345.0,
+            ),
+            (
+                "SD345",
+                Some(1.2),
+                Some(1.0),
+                StrengthBasis::MaterialStrength,
+                AnalysisKind::Incremental,
+                345.0,
+            ),
         ] {
-            model.elements[0].kind = element_kind;
-            for (name, concrete_factor, rebar_factor, basis, kind, expected_fy) in [
-                (
-                    "直接入力主筋",
-                    Some(1.2),
-                    Some(1.0),
-                    StrengthBasis::MaterialStrength,
-                    AnalysisKind::Incremental,
-                    345.0,
-                ),
-                (
-                    "直接入力主筋",
-                    None,
-                    Some(1.0),
-                    StrengthBasis::MaterialStrength,
-                    AnalysisKind::Incremental,
-                    345.0,
-                ),
-                (
-                    "直接入力主筋",
-                    Some(1.0),
-                    None,
-                    StrengthBasis::MaterialStrength,
-                    AnalysisKind::Incremental,
-                    379.5,
-                ),
-                (
-                    "直接入力主筋",
-                    Some(1.2),
-                    Some(1.05),
-                    StrengthBasis::MaterialStrength,
-                    AnalysisKind::Incremental,
-                    362.25,
-                ),
-                (
-                    "直接入力主筋",
-                    Some(1.2),
-                    Some(1.05),
-                    StrengthBasis::Nominal,
-                    AnalysisKind::TimeHistory,
-                    345.0,
-                ),
-                (
-                    "SD345",
-                    Some(1.2),
-                    Some(1.0),
-                    StrengthBasis::MaterialStrength,
-                    AnalysisKind::Incremental,
-                    345.0,
-                ),
-            ] {
-                model.materials[0].strength_factor = concrete_factor;
-                model.materials[1].name = name.into();
-                model.materials[1].strength_factor = rebar_factor;
+            model.materials[0].strength_factor = concrete_factor;
+            model.materials[1].name = name.into();
+            model.materials[1].strength_factor = rebar_factor;
 
-                ensure_nonlinear_input_with_basis(&model, kind, basis).unwrap();
-                let data = &model.elements[0];
-                let mut element = build_nonlinear_behavior(data, &model, basis, kind, None);
-                let mut axial_extension = LocalVec {
-                    data: smallvec::smallvec![0.0; 12],
-                };
-                axial_extension.data[8] = 0.03;
-                element
-                    .update_state(&axial_extension, false, &Ctx { model: &model })
-                    .unwrap();
-                let states = element.fiber_section_states().unwrap();
-                for section in states {
-                    let mut main_bars = section
-                        .fibers
-                        .iter()
-                        .filter(|fiber| fiber.material == 1)
-                        .peekable();
-                    assert!(main_bars.peek().is_some());
-                    for bar in main_bars {
-                        let fy = bar.strain.abs() * 205_000.0 / bar.yield_ratio;
-                        assert!((fy - expected_fy).abs() < 1e-9, "{element_kind:?} {name} {concrete_factor:?} {rebar_factor:?} {basis:?}: {fy} != {expected_fy}");
-                    }
+            ensure_nonlinear_input_with_basis(&model, kind, basis).unwrap();
+            let data = &model.elements[0];
+            let mut element = build_nonlinear_behavior(data, &model, basis, kind, None);
+            let mut axial_extension = LocalVec {
+                data: smallvec::smallvec![0.0; 12],
+            };
+            axial_extension.data[8] = 0.03;
+            element
+                .update_state(&axial_extension, false, &Ctx { model: &model })
+                .unwrap();
+            let states = element.fiber_section_states().unwrap();
+            for section in states {
+                let mut main_bars = section
+                    .fibers
+                    .iter()
+                    .filter(|fiber| fiber.material == 1)
+                    .peekable();
+                assert!(main_bars.peek().is_some());
+                for bar in main_bars {
+                    let fy = bar.strain.abs() * 205_000.0 / bar.yield_ratio;
+                    assert!((fy - expected_fy).abs() < 1e-9, "{name} {concrete_factor:?} {rebar_factor:?} {basis:?}: {fy} != {expected_fy}");
                 }
-
-                let view = build_hinge_view(data, &model, basis, kind, 0.0, 8, 8).unwrap();
-                assert_eq!(view.model, view_kind);
-                let n_tens = view.mn_surface.unwrap().n_tens;
-                let steel_factor = match basis {
-                    StrengthBasis::MaterialStrength => 1.05,
-                    StrengthBasis::Nominal => 1.0,
-                };
-                let expected_n_tens =
-                    rebar.total_main_area() * expected_fy + steel_plastic_axial_n * steel_factor;
-                assert!((n_tens - expected_n_tens).abs() < 1e-6, "{element_kind:?} {name} {concrete_factor:?} {rebar_factor:?} {basis:?}: {n_tens} != {expected_n_tens}");
             }
+
+            let view = build_hinge_view(data, &model, basis, kind, 0.0, 8, 8).unwrap();
+            assert_eq!(view.model, AnalysisHingeModel::Fiber);
+            let n_tens = view.mn_surface.unwrap().n_tens;
+            let steel_factor = match basis {
+                StrengthBasis::MaterialStrength => 1.05,
+                StrengthBasis::Nominal => 1.0,
+            };
+            let expected_n_tens =
+                rebar.total_main_area() * expected_fy + steel_plastic_axial_n * steel_factor;
+            assert!((n_tens - expected_n_tens).abs() < 1e-6, "{name} {concrete_factor:?} {rebar_factor:?} {basis:?}: {n_tens} != {expected_n_tens}");
         }
     }
 }
@@ -153,7 +148,6 @@ fn direct_input_main_rebar_invalid_strength_stops_pushover_and_hinge_view() {
 
     for (kind, force_regime) in [
         (ElementKind::Fiber, ForceRegime::Auto),
-        (ElementKind::MultiSpring, ForceRegime::Auto),
         (ElementKind::Beam, ForceRegime::AxialBendingInteract),
     ] {
         model.elements[0].kind = kind;

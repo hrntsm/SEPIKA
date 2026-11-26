@@ -98,7 +98,7 @@ fn set_plate_section(model: &mut Model, wall: bool) {
 }
 
 #[test]
-fn 明示beam_fiber_ms混在は準備後も同じ版荷重と合力一次モーメントを持つ() {
+fn 明示beam_fiber混在は準備後も同じ版荷重と合力一次モーメントを持つ() {
     for wall in [false, true] {
         let mut reference_loads = None;
         let mut reference_prepared_loads = None;
@@ -442,13 +442,10 @@ fn 取付き床の全長連結混在支持は分割と統合阻止と独立荷�
     for (split, kinds) in [
         (false, vec![Beam]),
         (false, vec![Fiber]),
-        (false, vec![MultiSpring]),
         (true, vec![Beam; 2]),
         (true, vec![Fiber; 2]),
-        (true, vec![MultiSpring; 2]),
         (true, vec![Beam, Fiber]),
-        (true, vec![Fiber, MultiSpring]),
-        (true, vec![MultiSpring, Beam]),
+        (true, vec![Fiber, Beam]),
     ] {
         for presplit in [false, true] {
             let mut model = attached_floor(split, presplit);
@@ -484,11 +481,7 @@ fn 取付き床の全長連結混在支持は分割と統合阻止と独立荷�
 
 #[test]
 fn 取付き床の斜め未到達異レベルとパネルは分割支持にならない() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for end in [[2500., 1500., 0.], [2000., 1000., 0.], [2000., 1500., 100.]] {
             let mut model = attached_floor(false, false);
             model.elements[1].kind = kind;

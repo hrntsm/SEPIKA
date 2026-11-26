@@ -134,10 +134,8 @@ fn explicit_use(model: &Model, elem: &ElementData, usage: FrameSectionUse) -> bo
 
 fn column_at(model: &Model, node: NodeId) -> bool {
     model.elements.iter().any(|e| {
-        matches!(
-            e.kind,
-            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-        ) && e.nodes.len() == 2
+        matches!(e.kind, ElementKind::Beam | ElementKind::Fiber)
+            && e.nodes.len() == 2
             && e.nodes.contains(&node)
             && explicit_use(model, e, FrameSectionUse::Column)
             && model.member_length(e).is_finite()
@@ -185,10 +183,8 @@ fn resolve(model: &Model, elem_id: ElemId) -> Result<LateralBracingReference, St
         if matches.next().is_some() {
             return Err("要素IDが重複しています".into());
         }
-        if !matches!(
-            e.kind,
-            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-        ) || e.nodes.len() != 2
+        if !matches!(e.kind, ElementKind::Beam | ElementKind::Fiber)
+            || e.nodes.len() != 2
             || !explicit_use(model, e, FrameSectionUse::Girder)
         {
             return Err(format!("要素{}は明示した2節点大梁でありません", id.0));

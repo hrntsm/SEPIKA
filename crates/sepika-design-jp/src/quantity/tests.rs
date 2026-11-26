@@ -2335,7 +2335,6 @@ fn frame_node_counts_reject_direct_quantity_and_normal_two_nodes_have_independen
     for kind in [
         ElementKind::Beam,
         ElementKind::Fiber,
-        ElementKind::MultiSpring,
         ElementKind::Brace {
             tension_only: false,
         },

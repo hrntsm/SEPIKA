@@ -498,13 +498,11 @@ pub(super) fn dominant_bend_axis_z(last: &MemberStepState) -> bool {
 /// ヒンジ詳細で表示する採用曲げ面（強軸 Mz=true）を決める（純粋関数）。
 ///
 /// 材端集中ばねは非線形ばねが強軸（局所 z）のみに作用するため、応答が弱軸支配でも
-/// 強軸に固定する。ファイバー／マルチスプリングは最終ステップの支配軸に従う。
+/// 強軸に固定する。ファイバーは最終ステップの支配軸に従う。
 fn effective_bend_dir_z(model: AnalysisHingeModel, dominant_z: bool) -> bool {
     match model {
         AnalysisHingeModel::ConcentratedSpring => true,
-        AnalysisHingeModel::Fiber | AnalysisHingeModel::MultiSpring | AnalysisHingeModel::Other => {
-            dominant_z
-        }
+        AnalysisHingeModel::Fiber | AnalysisHingeModel::Other => dominant_z,
     }
 }
 
@@ -773,7 +771,7 @@ fn draw_hinge_detail_content(
             resolve_member_hysteresis(&elem_snapshot, &app.core.model, AnalysisKind::Incremental)
                 .label()
         )),
-        AnalysisHingeModel::Fiber | AnalysisHingeModel::MultiSpring => Some(format!(
+        AnalysisHingeModel::Fiber => Some(format!(
             "コンクリート除荷則: {}",
             resolve_fiber_concrete_hysteresis(
                 &elem_snapshot,
@@ -791,7 +789,7 @@ fn draw_hinge_detail_content(
         AnalysisHingeModel::ConcentratedSpring => {
             "採用曲げ面: 強軸(Mz)固定（非線形ばねは強軸のみ。弱軸 My は弾性）。".to_string()
         }
-        AnalysisHingeModel::Fiber | AnalysisHingeModel::MultiSpring | AnalysisHingeModel::Other => {
+        AnalysisHingeModel::Fiber | AnalysisHingeModel::Other => {
             format!(
                 "採用曲げ面: {}",
                 if bend_dir_z {
@@ -859,7 +857,7 @@ enum MnDisplay {
     None,
     /// 集中ばねの N-M 線形相関。
     Linear,
-    /// ファイバー／マルチスプリングの N-M 曲面。
+    /// ファイバーの N-M 曲面。
     Surface,
 }
 
@@ -867,11 +865,7 @@ enum MnDisplay {
 fn mn_display(view: &HingeView) -> MnDisplay {
     match view.model {
         AnalysisHingeModel::ConcentratedSpring if view.mn_linear.is_some() => MnDisplay::Linear,
-        AnalysisHingeModel::Fiber | AnalysisHingeModel::MultiSpring
-            if view.mn_surface.is_some() =>
-        {
-            MnDisplay::Surface
-        }
+        AnalysisHingeModel::Fiber if view.mn_surface.is_some() => MnDisplay::Surface,
         _ => MnDisplay::None,
     }
 }
@@ -885,7 +879,7 @@ fn mn_unavailable_message(view: &HingeView) -> &'static str {
         AnalysisHingeModel::ConcentratedSpring => {
             "この解析モデルでは N-M 相関を使用していません（履歴材料は N-M 相関非対応）。"
         }
-        AnalysisHingeModel::Fiber | AnalysisHingeModel::MultiSpring => {
+        AnalysisHingeModel::Fiber => {
             "断面または材料の情報が不足しているため N-M 相関図を表示できません。"
         }
         AnalysisHingeModel::Other => "この要素種別では N-M 相関図を表示しません。",
@@ -897,7 +891,6 @@ fn analysis_model_label(model: AnalysisHingeModel) -> &'static str {
     match model {
         AnalysisHingeModel::ConcentratedSpring => "材端集中ばね",
         AnalysisHingeModel::Fiber => "ファイバー（マルチファイバー）",
-        AnalysisHingeModel::MultiSpring => "マルチスプリング",
         AnalysisHingeModel::Other => "その他（非線形ヒンジなし）",
     }
 }
@@ -1020,7 +1013,7 @@ fn plot_m_theta_end(
     }
 }
 
-/// N-M 相関図（ファイバー／マルチスプリング）: N-My-Mz 曲面の 3D ワイヤーフレーム
+/// N-M 相関図（ファイバー）: N-My-Mz 曲面の 3D ワイヤーフレーム
 /// （上段）＋ 2D スライス（採用曲げ面での正曲げ側・負曲げ側の曲線＋応答経路、下段）。
 fn draw_mn_plot(
     ui: &mut egui::Ui,
@@ -1803,7 +1796,7 @@ mod tests {
 
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::section_shape::SectionShape;
-    use sepika_section::mn_surface::{plastic_fibers, StrengthParams, YieldModelKind};
+    use sepika_section::mn_surface::{plastic_fibers, StrengthParams};
 
     /// 中心 (0,0) の正方形（原点対称）の面積重心は原点。
     #[test]
@@ -1897,8 +1890,7 @@ mod tests {
             concrete_fc: 24.0,
             steel_e: 205_000.0,
         };
-        let raw = plastic_fibers(&shape, &strength, YieldModelKind::MultiFiber)
-            .expect("鋼断面は配筋不要");
+        let raw = plastic_fibers(&shape, &strength).expect("鋼断面は配筋不要");
         assert!(!raw.is_empty());
         let rotated: Vec<[f64; 2]> = raw.iter().map(|f| [f.z, -f.y]).collect();
 
@@ -1961,8 +1953,7 @@ mod tests {
             concrete_fc: 24.0,
             steel_e: 205_000.0,
         };
-        let raw = plastic_fibers(&shape, &strength, YieldModelKind::MultiFiber)
-            .expect("鋼断面は配筋不要");
+        let raw = plastic_fibers(&shape, &strength).expect("鋼断面は配筋不要");
         assert!(!raw.is_empty());
         let rotated: Vec<[f64; 2]> = raw.iter().map(|f| [f.z, -f.y]).collect();
 
@@ -2113,15 +2104,13 @@ mod tests {
         assert_ne!(key_of(&model, &elem, 0), key_of(&model, &elem, 1));
     }
 
-    /// ファイバー／マルチスプリングのビューは選択ステップの軸力に依存しないため、
+    /// ファイバーのビューは選択ステップの軸力に依存しないため、
     /// ステップが変わってもキーは変わらない（重い曲面を再生成しない）。
     #[test]
     fn hinge_view_key_ignores_step_for_non_concentrated() {
         let model = key_test_model();
         let fiber = key_test_elem(ElementKind::Fiber, ForceRegime::AxialBendingInteract);
         assert_eq!(key_of(&model, &fiber, 0), key_of(&model, &fiber, 1));
-        let ms = key_test_elem(ElementKind::MultiSpring, ForceRegime::AxialBendingInteract);
-        assert_eq!(key_of(&model, &ms, 0), key_of(&model, &ms, 1));
     }
 
     /// 材端集中ばねは N-M 相関非対応の履歴則でも選択ステップの軸力が骨格に
@@ -2491,55 +2480,46 @@ mod tests {
     }
 
     #[test]
-    fn stale_girder_cache_tracks_elastic_wall_role_and_return_to_fiber_or_ms() {
-        for representation in [ElementKind::Fiber, ElementKind::MultiSpring] {
-            let (mut input, _) = wall_side_column_view_model();
-            input.elements[0].kind = representation;
-            let expanded = sepika_core::wall_expand::expand_wall_elements(&input).0;
-            let staleness = Staleness {
-                results_stale: true,
-                last_run: Some(SystemTime::UNIX_EPOCH),
-                ..Default::default()
-            };
-            let generation = (staleness.last_run, staleness.results_stale);
-            let mut cache = None;
-            let mut initial_key = None;
-            for (model, elastic) in [(&input, false), (&expanded, true), (&input, false)] {
-                let data = model
-                    .elements
-                    .iter()
-                    .find(|element| element.id == ElemId(0))
-                    .unwrap();
-                let key = hinge_view_key(model, data, 0, &staleness);
-                if let Some(initial) = &initial_key {
-                    assert_eq!(key == *initial, !elastic);
-                } else {
-                    initial_key = Some(key.clone());
-                }
-                ensure_hinge_view(model, &mut cache, key, data, 0.0);
-                let cached = cache.as_ref().unwrap();
-                let view = cached.view.as_ref().unwrap();
-                assert_eq!(cached.key.generation, generation);
-                if elastic {
-                    assert_eq!(view.model, AnalysisHingeModel::Other);
-                    assert!(view.mn_surface.is_none());
-                    assert!(view
-                        .unavailability_reason
-                        .as_ref()
-                        .unwrap()
-                        .contains("壁上下の剛梁は弾性高剛性部材"));
-                } else {
-                    assert_eq!(
-                        view.model,
-                        if representation == ElementKind::Fiber {
-                            AnalysisHingeModel::Fiber
-                        } else {
-                            AnalysisHingeModel::MultiSpring
-                        }
-                    );
-                    assert!(view.mn_surface.is_some());
-                    assert!(view.unavailability_reason.is_none());
-                }
+    fn stale_girder_cache_tracks_elastic_wall_role_and_return_to_fiber() {
+        let (mut input, _) = wall_side_column_view_model();
+        input.elements[0].kind = ElementKind::Fiber;
+        let expanded = sepika_core::wall_expand::expand_wall_elements(&input).0;
+        let staleness = Staleness {
+            results_stale: true,
+            last_run: Some(SystemTime::UNIX_EPOCH),
+            ..Default::default()
+        };
+        let generation = (staleness.last_run, staleness.results_stale);
+        let mut cache = None;
+        let mut initial_key = None;
+        for (model, elastic) in [(&input, false), (&expanded, true), (&input, false)] {
+            let data = model
+                .elements
+                .iter()
+                .find(|element| element.id == ElemId(0))
+                .unwrap();
+            let key = hinge_view_key(model, data, 0, &staleness);
+            if let Some(initial) = &initial_key {
+                assert_eq!(key == *initial, !elastic);
+            } else {
+                initial_key = Some(key.clone());
+            }
+            ensure_hinge_view(model, &mut cache, key, data, 0.0);
+            let cached = cache.as_ref().unwrap();
+            let view = cached.view.as_ref().unwrap();
+            assert_eq!(cached.key.generation, generation);
+            if elastic {
+                assert_eq!(view.model, AnalysisHingeModel::Other);
+                assert!(view.mn_surface.is_none());
+                assert!(view
+                    .unavailability_reason
+                    .as_ref()
+                    .unwrap()
+                    .contains("壁上下の剛梁は弾性高剛性部材"));
+            } else {
+                assert_eq!(view.model, AnalysisHingeModel::Fiber);
+                assert!(view.mn_surface.is_some());
+                assert!(view.unavailability_reason.is_none());
             }
         }
     }
@@ -3055,20 +3035,6 @@ mod tests {
         .expect("配筋は妥当");
         assert_eq!(fiber_view.model, AnalysisHingeModel::Fiber);
         assert_eq!(mn_display(&fiber_view), MnDisplay::Surface);
-
-        let ms = key_test_elem(ElementKind::MultiSpring, ForceRegime::AxialBendingInteract);
-        let ms_view = build_hinge_view(
-            &ms,
-            &rc,
-            basis,
-            kind,
-            0.0,
-            mn_draw::N_ALPHA,
-            mn_draw::N_BETA,
-        )
-        .expect("配筋は妥当");
-        assert_eq!(ms_view.model, AnalysisHingeModel::MultiSpring);
-        assert_eq!(mn_display(&ms_view), MnDisplay::Surface);
 
         let other = key_test_elem(
             ElementKind::Brace {

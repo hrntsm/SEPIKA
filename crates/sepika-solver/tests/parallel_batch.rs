@@ -297,11 +297,7 @@ fn loaded_frame_and_legacy_brace_cases_remain_independent_in_parallel() {
     use sepika_core::model::LoadCaseKind;
     use sepika_solver::statics::linear::linear_static_once;
     set_parallelism(Parallelism::Threads(2));
-    for frame_kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for frame_kind in [ElementKind::Beam, ElementKind::Fiber] {
         for iterative in [false, true] {
             for fixed in [false, true] {
                 let mut model = static_analysis_model::scalar_model(frame_kind);

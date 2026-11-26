@@ -1412,11 +1412,7 @@ fn beam_736_public_dynamic_entries() {
         linear_time_history_analysis, GroundMotion, NewmarkCfg,
     };
     for with_panel in [false, true] {
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             for g in [80_000.0, f64::MAX] {
                 let mut model = l_frame(with_panel);
                 model.elements[0].kind = kind;
@@ -1525,11 +1521,7 @@ fn beam_736_public_dynamic_entries() {
 
 #[test]
 fn beam_736_preparation_and_nonlinear_entries_return_stiffness_diagnostics() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for g in [80_000.0, f64::MAX] {
             let mut model = l_frame(false);
             model.elements[0].kind = kind;
@@ -1642,11 +1634,7 @@ fn public_nonlinear_time_history_accepts_two_sided_panels_and_rejects_one_sided_
 #[test]
 fn eccentric_panel_flange_applicability_uses_actual_end_heights_without_extending_staggered_scope()
 {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for reverse in [[false, false], [true, false], [false, true], [true, true]] {
             let mut baseline = l_frame(false);
             baseline

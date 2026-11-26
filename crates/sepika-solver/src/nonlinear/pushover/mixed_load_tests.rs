@@ -90,269 +90,267 @@ fn close(actual: f64, expected: f64) {
 
 #[test]
 fn mixed_gravity_and_confirmed_pushover_keep_all_member_load_paths_consistent() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let model = mixed_model(kind);
-        let map = DofMap::build(&model);
-        let reducer = Reducer::build(&model, &map);
-        let mut reference = model.clone();
-        reference.load_cases[0].member.clear();
-        let capacities = crate::nonlinear::wall_reference::resolve(
-            &reference,
-            true,
-            StrengthBasis::MaterialStrength,
-        )
-        .unwrap();
-        let mut behaviors: Vec<_> = model
-            .elements
-            .iter()
-            .map(|elem| {
-                build_nonlinear_behavior(
-                    elem,
-                    &model,
-                    StrengthBasis::MaterialStrength,
-                    sepika_core::model::AnalysisKind::Incremental,
-                    capacities
-                        .iter()
-                        .find(|(id, _)| *id == elem.id)
-                        .map(|(_, q)| *q),
-                )
-            })
-            .collect();
-        assert!(behaviors[3].owns_frame_member_loads());
-        assert!(behaviors[5].owns_frame_member_loads());
-        assert!(behaviors[6].owns_frame_member_loads());
-        let (rhs, loads) =
-            prepare_nonlinear_loads(&model, &map, &behaviors, &model.load_cases[0]).unwrap();
-        let active = map.active(6 * 6).unwrap() as usize;
-        close(rhs[active], 0.);
-        let mut displacement = vec![0.; map.n_active()];
-        let mut solver = SolverState::new(map.n_active(), reducer.n_indep);
-        apply_initial_load(
-            &model,
-            &map,
-            &reducer,
-            &mut behaviors,
-            &rhs,
-            &loads,
-            &mut displacement,
-            &mut solver,
-        )
-        .unwrap();
-        close(displacement[active], 1e6 / (205000. * 10000.));
-        let responses = super::super::geom::member_recording_responses(&model, &behaviors).unwrap();
-        let ordinary = responses[5].as_ref().unwrap();
-        close(ordinary.physical_frame_end_force_global[1], -3000.);
-        close(ordinary.physical_frame_end_force_global[7], -3000.);
-        close(ordinary.physical_frame_end_force_global[5], -3e6);
-        close(ordinary.physical_frame_end_force_global[11], 3e6);
-        close(ordinary.section.at(0.5).unwrap()[5], -1.5e6);
-        close(
-            ordinary.physical_frame_end_force_global[1]
-                + ordinary.physical_frame_end_force_global[7]
-                + 6000.,
-            0.,
-        );
-        close(
-            ordinary.physical_frame_end_force_global[5]
-                + ordinary.physical_frame_end_force_global[11]
-                + 6000. * ordinary.physical_frame_end_force_global[7]
-                + 18e6,
-            0.,
-        );
-        let wall = responses[3].as_ref().unwrap();
-        close(wall.physical_frame_end_force_global[0], -1500.);
-        close(wall.physical_frame_end_force_global[6], -1500.);
-        close(wall.physical_frame_end_force_global[4], 0.);
-        close(wall.physical_frame_end_force_global[10], 0.);
-        close(wall.section.at(0.5).unwrap()[5].abs(), 1.125e6);
-        let legacy = behaviors[6].internal_force(&Ctx { model: &model });
-        close(legacy.data[0], -2000.);
-        close(legacy.data[6], 0.);
-        let legacy_support_reaction = legacy.data[0];
-        close(legacy_support_reaction + 2000., 0.);
-        let applied = responses[6]
-            .as_ref()
-            .unwrap()
-            .section
-            .applied_nodal_forces_global();
-        close(applied[0][0] * 0.1 + applied[1][0] * -0.3, -200.);
-        close(
-            responses[6].as_ref().unwrap().section.at(0.5).unwrap()[0],
-            1000.,
-        );
-        let reduced_internal = reducer.reduce_f(&compute_f_int(&model, &map, &behaviors));
-        for (actual, expected) in reduced_internal.into_iter().zip(reducer.reduce_f(&rhs)) {
-            close(actual, expected);
-        }
-        let heights = super::super::response::story_heights(&model);
-        let mut recorder = super::super::step_record::StepRecorder::new(
-            &model,
-            &map,
-            SeismicDir::X,
-            &heights,
-            DuctilityMethod::default(),
-            crate::nonlinear::pushover::shear_yield::build_shear_yield_thresholds(&model),
-            super::super::loads::PhysicalPushoverLoads::empty(),
-        );
-        recorder.constant_external = rhs;
-        recorder.reference_external = vec![0.; map.n_active()];
-        recorder.physical_loads = super::super::loads::PhysicalPushoverLoads::new(
-            &model,
-            &[(model.load_cases[0].id, 1.)],
-            super::super::loads::PhysicalPushoverLoads::empty().reference,
-        )
-        .unwrap();
-        recorder
-            .record(0., &model, &map, &behaviors, &displacement)
-            .unwrap();
-        let recorded = recorder.finish();
-        close(recorded.member_history_steps[0][5].mz_i.abs() as f64, 3e6);
-        close(recorded.member_history_steps[0][5].mz_j.abs() as f64, 3e6);
-        close(recorded.member_history_steps[0][3].mz_i.abs() as f64, 0.);
-        close(recorded.member_history_steps[0][3].mz_j.abs() as f64, 0.);
-        close(recorded.member_history_steps[0][6].n as f64, -2000.);
-        let error = pushover_analysis(&model, &map, &reducer, SeismicDir::X, 1, 0.).unwrap_err();
-        assert!(
-            error.contains("壁 ID 0")
-                && error.contains("部材 ID 3")
-                && error.contains("部材荷重は未対応"),
-            "{error}"
-        );
-        let mut axial_model = model.clone();
-        axial_model.load_cases[0].member[0].dir = [0., 0., -1.];
-        axial_model.load_cases[0].member[0].kind = MemberLoadKind::Distributed {
-            a: 0.,
-            b: 3000.,
-            w1: 0.001,
-            w2: 0.001,
-        };
-        for node in &mut axial_model.nodes[2..4] {
-            node.restraint = Dof6Mask(0b111100);
-        }
-        let axial_map = DofMap::build(&axial_model);
-        let axial_reducer = Reducer::build(&axial_model, &axial_map);
-        let result = pushover_analysis(
-            &axial_model,
-            &axial_map,
-            &axial_reducer,
-            SeismicDir::X,
-            1,
-            0.,
-        )
-        .unwrap();
-        assert_eq!(result.steps[0].load_factor, 0.);
-        let owner = result
-            .member_response
-            .iter()
-            .find(|r| r.elem == ElemId(5))
-            .unwrap();
-        close(owner.m_strong, 3e6);
-        close(owner.shear_strong, 3000.);
-        let wall = result
-            .member_response
-            .iter()
-            .find(|r| r.elem == ElemId(3))
-            .unwrap();
-        close(wall.axial, 1.5);
-        close(wall.shear_strong, 0.);
-        let legacy = result
-            .member_response
-            .iter()
-            .find(|r| r.elem == ElemId(6))
-            .unwrap();
-        close(legacy.m_strong, 0.);
-        close(legacy.shear_strong, 0.);
+    let kind = ElementKind::Fiber;
+    let model = mixed_model(kind);
+    let map = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &map);
+    let mut reference = model.clone();
+    reference.load_cases[0].member.clear();
+    let capacities = crate::nonlinear::wall_reference::resolve(
+        &reference,
+        true,
+        StrengthBasis::MaterialStrength,
+    )
+    .unwrap();
+    let mut behaviors: Vec<_> = model
+        .elements
+        .iter()
+        .map(|elem| {
+            build_nonlinear_behavior(
+                elem,
+                &model,
+                StrengthBasis::MaterialStrength,
+                sepika_core::model::AnalysisKind::Incremental,
+                capacities
+                    .iter()
+                    .find(|(id, _)| *id == elem.id)
+                    .map(|(_, q)| *q),
+            )
+        })
+        .collect();
+    assert!(behaviors[3].owns_frame_member_loads());
+    assert!(behaviors[5].owns_frame_member_loads());
+    assert!(behaviors[6].owns_frame_member_loads());
+    let (rhs, loads) =
+        prepare_nonlinear_loads(&model, &map, &behaviors, &model.load_cases[0]).unwrap();
+    let active = map.active(6 * 6).unwrap() as usize;
+    close(rhs[active], 0.);
+    let mut displacement = vec![0.; map.n_active()];
+    let mut solver = SolverState::new(map.n_active(), reducer.n_indep);
+    apply_initial_load(
+        &model,
+        &map,
+        &reducer,
+        &mut behaviors,
+        &rhs,
+        &loads,
+        &mut displacement,
+        &mut solver,
+    )
+    .unwrap();
+    close(displacement[active], 1e6 / (205000. * 10000.));
+    let responses = super::super::geom::member_recording_responses(&model, &behaviors).unwrap();
+    let ordinary = responses[5].as_ref().unwrap();
+    close(ordinary.physical_frame_end_force_global[1], -3000.);
+    close(ordinary.physical_frame_end_force_global[7], -3000.);
+    close(ordinary.physical_frame_end_force_global[5], -3e6);
+    close(ordinary.physical_frame_end_force_global[11], 3e6);
+    close(ordinary.section.at(0.5).unwrap()[5], -1.5e6);
+    close(
+        ordinary.physical_frame_end_force_global[1]
+            + ordinary.physical_frame_end_force_global[7]
+            + 6000.,
+        0.,
+    );
+    close(
+        ordinary.physical_frame_end_force_global[5]
+            + ordinary.physical_frame_end_force_global[11]
+            + 6000. * ordinary.physical_frame_end_force_global[7]
+            + 18e6,
+        0.,
+    );
+    let wall = responses[3].as_ref().unwrap();
+    close(wall.physical_frame_end_force_global[0], -1500.);
+    close(wall.physical_frame_end_force_global[6], -1500.);
+    close(wall.physical_frame_end_force_global[4], 0.);
+    close(wall.physical_frame_end_force_global[10], 0.);
+    close(wall.section.at(0.5).unwrap()[5].abs(), 1.125e6);
+    let legacy = behaviors[6].internal_force(&Ctx { model: &model });
+    close(legacy.data[0], -2000.);
+    close(legacy.data[6], 0.);
+    let legacy_support_reaction = legacy.data[0];
+    close(legacy_support_reaction + 2000., 0.);
+    let applied = responses[6]
+        .as_ref()
+        .unwrap()
+        .section
+        .applied_nodal_forces_global();
+    close(applied[0][0] * 0.1 + applied[1][0] * -0.3, -200.);
+    close(
+        responses[6].as_ref().unwrap().section.at(0.5).unwrap()[0],
+        1000.,
+    );
+    let reduced_internal = reducer.reduce_f(&compute_f_int(&model, &map, &behaviors));
+    for (actual, expected) in reduced_internal.into_iter().zip(reducer.reduce_f(&rhs)) {
+        close(actual, expected);
     }
+    let heights = super::super::response::story_heights(&model);
+    let mut recorder = super::super::step_record::StepRecorder::new(
+        &model,
+        &map,
+        SeismicDir::X,
+        &heights,
+        DuctilityMethod::default(),
+        crate::nonlinear::pushover::shear_yield::build_shear_yield_thresholds(&model),
+        super::super::loads::PhysicalPushoverLoads::empty(),
+    );
+    recorder.constant_external = rhs;
+    recorder.reference_external = vec![0.; map.n_active()];
+    recorder.physical_loads = super::super::loads::PhysicalPushoverLoads::new(
+        &model,
+        &[(model.load_cases[0].id, 1.)],
+        super::super::loads::PhysicalPushoverLoads::empty().reference,
+    )
+    .unwrap();
+    recorder
+        .record(0., &model, &map, &behaviors, &displacement)
+        .unwrap();
+    let recorded = recorder.finish();
+    close(recorded.member_history_steps[0][5].mz_i.abs() as f64, 3e6);
+    close(recorded.member_history_steps[0][5].mz_j.abs() as f64, 3e6);
+    close(recorded.member_history_steps[0][3].mz_i.abs() as f64, 0.);
+    close(recorded.member_history_steps[0][3].mz_j.abs() as f64, 0.);
+    close(recorded.member_history_steps[0][6].n as f64, -2000.);
+    let error = pushover_analysis(&model, &map, &reducer, SeismicDir::X, 1, 0.).unwrap_err();
+    assert!(
+        error.contains("壁 ID 0")
+            && error.contains("部材 ID 3")
+            && error.contains("部材荷重は未対応"),
+        "{error}"
+    );
+    let mut axial_model = model.clone();
+    axial_model.load_cases[0].member[0].dir = [0., 0., -1.];
+    axial_model.load_cases[0].member[0].kind = MemberLoadKind::Distributed {
+        a: 0.,
+        b: 3000.,
+        w1: 0.001,
+        w2: 0.001,
+    };
+    for node in &mut axial_model.nodes[2..4] {
+        node.restraint = Dof6Mask(0b111100);
+    }
+    let axial_map = DofMap::build(&axial_model);
+    let axial_reducer = Reducer::build(&axial_model, &axial_map);
+    let result = pushover_analysis(
+        &axial_model,
+        &axial_map,
+        &axial_reducer,
+        SeismicDir::X,
+        1,
+        0.,
+    )
+    .unwrap();
+    assert_eq!(result.steps[0].load_factor, 0.);
+    let owner = result
+        .member_response
+        .iter()
+        .find(|r| r.elem == ElemId(5))
+        .unwrap();
+    close(owner.m_strong, 3e6);
+    close(owner.shear_strong, 3000.);
+    let wall = result
+        .member_response
+        .iter()
+        .find(|r| r.elem == ElemId(3))
+        .unwrap();
+    close(wall.axial, 1.5);
+    close(wall.shear_strong, 0.);
+    let legacy = result
+        .member_response
+        .iter()
+        .find(|r| r.elem == ElemId(6))
+        .unwrap();
+    close(legacy.m_strong, 0.);
+    close(legacy.shear_strong, 0.);
 }
 
 #[test]
 fn fixed_member_full_initial_load_matches_one_committed_trial_and_restores_on_failure() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut model = super::super::tests::single_column_model(1e10, 0.);
-        model.elements[0].kind = kind;
-        for node in &mut model.nodes {
-            node.restraint = Dof6Mask::FIXED;
-        }
-        let map = DofMap::build(&model);
-        let reducer = Reducer::build(&model, &map);
-        let build = |model: &Model, elem: &sepika_core::model::ElementData| {
-            build_nonlinear_behavior(
-                elem,
-                model,
-                StrengthBasis::MaterialStrength,
-                sepika_core::model::AnalysisKind::Incremental,
-                None,
-            )
-        };
-        let mut actual = vec![build(&model, &model.elements[0])];
-        let mut expected = vec![build(&model, &model.elements[0])];
-        let load = MemberLoad::manual(
-            model.elements[0].id,
-            [1., 0., 0.],
-            MemberLoadKind::Distributed {
-                a: 0.,
-                b: 3000.,
-                w1: 2.,
-                w2: 2.,
-            },
-        );
-        let loads = vec![vec![load.clone()]];
-        apply_du_trial_with_member_loads(&model, &map, &mut expected, &[], &loads).unwrap();
-        expected[0].commit_state();
-        let mut solver = SolverState::new(0, 0);
-        apply_initial_load(
-            &model,
-            &map,
-            &reducer,
-            &mut actual,
-            &[],
-            &loads,
-            &mut [],
-            &mut solver,
-        )
-        .unwrap();
-        assert_eq!(
-            actual[0].serialize_checkpoint(),
-            expected[0].serialize_checkpoint()
-        );
-        let response = actual[0].state_frame_load_response().unwrap().unwrap();
-        close(response.physical_frame_end_force_global[0], -3000.);
-        close(response.physical_frame_end_force_global[6], -3000.);
-
-        let mut duplicate = model.elements[0].clone();
-        duplicate.id = ElemId(1);
-        model.elements.push(duplicate.clone());
-        actual.push(build(&model, &duplicate));
-        let before: Vec<_> = actual.iter().map(|b| b.serialize_checkpoint()).collect();
-        let mut invalid = load.clone();
-        invalid.elem = ElemId(1);
-        if let MemberLoadKind::Distributed { w1, w2, .. } = &mut invalid.kind {
-            *w1 = f64::MAX;
-            *w2 = f64::MAX;
-        }
-        let error = apply_initial_load(
-            &model,
-            &map,
-            &reducer,
-            &mut actual,
-            &[],
-            &[vec![load], vec![invalid]],
-            &mut [],
-            &mut solver,
-        )
-        .unwrap_err();
-        assert!(
-            error.contains("長期荷重の初期載荷") && error.contains("1"),
-            "{error}"
-        );
-        assert_eq!(
-            actual
-                .iter()
-                .map(|b| b.serialize_checkpoint())
-                .collect::<Vec<_>>(),
-            before
-        );
+    let kind = ElementKind::Fiber;
+    let mut model = super::super::tests::single_column_model(1e10, 0.);
+    model.elements[0].kind = kind;
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask::FIXED;
     }
+    let map = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &map);
+    let build = |model: &Model, elem: &sepika_core::model::ElementData| {
+        build_nonlinear_behavior(
+            elem,
+            model,
+            StrengthBasis::MaterialStrength,
+            sepika_core::model::AnalysisKind::Incremental,
+            None,
+        )
+    };
+    let mut actual = vec![build(&model, &model.elements[0])];
+    let mut expected = vec![build(&model, &model.elements[0])];
+    let load = MemberLoad::manual(
+        model.elements[0].id,
+        [1., 0., 0.],
+        MemberLoadKind::Distributed {
+            a: 0.,
+            b: 3000.,
+            w1: 2.,
+            w2: 2.,
+        },
+    );
+    let loads = vec![vec![load.clone()]];
+    apply_du_trial_with_member_loads(&model, &map, &mut expected, &[], &loads).unwrap();
+    expected[0].commit_state();
+    let mut solver = SolverState::new(0, 0);
+    apply_initial_load(
+        &model,
+        &map,
+        &reducer,
+        &mut actual,
+        &[],
+        &loads,
+        &mut [],
+        &mut solver,
+    )
+    .unwrap();
+    assert_eq!(
+        actual[0].serialize_checkpoint(),
+        expected[0].serialize_checkpoint()
+    );
+    let response = actual[0].state_frame_load_response().unwrap().unwrap();
+    close(response.physical_frame_end_force_global[0], -3000.);
+    close(response.physical_frame_end_force_global[6], -3000.);
+
+    let mut duplicate = model.elements[0].clone();
+    duplicate.id = ElemId(1);
+    model.elements.push(duplicate.clone());
+    actual.push(build(&model, &duplicate));
+    let before: Vec<_> = actual.iter().map(|b| b.serialize_checkpoint()).collect();
+    let mut invalid = load.clone();
+    invalid.elem = ElemId(1);
+    if let MemberLoadKind::Distributed { w1, w2, .. } = &mut invalid.kind {
+        *w1 = f64::MAX;
+        *w2 = f64::MAX;
+    }
+    let error = apply_initial_load(
+        &model,
+        &map,
+        &reducer,
+        &mut actual,
+        &[],
+        &[vec![load], vec![invalid]],
+        &mut [],
+        &mut solver,
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("長期荷重の初期載荷") && error.contains("1"),
+        "{error}"
+    );
+    assert_eq!(
+        actual
+            .iter()
+            .map(|b| b.serialize_checkpoint())
+            .collect::<Vec<_>>(),
+        before
+    );
 }
 
 #[test]

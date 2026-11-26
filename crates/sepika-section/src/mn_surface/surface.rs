@@ -1,4 +1,4 @@
-//! 支持点法による M-N 相関曲面の構築（マルチスプリング/マルチファイバー/単純降伏バネ）。
+//! 支持点法による M-N 相関曲面の構築（マルチファイバー/単純降伏バネ）。
 
 use super::plastic::{axial_capacity, plastic_moment_at_n, plastic_point};
 use super::types::{PlasticFiber, YieldModelKind};

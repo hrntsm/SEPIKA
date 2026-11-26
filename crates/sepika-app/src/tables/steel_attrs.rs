@@ -2,7 +2,7 @@
 //! 継手フランジ／ウェブ欠損率・スカラップ欠損率、横座屈長さ lb の直接入力、
 //! 等間隔横補剛本数、座屈長さ lk_y/lk_z の直接入力、横座屈修正係数 C の
 //! 直接入力）の編集 UI。
-//! 対象は `ElementKind::Beam` の部材と、`Fiber`・`MultiSpring` の SRC柱・CFT柱・一般H形鋼柱。
+//! 対象は `ElementKind::Beam` の部材と、`Fiber` の SRC柱・CFT柱・一般H形鋼柱。
 //! 編集は `sepika_edit::{SetSteelDesignAttr, RemoveSteelDesignAttr}` 経由
 //! （undo 対応）。空（すべて既定値）を適用した場合は削除として扱う
 //! （[`SteelDesignAttr::is_empty`]）。
@@ -213,7 +213,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
         .iter()
         .filter(|e| match e.kind {
             ElementKind::Beam | ElementKind::Brace { .. } => true,
-            ElementKind::Fiber | ElementKind::MultiSpring => {
+            ElementKind::Fiber => {
                 is_symmetric_h_column(model, e) || model.element_section(e).is_some_and(|sec| {
                     sec.frame_use == Some(FrameSectionUse::Column)
                         && (sec.is_cft()
@@ -653,11 +653,7 @@ mod tests {
     #[test]
     fn general_h_column_support_confirmation_is_saved_and_invalidates_prior_design() {
         const CONFIRM: &str = "柱の両実材端で横移動・ねじれを拘束し、中間横補剛なし";
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut model = crate::sample::portal_frame();
             model.elements[0].kind = kind;
             let mut app = App::default();
@@ -778,84 +774,83 @@ mod tests {
     }
 
     #[test]
-    fn cft_column_fiber_and_multi_spring_edit_and_save_both_axes_at_full_precision() {
+    fn cft_column_fiber_edit_and_save_both_axes_at_full_precision() {
         use crate::app::cft_column_buckling_tests::input;
 
-        for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-            let mut model = input::cantilever(false, 1000.0);
-            model.elements[0].kind = kind;
-            let mut app = App::default();
-            assert!(app.load_model(model));
-            let ctx = egui::Context::default();
-            click_text(&ctx, &mut app, "―");
-            click_text(&ctx, &mut app, "部材#0");
-            type_field(&ctx, &mut app, "steel_attr_lk_y", "4799.9");
-            type_field(&ctx, &mut app, "steel_attr_lk_z", "4800.1");
-            click_text(&ctx, &mut app, "✔ 適用");
-            let attr = input::direct_lengths(ElemId(0), Some(4799.9), Some(4800.1));
-            let expected = std::slice::from_ref(&attr);
-            assert_eq!(app.core.model.steel_design_attrs.as_slice(), expected);
+        let kind = ElementKind::Fiber;
+        let mut model = input::cantilever(false, 1000.0);
+        model.elements[0].kind = kind;
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        let ctx = egui::Context::default();
+        click_text(&ctx, &mut app, "―");
+        click_text(&ctx, &mut app, "部材#0");
+        type_field(&ctx, &mut app, "steel_attr_lk_y", "4799.9");
+        type_field(&ctx, &mut app, "steel_attr_lk_z", "4800.1");
+        click_text(&ctx, &mut app, "✔ 適用");
+        let attr = input::direct_lengths(ElemId(0), Some(4799.9), Some(4800.1));
+        let expected = std::slice::from_ref(&attr);
+        assert_eq!(app.core.model.steel_design_attrs.as_slice(), expected);
 
-            let path =
-                std::env::temp_dir().join(format!("sepika-cft-lk-{}.ovika", uuid::Uuid::new_v4()));
-            let reload = |app: &mut App| {
-                app.save_project_to(path.clone());
-                assert!(
-                    app.core.scoped.last_error.is_none(),
-                    "{:?}",
-                    app.core.scoped.last_error
-                );
-                let mut reopened = App::default();
-                reopened.open_project_from(path.clone());
-                assert!(
-                    reopened.core.scoped.last_error.is_none(),
-                    "{:?}",
-                    reopened.core.scoped.last_error
-                );
-                assert_eq!(reopened.core.model.elements[0].kind, kind);
-                reopened
-            };
-            let mut app = reload(&mut app);
-            assert_eq!(app.core.model.steel_design_attrs.as_slice(), expected);
-            let ctx = egui::Context::default();
-            click_text(&ctx, &mut app, "✏");
-            assert_eq!(app.ui.scoped.steel_attr_draft.lk_y_direct, "4799.9");
-            assert_eq!(app.ui.scoped.steel_attr_draft.lk_z_direct, "4800.1");
+        let path =
+            std::env::temp_dir().join(format!("sepika-cft-lk-{}.ovika", uuid::Uuid::new_v4()));
+        let reload = |app: &mut App| {
+            app.save_project_to(path.clone());
+            assert!(
+                app.core.scoped.last_error.is_none(),
+                "{:?}",
+                app.core.scoped.last_error
+            );
+            let mut reopened = App::default();
+            reopened.open_project_from(path.clone());
+            assert!(
+                reopened.core.scoped.last_error.is_none(),
+                "{:?}",
+                reopened.core.scoped.last_error
+            );
+            assert_eq!(reopened.core.model.elements[0].kind, kind);
+            reopened
+        };
+        let mut app = reload(&mut app);
+        assert_eq!(app.core.model.steel_design_attrs.as_slice(), expected);
+        let ctx = egui::Context::default();
+        click_text(&ctx, &mut app, "✏");
+        assert_eq!(app.ui.scoped.steel_attr_draft.lk_y_direct, "4799.9");
+        assert_eq!(app.ui.scoped.steel_attr_draft.lk_z_direct, "4800.1");
+        assert!(draw(&ctx, &mut app, vec![]).shapes.iter().any(|s| {
+            matches!(&s.shape, egui::Shape::Text(text)
+                if text.galley.text().contains("lk_y=4799.9 lk_z=4800.1"))
+        }));
+
+        let revision = app.core.scoped.undo.revision();
+        for (field, axis, value) in [
+            ("steel_attr_lk_y", "lk_y", "NaN"),
+            ("steel_attr_lk_z", "lk_z", "inf"),
+        ] {
+            type_field(&ctx, &mut app, field, value);
+            let reason = format!("{axis}の入力エラー: {axis}は有限な正の値");
             assert!(draw(&ctx, &mut app, vec![]).shapes.iter().any(|s| {
                 matches!(&s.shape, egui::Shape::Text(text)
-                    if text.galley.text().contains("lk_y=4799.9 lk_z=4800.1"))
+                    if text.galley.text().contains(&reason))
             }));
-
-            let revision = app.core.scoped.undo.revision();
-            for (field, axis, value) in [
-                ("steel_attr_lk_y", "lk_y", "NaN"),
-                ("steel_attr_lk_z", "lk_z", "inf"),
-            ] {
-                type_field(&ctx, &mut app, field, value);
-                let reason = format!("{axis}の入力エラー: {axis}は有限な正の値");
-                assert!(draw(&ctx, &mut app, vec![]).shapes.iter().any(|s| {
-                    matches!(&s.shape, egui::Shape::Text(text)
-                        if text.galley.text().contains(&reason))
-                }));
-                click_text(&ctx, &mut app, "✔ 適用");
-                assert_eq!(app.core.scoped.undo.revision(), revision);
-                assert_eq!(app.core.model.steel_design_attrs.as_slice(), expected);
-                click_text(&ctx, &mut app, "✏");
-            }
-
-            type_field(&ctx, &mut app, "steel_attr_lk_y", "5000.25");
             click_text(&ctx, &mut app, "✔ 適用");
-            let app = reload(&mut app);
-            assert_eq!(
-                app.core.model.steel_design_attrs,
-                [input::direct_lengths(
-                    ElemId(0),
-                    Some(5000.25),
-                    Some(4800.1)
-                )]
-            );
-            std::fs::remove_file(path).unwrap();
+            assert_eq!(app.core.scoped.undo.revision(), revision);
+            assert_eq!(app.core.model.steel_design_attrs.as_slice(), expected);
+            click_text(&ctx, &mut app, "✏");
         }
+
+        type_field(&ctx, &mut app, "steel_attr_lk_y", "5000.25");
+        click_text(&ctx, &mut app, "✔ 適用");
+        let app = reload(&mut app);
+        assert_eq!(
+            app.core.model.steel_design_attrs,
+            [input::direct_lengths(
+                ElemId(0),
+                Some(5000.25),
+                Some(4800.1)
+            )]
+        );
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

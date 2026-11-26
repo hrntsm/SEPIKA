@@ -126,11 +126,7 @@ fn qd1_terminal_column_uses_full_head_girder_moment() {
 
 #[test]
 fn qd1_continuous_column_uses_half_head_girder_moment() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = yielding_head_model();
         model.elements[COLUMN.index()].nodes.swap(0, 1);
         fixture::add_column_above(&mut model, NodeId(1), kind);
@@ -1282,8 +1278,8 @@ fn qd1_counts_both_opposing_girders_for_all_elastic_representations() {
     for (positive, negative) in [
         (ElementKind::Beam, ElementKind::Beam),
         (ElementKind::Fiber, ElementKind::Beam),
-        (ElementKind::Beam, ElementKind::MultiSpring),
-        (ElementKind::MultiSpring, ElementKind::Fiber),
+        (ElementKind::Beam, ElementKind::Fiber),
+        (ElementKind::Fiber, ElementKind::Fiber),
     ] {
         let mut model =
             fixture::column_with_opposing_head_girders(column::column_model(false, 0.0), negative);
@@ -1433,11 +1429,7 @@ fn qd1_short_column_with_pinned_girder_fails_while_rigid_connection_passes() {
 #[test]
 fn qd1_uses_only_opposing_girders_that_transfer_bending_at_the_column() {
     use reference::{BOTH_COLUMN_ENDS_QD1_N, ONE_GIRDER_QD1_N, TWO_GIRDER_QD1_N};
-    let kinds = [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ];
+    let kinds = [ElementKind::Beam, ElementKind::Fiber];
     for (positive, negative) in kinds.into_iter().zip(kinds.into_iter().cycle().skip(1)) {
         let mut model =
             fixture::column_with_opposing_head_girders(column::column_model(false, 0.0), negative);
@@ -1497,12 +1489,12 @@ fn qd1_accounts_for_the_analytical_rigid_zone_at_the_connected_end() {
     use reference::{BOTH_COLUMN_ENDS_QD1_N, ONE_GIRDER_QD1_N, TWO_GIRDER_QD1_N};
     let mut model = fixture::column_with_opposing_head_girders(
         column::column_model(false, 0.0),
-        ElementKind::MultiSpring,
+        ElementKind::Fiber,
     );
     for (kind, id, end) in [
         (ElementKind::Beam, fixture::GIRDER, 0),
         (ElementKind::Fiber, fixture::GIRDER, 0),
-        (ElementKind::MultiSpring, ElemId(3), 1),
+        (ElementKind::Fiber, ElemId(3), 1),
     ] {
         for (condition, lengths_mm, enabled, expected) in [
             (EndCondition::Fixed, [100.0, 0.0], true, TWO_GIRDER_QD1_N),
@@ -1544,7 +1536,7 @@ fn qd1_accounts_for_rigid_arm_moment_beyond_the_plan_direction_of_a_girder() {
 
     let mut model = fixture::column_with_opposing_head_girders(
         column::column_model(false, 0.0),
-        ElementKind::MultiSpring,
+        ElementKind::Fiber,
     );
     let girder = fixture::GIRDER.index();
     let far = model.elements[girder].nodes[1].index();
@@ -1580,7 +1572,7 @@ fn qd1_accounts_for_rigid_arm_moment_beyond_the_plan_direction_of_a_girder() {
 fn qd1_keeps_the_orthogonal_girder_only_for_an_exactly_parallel_rigid_arm() {
     let mut model = fixture::column_with_opposing_head_girders(
         column::column_model(false, 0.0),
-        ElementKind::MultiSpring,
+        ElementKind::Fiber,
     );
     model.elements[COLUMN.index()].local_axis.ref_vector = [3500.0, 2300.0, 0.0];
     model.nodes[3].coord[..2].copy_from_slice(&[-2300.0, 3500.0]);
@@ -1634,7 +1626,7 @@ fn qd1_uses_both_column_ends_for_an_inclined_column_with_a_pinned_girder_and_rig
 
     let mut model = fixture::column_with_opposing_head_girders(
         column::column_model(false, 0.0),
-        ElementKind::MultiSpring,
+        ElementKind::Fiber,
     );
     model.elements[COLUMN.index()].local_axis.ref_vector = [3500.0, 2300.0, 0.0];
     model.nodes[0].coord = [-1000.0, 0.0, -3000.0];
@@ -1670,7 +1662,7 @@ fn qd1_uses_both_column_ends_for_an_inclined_column_with_a_pinned_girder_and_rig
 fn qd1_uses_column_ends_when_xyz_offsets_make_the_girder_mechanism_uncertain() {
     let mut model = fixture::column_with_opposing_head_girders(
         column::column_model(false, 0.0),
-        ElementKind::MultiSpring,
+        ElementKind::Fiber,
     );
     let i = fixture::GIRDER.index();
     for (condition, offsets, expected_strong, expected_weak) in [
@@ -1770,11 +1762,7 @@ fn pinned_flexible_end_can_transfer_nodal_moment_through_a_rigid_arm_or_xyz_offs
 
 #[test]
 fn qd1_uses_both_column_ends_if_an_opposing_girder_lacks_yield_strength() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model =
             fixture::column_with_opposing_head_girders(column::column_model(false, 0.0), kind);
         fixture::remove_opposite_girder_yield_strength(&mut model);
@@ -1786,28 +1774,27 @@ fn qd1_uses_both_column_ends_if_an_opposing_girder_lacks_yield_strength() {
 
 #[test]
 fn qd1_uses_both_column_ends_only_in_the_direction_of_unclassified_frame_members() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        for (unclassified, expected_qd1_n) in [
-            (ElemId(3), reference::BOTH_COLUMN_ENDS_QD1_N),
-            (ElemId(2), reference::TWO_GIRDER_QD1_N),
-        ] {
-            let mut model = fixture::column_with_opposing_head_girders(
-                column::column_model(false, 0.0),
-                ElementKind::Beam,
-            );
-            let mut section = model.sections[GIRDER_SECTION.index()].clone();
-            section.id = SectionId(2);
-            section.name = "断面用途未設定の汎用断面".into();
-            section.shape = None;
-            section.property_basis = Default::default();
-            section.frame_use = None;
-            let member = &mut model.elements[unclassified.index()];
-            member.kind = kind;
-            member.section = Some(section.id);
-            model.sections.push(section);
+    let kind = ElementKind::Fiber;
+    for (unclassified, expected_qd1_n) in [
+        (ElemId(3), reference::BOTH_COLUMN_ENDS_QD1_N),
+        (ElemId(2), reference::TWO_GIRDER_QD1_N),
+    ] {
+        let mut model = fixture::column_with_opposing_head_girders(
+            column::column_model(false, 0.0),
+            ElementKind::Beam,
+        );
+        let mut section = model.sections[GIRDER_SECTION.index()].clone();
+        section.id = SectionId(2);
+        section.name = "断面用途未設定の汎用断面".into();
+        section.shape = None;
+        section.property_basis = Default::default();
+        section.frame_use = None;
+        let member = &mut model.elements[unclassified.index()];
+        member.kind = kind;
+        member.section = Some(section.id);
+        model.sections.push(section);
 
-            assert_analyzed_column_qd1(model, expected_qd1_n, false);
-        }
+        assert_analyzed_column_qd1(model, expected_qd1_n, false);
     }
 }
 
@@ -1937,7 +1924,7 @@ fn invalid_girder_rebar_category_blocks_only_its_assigned_column_shear_direction
     for (kind, girder_xy, axis) in [
         (ElementKind::Beam, [4000.0, 0.0], "Qy"),
         (ElementKind::Fiber, [0.0, 4000.0], "Qz"),
-        (ElementKind::MultiSpring, [-4000.0, 0.0], "Qy"),
+        (ElementKind::Beam, [-4000.0, 0.0], "Qy"),
     ] {
         let mut model = fixture::column_with_girder(column::column_model(false, 0.0));
         model.elements[fixture::GIRDER.index()].kind = kind;
@@ -1989,7 +1976,7 @@ fn invalid_girder_rebar_category_blocks_only_its_assigned_column_shear_direction
 fn a_pinned_girder_needs_no_yield_strength_and_keeps_other_girder_diagnostics() {
     let mut model = fixture::column_with_opposing_head_girders(
         column::column_model(false, 0.0),
-        ElementKind::MultiSpring,
+        ElementKind::Fiber,
     );
     let opposite = ElemId(3).index();
     fixture::remove_opposite_girder_yield_strength(&mut model);

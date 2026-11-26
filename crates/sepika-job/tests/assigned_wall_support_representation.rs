@@ -229,11 +229,7 @@ fn dl(model: &Model) -> &LoadCase {
 #[test]
 fn assigned_secondary_supported_wall_keeps_slits_boundary_and_upper_reactions_for_each_kind() {
     let reference = bincode::serialize(&fixture(ElementKind::Beam)).unwrap();
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = fixture(kind);
         model.validate().unwrap();
         let mut same_input = model.clone();
@@ -337,11 +333,7 @@ fn assigned_secondary_supported_wall_keeps_slits_boundary_and_upper_reactions_fo
 
 #[test]
 fn assigned_wall_preserves_explicit_dl_modes_and_arbitrary_rates_without_slits() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for (mode, lower_fraction) in [
             (WallDlSupport::LowerBeam, 1.),
             (WallDlSupport::UpperBeam, 0.),
@@ -396,11 +388,7 @@ fn assigned_wall_preserves_explicit_dl_modes_and_arbitrary_rates_without_slits()
 
 #[test]
 fn invalid_wall_assignments_and_slit_selections_are_rejected_without_shape_conversion() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = fixture(kind);
         model.wall_plates[0].slit.beam_face = [true, true];
         assert!(
@@ -483,11 +471,7 @@ fn existing_attached_wall_keeps_its_shape_and_public_solver_still_rejects_isolat
 
 #[test]
 fn wall_to_secondary_beam_transfer_and_mass_ignore_xyz_display_offsets() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut baseline = fixture(kind);
         baseline.stories = [0.0, 3000.0, 6000.0]
             .into_iter()

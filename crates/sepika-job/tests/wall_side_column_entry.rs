@@ -8,11 +8,7 @@ fn time_history_job_preserves_actual_wall_connection_reason_before_damping_eigen
     use sepika_element::factory::ensure_wall_side_column_analysis;
     use sepika_job::{compute::compute_time_history, AnalysisSettings};
     use sepika_solver::dynamic::timehistory::GroundMotion;
-    for representation in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for representation in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = fixture::wall_connection_fixture(representation);
         let expected = ensure_wall_side_column_analysis(
             &model,
@@ -49,11 +45,7 @@ fn linear_time_history_job_preserves_consistent_mass_reason_before_damping_eigen
     use sepika_element::behavior::MassOption;
     use sepika_element::factory::ensure_wall_side_column_analysis;
     use sepika_job::{compute::compute_time_history, AnalysisSettings};
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = fixture::wall_connection_fixture(kind);
         for element in &mut model.elements[..2] {
             element.end_cond = [EndCondition::Fixed, EndCondition::Pinned];
@@ -88,11 +80,7 @@ fn pure_steel_walls_are_rejected_and_unloaded_frames_stay_at_rest() {
     use sepika_core::ids::MaterialId;
     use sepika_core::model::{ElementKind, MassMethod};
     use sepika_job::{compute::compute_time_history, AnalysisSettings};
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for steel_wall in [false, true] {
             let mut model = fixture::wall_connection_fixture(kind);
             model.mass_method = MassMethod::LumpedOnly;

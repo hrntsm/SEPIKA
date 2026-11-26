@@ -1,10 +1,10 @@
 # 壁幾何と側柱の試験整理（Issue #1059）
 
-## 対象と現役の保証
+## 整理時点の対象と保証
 
 基点 `368308878de40a88e1310a33b4a8d340976094f1` のE057–E065を整理した。変更はテスト領域のみで、本番の算式・診断・状態確定と復元・物理力の所有は変更しない。既存のVerification/Validationの状態は引き継ぎ、固定SHAと過去の実行結果は履歴として保持する。
 
-| 保証 | 現役の試験と判定 |
+| 整理時点の保証 | 当時の試験と判定 |
 | --- | --- |
 | 台形壁の上下辺平均壁長と開口周比 | `wall/misc_wall.rs::台形壁の開口周比は壁エレメント幾何の壁長を用いる`。bottom4000/top3000/平均3500/h3000を絶対1e-9で確認。開口1.8e6に対し包絡長ならr0≤0.4、平均長ならr0>0.4と不成立を保持。fixtureだけを共用。 |
 | 柱際スリットを持つ雑壁の収集と板厚不明の除外 | `wall/misc_wall.rs::test_plate_without_thickness_is_not_counted_as_misc_stiffness`。板厚除去前に収集1件・両柱際スリットtrueを確認し、算入壁版ID0とsection=None後の除外を確認。旧`test_column_face_slit_wall_is_collected_as_misc_wall`から移設。 |
@@ -17,7 +17,17 @@
 
 実装参照: [雑壁](../../crates/sepika-element/src/wall/misc_wall.rs)、[側柱](../../crates/sepika-element/src/wall/side_column/mod.rs)、[局所釣合い試験](../../crates/sepika-element/src/wall/side_column/local_equilibrium/tests.rs)、[壁面応答](../../crates/sepika-element/src/wall/static_face.rs)。
 
-## 実行結果
+## マルチスプリング廃止後の回帰試験
+
+[#2032](https://github.com/hrntsm/SEPIKA/issues/2032) でマルチスプリングを廃止した。上表のマルチスプリングの行や旧試験名は #1059 当時の証跡であり、現行の試験対象ではない。通常梁・ファイバーの回帰は次の試験で引き続き確認する。
+
+- [側柱の検出と解放軸](../../crates/sepika-element/src/wall/side_column/mod.rs) の `beam_and_fiber_share_side_column_detection_and_index_selection` が、両種別の左右の側柱について直接判定と索引経由の解放軸、および壁との対応が1件であることを照合する。
+- [主架構と側柱の役割](../../crates/sepika-core/src/model/wall_side_column/tests.rs) の `c00_c01_c02_beam_and_fiber_have_identical_physical_roles` が、解析表現によらない壁境界と側柱の役割を照合する。
+- [側柱の要素生成](../../crates/sepika-element/src/factory/tests.rs) の `beam_and_fiber_side_columns_do_not_connect_out_of_scope_rc_panel` が、適用外のRC仕口パネルへ接続しないことを照合する。
+- [壁面応答](../../crates/sepika-element/src/wall/static_face.rs) の `frame_representations_preserve_common_face_and_reject_invalid_bindings` が、両種別で同じ壁面の断面力・面積・せい、不正な側柱割当の拒否を照合する。通常梁では両せん断耐力方式の独立値と正負方向の一致も照合する。
+- [壁の質量分担](../../crates/sepika-job/tests/wall_weight_partition.rs) の `direct_wall_factory_keeps_clear_plate_mass_with_beam_and_fiber_boundaries` が、両種別で壁板の内法部分の質量と壁要素の質量行列を照合する。
+
+## 整理時点の実行結果
 
 次は同じ基点 `368308878de40a88e1310a33b4a8d340976094f1` に今回の差分を適用したローカル結果である。初回elementの未使用Ctx参照残存によるコンパイル失敗は修正済みで、成功結果と区別する。
 

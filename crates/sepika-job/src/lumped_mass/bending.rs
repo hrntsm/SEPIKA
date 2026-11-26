@@ -233,7 +233,6 @@ fn validate_scope(inp: &LumpedMassBuildInput<'_>) -> JobResult<()> {
             ElementKind::Wall => "壁要素",
             ElementKind::Shell => "シェル要素",
             ElementKind::Fiber => "ファイバー要素",
-            ElementKind::MultiSpring => "マルチスプリング要素",
             _ => "接続節点数が不正な骨組要素",
         };
         let location = element

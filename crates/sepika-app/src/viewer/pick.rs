@@ -220,10 +220,7 @@ pub(super) fn member_load_pickable(
             && e.nodes.len() == 2
             && matches!(
                 e.kind,
-                ElementKind::Beam
-                    | ElementKind::Fiber
-                    | ElementKind::MultiSpring
-                    | ElementKind::Brace { .. }
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
             )
     })
 }

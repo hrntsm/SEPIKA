@@ -8,30 +8,29 @@ use sepika_core::model::{
 };
 
 #[test]
-fn no_long_axial_column_targets_fiber_and_multispring_by_section_use() {
+fn no_long_axial_column_targets_fiber_by_section_use() {
     let mut model = Model::default();
     let mut section = Section::zero(SectionId(0), "C1".into());
     section.frame_use = Some(FrameSectionUse::Column);
     model.sections.push(section);
     model.stress_cfg.no_long_axial_column = true;
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let elem = ElementData {
-            id: ElemId(0),
-            kind,
-            nodes: smallvec::smallvec![],
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [0.0, 1.0, 0.0],
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
-            plastic_zone: None,
-            spring: None,
-        };
-        assert!(is_axial_disabled_target(&elem, &model, &model.stress_cfg));
-    }
+    let kind = ElementKind::Fiber;
+    let elem = ElementData {
+        id: ElemId(0),
+        kind,
+        nodes: smallvec::smallvec![],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 1.0, 0.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
+        plastic_zone: None,
+        spring: None,
+    };
+    assert!(is_axial_disabled_target(&elem, &model, &model.stress_cfg));
 }
 
 /// 単純梁（i:ピン, j:ローラ）に等分布荷重 → 中央曲げ wL²/8、端部 0 を検証。
@@ -300,11 +299,7 @@ fn wall_normal_release_retains_loaded_support_balance_without_end_moments() {
 
 #[test]
 fn ordinary_fixed_udl_reactions_balance_original_force_and_moment() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = owned_udl_model();
         model.nodes[1].coord = [6000.0, 0.0, 0.0];
         model.elements[0].kind = kind;
@@ -2012,11 +2007,7 @@ fn assert_scalar_response(result: &StaticOnce, force: f64, factor: f64) {
 fn static_public_paths_adopt_all_column_kinds_and_load_classifications() {
     use crate::statics::analysis::Analysis;
     use sepika_core::model::LoadCaseKind::*;
-    for elem_kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for elem_kind in [ElementKind::Beam, ElementKind::Fiber] {
         for column in [true, false] {
             for enabled in [false, true] {
                 let mut model = scalar_axial_model(elem_kind, column);
@@ -2187,14 +2178,10 @@ fn static_adoption_does_not_change_baseline_eigenvalues() {
 }
 
 #[test]
-fn lip_channel_geometry_public_linear_result_rejects_beam_fiber_ms_without_panic() {
+fn lip_channel_geometry_public_linear_result_rejects_beam_fiber_without_panic() {
     use sepika_core::section_shape::SectionShape;
     let mut failures = vec![];
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for lip in [75.0, 80.0, 100.0] {
             for fully_fixed in [false, true] {
                 let mut model = ss_beam(3000.0, vec![]);
@@ -2260,11 +2247,7 @@ fn invalid_young_modulus_reaches_both_public_static_entries_as_same_reason() {
 #[test]
 fn invalid_beam_shear_modulus_is_rejected_by_public_static_entries_and_constructor() {
     use sepika_element::frame::beam::BeamElement;
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for (shear, poisson) in [
             (Some(f64::NAN), 0.3),
             (Some(f64::INFINITY), 0.3),

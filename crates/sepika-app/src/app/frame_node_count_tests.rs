@@ -7,11 +7,10 @@ fn test_tmp() -> std::path::PathBuf {
     path
 }
 
-fn kinds() -> [ElementKind; 4] {
+fn kinds() -> [ElementKind; 3] {
     [
         ElementKind::Beam,
         ElementKind::Fiber,
-        ElementKind::MultiSpring,
         ElementKind::Brace {
             tension_only: false,
         },
@@ -329,6 +328,58 @@ fn frame_two_nodes_ovika_roundtrip_keeps_independent_quantity_and_support_axis()
         assert_eq!(quantity.items.len(), 1);
         assert!((quantity.items[0].concrete_m3 - 1.08).abs() < 1e-9);
         assert!((quantity.items[0].formwork_m2 - 9.0).abs() < 1e-9);
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn removed_multi_spring_rejects_model_load_without_replacing_the_open_project() {
+    let incoming = crate::sample::portal_frame();
+    let mut app = App::default();
+    assert!(app.load_model(incoming.clone()));
+    app.run_linear_static(LoadCaseId(0));
+    assert!(app.core.scoped.results.is_some());
+    assert!(app.apply_model_edit(Box::new(sepika_edit::SetNodeCoord {
+        node: NodeId(0),
+        coord: [-100.0, 0.0, 0.0],
+    })));
+    let before = rmp_serde::to_vec_named(&app.core.model).unwrap();
+    let results = rmp_serde::to_vec_named(&app.core.scoped.results).unwrap();
+    let revision = app.core.scoped.undo.revision();
+    let path = test_tmp().join("removed-line-member.ovika");
+
+    for usage in [FrameSectionUse::Column, FrameSectionUse::Girder] {
+        let index = incoming
+            .elements
+            .iter()
+            .position(|element| incoming.element_section(element).unwrap().frame_use == Some(usage))
+            .unwrap();
+        let mut document = serde_json::to_value(&incoming).unwrap();
+        document["elements"][index]["kind"] = serde_json::json!("MultiSpring");
+        let error = serde_json::from_value::<Model>(document.clone()).unwrap_err();
+        assert!(
+            error.to_string().contains("unknown variant `MultiSpring`"),
+            "{error}"
+        );
+        super::secondary_cft_tests::write_invalid_container(&path, &document);
+        let error = sepika_io::ovika::load_ovika(&path).err().unwrap();
+        assert!(
+            matches!(
+                &error,
+                sepika_io::ovika::IoError::Decode(reason)
+                    if reason.contains("unknown variant `MultiSpring`")
+            ),
+            "{error}"
+        );
+        app.open_project_from(path.clone());
+        let reason = app.core.scoped.last_error.as_deref().unwrap();
+        assert!(reason.contains("unknown variant `MultiSpring`"), "{reason}");
+        assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), before);
+        assert_eq!(
+            rmp_serde::to_vec_named(&app.core.scoped.results).unwrap(),
+            results
+        );
+        assert_eq!(app.core.scoped.undo.revision(), revision);
     }
     std::fs::remove_file(path).unwrap();
 }

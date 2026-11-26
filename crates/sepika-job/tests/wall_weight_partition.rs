@@ -187,11 +187,7 @@ fn preparation_reports_invalid_native_wall_rebar_strength() {
     }
 }
 
-const WALL_SYSTEM_KINDS: [ElementKind; 3] = [
-    ElementKind::Beam,
-    ElementKind::Fiber,
-    ElementKind::MultiSpring,
-];
+const WALL_SYSTEM_KINDS: [ElementKind; 2] = [ElementKind::Beam, ElementKind::Fiber];
 
 fn wall_system_mass_fixture(kind: ElementKind, generated: bool) -> Model {
     let mut model = if generated {
@@ -259,7 +255,7 @@ fn wall_mass_close(actual_t: f64, expected_t: f64) {
 }
 
 #[test]
-fn direct_wall_factory_keeps_clear_plate_mass_for_three_boundary_representations() {
+fn direct_wall_factory_keeps_clear_plate_mass_with_beam_and_fiber_boundaries() {
     use sepika_element::behavior::MassOption;
     let expected_plate_t = 4.5813810016672365;
     let expected_matrix_t = 10.06337536263658;

@@ -102,12 +102,8 @@ fn classify(model: &Model, id: u32) -> WallSideColumnClassification {
 }
 
 #[test]
-fn c00_c01_c02_all_three_representations_have_identical_physical_roles() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+fn c00_c01_c02_beam_and_fiber_have_identical_physical_roles() {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let model = fixture(kind);
         let index = WallSideColumnIndex::build(&model);
         assert_eq!(
@@ -133,11 +129,7 @@ fn c00_c01_c02_all_three_representations_have_identical_physical_roles() {
 
 #[test]
 fn c03_wall_free_frames_are_explicit_non_side_columns() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = fixture(kind);
         model.elements.remove(0);
         assert!(has(
@@ -321,7 +313,7 @@ fn c09_duplicate_candidates_report_all_stable_ids() {
         .push(member(8, ElementKind::Fiber, &[3, 0], 2));
     model
         .elements
-        .push(member(7, ElementKind::MultiSpring, &[0, 3], 2));
+        .push(member(7, ElementKind::Fiber, &[0, 3], 2));
     let index = WallSideColumnIndex::build(&model);
     assert_eq!(
         index
@@ -494,7 +486,7 @@ fn c13_c14_src_is_recognized_for_symmetric_and_one_sided_frames() {
 
 #[test]
 fn c15_cft_recognition_does_not_claim_qu_or_nonlinear_applicability() {
-    let mut model = fixture(ElementKind::MultiSpring);
+    let mut model = fixture(ElementKind::Fiber);
     model.sections[2].shape = Some(SectionShape::CftBox {
         height: 600.,
         width: 600.,
@@ -541,11 +533,7 @@ fn c16_rc_wall_with_steel_column_or_girder_is_material_conflict() {
 
 #[test]
 fn steel_wall_is_rejected_without_classifying_side_columns() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = fixture(kind);
         model.sections[0].material = Some(MaterialId(1));
         let index = WallSideColumnIndex::build(&model);
@@ -708,7 +696,7 @@ fn invalid_nonparallel_candidate_retains_cause_without_plane_conflict() {
 
 #[test]
 fn invalid_only_candidates_are_not_selected_as_no_matching_wall() {
-    let mut model = fixture(ElementKind::MultiSpring);
+    let mut model = fixture(ElementKind::Fiber);
     model.sections[2].frame_use = None;
     let index = WallSideColumnIndex::build(&model);
     let errors = index.replacement_bindings(ElemId(3)).unwrap_err();

@@ -774,15 +774,14 @@ mod tests {
             girder_self_weight_interval(&large_reference, &large_reference.elements[0]),
             Ok([300.0, 5700.0])
         );
-        for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-            let mut mixed = model.clone();
-            mixed.elements[0].kind = kind;
-            mixed.elements[1].kind = kind;
-            assert_eq!(
-                girder_self_weight_interval(&mixed, &mixed.elements[0]).unwrap(),
-                [300.0, 5700.0]
-            );
-        }
+        let kind = ElementKind::Fiber;
+        let mut mixed = model.clone();
+        mixed.elements[0].kind = kind;
+        mixed.elements[1].kind = kind;
+        assert_eq!(
+            girder_self_weight_interval(&mixed, &mixed.elements[0]).unwrap(),
+            [300.0, 5700.0]
+        );
         let mut upper = elem(4, ElementKind::Beam, 0, 5, 3);
         upper.local_axis.ref_vector = [1.0, 0.0, 0.0];
         model.elements.push(upper);

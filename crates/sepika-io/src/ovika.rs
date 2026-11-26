@@ -1003,7 +1003,6 @@ mod tests {
         for (kind_index, kind) in [
             ElementKind::Beam,
             ElementKind::Fiber,
-            ElementKind::MultiSpring,
             ElementKind::Brace {
                 tension_only: false,
             },

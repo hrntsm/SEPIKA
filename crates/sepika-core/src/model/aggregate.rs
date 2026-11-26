@@ -705,10 +705,7 @@ impl Model {
         for elem in &self.elements {
             if matches!(
                 elem.kind,
-                ElementKind::Beam
-                    | ElementKind::Fiber
-                    | ElementKind::MultiSpring
-                    | ElementKind::Brace { .. }
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
             ) {
                 let Some(section_id) = elem.section else {
                     continue;
@@ -729,10 +726,6 @@ impl Model {
                         )
                         | (
                             ElementKind::Fiber,
-                            FrameSectionUse::Girder | FrameSectionUse::Column
-                        )
-                        | (
-                            ElementKind::MultiSpring,
                             FrameSectionUse::Girder | FrameSectionUse::Column
                         )
                 );

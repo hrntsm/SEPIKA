@@ -1,6 +1,6 @@
 //! 3次元 M-N 相関曲面（降伏曲面）ビュー。
 //!
-//! 部材端の降伏判定に用いるモデル化手法（端部単純降伏バネ／マルチスプリング／
+//! 部材端の降伏判定に用いるモデル化手法（端部単純降伏バネ／
 //! マルチファイバー）ごとの N–My–Mz 相関曲面の違いを、3D ワイヤーフレームと
 //! 任意軸力位置での My–Mz スライス（2D 相関曲線）で比較表示する。
 //!
@@ -31,7 +31,6 @@ const SLICE_PTS: usize = 64;
 fn model_color(kind: YieldModelKind) -> egui::Color32 {
     match kind {
         YieldModelKind::SimpleSpring => theme::PARETO_RED,
-        YieldModelKind::MultiSpring => theme::GOOD_GREEN,
         YieldModelKind::MultiFiber => theme::DATA_BLUE,
     }
 }
@@ -49,10 +48,7 @@ struct MnCache {
     shape: SectionShape,
     strength: StrengthParams,
     simple: MnSurface,
-    ms: MnSurface,
     fiber: MnSurface,
-    /// マルチスプリング用バネ配置（軸力スライス計算に使用）
-    ms_fibers: Vec<PlasticFiber>,
     /// マルチファイバー用ファイバ配置（軸力スライス計算・単純バネの耐力算定に使用）
     fiber_fibers: Vec<PlasticFiber>,
 }
@@ -87,7 +83,6 @@ struct MThetaKey {
 /// M-θ プロット用の計算結果（モデル別の [θ(rad), M(N·mm)] 点列。軸力範囲外は `None`）。
 struct MThetaData {
     fiber: Option<Vec<[f64; 2]>>,
-    ms: Option<Vec<[f64; 2]>>,
     /// 単純降伏バネ（材端剛塑性ばね）: (0,0)→(θy,Mlim)→(θmax,Mlim) の折れ線
     simple: Option<Vec<[f64; 2]>>,
 }
@@ -101,7 +96,6 @@ pub struct MnViewState {
     pub section_idx: usize,
     pub strength: StrengthParams,
     pub show_simple: bool,
-    pub show_ms: bool,
     pub show_fiber: bool,
     /// スライス軸力の比率。-1.0(圧縮耐力)〜+1.0(引張耐力)。
     pub n_ratio: f64,
@@ -129,7 +123,6 @@ impl Default for MnViewState {
             section_idx: 0,
             strength: StrengthParams::default(),
             show_simple: true,
-            show_ms: true,
             show_fiber: true,
             n_ratio: 0.0,
             slice_mode: SlicePlotMode::default(),
@@ -252,13 +245,6 @@ fn control_panel(ui: &mut egui::Ui, app: &mut App) {
         );
     });
     ui.horizontal(|ui| {
-        ui.colored_label(model_color(YieldModelKind::MultiSpring), "■");
-        ui.checkbox(
-            &mut app.ui.scoped.mn_view.show_ms,
-            YieldModelKind::MultiSpring.label(),
-        );
-    });
-    ui.horizontal(|ui| {
         ui.colored_label(model_color(YieldModelKind::MultiFiber), "■");
         ui.checkbox(
             &mut app.ui.scoped.mn_view.show_fiber,
@@ -360,7 +346,7 @@ fn summary_table(ui: &mut egui::Ui, cache: &MnCache) {
             ui.strong("Mpz[kN·m]");
             ui.end_row();
 
-            for surf in [&cache.simple, &cache.ms, &cache.fiber] {
+            for surf in [&cache.simple, &cache.fiber] {
                 ui.colored_label(model_color(surf.kind), surf.kind.label());
                 ui.label(format!("{:.1}", force_kn(surf.n_comp)));
                 ui.label(format!("{:.1}", force_kn(surf.n_tens)));
@@ -424,19 +410,15 @@ fn ensure_cache(
 
     let strength = state.strength;
     let build = || -> Result<MnCache, RebarGeometryError> {
-        let fiber_fibers = plastic_fibers(shape, &strength, YieldModelKind::MultiFiber)?;
-        let ms_fibers = plastic_fibers(shape, &strength, YieldModelKind::MultiSpring)?;
+        let fiber_fibers = plastic_fibers(shape, &strength)?;
         let fiber = build_surface(&fiber_fibers, YieldModelKind::MultiFiber, N_ALPHA, N_BETA);
-        let ms = build_surface(&ms_fibers, YieldModelKind::MultiSpring, N_ALPHA, N_BETA);
         let simple = build_simple_spring_surface(&fiber_fibers, N_ALPHA, N_BETA);
         Ok(MnCache {
             section_idx,
             shape: shape.clone(),
             strength,
             simple,
-            ms,
             fiber,
-            ms_fibers,
             fiber_fibers,
         })
     };
@@ -486,9 +468,6 @@ fn ensure_m_theta_cache(
         .as_ref()
         .map(|c| m_theta_curve(c, key.span, key.lp));
 
-    let ms_mphi = m_phi_curve(&cache.ms_fibers, ky, kz, key.n_target, N_STEPS);
-    let ms = ms_mphi.as_ref().map(|c| m_theta_curve(c, key.span, key.lp));
-
     let simple = fiber_mphi.as_ref().and_then(|fc| {
         let mp = if key.bend_dir_z {
             cache.simple.mp_z
@@ -515,7 +494,7 @@ fn ensure_m_theta_cache(
         Some(vec![[0.0, 0.0], [theta_y, m_lim], [theta_max, m_lim]])
     });
 
-    *slot = Some((key, MThetaData { fiber, ms, simple }));
+    *slot = Some((key, MThetaData { fiber, simple }));
 }
 
 /// 右ペイン: 断面が未選択・形状未定義の場合は案内、それ以外は 3D + 2D を描画する。
@@ -551,7 +530,6 @@ fn visualization(ui: &mut egui::Ui, app: &mut App) {
     let n_ratio = app.ui.scoped.mn_view.n_ratio;
     let show = [
         app.ui.scoped.mn_view.show_simple,
-        app.ui.scoped.mn_view.show_ms,
         app.ui.scoped.mn_view.show_fiber,
     ];
     let n_target = n_from_ratio(cache, n_ratio);
@@ -590,13 +568,13 @@ fn visualization(ui: &mut egui::Ui, app: &mut App) {
     }
 }
 
-/// 3D 領域の描画本体（ワイヤーフレーム3面・座標軸・スライス平面）。
+/// 3D 領域の描画本体（ワイヤーフレーム・座標軸・スライス平面）。
 fn draw_3d(
     ui: &mut egui::Ui,
     rect: &egui::Rect,
     cam: &CameraState,
     cache: &MnCache,
-    show: [bool; 3],
+    show: [bool; 2],
     n_target: f64,
 ) {
     let painter = ui.painter_at(*rect);
@@ -609,8 +587,7 @@ fn draw_3d(
 
     for (visible, surf, kind) in [
         (show[0], &cache.simple, YieldModelKind::SimpleSpring),
-        (show[1], &cache.ms, YieldModelKind::MultiSpring),
-        (show[2], &cache.fiber, YieldModelKind::MultiFiber),
+        (show[1], &cache.fiber, YieldModelKind::MultiFiber),
     ] {
         if visible {
             mn_draw::draw_wireframe(&painter, surf, refs, &view, model_color(kind), 180);
@@ -649,7 +626,7 @@ fn draw_slice_plane(
 }
 
 /// 2D スライスプロット（My–Mz 相関曲線、egui_plot）を描く。
-fn draw_slice_plot(ui: &mut egui::Ui, cache: &MnCache, show: [bool; 3], n_target: f64) {
+fn draw_slice_plot(ui: &mut egui::Ui, cache: &MnCache, show: [bool; 2], n_target: f64) {
     let height = ui.available_height();
     egui_plot::Plot::new("mn_slice")
         .data_aspect(1.0)
@@ -687,14 +664,6 @@ fn draw_slice_plot(ui: &mut egui::Ui, cache: &MnCache, show: [bool; 3], n_target
             if show[1] {
                 plot_slice_curve(
                     plot_ui,
-                    &cache.ms_fibers,
-                    n_target,
-                    YieldModelKind::MultiSpring,
-                );
-            }
-            if show[2] {
-                plot_slice_curve(
-                    plot_ui,
                     &cache.fiber_fibers,
                     n_target,
                     YieldModelKind::MultiFiber,
@@ -728,9 +697,9 @@ fn plot_slice_curve(
 
 /// M-θ 骨格曲線プロット（塑性化領域考慮、egui_plot）を描く。
 /// 単純降伏バネは材端剛塑性ばね（弾性部材+剛塑性ヒンジ）の折れ線として、
-/// マルチスプリング／マルチファイバーは `MThetaData` にキャッシュ済みの
+/// マルチファイバーは `MThetaData` にキャッシュ済みの
 /// 断面 M-φ 由来の骨格曲線として描く。
-fn draw_m_theta_plot(ui: &mut egui::Ui, data: &MThetaData, show: [bool; 3]) {
+fn draw_m_theta_plot(ui: &mut egui::Ui, data: &MThetaData, show: [bool; 2]) {
     let height = ui.available_height();
     egui_plot::Plot::new("mn_m_theta")
         .x_axis_label("θ [×10⁻³ rad]")
@@ -744,11 +713,6 @@ fn draw_m_theta_plot(ui: &mut egui::Ui, data: &MThetaData, show: [bool; 3]) {
                 }
             }
             if show[1] {
-                if let Some(pts) = &data.ms {
-                    plot_m_theta_line(plot_ui, pts, YieldModelKind::MultiSpring);
-                }
-            }
-            if show[2] {
                 if let Some(pts) = &data.fiber {
                     plot_m_theta_line(plot_ui, pts, YieldModelKind::MultiFiber);
                 }
@@ -936,12 +900,8 @@ mod tests {
         let mut model = sepika_io::ovika::load_ovika(&path).unwrap().model;
         let mut state = MnViewState::default();
         ensure_cache(&mut state, 0, model.sections[0].shape.as_ref().unwrap()).unwrap();
-        for fibers in [
-            &state.cache.as_ref().unwrap().fiber_fibers,
-            &state.cache.as_ref().unwrap().ms_fibers,
-        ] {
-            assert!((fibers.iter().map(|f| f.area).sum::<f64>() - 180000.0).abs() < 1e-6);
-        }
+        let fibers = &state.cache.as_ref().unwrap().fiber_fibers;
+        assert!((fibers.iter().map(|f| f.area).sum::<f64>() - 180000.0).abs() < 1e-6);
         let mut edited = shape.clone();
         if let SectionShape::SrcColumnRect { steel_width, .. } = &mut edited {
             *steel_width = 180.0;
@@ -975,33 +935,24 @@ mod tests {
         sepika_element::factory::ensure_nonlinear_input(&model).unwrap();
         ensure_cache(&mut state, 0, model.sections[0].shape.as_ref().unwrap()).unwrap();
         assert_eq!(state.cache.as_ref().unwrap().shape, edited);
-        for kind in [
-            sepika_core::model::ElementKind::Fiber,
-            sepika_core::model::ElementKind::MultiSpring,
-        ] {
-            let mut element = model.elements[0].clone();
-            element.kind = kind;
-            sepika_element::factory::build_nonlinear_behavior(
-                &element,
-                &model,
-                sepika_element::factory::StrengthBasis::Nominal,
-                AnalysisKind::Incremental,
-                None,
-            );
-        }
+        let mut element = model.elements[0].clone();
+        element.kind = sepika_core::model::ElementKind::Fiber;
+        sepika_element::factory::build_nonlinear_behavior(
+            &element,
+            &model,
+            sepika_element::factory::StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+            None,
+        );
         let expected_as = 7328.0;
-        for fibers in [
-            &state.cache.as_ref().unwrap().fiber_fibers,
-            &state.cache.as_ref().unwrap().ms_fibers,
-        ] {
-            let area: f64 = fibers
-                .iter()
-                .filter(|f| f.region == sepika_section::mn_surface::FiberRegion::Steel)
-                .map(|f| f.area)
-                .sum();
-            assert!((area - expected_as).abs() < 1e-6);
-            assert!(m_phi_curve(fibers, 1.0, 0.0, 0.0, 20).is_some());
-        }
+        let fibers = &state.cache.as_ref().unwrap().fiber_fibers;
+        let area: f64 = fibers
+            .iter()
+            .filter(|f| f.region == sepika_section::mn_surface::FiberRegion::Steel)
+            .map(|f| f.area)
+            .sum();
+        assert!((area - expected_as).abs() < 1e-6);
+        assert!(m_phi_curve(fibers, 1.0, 0.0, 0.0, 20).is_some());
         if let SectionShape::SrcColumnRect {
             steel_height,
             steel_width,

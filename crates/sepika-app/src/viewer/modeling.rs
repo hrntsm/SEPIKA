@@ -11,7 +11,7 @@
 //! - **剛域**: 部材端の剛域長 `length_i/j` を、ハッチング入りのブロック（矩形の輪郭
 //!   ＋斜めハッチ）で示す。線材とは図形の種類が違うため弾性材の細い線と紛れない。
 //! - **材端集中塑性**: 材端（剛域フェイス）の塑性ヒンジ位置に塗り円（●）を置く。
-//! - **ファイバー／MS**: 解析上は可撓部の材端（積分点 ξ=∓1、剛域があればその
+//! - **ファイバー**: 解析上は可撓部の材端（積分点 ξ=∓1、剛域があればその
 //!   フェイス）にファイバー断面を置き、その積分重み＝塑性化域長 Lp の区間だけが
 //!   塑性化する。中央 \[Lp, L'−Lp\] は弾性。よって端部 Lp 区間を太線で強調し、
 //!   中央を弾性色の細線とし、ファイバー断面の位置に断面記号を描く。Lp は要素生成と
@@ -156,7 +156,7 @@ pub(super) fn classify_with(
         return ModelClass::Elastic;
     }
     match data.kind {
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
+        ElementKind::Beam | ElementKind::Fiber => {
             let is_side_column = match side_cols {
                 Some(idx) => idx.release_axis(data, model).is_some(),
                 None => wall_side_column_release(data, model).is_some(),
@@ -167,9 +167,7 @@ pub(super) fn classify_with(
             match analysis {
                 ModelingAnalysis::Static => ModelClass::Elastic,
                 ModelingAnalysis::Incremental | ModelingAnalysis::TimeHistory => {
-                    if data.kind == ElementKind::MultiSpring {
-                        ModelClass::ConcentratedPlastic
-                    } else if data.kind == ElementKind::Fiber {
+                    if data.kind == ElementKind::Fiber {
                         ModelClass::Fiber
                     } else {
                         match resolve_force_regime(data, model) {
@@ -586,27 +584,15 @@ fn is_wall_girder(
     model: &Model,
     wall_nodes: &std::collections::HashSet<NodeId>,
 ) -> bool {
-    matches!(
-        elem.kind,
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-    ) && elem.nodes.len() >= 2
+    matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber)
+        && elem.nodes.len() >= 2
         && wall_nodes.contains(&elem.nodes[0])
         && wall_nodes.contains(&elem.nodes[1])
         && sepika_element::frame::beam::is_elastic_wall_girder(model, elem)
 }
 
-/// 部材 `elem` が「端部塑性化域モデル」（材端 ξ=∓1 にファイバー断面を置き、
-/// 中央を弾性とするモデル）で解析されるか。
-///
-/// 該当するのは増分解析のファイバー要素と MS 要素で、いずれも実体は
-/// `FiberBeam::build_plastic_zone`（MS はファイバ分割が粗いだけ）。`class` は
-/// 解析種別を織り込んだ分類結果のため、静解析（全部材弾性）では偽になる。
-fn is_end_plastic_zone_model(elem: &ElementData, class: ModelClass) -> bool {
-    match class {
-        ModelClass::Fiber => true,
-        ModelClass::ConcentratedPlastic => elem.kind == ElementKind::MultiSpring,
-        _ => false,
-    }
+fn is_end_plastic_zone_model(class: ModelClass) -> bool {
+    class == ModelClass::Fiber
 }
 
 /// 端部塑性化域モデルの有効な塑性化域長 Lp [mm]（可撓長 `l_flex` 基準）。
@@ -648,7 +634,7 @@ fn draw_line_member(
     let l = model.member_length(elem);
     let color = class.color();
 
-    let end_plastic = is_end_plastic_zone_model(elem, class);
+    let end_plastic = is_end_plastic_zone_model(class);
     let (s_i, s_j, l_flex) = flexible_span(elem, l);
 
     let fa = lerp(p0, p1, s_i);
@@ -1325,11 +1311,8 @@ pub(super) fn show_modeling_tooltip_with_view(
             if is_wall_girder(elem, model, &seismic_wall_nodes(model)) {
                 ui.label("壁上下の剛梁（弾性高剛性部材。材料降伏は評価しません）");
             }
-            let is_frame_line = matches!(
-                elem.kind,
-                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-            );
-            let end_plastic = is_end_plastic_zone_model(elem, class);
+            let is_frame_line = matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber);
+            let end_plastic = is_end_plastic_zone_model(class);
             if is_frame_line {
                 ui.label(format!(
                     "端条件: i={} / j={}",
@@ -1788,21 +1771,6 @@ mod tests {
         }
     }
 
-    /// マルチスプリング梁は静解析で弾性、増分解析で材端集中塑性。
-    #[test]
-    fn test_multispring_class_by_analysis() {
-        let model = Model::default();
-        let e = elem(ElementKind::MultiSpring, ForceRegime::Auto);
-        assert_eq!(
-            classify(&e, &model, ModelingAnalysis::Static),
-            ModelClass::Elastic
-        );
-        assert_eq!(
-            classify(&e, &model, ModelingAnalysis::Incremental),
-            ModelClass::ConcentratedPlastic
-        );
-    }
-
     /// 4000×3000 の壁 1 枚と、その四周の柱・梁を持つモデル。
     /// 耐震壁は四周を柱・梁に囲まれた壁を対象とするため、四周が揃っていないと
     /// 板厚に依らず雑壁になる。
@@ -2041,11 +2009,7 @@ mod tests {
             vec![1, 2],
             "付帯梁は上下の水平材のみ（鉛直辺は対象外）"
         );
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             for regime in [
                 ForceRegime::Auto,
                 ForceRegime::UniaxialBendingShear,
@@ -2061,7 +2025,7 @@ mod tests {
                 ] {
                     let class = classify(girder, &model, analysis);
                     assert_eq!(class, ModelClass::Elastic);
-                    assert!(!is_end_plastic_zone_model(girder, class));
+                    assert!(!is_end_plastic_zone_model(class));
                     assert!(is_wall_girder(girder, &model, &seismic_wall_nodes(&model)));
                 }
             }
@@ -2069,32 +2033,29 @@ mod tests {
     }
 
     /// 端部塑性化域モデル（材端 ξ=∓1 にファイバー断面を置くモデル）の判定。
-    /// 増分解析のファイバー要素と MS 要素のみが該当し、静解析（全部材弾性）や
+    /// 増分解析のファイバー要素のみが該当し、静解析（全部材弾性）や
     /// 材端回転ばねの梁は該当しない。
     #[test]
-    fn 端部塑性化域モデルの判定は増分解析のファイバーとmsのみ() {
+    fn 端部塑性化域モデルの判定は増分解析のファイバーのみ() {
         let model = Model::default();
         let fiber = elem(ElementKind::Fiber, ForceRegime::Auto);
-        let ms = elem(ElementKind::MultiSpring, ForceRegime::Auto);
         let spring_beam = elem(ElementKind::Beam, ForceRegime::UniaxialBendingShear);
 
-        for e in [&fiber, &ms, &spring_beam] {
+        for e in [&fiber, &spring_beam] {
             let class = classify(e, &model, ModelingAnalysis::Static);
-            assert!(!is_end_plastic_zone_model(e, class));
+            assert!(!is_end_plastic_zone_model(class));
         }
 
-        assert!(is_end_plastic_zone_model(
+        assert!(is_end_plastic_zone_model(classify(
             &fiber,
-            classify(&fiber, &model, ModelingAnalysis::Incremental)
-        ));
-        assert!(is_end_plastic_zone_model(
-            &ms,
-            classify(&ms, &model, ModelingAnalysis::Incremental)
-        ));
-        assert!(!is_end_plastic_zone_model(
+            &model,
+            ModelingAnalysis::Incremental
+        )));
+        assert!(!is_end_plastic_zone_model(classify(
             &spring_beam,
-            classify(&spring_beam, &model, ModelingAnalysis::Incremental)
-        ));
+            &model,
+            ModelingAnalysis::Incremental
+        )));
     }
 
     /// 塑性化域長 Lp の表示値は要素生成の既定と一致する
@@ -2150,12 +2111,8 @@ mod tests {
         assert!((l_flex - 3000.0).abs() < 1e-9);
     }
     #[test]
-    fn 側柱の解放と材料履歴は三表現で解析種別に一致する() {
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+    fn 側柱の解放と材料履歴は解析種別に一致する() {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let (mut model, _) = wall_model(150.0);
             model.elements[3].kind = kind;
             let column = &model.elements[3];
@@ -2166,15 +2123,8 @@ mod tests {
             );
             let nonlinear =
                 classify_with(column, &model, ModelingAnalysis::Incremental, Some(&index));
-            assert_eq!(
-                nonlinear,
-                if kind == ElementKind::MultiSpring {
-                    ModelClass::ConcentratedPlastic
-                } else {
-                    ModelClass::Fiber
-                }
-            );
-            assert!(is_end_plastic_zone_model(column, nonlinear));
+            assert_eq!(nonlinear, ModelClass::Fiber);
+            assert!(is_end_plastic_zone_model(nonlinear));
             assert!(wall_side_column_release(column, &model).is_some());
             let mut conflicting = column.clone();
             conflicting.nodes = model.elements[1].nodes.clone();

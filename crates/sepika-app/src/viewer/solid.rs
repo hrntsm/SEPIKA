@@ -432,10 +432,7 @@ pub(super) fn draw_section_solids_with_displacements(
         }
         let is_line_member = matches!(
             elem.kind,
-            ElementKind::Beam
-                | ElementKind::Fiber
-                | ElementKind::MultiSpring
-                | ElementKind::Brace { .. }
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
         );
         if !is_line_member || elem.nodes.len() < 2 {
             continue;

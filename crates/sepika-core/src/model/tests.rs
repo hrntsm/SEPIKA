@@ -704,7 +704,6 @@ fn test_requires_section_and_material_covers_line_and_area_elements() {
     for kind in [
         ElementKind::Beam,
         ElementKind::Fiber,
-        ElementKind::MultiSpring,
         ElementKind::Brace {
             tension_only: false,
         },
@@ -1822,7 +1821,6 @@ fn frame_node_count_matrix_and_support_axes() {
     for kind in [
         ElementKind::Beam,
         ElementKind::Fiber,
-        ElementKind::MultiSpring,
         ElementKind::Brace {
             tension_only: false,
         },

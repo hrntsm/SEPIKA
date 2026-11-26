@@ -1015,11 +1015,7 @@ mod tests {
 
     #[test]
     fn 支持候補は解析方式によらず有効な主架構だけを含む() {
-        for element_kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for element_kind in [ElementKind::Beam, ElementKind::Fiber] {
             for secondary_kind in [SecondaryMemberKind::Beam, SecondaryMemberKind::Post] {
                 let mut model = support_model(element_kind);
                 let parent = match secondary_kind {
@@ -1090,11 +1086,7 @@ mod tests {
 
     #[test]
     fn フォームの再描画と名前変更で支持を保持し配置とundo_redoに引き継ぐ() {
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut app = App::default();
             assert!(app.load_model(support_model(kind)));
             app.ui.scoped.secondary_draft = SecondaryMemberDraft {

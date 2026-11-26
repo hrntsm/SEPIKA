@@ -913,7 +913,7 @@ fn rigid_diaphragm_src_girder_with_axial_bending_interaction_requires_manufactur
 }
 
 #[test]
-fn src_built_up_h_fiber_and_multi_spring_models_still_run() {
+fn src_built_up_h_fiber_models_still_run() {
     use sepika_core::model::Constraint;
 
     for (frame_use, kind, force_regime, rigid_floor) in [
@@ -938,12 +938,6 @@ fn src_built_up_h_fiber_and_multi_spring_models_still_run() {
         (
             FrameSectionUse::Girder,
             ElementKind::Fiber,
-            ForceRegime::UniaxialBendingShear,
-            true,
-        ),
-        (
-            FrameSectionUse::Girder,
-            ElementKind::MultiSpring,
             ForceRegime::UniaxialBendingShear,
             true,
         ),

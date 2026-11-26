@@ -52,19 +52,19 @@ fn member_hysteresis_editable(is_generated_wall: bool, kind: ElementKind) -> boo
     !is_generated_wall
         && matches!(
             kind,
-            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring | ElementKind::Wall
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::Wall
         )
 }
 
 /// 「自動」解決表示用に、要素種別に応じた履歴則解決関数を使い分ける。
-/// 梁=材端曲げバネの履歴則、ファイバー柱・MS・壁=コンクリート除荷則。
+/// 梁=材端曲げバネの履歴則、ファイバー柱・壁=コンクリート除荷則。
 fn resolve_member_hysteresis_for_kind(
     elem: &ElementData,
     model: &sepika_core::model::Model,
     kind: sepika_core::model::AnalysisKind,
 ) -> HysteresisModel {
     match elem.kind {
-        ElementKind::Fiber | ElementKind::MultiSpring => {
+        ElementKind::Fiber => {
             sepika_element::factory::resolve_fiber_concrete_hysteresis(elem, model, kind)
         }
         ElementKind::Wall => {
@@ -370,7 +370,6 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                         match elem.kind {
                             ElementKind::Beam => "Beam",
                             ElementKind::Fiber => "Fiber",
-                            ElementKind::MultiSpring => "MultiSpring",
                             ElementKind::Wall => "Wall",
                             ElementKind::Shell => "Shell",
                             ElementKind::Brace { .. } => "Brace",
@@ -478,9 +477,9 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                         } else {
                             "増分解析（保有水平耐力計算）の履歴則。\
                                  梁=材端曲げバネ（自動: RC/SRC/CFT=武田型、S=標準型）。\
-                                 柱（ファイバー）・MS・壁=コンクリート除荷則\
+                                 柱（ファイバー）・壁=コンクリート除荷則\
                                  （逆行型／原点指向型のみ有効。\
-                                 自動: 柱・MS=逆行型、壁=原点指向型）"
+                                 自動: 柱=逆行型、壁=原点指向型）"
                         });
                     });
                 });
@@ -525,7 +524,7 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                              履歴則の個別指定はできません（解析時は壁の既定）"
                         } else {
                             "時刻歴応答解析の履歴則。「増分と同じ」で増分用の指定に従う。\
-                                 自動: 梁=増分と同じ既定、柱（ファイバー）・MS・壁の\
+                                 自動: 梁=増分と同じ既定、柱（ファイバー）・壁の\
                                  コンクリートは原点指向型（壁は定義のみ、非線形時刻歴は未対応）"
                         });
                     });

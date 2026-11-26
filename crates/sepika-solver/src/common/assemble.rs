@@ -127,7 +127,6 @@ fn validate_mass_inputs(
                 ElementKind::Wall
                     | ElementKind::Beam
                     | ElementKind::Fiber
-                    | ElementKind::MultiSpring
                     | ElementKind::Brace { .. }
             ) {
                 model.element_mass_properties(elem).map_err(|reason| {
@@ -255,14 +254,11 @@ pub fn assemble_global_f(model: &Model, dofmap: &DofMap, lc: LoadCaseId) -> Vec<
 }
 
 /// 部材荷重（等価節点力・固定端内力）を扱える線材要素か。
-/// 対象は 2 節点の線材（梁・ファイバー梁・マルチスプリング梁・ブレース）。
+/// 対象は 2 節点の線材（梁・ファイバー梁・ブレース）。
 pub(crate) fn is_member_load_target(elem: &ElementData) -> bool {
     matches!(
         elem.kind,
-        ElementKind::Beam
-            | ElementKind::Fiber
-            | ElementKind::MultiSpring
-            | ElementKind::Brace { .. }
+        ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
     ) && elem.nodes.len() == 2
 }
 

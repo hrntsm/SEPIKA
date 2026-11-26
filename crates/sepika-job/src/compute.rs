@@ -655,7 +655,6 @@ mod static_settings_tests {
         for kind in [
             ElementKind::Beam,
             ElementKind::Fiber,
-            ElementKind::MultiSpring,
             ElementKind::Brace { tension_only: true },
         ] {
             let mut model = scalar_model(kind);

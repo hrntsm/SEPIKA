@@ -3376,7 +3376,6 @@ fn src_analysis_ratio_model() -> Model {
 #[test]
 fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
     use crate::frame::beam::BeamElement;
-    use crate::frame::multi_spring::MultiSpringElement;
     let model = src_analysis_ratio_model();
     let data = &model.elements[0];
     let beam = BeamElement::try_new(data, &model).unwrap();
@@ -3395,40 +3394,32 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
     );
     assert_eq!(plastic.hinge.k_el.get(3, 3), beam.g * beam.j / beam.length);
     assert!(plastic.torsion_j > model.sections[0].j);
-    let multi = MultiSpringElement::new(
-        data,
-        &model,
-        StrengthBasis::Nominal,
-        AnalysisKind::Incremental,
+    let fiber = &plastic;
+    let h = &fiber.hinge;
+    assert_relative_eq!(
+        h.k_el.get(4, 4),
+        expected_eiy_n_mm2 * (4.0 + fiber.phi_z) / (fiber.flex_length * (1.0 + fiber.phi_z)),
+        max_relative = 1e-12
     );
-    for fiber in [&plastic, &multi.inner] {
-        let h = &fiber.hinge;
-        assert_relative_eq!(
-            h.k_el.get(4, 4),
-            expected_eiy_n_mm2 * (4.0 + fiber.phi_z) / (fiber.flex_length * (1.0 + fiber.phi_z)),
-            max_relative = 1e-12
-        );
-        assert_relative_eq!(
-            h.k_el.get(0, 0),
-            expected_ea_n / fiber.flex_length,
-            max_relative = 1e-12
-        );
-        assert_eq!(fiber.initial_elastic_stiffness.get(0, 0), h.k_el.get(0, 0));
-        assert_eq!(fiber.torsion_j, beam.j);
-        assert_eq!(fiber.mass_properties, beam.mass_properties);
-        let mass = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
-        let total_x = mass.get(0, 0) + mass.get(0, 6) + mass.get(6, 0) + mass.get(6, 6);
-        assert_relative_eq!(
-            total_x,
-            beam.mass_properties.total_mass(beam.length),
-            max_relative = 1e-12
-        );
-    }
+    assert_relative_eq!(
+        h.k_el.get(0, 0),
+        expected_ea_n / fiber.flex_length,
+        max_relative = 1e-12
+    );
+    assert_eq!(fiber.initial_elastic_stiffness.get(0, 0), h.k_el.get(0, 0));
+    assert_eq!(fiber.torsion_j, beam.j);
+    assert_eq!(fiber.mass_properties, beam.mass_properties);
+    let mass = fiber.mass_matrix(crate::behavior::MassOption::Consistent);
+    let total_x = mass.get(0, 0) + mass.get(0, 6) + mass.get(6, 0) + mass.get(6, 6);
+    assert_relative_eq!(
+        total_x,
+        beam.mass_properties.total_mass(beam.length),
+        max_relative = 1e-12
+    );
 
     let ctx = Ctx { model: &model };
     for (kind, force_regime) in [
         (ElementKind::Fiber, ForceRegime::Auto),
-        (ElementKind::MultiSpring, ForceRegime::Auto),
         (ElementKind::Beam, ForceRegime::AxialBendingInteract),
     ] {
         let mut data = data.clone();
@@ -3499,7 +3490,6 @@ fn src_nonlinear_entries_reject_invalid_materials_instead_of_provisional_propert
         .is_err());
         for (kind, regime) in [
             (ElementKind::Fiber, ForceRegime::Auto),
-            (ElementKind::MultiSpring, ForceRegime::Auto),
             (ElementKind::Beam, ForceRegime::AxialBendingInteract),
         ] {
             let mut data = data.clone();
@@ -3550,8 +3540,7 @@ fn fiber分割数はsrcの両質量形式の算定元にならない() {
 }
 
 #[test]
-fn src552_direct_fiber_ms_material_regions_and_micro_tangent() {
-    use crate::frame::multi_spring::MultiSpringElement;
+fn src552_direct_fiber_material_regions_and_micro_tangent() {
     use sepika_section::fiber::{integrate_fibers, section_response, SectionStrain};
     let model = src_analysis_ratio_model();
     let data = &model.elements[0];
@@ -3563,85 +3552,78 @@ fn src552_direct_fiber_ms_material_regions_and_micro_tangent() {
         AnalysisKind::Incremental,
     )
     .unwrap();
-    let multi = MultiSpringElement::new(
-        data,
-        &model,
-        StrengthBasis::Nominal,
-        AnalysisKind::Incremental,
-    );
-    for mut fiber in [plastic, multi.inner] {
-        let gp = &mut fiber.gauss_points[0];
-        for (tag, expected) in [(0, 172192.0), (2, 7808.0)] {
-            assert_relative_eq!(
-                gp.section
-                    .fibers
-                    .iter()
-                    .filter(|f| f.material == tag)
-                    .map(|f| f.area)
-                    .sum::<f64>(),
-                expected,
-                max_relative = 1e-10
-            );
-        }
-        let (constant, _) = integrate_fibers(&gp.section, |_, f| {
-            (if f.material == 0 { -24.0 } else { -235.0 }, 0.0)
-        });
-        assert_relative_eq!(constant.n, -5967488.0, max_relative = 1e-10);
-        let (elastic, stiffness) = integrate_fibers(&gp.section, |_, f| {
-            let e = if f.material == 0 { 20500.0 } else { 205000.0 };
-            (e * 1e-4, e)
-        });
-        assert_relative_eq!(elastic.n, 513057.6, max_relative = 1e-10);
-        assert_relative_eq!(stiffness.d[0][0], 5130576000.0, max_relative = 1e-10);
-        println!(
-            "SRC552 direct EI error={}",
-            (stiffness.d[2][2] / 150579426048000.0 - 1.0).abs()
+    let mut fiber = plastic;
+    let gp = &mut fiber.gauss_points[0];
+    for (tag, expected) in [(0, 172192.0), (2, 7808.0)] {
+        assert_relative_eq!(
+            gp.section
+                .fibers
+                .iter()
+                .filter(|f| f.material == tag)
+                .map(|f| f.area)
+                .sum::<f64>(),
+            expected,
+            max_relative = 1e-10
         );
-        let base = [-1e-7, 0.0, 0.0];
-        let (_, tangent) = section_response(
+    }
+    let (constant, _) = integrate_fibers(&gp.section, |_, f| {
+        (if f.material == 0 { -24.0 } else { -235.0 }, 0.0)
+    });
+    assert_relative_eq!(constant.n, -5967488.0, max_relative = 1e-10);
+    let (elastic, stiffness) = integrate_fibers(&gp.section, |_, f| {
+        let e = if f.material == 0 { 20500.0 } else { 205000.0 };
+        (e * 1e-4, e)
+    });
+    assert_relative_eq!(elastic.n, 513057.6, max_relative = 1e-10);
+    assert_relative_eq!(stiffness.d[0][0], 5130576000.0, max_relative = 1e-10);
+    println!(
+        "SRC552 direct EI error={}",
+        (stiffness.d[2][2] / 150579426048000.0 - 1.0).abs()
+    );
+    let base = [-1e-7, 0.0, 0.0];
+    let (_, tangent) = section_response(
+        &gp.section,
+        SectionStrain {
+            eps0: base[0],
+            ky: base[1],
+            kz: base[2],
+        },
+        &mut gp.mats,
+    );
+    for axis in 0..3 {
+        let step = if axis == 0 { 1e-10 } else { 1e-13 };
+        let mut plus = base;
+        plus[axis] += step;
+        let mut minus = base;
+        minus[axis] -= step;
+        let (p, _) = section_response(
             &gp.section,
             SectionStrain {
-                eps0: base[0],
-                ky: base[1],
-                kz: base[2],
+                eps0: plus[0],
+                ky: plus[1],
+                kz: plus[2],
             },
             &mut gp.mats,
         );
-        for axis in 0..3 {
-            let step = if axis == 0 { 1e-10 } else { 1e-13 };
-            let mut plus = base;
-            plus[axis] += step;
-            let mut minus = base;
-            minus[axis] -= step;
-            let (p, _) = section_response(
-                &gp.section,
-                SectionStrain {
-                    eps0: plus[0],
-                    ky: plus[1],
-                    kz: plus[2],
-                },
-                &mut gp.mats,
-            );
-            let (m, _) = section_response(
-                &gp.section,
-                SectionStrain {
-                    eps0: minus[0],
-                    ky: minus[1],
-                    kz: minus[2],
-                },
-                &mut gp.mats,
-            );
-            for (row, derivative) in [
-                (p.n - m.n) / (2.0 * step),
-                (p.my - m.my) / (2.0 * step),
-                (p.mz - m.mz) / (2.0 * step),
-            ]
-            .into_iter()
-            .enumerate()
-            {
-                let scale = (tangent.d[row][row] * tangent.d[axis][axis]).sqrt();
-                assert!((derivative - tangent.d[row][axis]).abs() / scale < 1e-7);
-            }
+        let (m, _) = section_response(
+            &gp.section,
+            SectionStrain {
+                eps0: minus[0],
+                ky: minus[1],
+                kz: minus[2],
+            },
+            &mut gp.mats,
+        );
+        for (row, derivative) in [
+            (p.n - m.n) / (2.0 * step),
+            (p.my - m.my) / (2.0 * step),
+            (p.mz - m.mz) / (2.0 * step),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let scale = (tangent.d[row][row] * tangent.d[axis][axis]).sqrt();
+            assert!((derivative - tangent.d[row][axis]).abs() / scale < 1e-7);
         }
     }
 }
@@ -3649,7 +3631,6 @@ fn src552_direct_fiber_ms_material_regions_and_micro_tangent() {
 #[test]
 fn src552_preparation_and_direct_entries_reject_bad_h() {
     use crate::frame::beam::BeamElement;
-    use crate::frame::multi_spring::MultiSpringElement;
     let mut model = src_analysis_ratio_model();
     if let Some(sepika_core::section_shape::SectionShape::SrcColumnRect { steel_height, .. }) =
         &mut model.sections[0].shape
@@ -3672,13 +3653,4 @@ fn src552_preparation_and_direct_entries_reject_bad_h() {
         AnalysisKind::Incremental
     )
     .is_err());
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| MultiSpringElement::new(
-            data,
-            &model,
-            StrengthBasis::Nominal,
-            AnalysisKind::Incremental
-        )))
-        .is_err()
-    );
 }

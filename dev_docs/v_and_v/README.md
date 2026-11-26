@@ -328,7 +328,7 @@ OS100%/150%別の全代表操作・可読性/性能の条件と最終HEADの全C
 
 ## 要素共通処理の現役参照整理（#1059）
 
-[整理時点の試験対応表](要素共通処理の試験整理_Issue1059.md#現役の保証)に、DOF順序・ばね剛性・ダンパー断面力・MS初期状態・パネル柱剛性・線材回転質量等の試験を記録した。免震支承に関する記載は [#1741](https://github.com/hrntsm/SEPIKA/issues/1741) の対応終了前の履歴。
+[整理時点の試験対応表](要素共通処理の試験整理_Issue1059.md#現役の保証)に、DOF順序・ばね剛性・ダンパー断面力・MS初期状態・パネル柱剛性・線材回転質量等の試験を記録した。MS初期状態の行は #2032 での廃止前の証跡。免震支承に関する記載は [#1741](https://github.com/hrntsm/SEPIKA/issues/1741) の対応終了前の履歴。
 
 ## 階重量・物理質量試験の現役参照整理（#1059）
 
@@ -818,7 +818,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [ファイバー共通処理の試験整理_Issue1059.md](ファイバー共通処理の試験整理_Issue1059.md) | 公称初期K・材料解決・部材荷重・偏心連成試験の現役対応 | 🔶（既存Verificationの保持。Validationの新規確認なし） |
 | [微小相似Fiber初期断面_Issue783_2026-10.md](微小相似Fiber初期断面_Issue783_2026-10.md) | 微小断面分割・無次元化・局所後退誤差、公開Auto時刻歴と解析42失効 | 🔶（独立A/両軸I・連成弾性解・尺度変更・失敗復元のVerification。Validationと最終ゲートは記録を参照） |
 | [仕口パネル接合面距離_Issue759_2026-10.md](仕口パネル接合面距離_Issue759_2026-10.md) | 一意な実接合面の方向別距離・剛体接続・公開入口と保存失効 | 🔶（all-targets1716/IO240と追補App全tests1024成功。荷重対照と壁fixtureを記録、既存strictdoc警告#800・Validation・最終ゲートは同記録） |
-| [線材荷重と端部変換の試験整理_Issue1059.md](線材荷重と端部変換の試験整理_Issue1059.md) | ブレースUDL・MS・パネル応答・端部縮約と質量試験の現役対応 | 🔶（数値Verification保持。Validationの新規確認なし） |
+| [線材荷重と端部変換の試験整理_Issue1059.md](線材荷重と端部変換の試験整理_Issue1059.md) | ブレースUDL・パネル応答・端部縮約・質量試験の対応。MSの行は廃止前の証跡 | 🔶（数値Verification保持。Validationの新規確認なし） |
 | [仕口パネル実軸力比_Issue761_2026-10.md](仕口パネル実軸力比_Issue761_2026-10.md) | 実材長・実基準軸耐力による軸力比と小寸法・相似尺度 | 🔶（公開要素Verification、solver・保存成果と最終ゲートは同記録。Validation未） |
 | [仕口パネル状態と生成の試験整理_Issue1059.md](仕口パネル状態と生成の試験整理_Issue1059.md) | 状態収集・初期応答・生成/再適用/OFFの現役対応 | 🔶（数値Verification保持。Validationの新規確認なし） |
 | [傾斜柱仕口パネル_Issue764_調査記録.md](傾斜柱仕口パネル_Issue764_調査記録.md) | 傾斜柱のMSなし材端力組立の公開再現・独立自由体・再開条件 | 🔶（実装前調査。境界の仕事共役・耐力高さ・状態付き区間荷重の判断待ち。製品式は未変更） |
@@ -837,7 +837,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [弾性梁採用G_Issue712_2026-10.md](弾性梁採用G_Issue712_2026-10.md) | 採用Gの直接生成・公開静/動解析、SRC/CFT既存拒否との区別 | 🔶（element497・修正後solver368成功。独立レビューの動解析panicは6入口追補で回復、最後の試験変更後focused1・design3・Clippy/文書検証成功。先行App default13/GUI14を区別。最終ゲート・Validation未） |
 | [仕口パネル参照柱_Issue585_2026-10.md](仕口パネル参照柱_Issue585_2026-10.md) | 共通解決・生成・解析・検定の参照柱、旧計算契約の失効 | 🔶（直接・関連回帰Verification成功、原典/手動GUI/Validation・最終headゲート未） |
 | [壁側柱の物理的分担と局所解放_Issue496_2026-10.md](壁側柱の物理的分担と局所解放_Issue496_2026-10.md) | 共通側柱分類・純鋼板独立K/反力/仕事、Beam/Fiber/MS局所釣合い・軸履歴・同step応答 | 🔶（分離候補のrun別Verification。App lib847・full_model37・壁統合18等のrun別成功と途中失敗を区別。最終ゲート・Validation未確認） |
-| [壁幾何と側柱の試験整理_Issue1059.md](壁幾何と側柱の試験整理_Issue1059.md) | 台形壁・スリット収集・側柱解放と壁面力の固有保証を保持した統合先 | 🔶（既存Verificationの整理。物理Validationの状態は変更しない） |
+| [壁幾何と側柱の試験整理_Issue1059.md](壁幾何と側柱の試験整理_Issue1059.md) | 台形壁・スリット収集・側柱解放と壁面力の試験整理。マルチスプリング廃止後の通常梁・ファイバーの回帰試験も案内 | 🔶（既存Verificationの整理。物理Validationの状態は変更しない） |
 | [断面JとCFTコアねじり_Issue416_2026-10.md](断面JとCFTコアねじり_Issue416_2026-10.md) | H慣用J・Box中心線式、独立P2参照、本番P1校正144levels、供給Js/実GsとBeam/Fiber・公開solver・OVIKA/結果26/18 | 🔶（数値Verificationと物理Validationを区別。正式Windowsgrid160fresh成功・3形状各3反復を記録。最終統合/公開PRゲートは記録待ち） |
 | [STB断面系列別ID_Issue571_2026-10.md](STB断面系列別ID_Issue571_2026-10.md) | 採用namespace・具体系列・数値IDによる定義/部材/強度結合、内部/OVIKA保持、元5Done | 🔶（初期3段階の失敗を保持し、最終feature1322・IO227・Clippy両構成・fmt・文書検査成功。全18 snapshot/1161入力hash一致。XSD124派生期待外0、full_model差分fresh必須指摘なし。文書修正後の再検査/レビュー・親監査・最終ゲート未確認） |
 | [STB標準入力限定_Issue660_2026-10.md](STB標準入力限定_Issue660_2026-10.md) | 旧独自入力互換の撤去・固定XSD照合・両公開import参照不正・内部/OVIKA保持 | 🔶（IO200・App GUI lib837・Clippy・文書検査成功、独立レビュー必須指摘なし。追加feature回帰1292成功/1失敗、共有fixture補正後App統合3成功、App試験移行後対象6成功。全体再実行・親最終監査・最終ゲート未確認） |
@@ -1171,7 +1171,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 20 | ファイバ断面（M–φ 積分） | sepika-section / sepika-core / sepika-element | fiber.rs, mn_surface/fibers.rs, section_shape/rounded.rs | `test_section_*`、`rounded_tests`、`rounded_beam_fiber_*`。フィレット・角Rの領域、公開耐力、両質量モードの証拠は [Issue #413 検証](フィレット_角R_断面整合_Issue413_2026-10.md) | P4 | ✅（指定形状の細分化照合。通常配置の一般精度保証ではない） |
 | 20a | 微小相似Fiber初期断面 | sepika-math / sepika-element / sepika-solver | dense_lu.rs, frame/fiber/constitutive_tests.rs, panel_zone.rs | `near_diagonal_coupling_roundoff_*`・`similar_*`・`panel_753_public_nonlinear_time_history_*`（[Issue #783検証](微小相似Fiber初期断面_Issue783_2026-10.md)）。偏心試験の現役統合先は[共通処理の対応表](ファイバー共通処理の試験整理_Issue1059.md#現役の保証) | P4 | 🔶（数値Verification。実験Validation未） |
 | 20b | 物理曲率・非対称断面・剛域付き軸履歴 | sepika-element | frame/fiber/physical_curvature_tests.rs、rigid_axial_tests.rs | [保存成果の補完と端部解放の収束検証](保存成果の物理曲率と剛域軸履歴_Issue496_2026-10.md) | P4 | 🔶（有限Verification。実験Validation未） |
-| 20c | 失敗時の要素状態復元・全固定時刻歴の回帰 | sepika-solver | `common/elem_loop/preserved_tests.rs`、`dynamic/timehistory/tests/loaded_recording.rs`、`tests/general_member_loads.rs` | 現行の混在要素復元試験はマクスウェル型・履歴型ダンパーとFiber/MS。削除された免震要素の試験（[#1741](https://github.com/hrntsm/SEPIKA/issues/1741)）や当時のチェックポイント復元は[保存ブランチの検証記録](保存ブランチ496の変更採否_2026-10.md)を参照 | 横断 | 🔶（有限Verification。実験Validation未） |
+| 20c | 失敗時の要素状態復元・全固定時刻歴の回帰 | sepika-solver | `common/elem_loop/preserved_tests.rs`、`dynamic/timehistory/tests/loaded_recording.rs`、`tests/general_member_loads.rs` | 現行の混在要素復元試験はマクスウェル型・履歴型ダンパーとファイバー。削除された免震要素の試験（[#1741](https://github.com/hrntsm/SEPIKA/issues/1741)）や当時のチェックポイント復元は[保存ブランチの検証記録](保存ブランチ496の変更採否_2026-10.md)を参照 | 横断 | 🔶（有限Verification。実験Validation未） |
 | 21 | 参考骨格算定（M–φ→M–θ、廃止済み） | — | — | 現行の試験対象なし。上記#436の履歴記録を参照 | P4 / #436 / #849 | 廃止済み（単位・拒否契約の検証履歴を保持） |
 | 22 | MCP サーバ（rmcp） | sepika-mcp | server.rs, job/*.rs | `model_query`/`model_edit`（壁版・床板・床領域）/`quantity_takeoff`/`analysis_run`/`result_get`/`analysis_status`（`--features mcp` で CI 検証。`tests.rs` + `server.rs` 統合テスト）。**未公開**: `model.load`/`model.save`/`report.export` | P8 | 廃止済み（過去の検証を記録） |
 | 24 | 編集トランザクション（EditCommand/Undo） | sepika-edit | lib.rs | `test_*` | P3/P8 | ✅ |

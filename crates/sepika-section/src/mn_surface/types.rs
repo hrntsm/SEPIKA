@@ -35,8 +35,6 @@ pub enum FiberRegion {
 pub enum YieldModelKind {
     /// 部材端の単純降伏バネ（2バネ連成: |N|/N許容 + M/M許容 = 1 の線形相関）
     SimpleSpring,
-    /// マルチスプリング（粗いバネ群、N-M 相関あり・多面体状）
-    MultiSpring,
     /// マルチファイバー（細分割、滑らかな相関曲面）
     MultiFiber,
 }
@@ -46,7 +44,6 @@ impl YieldModelKind {
     pub fn label(&self) -> &'static str {
         match self {
             YieldModelKind::SimpleSpring => "単純降伏バネ",
-            YieldModelKind::MultiSpring => "マルチスプリング",
             YieldModelKind::MultiFiber => "マルチファイバー",
         }
     }

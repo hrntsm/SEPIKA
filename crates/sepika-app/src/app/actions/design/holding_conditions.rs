@@ -10,10 +10,8 @@ impl App {
             .elements
             .iter()
             .filter(|e| {
-                matches!(
-                    e.kind,
-                    ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-                ) && e.nodes.len() == 2
+                matches!(e.kind, ElementKind::Beam | ElementKind::Fiber)
+                    && e.nodes.len() == 2
                     && matches!(
                         MemberKind::try_of_element(e, model),
                         Ok(MemberKind::Column | MemberKind::Girder)

@@ -79,8 +79,7 @@ fn sample_rc_shape() -> SectionShape {
 #[test]
 fn test_rc_rect_capacity() {
     let strength = StrengthParams::default();
-    let fibers = plastic_fibers(&sample_rc_shape(), &strength, YieldModelKind::MultiFiber)
-        .expect("配筋は妥当");
+    let fibers = plastic_fibers(&sample_rc_shape(), &strength).expect("配筋は妥当");
     // 引張耐力 = 主筋のみ: (4×2 + 2×2) 本 × a × fy
     let a_bar = std::f64::consts::PI * 22.0 * 22.0 / 4.0;
     let nt_exact = 12.0 * a_bar * strength.rebar_fy;
@@ -94,8 +93,7 @@ fn test_rc_rect_capacity() {
 #[test]
 fn test_rc_moment_increases_with_moderate_compression() {
     let strength = StrengthParams::default();
-    let fibers = plastic_fibers(&sample_rc_shape(), &strength, YieldModelKind::MultiFiber)
-        .expect("配筋は妥当");
+    let fibers = plastic_fibers(&sample_rc_shape(), &strength).expect("配筋は妥当");
     let (nc, _) = axial_capacity(&fibers);
     let m0 = plastic_moment_at_n(&fibers, 1.0, 0.0, 0.0).unwrap()[0];
     let m_comp = plastic_moment_at_n(&fibers, 1.0, 0.0, 0.3 * nc).unwrap()[0];
@@ -175,8 +173,7 @@ fn test_steel_h_plastic_moment() {
         flange_thick: 13.0,
     };
     let strength = StrengthParams::default();
-    let fibers =
-        plastic_fibers(&shape, &strength, YieldModelKind::MultiFiber).expect("鋼断面は配筋不要");
+    let fibers = plastic_fibers(&shape, &strength).expect("鋼断面は配筋不要");
     // Zp = B·tf·(H−tf) + tw·(H−2tf)²/4
     let zp =
         200.0 * 13.0 * (400.0 - 13.0) + 8.0 * (400.0 - 2.0 * 13.0) * (400.0 - 2.0 * 13.0) / 4.0;
@@ -193,8 +190,7 @@ fn test_tee_centroid_correction() {
         flange_thick: 12.0,
     };
     let strength = StrengthParams::default();
-    let fibers =
-        plastic_fibers(&shape, &strength, YieldModelKind::MultiFiber).expect("鋼断面は配筋不要");
+    let fibers = plastic_fibers(&shape, &strength).expect("鋼断面は配筋不要");
     let a_sum: f64 = fibers.iter().map(|f| f.area).sum();
     let cz: f64 = fibers.iter().map(|f| f.area * f.z).sum::<f64>() / a_sum;
     assert_relative_eq!(cz, 0.0, epsilon = 1e-9);
@@ -244,8 +240,7 @@ fn test_m_theta_elastic_slope_and_plastic_rotation() {
 #[test]
 fn test_m_phi_rc_section() {
     let strength = StrengthParams::default();
-    let fibers = plastic_fibers(&sample_rc_shape(), &strength, YieldModelKind::MultiFiber)
-        .expect("配筋は妥当");
+    let fibers = plastic_fibers(&sample_rc_shape(), &strength).expect("配筋は妥当");
     let (nc, _) = axial_capacity(&fibers);
     let curve = m_phi_curve(&fibers, 1.0, 0.0, 0.2 * nc, 40).unwrap();
     assert!(curve.ei0.is_finite() && curve.ei0 > 0.0);
@@ -256,30 +251,6 @@ fn test_m_phi_rc_section() {
     let mp = plastic_moment_at_n(&fibers, 1.0, 0.0, 0.2 * nc).unwrap()[0];
     let m_last = curve.points.last().unwrap()[1];
     assert!(m_last > 0.95 * mp, "m_last = {m_last}, mp = {mp}");
-}
-
-#[test]
-fn test_m_phi_multispring_is_piecewise() {
-    let strength = StrengthParams::default();
-    let shape = sample_rc_shape();
-    let ms = plastic_fibers(&shape, &strength, YieldModelKind::MultiSpring).expect("配筋は妥当");
-    let fib = plastic_fibers(&shape, &strength, YieldModelKind::MultiFiber).expect("配筋は妥当");
-    assert!(
-        ms.len() < fib.len() / 10,
-        "MS ({}) must be much coarser than fiber ({})",
-        ms.len(),
-        fib.len()
-    );
-    let (nc_ms, nt_ms) = axial_capacity(&ms);
-    let (nc_f, nt_f) = axial_capacity(&fib);
-    assert_relative_eq!(nc_ms, nc_f, max_relative = 1e-9);
-    assert_relative_eq!(nt_ms, nt_f, max_relative = 1e-9);
-    let c_ms = m_phi_curve(&ms, 1.0, 0.0, 0.0, 60).unwrap();
-    let c_f = m_phi_curve(&fib, 1.0, 0.0, 0.0, 60).unwrap();
-    assert_relative_eq!(c_ms.ei0, c_f.ei0, max_relative = 5e-2);
-    let m_ms = c_ms.points.last().unwrap()[1];
-    let m_f = c_f.points.last().unwrap()[1];
-    assert_relative_eq!(m_ms, m_f, max_relative = 8e-2);
 }
 
 /// 幾何的に成立しない実配筋（Y 方向の段数不整合）では、ファイバ生成が
@@ -302,11 +273,7 @@ fn test_inconsistent_column_rebar_returns_err() {
             },
         },
     };
-    let result = plastic_fibers(
-        &shape,
-        &StrengthParams::default(),
-        YieldModelKind::MultiFiber,
-    );
+    let result = plastic_fibers(&shape, &StrengthParams::default());
     assert!(result.is_err(), "不正配筋は Err を返す: {result:?}");
 }
 
@@ -425,30 +392,23 @@ fn src552_independent_area_centroid_inertia_and_elastic_oracle() {
 #[test]
 fn src552_mn_mphi_and_discrete_rebar_use_corrected_regions() {
     let mut shape = src552_shape();
-    for kind in [YieldModelKind::MultiFiber, YieldModelKind::MultiSpring] {
-        let fibers = plastic_fibers(&shape, &StrengthParams::default(), kind).unwrap();
-        assert_relative_eq!(
-            fibers.iter().map(|f| f.area).sum::<f64>(),
-            180000.0,
-            max_relative = 1e-10
-        );
-        let surface = build_surface(&fibers, kind, 8, 16);
-        for p in &surface.grid[8] {
-            assert_relative_eq!(p[0], -5967488.0, max_relative = 1e-10);
-        }
-        assert!(m_phi_curve(&fibers, 1.0, 0.0, 0.0, 20).is_some());
+    let fibers = plastic_fibers(&shape, &StrengthParams::default()).unwrap();
+    assert_relative_eq!(
+        fibers.iter().map(|f| f.area).sum::<f64>(),
+        180000.0,
+        max_relative = 1e-10
+    );
+    let surface = build_surface(&fibers, YieldModelKind::MultiFiber, 8, 16);
+    for p in &surface.grid[8] {
+        assert_relative_eq!(p[0], -5967488.0, max_relative = 1e-10);
     }
+    assert!(m_phi_curve(&fibers, 1.0, 0.0, 0.0, 20).is_some());
     if let SectionShape::SrcColumnRect { rebar, .. } = &mut shape {
         rebar.main_dia = sepika_core::section_shape::RebarSize::DiameterMm(20.0);
         rebar.x = vec![2];
         rebar.y = vec![2];
     }
-    let fibers = plastic_fibers(
-        &shape,
-        &StrengthParams::default(),
-        YieldModelKind::MultiFiber,
-    )
-    .unwrap();
+    let fibers = plastic_fibers(&shape, &StrengthParams::default()).unwrap();
     let bars: Vec<_> = fibers
         .iter()
         .filter(|f| f.region == FiberRegion::Rebar)
@@ -492,12 +452,7 @@ fn src552_rejects_invalid_geometry_material_and_bar_interference() {
                 ][index] = value;
             }
             assert!(shape.validate_rebar().is_err());
-            assert!(plastic_fibers(
-                &shape,
-                &StrengthParams::default(),
-                YieldModelKind::MultiFiber
-            )
-            .is_err());
+            assert!(plastic_fibers(&shape, &StrengthParams::default()).is_err());
         }
     }
     for index in 0..3 {
@@ -507,7 +462,7 @@ fn src552_rejects_invalid_geometry_material_and_bar_interference() {
             &mut strength.steel_fy,
             &mut strength.steel_e,
         ][index] = f64::NAN;
-        assert!(plastic_fibers(&valid, &strength, YieldModelKind::MultiFiber).is_err());
+        assert!(plastic_fibers(&valid, &strength).is_err());
     }
     let mut shape = valid;
     if let SectionShape::SrcColumnRect {
@@ -523,12 +478,7 @@ fn src552_rejects_invalid_geometry_material_and_bar_interference() {
     }
     let error = shape.validate_rebar().unwrap_err().to_string();
     assert!(error.contains("主筋1") && error.contains("干渉"), "{error}");
-    assert!(plastic_fibers(
-        &shape,
-        &StrengthParams::default(),
-        YieldModelKind::MultiSpring
-    )
-    .is_err());
+    assert!(plastic_fibers(&shape, &StrengthParams::default()).is_err());
 }
 
 #[test]
@@ -558,24 +508,19 @@ fn src552_rebar_strength_overlap_and_outside_are_rejected() {
         rebar_fy: f64::NAN,
         ..Default::default()
     };
-    assert!(plastic_fibers(&shape, &strength, YieldModelKind::MultiFiber).is_err());
+    assert!(plastic_fibers(&shape, &strength).is_err());
     if let SectionShape::SrcBeamRect { rebar, .. } = &mut shape {
         rebar.top = vec![];
         rebar.bottom = vec![];
     }
-    assert!(plastic_fibers(&shape, &strength, YieldModelKind::MultiFiber).is_ok());
+    assert!(plastic_fibers(&shape, &strength).is_ok());
     for (count, cover) in [(20, 40.0), (2, 310.0)] {
         if let SectionShape::SrcBeamRect { rebar, .. } = &mut shape {
             rebar.top = vec![count];
             rebar.cover = cover;
         }
         assert!(shape.validate_rebar().is_err());
-        assert!(plastic_fibers(
-            &shape,
-            &StrengthParams::default(),
-            YieldModelKind::MultiSpring
-        )
-        .is_err());
+        assert!(plastic_fibers(&shape, &StrengthParams::default()).is_err());
     }
 }
 

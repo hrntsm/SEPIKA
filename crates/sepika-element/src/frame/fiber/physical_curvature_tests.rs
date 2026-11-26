@@ -188,117 +188,116 @@ fn asymmetric_material_and_geometry_keep_physical_compression_side_and_boundary_
 }
 
 #[test]
-fn usual_rc_fiber_and_ms_factories_keep_top_bottom_bending_under_end_swap_and_quarter_turn() {
+fn usual_rc_fiber_factory_keep_top_bottom_bending_under_end_swap_and_quarter_turn() {
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::section_shape::{BeamStirrup, RcBeamRebar, SectionShape};
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        for reverse in [false, true] {
-            for rotate in [false, true] {
-                for curvature in [-1e-8, 1e-8] {
-                    let mut model = super::tests::rc_fiber_model();
-                    let shape = SectionShape::RcBeamRect {
-                        b: 500.0,
-                        d: 500.0,
-                        rebar: RcBeamRebar {
-                            main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
-                            top: vec![4],
-                            bottom: vec![2],
-                            cover: 40.0,
-                            stirrup: BeamStirrup {
-                                dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
-                                pitch: 100.0,
-                                legs: 2,
-                            },
+    let kind = ElementKind::Fiber;
+    for reverse in [false, true] {
+        for rotate in [false, true] {
+            for curvature in [-1e-8, 1e-8] {
+                let mut model = super::tests::rc_fiber_model();
+                let shape = SectionShape::RcBeamRect {
+                    b: 500.0,
+                    d: 500.0,
+                    rebar: RcBeamRebar {
+                        main_dia: sepika_core::section_shape::RebarSize::DiameterMm(25.0),
+                        top: vec![4],
+                        bottom: vec![2],
+                        cover: 40.0,
+                        stirrup: BeamStirrup {
+                            dia: sepika_core::section_shape::RebarSize::DiameterMm(10.0),
+                            pitch: 100.0,
+                            legs: 2,
                         },
-                    };
-                    model.sections[0] = shape.to_section(SectionId(0), "上下非対称RC梁".into());
-                    model.sections[0].material = Some(MaterialId(0));
-                    model.sections[0].rebar_material = Some(MaterialId(1));
-                    model.sections[0].shear_rebar_material = Some(MaterialId(1));
-                    model.elements[0].kind = kind;
-                    model.elements[0].plastic_zone = Some(250.0);
-                    let mut u = [0.0; 12];
-                    for end in 0..2 {
-                        let x = if (end == 1) != reverse { 3000.0 } else { 0.0 };
-                        model.nodes[end].coord = if rotate { [0.0, x, 0.0] } else { [x, 0.0, 0.0] };
-                        let uy = curvature * x * x / 2.0;
-                        if rotate {
-                            u[end * 6] = -uy;
-                        } else {
-                            u[end * 6 + 1] = uy;
-                        }
-                        u[end * 6 + 5] = curvature * x;
-                    }
-                    model.elements[0].local_axis.ref_vector = if rotate {
-                        [-1.0, 0.0, 0.0]
+                    },
+                };
+                model.sections[0] = shape.to_section(SectionId(0), "上下非対称RC梁".into());
+                model.sections[0].material = Some(MaterialId(0));
+                model.sections[0].rebar_material = Some(MaterialId(1));
+                model.sections[0].shear_rebar_material = Some(MaterialId(1));
+                model.elements[0].kind = kind;
+                model.elements[0].plastic_zone = Some(250.0);
+                let mut u = [0.0; 12];
+                for end in 0..2 {
+                    let x = if (end == 1) != reverse { 3000.0 } else { 0.0 };
+                    model.nodes[end].coord = if rotate { [0.0, x, 0.0] } else { [x, 0.0, 0.0] };
+                    let uy = curvature * x * x / 2.0;
+                    if rotate {
+                        u[end * 6] = -uy;
                     } else {
-                        [0.0, 1.0, 0.0]
-                    };
-                    let ctx = Ctx { model: &model };
-                    let mut member = crate::factory::build_nonlinear_behavior(
-                        &model.elements[0],
-                        &model,
-                        StrengthBasis::Nominal,
-                        AnalysisKind::Incremental,
-                        None,
-                    );
-                    member
-                        .update_state(
-                            &LocalVec {
-                                data: u.into_iter().collect(),
-                            },
-                            false,
-                            &ctx,
-                        )
-                        .unwrap();
-                    let states = member.fiber_section_states().unwrap();
-                    assert_eq!(states.len(), 2);
-                    let snapshot = member.snapshot_state();
-                    let state = crate::frame::shear::axial_bending_snapshot(snapshot.as_ref())
-                        .downcast_ref::<FiberBeamSnapshot>()
-                        .unwrap();
-                    let axis = crate::transform::LocalFrame::from_nodes(
-                        model.nodes[0].coord,
-                        model.nodes[1].coord,
-                        model.elements[0].local_axis.ref_vector,
+                        u[end * 6 + 1] = uy;
+                    }
+                    u[end * 6 + 5] = curvature * x;
+                }
+                model.elements[0].local_axis.ref_vector = if rotate {
+                    [-1.0, 0.0, 0.0]
+                } else {
+                    [0.0, 1.0, 0.0]
+                };
+                let ctx = Ctx { model: &model };
+                let mut member = crate::factory::build_nonlinear_behavior(
+                    &model.elements[0],
+                    &model,
+                    StrengthBasis::Nominal,
+                    AnalysisKind::Incremental,
+                    None,
+                );
+                member
+                    .update_state(
+                        &LocalVec {
+                            data: u.into_iter().collect(),
+                        },
+                        false,
+                        &ctx,
                     )
                     .unwrap();
-                    let force = member.internal_force(&ctx);
-                    let local = axis.rotate_to_local(&std::array::from_fn(|i| force.data[i]));
-                    for (end, section) in states.iter().enumerate() {
-                        let mut top = 0;
-                        let mut bottom = 0;
-                        let mut physical_q = [0.0; 3];
-                        for (index, fiber) in section.fibers.iter().enumerate() {
-                            if fiber.material == 1 {
-                                assert!(fiber.strain*curvature*fiber.y < 0.0,"{kind:?} reverse={reverse} rotate={rotate} κ={curvature} y={} ε={}",fiber.y,fiber.strain);
-                                if fiber.y > 0.0 {
-                                    top += 1;
-                                } else {
-                                    bottom += 1;
-                                }
-                            }
-                            let traction = state.2[end][index].probe(fiber.strain).0 * fiber.area;
-                            physical_q[0] += traction;
-                            physical_q[1] += fiber.z * traction;
-                            physical_q[2] -= fiber.y * traction;
-                        }
-                        assert_eq!((top, bottom), (4, 2));
-                        for (component, slot) in [0, 4, 5].into_iter().enumerate() {
-                            let boundary = if end == 0 {
-                                -local[slot]
+                let states = member.fiber_section_states().unwrap();
+                assert_eq!(states.len(), 2);
+                let snapshot = member.snapshot_state();
+                let state = crate::frame::shear::axial_bending_snapshot(snapshot.as_ref())
+                    .downcast_ref::<FiberBeamSnapshot>()
+                    .unwrap();
+                let axis = crate::transform::LocalFrame::from_nodes(
+                    model.nodes[0].coord,
+                    model.nodes[1].coord,
+                    model.elements[0].local_axis.ref_vector,
+                )
+                .unwrap();
+                let force = member.internal_force(&ctx);
+                let local = axis.rotate_to_local(&std::array::from_fn(|i| force.data[i]));
+                for (end, section) in states.iter().enumerate() {
+                    let mut top = 0;
+                    let mut bottom = 0;
+                    let mut physical_q = [0.0; 3];
+                    for (index, fiber) in section.fibers.iter().enumerate() {
+                        if fiber.material == 1 {
+                            assert!(fiber.strain*curvature*fiber.y < 0.0,"{kind:?} reverse={reverse} rotate={rotate} κ={curvature} y={} ε={}",fiber.y,fiber.strain);
+                            if fiber.y > 0.0 {
+                                top += 1;
                             } else {
-                                local[slot + 6]
-                            };
-                            assert_relative_eq!(
-                                physical_q[component],
-                                boundary,
-                                epsilon = 1e-5,
-                                max_relative = 1e-9
-                            );
+                                bottom += 1;
+                            }
                         }
-                        assert!(physical_q[2] * curvature > 0.0);
+                        let traction = state.2[end][index].probe(fiber.strain).0 * fiber.area;
+                        physical_q[0] += traction;
+                        physical_q[1] += fiber.z * traction;
+                        physical_q[2] -= fiber.y * traction;
                     }
+                    assert_eq!((top, bottom), (4, 2));
+                    for (component, slot) in [0, 4, 5].into_iter().enumerate() {
+                        let boundary = if end == 0 {
+                            -local[slot]
+                        } else {
+                            local[slot + 6]
+                        };
+                        assert_relative_eq!(
+                            physical_q[component],
+                            boundary,
+                            epsilon = 1e-5,
+                            max_relative = 1e-9
+                        );
+                    }
+                    assert!(physical_q[2] * curvature > 0.0);
                 }
             }
         }

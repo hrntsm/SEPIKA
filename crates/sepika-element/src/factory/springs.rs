@@ -122,7 +122,7 @@ pub fn resolve_member_hysteresis(
     }
 }
 
-/// ファイバー断面・MS 要素のコンクリート除荷則を解決する。
+/// ファイバー断面のコンクリート除荷則を解決する。
 pub fn resolve_fiber_concrete_hysteresis(
     data: &ElementData,
     model: &Model,

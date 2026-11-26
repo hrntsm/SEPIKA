@@ -3923,7 +3923,6 @@ fn ダンパー総重量はgui共通同期経路の再実行でも増殖しな�
             tension_only: false,
         },
         ElementKind::Fiber,
-        ElementKind::MultiSpring,
     ] {
         for method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
             let mut app = App::default();
@@ -13069,11 +13068,7 @@ mod wall_connection_entry_fixture {
 #[test]
 fn wall_connection_gui_diagnostic_preserves_shared_stop_reason() {
     use sepika_core::model::ElementKind;
-    for representation in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for representation in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = wall_connection_entry_fixture::wall_connection_fixture(representation);
         for node in &mut model.nodes[..2] {
             node.restraint = sepika_core::dof::Dof6Mask::FIXED;

@@ -2224,11 +2224,7 @@ fn reference_skeleton_report_caps_horizontal_rebar_and_diagnoses_missing_vertica
 
 #[test]
 fn reference_skeleton_uses_same_face_total_state_and_keeps_allowable_check_on_missing_side() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         reference_skeleton_for_frame_representation(kind);
     }
 }

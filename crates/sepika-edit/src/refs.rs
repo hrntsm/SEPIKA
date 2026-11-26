@@ -66,10 +66,7 @@ pub(crate) fn frame_element_section_ref_ok(
                 if section.frame_use != Some(FrameSectionUse::Column) {
                     return false;
                 }
-                if !matches!(
-                    element.kind,
-                    ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-                ) {
+                if !matches!(element.kind, ElementKind::Beam | ElementKind::Fiber) {
                     return false;
                 }
                 true

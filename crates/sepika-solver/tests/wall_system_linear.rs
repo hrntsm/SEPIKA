@@ -10,11 +10,7 @@ use sepika_solver::statics::linear::{linear_static_once, StaticOnce};
 #[path = "support/rc_wall_side_column_model.rs"]
 mod rc_wall_side_column_model;
 
-const KINDS: [ElementKind; 3] = [
-    ElementKind::Beam,
-    ElementKind::Fiber,
-    ElementKind::MultiSpring,
-];
+const KINDS: [ElementKind; 2] = [ElementKind::Beam, ElementKind::Fiber];
 
 #[test]
 fn physical_story_shear_includes_wall_brace_and_support_conditions() {
@@ -886,7 +882,7 @@ fn wall_system_signed_rotated_and_reordered_states_match_independent_reference()
             }
         }
     }
-    assert_eq!(states, 48);
+    assert_eq!(states, 32);
 }
 
 #[test]
