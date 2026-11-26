@@ -57,6 +57,7 @@ fn peak_labels_with_confirmed_long_term(
                     index,
                     rec,
                     rec.frame_time.len(),
+                    || true,
                     nonlinear,
                     applied_long_term,
                     || (!confirmed_long_term).then_some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),
@@ -206,12 +207,15 @@ fn signed_q0_th_detail_steel_still_checks_without_rc_gravity_input() {
     assert!(app.load_model(column(0.0, true)));
     app.core.analysis_cfg.qd_method = QdMethod::Qd1;
     let rec = ThRecording {
-        peak_member_forces: vec![Some(moments(250e6))],
+        peak_member_forces: vec![Some(moments(300e6))],
         ..Default::default()
     };
     let text = labels(&app, &rec, true);
     assert!(text.contains("検定比") && text.contains("(NG)"), "{text}");
-    assert!(text.contains("採用横座屈長さ lb=3000 mm"), "{text}");
+    assert!(
+        text.contains("確定時刻ごとの補剛区間の照査記録がありません"),
+        "{text}"
+    );
     assert!(!text.contains("重力参照内力"), "{text}");
 
     let mut rc_model = fixture::model();

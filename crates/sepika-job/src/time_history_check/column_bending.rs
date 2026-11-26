@@ -7,11 +7,13 @@ use sepika_design_jp::steel::{
 };
 use sepika_design_jp::{DesignCtx, LoadTerm, MemberForcesAt, MemberKind};
 use sepika_solver::dynamic::timehistory::{
-    ColumnBendingPeak, CommittedBendingResponse, SymmetricColumnBendingHistory,
+    ColumnBendingMaterialFailure, ColumnBendingPeak, CommittedBendingResponse,
+    SymmetricColumnBendingHistory,
 };
 
 pub(crate) struct Column<'a> {
     pub index: usize,
+    length_mm: f64,
     section: &'a Section,
     material: Option<&'a Material>,
     ctx: DesignCtx,
@@ -69,6 +71,7 @@ pub(crate) fn columns<'a>(
             }
             Some(Column {
                 index,
+                length_mm: model.member_length(elem),
                 section,
                 material,
                 ctx: DesignCtx {
@@ -90,15 +93,45 @@ pub(crate) fn record(
     bending: &CommittedBendingResponse<'_>,
 ) {
     item.committed_count += 1;
-    let (Some(lb_mm), Some(material)) = (item.lb_mm, column.material) else {
+    let Some(material) = column.material else {
         return;
     };
-    let span = match bending(column.index, lb_mm) {
+    let span = match bending(column.index, item.lb_mm.unwrap_or(column.length_mm)) {
         Ok(span) => span,
         Err(reason) => {
             item.unavailable.insert(reason);
             return;
         }
+    };
+    let material_excess = span
+        .demand_peaks
+        .iter()
+        .max_by(|a, b| a.left[5].abs().total_cmp(&b.left[5].abs()))
+        .and_then(|demand| {
+            SteelDesign
+                .time_history_column_bending_material_failure(
+                    demand.left[5],
+                    column.section,
+                    material,
+                    &column.ctx,
+                )
+                .map(|ratio| (demand, ratio))
+        });
+    if let Some((demand, ratio)) = material_excess.filter(|&(_, ratio)| {
+        item.material_failure
+            .as_ref()
+            .is_none_or(|prior| ratio > prior.ratio)
+    }) {
+        item.material_failure = Some(ColumnBendingMaterialFailure {
+            step,
+            time_s,
+            x_mm: demand.x_mm,
+            mz_nmm: demand.left[5],
+            ratio,
+        });
+    }
+    let Some(lb_mm) = item.lb_mm else {
+        return;
     };
     let mut complete = !span.demand_peaks.is_empty();
     if !complete {
@@ -176,19 +209,25 @@ pub(crate) fn valid_prefix(
             .iter()
             .find(|attr| attr.elem == elem.id);
         let lb = confirmed_span_length(model, elem, attr).ok();
+        let valid_demand = |step, time_s, x_mm, mz_nmm: f64| {
+            let length_mm = model.member_length(elem);
+            (0.0..=length_mm + 32.0 * f64::EPSILON * length_mm).contains(&x_mm)
+                && usize::try_from(step).ok().and_then(|i| times.get(i)) == Some(&time_s)
+                && mz_nmm.is_finite()
+                && mz_nmm != 0.0
+        };
         item.lb_mm == lb
             && item.committed_count == times.len()
             && item.evaluated_count <= item.committed_count
             && (item.evaluated_count == item.committed_count) == item.unavailable.is_empty()
+            && item.material_failure.as_ref().is_none_or(|failure| {
+                valid_demand(failure.step, failure.time_s, failure.x_mm, failure.mz_nmm)
+                    && failure.ratio.is_finite()
+                    && failure.ratio > 1.0
+            })
             && item.peak.as_ref().is_none_or(|peak| {
-                lb.is_some_and(|length_mm| {
-                    peak.max_x_mm.is_finite()
-                        && (0.0..=length_mm + 32.0 * f64::EPSILON * length_mm)
-                            .contains(&peak.max_x_mm)
-                }) && usize::try_from(peak.step).ok().and_then(|i| times.get(i))
-                    == Some(&peak.time_s)
-                    && peak.max_mz_nmm.is_finite()
-                    && peak.max_mz_nmm != 0.0
+                lb.is_some()
+                    && valid_demand(peak.step, peak.time_s, peak.max_x_mm, peak.max_mz_nmm)
                     && peak.end_moments_nmm.iter().all(|moment| moment.is_finite())
                     && (1.0..=2.3).contains(&peak.c)
                     && (0.3..=0.9 + f64::EPSILON).contains(&peak.p_lambda_b)
@@ -268,14 +307,14 @@ mod tests {
     fn opposite_ends_from_different_steps_do_not_hide_strong_bending_failure() {
         let model = model();
         let frame = frame();
-        let samples = [[259e6, 0.0], [0.0, -259e6], [50e6, -50e6]];
+        let samples = [[259e6, 0.0], [0.0, -259e6], [260e6, -260e6]];
         let history = collect(&model, 4, |step, _, lb| {
             let Some(&[i, j]) = samples.get(step) else {
                 return Err("同じ確定時刻の荷重込み部材応答がありません".into());
             };
             let q = -86_333.333_333_333_33;
             let q = if step == 2 {
-                -33_333.333_333_333_336
+                -173_333.333_333_333_34
             } else {
                 q
             };
@@ -334,6 +373,90 @@ mod tests {
     }
 
     #[test]
+    fn weak_axis_load_inside_a_flat_maximum_cannot_be_hidden_by_zero_end_moments() {
+        let model = model();
+        let loads = MemberLoad::manual(
+            model.elements[0].id,
+            [0.0, 1.0, 0.0],
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 3000.0,
+                w1: -1.0,
+                w2: -1.0,
+            },
+        );
+        for weak_load in [false, true] {
+            let qz = if weak_load { 1500.0 } else { 0.0 };
+            let force = MemberForces {
+                at: vec![
+                    (0.0, [0.0, 0.0, qz, 0.0, 0.0, 200e6]),
+                    (1.0, [0.0, 0.0, -qz, 0.0, 0.0, 200e6]),
+                ],
+            };
+            let terms = [(1.0, &loads)];
+            let history = collect(&model, 1, |_, _, lb| {
+                let applied = if weak_load { terms.as_slice() } else { &[] };
+                frame_strong_bending_span(&frame(), lb, [0.0, lb], applied, &force)
+            });
+            assert!(history.material_failure.is_none(), "{history:?}");
+            if weak_load {
+                assert_eq!(history.evaluated_count, 0);
+                assert!(history.peak.is_none(), "{history:?}");
+                assert!(
+                    history
+                        .unavailable
+                        .iter()
+                        .any(|reason| reason.contains("最大となる平坦区間")),
+                    "{history:?}"
+                );
+            } else {
+                assert_eq!(history.evaluated_count, 1);
+                let peak = history.peak.unwrap();
+                assert_eq!((peak.c, peak.p_lambda_b), (1.0, 0.3));
+                assert!(peak.ratio < 1.0, "{peak:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn internal_bending_excess_survives_unavailable_lateral_buckling() {
+        let mut model = model();
+        let load = MemberLoad::manual(
+            model.elements[0].id,
+            [1.0, 0.0, 0.0],
+            MemberLoadKind::Distributed {
+                a: 0.0,
+                b: 3000.0,
+                w1: -140.0,
+                w2: -140.0,
+            },
+        );
+        let force = MemberForces {
+            at: vec![
+                (0.0, [0.0, 140e3, 0.0, 0.0, 1e6, 210e6]),
+                (0.5, [0.0, -70e3, 0.0, 0.0, 1e6, 262.5e6]),
+                (1.0, [0.0, -280e3, 0.0, 0.0, 1e6, 0.0]),
+            ],
+        };
+        for reason in ["弱軸曲げと強軸曲げ", "両実材端の支持条件が未確認"] {
+            let history = collect(&model, 1, |_, _, length| {
+                frame_strong_bending_span(&frame(), length, [0.0, length], &[(1.0, &load)], &force)
+            });
+            assert_eq!(history.evaluated_count, 0);
+            assert!(history.peak.is_none(), "{history:?}");
+            assert!(
+                history.unavailable.iter().any(|item| item.contains(reason)),
+                "{history:?}"
+            );
+            let failure = history.material_failure.unwrap();
+            assert!((failure.x_mm - 1000.0).abs() < 1e-9, "{failure:?}");
+            assert!((failure.mz_nmm - 280e6).abs() < 1e-6, "{failure:?}");
+            assert!((failure.ratio - 1.03767).abs() < 1e-5, "{failure:?}");
+            model.steel_design_attrs[0].column_lateral_buckling_end_supports = None;
+        }
+    }
+
+    #[test]
     fn verified_eccentric_supports_use_the_actual_length() {
         let mut model = model();
         model.elements[0].end_offsets_mm[1][2] = 500.0;
@@ -368,7 +491,12 @@ mod tests {
             if move_after_confirmation {
                 model.elements[0].end_offsets_mm[1][2] = 0.0;
             }
-            let history = collect(&model, 1, |_, _, _| panic!("未確認区間の分布を取得した"));
+            let zero = MemberForces {
+                at: vec![(0.0, [0.0; 6]), (1.0, [0.0; 6])],
+            };
+            let history = collect(&model, 1, |_, _, length| {
+                frame_strong_bending_span(&frame(), length, [0.0, length], &[], &zero)
+            });
             assert!(history.lb_mm.is_none() && history.peak.is_none());
             assert!(
                 history.unavailable.iter().any(|item| item.contains(reason)),

@@ -609,6 +609,17 @@ impl SteelDesign {
         column::time_history_column_strong_bending(sec, mat, ctx, lb_mm, span, peak)
     }
 
+    /// 上下対称H形鋼柱の強軸曲げ [N·mm] が材料の許容上限を超える場合だけ、独立した不適合の比を返す。
+    pub fn time_history_column_bending_material_failure(
+        &self,
+        mz_nmm: f64,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+    ) -> Option<f64> {
+        column::strong_bending_material_excess(mz_nmm, sec, mat, ctx).map(|(_, _, ratio)| ratio)
+    }
+
     /// 対称H形鋼柱の強軸横座屈は別途区間で照査する。
     /// 強軸曲げを含む行では既知の不適合のみを返し、包絡は成分を組み合わせない。
     pub fn check_time_history_h_column_section(

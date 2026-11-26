@@ -347,6 +347,12 @@ fn draw_th_detail_content_at(
         elem_idx,
         recording,
         th_result.time.len(),
+        || {
+            view.spatial_case_id(app).is_some_and(|id| {
+                app.require_result_input(crate::app::ResultInputKey::TimeHistory(id))
+                    .is_ok()
+            })
+        },
         th_nonlinear,
         th_applied_long_term,
         || damage_control_gravity_issue(app, view, &display, th_result),
@@ -717,6 +723,7 @@ fn draw_peak_check<'a>(
     elem_idx: usize,
     rec: &ThRecording,
     expected_count: usize,
+    bending_input_current: impl FnOnce() -> bool,
     th_nonlinear: bool,
     th_applied_long_term: bool,
     damage_control_gravity_issue: impl FnOnce() -> Option<&'static str>,
@@ -753,14 +760,17 @@ fn draw_peak_check<'a>(
         draw_asymmetric_column_section_history(ui, rec, elem_idx);
     }
     let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
-    if symmetric_h_column {
-        draw_symmetric_column_bending(
+    if symmetric_h_column
+        && !draw_symmetric_column_bending(
             ui,
             rec,
             elem_idx,
             expected_count,
             attr.and_then(|a| a.c_direct).is_some(),
-        );
+            bending_input_current,
+        )
+    {
+        return;
     }
     let Some(peak) = rec
         .peak_member_forces
@@ -1261,7 +1271,8 @@ fn draw_symmetric_column_bending(
     elem_idx: usize,
     expected_count: usize,
     has_direct_c: bool,
-) {
+    input_current: impl FnOnce() -> bool,
+) -> bool {
     ui.strong("全確定時刻の強軸曲げ・横座屈照査（短期）");
     ui.label("軸力・弱軸曲げ・弱軸せん断・ねじりを含む部材全体の適否を示すものではありません。");
     if has_direct_c {
@@ -1272,8 +1283,15 @@ fn draw_symmetric_column_bending(
             theme::WARN_TEXT,
             "未算定：確定時刻ごとの補剛区間の照査記録がありません。先頭から解析を再実行してください。",
         );
-        return;
+        return true;
     };
+    if !input_current() {
+        ui.colored_label(
+            theme::WARN_TEXT,
+            "未算定：選択中の時刻歴結果の生成入力と現在のモデルの一致を確認できません。解析を再実行してください。",
+        );
+        return false;
+    }
     let complete = expected_count > 0
         && history.committed_count == expected_count
         && history.evaluated_count == expected_count
@@ -1334,6 +1352,19 @@ fn draw_symmetric_column_bending(
     for reason in &history.unavailable {
         ui.colored_label(theme::WARN_TEXT, format!("未算定：{reason}"));
     }
+    if let Some(failure) = &history.material_failure {
+        ui.colored_label(
+            theme::status_color(failure.ratio),
+            format!(
+                "独立NG：強軸曲げが短期材料許容上限を超過（比 {:.5}）　t={:.6} s　Mz={:.3} kN·m（i端から {:.3} mm）",
+                failure.ratio,
+                failure.time_s,
+                moment_kn_m(failure.mz_nmm),
+                failure.x_mm,
+            ),
+        );
+    }
+    true
 }
 
 fn draw_asymmetric_column_section_history(ui: &mut egui::Ui, rec: &ThRecording, elem_idx: usize) {
@@ -1624,6 +1655,7 @@ mod tests {
                     index,
                     rec,
                     rec.frame_time.len(),
+                    || true,
                     with_gravity,
                     with_gravity,
                     || (!with_gravity).then_some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),
@@ -1642,31 +1674,42 @@ mod tests {
     }
 
     #[test]
-    fn h_column_checks_tension_and_strong_bending_at_the_same_axial_peak_step() {
+    fn h_column_keeps_tension_side_ng_only_from_concurrent_axial_peak_step() {
         let mut app = App::default();
         assert!(app.load_model(combined_column::cantilever(77_000.0, 215e6, 0.0)));
-        let recording = ThRecording {
-            peak_member_forces: vec![Some(MemberForces {
-                at: vec![(0.5, [77_000.0, 0.0, 0.0, 0.0, 0.0, 250e6])],
-            })],
-            axial_force_peaks: vec![AxialForcePeaks {
-                snapshots: vec![ForcePeakSnapshot {
-                    time: 1.0,
-                    forces: MemberForces {
-                        at: vec![(0.5, [77_000.0, 0.0, 0.0, 0.0, 0.0, 215e6])],
-                    },
-                    positions: vec![0],
+        for (concurrent_mz, tension_side_ng) in [(215e6, None), (265e6, Some("検定比 1.022 (NG)"))]
+        {
+            let recording = ThRecording {
+                peak_member_forces: vec![Some(MemberForces {
+                    at: vec![(0.5, [77_000.0, 0.0, 0.0, 0.0, 0.0, 268e6])],
+                })],
+                axial_force_peaks: vec![AxialForcePeaks {
+                    snapshots: vec![ForcePeakSnapshot {
+                        time: 1.0,
+                        forces: MemberForces {
+                            at: vec![(0.5, [77_000.0, 0.0, 0.0, 0.0, 0.0, concurrent_mz])],
+                        },
+                        positions: vec![0],
+                    }],
                 }],
-            }],
-            ..Default::default()
-        };
-        let text = peak_recording_text(&app, &app.core.model.elements[0], 0, &recording, false);
-        assert!(
-            text.lines()
-                .zip(text.lines().skip(1))
-                .any(|row| row == ("引張側 t=1.000000 s  ξ=0.50:", "検定比 0.924 (OK)")),
-            "{text}"
-        );
+                ..Default::default()
+            };
+            let text = peak_recording_text(&app, &app.core.model.elements[0], 0, &recording, false);
+            assert!(
+                text.contains("軸力・弱軸曲げ・弱軸せん断との横座屈を考慮する組合せは未算定"),
+                "{text}"
+            );
+            assert!(!text.contains("(OK)"), "{text}");
+            if let Some(ng) = tension_side_ng {
+                assert!(
+                    text.contains(&format!("引張側 t=1.000000 s  ξ=0.50:\n{ng}")),
+                    "{text}"
+                );
+                assert_eq!(text.matches("(NG)").count(), 1, "{text}");
+            } else {
+                assert!(!text.contains("(NG)"), "{text}");
+            }
+        }
     }
 
     fn rc_column_peak_check_app(
@@ -2877,6 +2920,7 @@ mod tests {
                     0,
                     &rec,
                     rec.frame_time.len(),
+                    || true,
                     false,
                     false,
                     || Some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),

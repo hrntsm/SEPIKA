@@ -118,7 +118,18 @@ pub struct SymmetricColumnBendingHistory {
     pub evaluated_count: usize,
     pub lb_mm: Option<f64>,
     pub peak: Option<ColumnBendingPeak>,
+    pub material_failure: Option<ColumnBendingMaterialFailure>,
     pub unavailable: BTreeSet<String>,
+}
+
+/// 全長の強軸曲げが短期材料許容上限を超えた独立の不適合。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ColumnBendingMaterialFailure {
+    pub step: u64,
+    pub time_s: f64,
+    pub x_mm: f64,
+    pub mz_nmm: f64,
+    pub ratio: f64,
 }
 
 /// 同一確定時刻・補剛区間の強軸曲げ需要と、規準の短期許容値による支配比。

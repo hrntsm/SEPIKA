@@ -11,6 +11,8 @@ pub struct FrameStrongBendingSpan {
     pub monotonic: bool,
     /// 区間内部で端部以上の曲げ絶対値を確認できた場合にtrue。
     pub interior_maximum: bool,
+    /// 需要範囲の非零の最大平坦部で軸力と弱軸曲げの一定性を確認できない場合にtrue。
+    pub unverified_maximum_plateau: bool,
     /// 需要範囲で絶対値最大に達する断面。複数区間の照査では需要範囲の両端も含む。
     pub demand_peaks: Vec<FrameStrongBendingPeak>,
 }
@@ -199,6 +201,7 @@ impl<'a> StrongBendingResponse<'a> {
         let mut has_negative_shear = false;
         let mut uncertain_shear_sign = false;
         let mut interior_maximum = false;
+        let mut unverified_flat_maximum_nmm = None::<f64>;
         let mut record_candidate = |x_mm: f64, on_plateau: bool| {
             if !(span_lo < x_mm && x_mm < span_hi) {
                 return Ok(());
@@ -242,6 +245,14 @@ impl<'a> StrongBendingResponse<'a> {
             let scale = q0.abs().max(q1.abs()).max(q2.abs());
             if scale == 0.0 {
                 record_candidate(lo.midpoint(hi), true)?;
+                if lo < demand_hi
+                    && demand_lo < hi
+                    && !response.constant_plateau_axial_and_weak_bending(lo, hi)?
+                {
+                    let abs_mz_nmm = response.at_mm(lo.midpoint(hi))?[5].abs();
+                    unverified_flat_maximum_nmm =
+                        Some(unverified_flat_maximum_nmm.unwrap_or(0.0).max(abs_mz_nmm));
+                }
                 lo = hi;
                 continue;
             }
@@ -332,6 +343,8 @@ impl<'a> StrongBendingResponse<'a> {
                 || uncertain_shear_sign
                 || has_positive_shear && has_negative_shear),
             interior_maximum: !boundary_shear_conflicts && interior_maximum,
+            unverified_maximum_plateau: maximum > 0.0
+                && unverified_flat_maximum_nmm.is_some_and(|mz| maximum - mz <= tolerance),
             demand_peaks,
         })
     }
@@ -420,7 +433,7 @@ fn verify_bending_stations(
 
 impl LoadedFrameSection {
     /// 同じ解析応答の全長で符号付き強軸曲げの分布と最大需要を返す。
-    /// 確認済み実材軸長 [mm] と記録断面力が対応しない場合は理由付きエラー。
+    /// 指定した実材軸長 [mm] や記録断面力と対応しない場合は理由付きエラー。
     pub fn full_span_strong_bending(
         &self,
         length_mm: f64,
@@ -429,7 +442,7 @@ impl LoadedFrameSection {
         let response_length = self.map.length_mm;
         let tolerance_mm = 32.0 * f64::EPSILON * response_length.max(1.0);
         if !length_mm.is_finite() || (length_mm - response_length).abs() > tolerance_mm {
-            return Err("確認済みの補剛区間が部材荷重応答の全長と一致しません".into());
+            return Err("実材軸長が部材荷重応答の全長と一致しません".into());
         }
         let stations = bending_stations_mm(response_length, forces)?;
         if stations
@@ -443,6 +456,22 @@ impl LoadedFrameSection {
         let span = [0.0, response_length];
         StrongBendingResponse::new(self.map.frame(), response_length, self, &stations)
             .span(span, span, false)
+    }
+
+    fn constant_plateau_axial_and_weak_bending(
+        &self,
+        lo_mm: f64,
+        hi_mm: f64,
+    ) -> Result<bool, String> {
+        let shear_z_n = self.at_mm(lo_mm)?[2] + self.point_load_jump(lo_mm)[2];
+        Ok(shear_z_n == 0.0
+            && !self.map.loads.iter().any(|load| {
+                let [axial, _, weak] = resolve(load, self.map.frame());
+                [axial, weak].into_iter().flatten().any(|component| {
+                    matches!(component, Comp::Dist { a, b, w1, w2 }
+                        if a < hi_mm && lo_mm < b && (w1 != 0.0 || w2 != 0.0))
+                })
+            }))
     }
 
     fn point_load_jump(&self, x_mm: f64) -> [f64; 3] {

@@ -51,7 +51,13 @@ pub(super) fn time_history_column_strong_bending(
     if peak.my != 0.0 {
         return Err("弱軸曲げと強軸曲げが同時に作用するため、強軸曲げの横座屈は未算定です".into());
     }
-    check_symmetric_h_plate_slenderness(peak, sec, mat)?;
+    check_symmetric_h_plate_slenderness(peak, sec, mat)
+        .map_err(|_| "局部座屈の影響を省く幅厚比の条件を確認できません")?;
+    if span.unverified_maximum_plateau {
+        return Err(
+            "強軸曲げが最大となる平坦区間の軸力・弱軸曲げの適用条件を確認できません".into(),
+        );
+    }
     let (c, p_lambda_b) = if span.interior_maximum {
         (1.0, 0.3)
     } else if span.monotonic {
@@ -114,23 +120,7 @@ pub(super) fn strong_bending_material_failure(
     mat: &Material,
     ctx: &DesignCtx,
 ) -> Option<CheckOutcome> {
-    if super::symmetric_h_web(sec).is_none()
-        || has_section_loss(ctx)
-        || [sec.property_basis.iy, sec.property_basis.depth]
-            .into_iter()
-            .any(|basis| basis != PropertyBasis::Shape)
-    {
-        return None;
-    }
-    let f = crate::material_strength::section_steel_f(sec, Some(mat)).ok()?;
-    let m_only = MemberForcesAt::from_local(forces.pos, [0.0, 0.0, 0.0, 0.0, 0.0, forces.mz]);
-    check_symmetric_h_plate_slenderness(&m_only, sec, mat).ok()?;
-    let sigma_b_mpa = forces.mz.abs() / section_modulus(sec.iy, sec.depth / 2.0);
-    let ft_mpa = steel_ft(f, ctx.term);
-    let ratio = sigma_b_mpa / ft_mpa;
-    if !ratio.is_finite() || ratio <= 1.0 {
-        return None;
-    }
+    let (sigma_b_mpa, ft_mpa, ratio) = strong_bending_material_excess(forces.mz, sec, mat, ctx)?;
     Some(CheckOutcome::Checked(CheckResult {
         basis: "強軸曲げ応力度だけで材料の許容上限を超えるため不適合".into(),
         detail: String::new(),
@@ -140,6 +130,29 @@ pub(super) fn strong_bending_material_failure(
             detail: format!("σbX={sigma_b_mpa:.4} N/mm², 材料許容上限={ft_mpa:.4} N/mm²"),
         }],
     }))
+}
+
+pub(super) fn strong_bending_material_excess(
+    mz_nmm: f64,
+    sec: &Section,
+    mat: &Material,
+    ctx: &DesignCtx,
+) -> Option<(f64, f64, f64)> {
+    if super::symmetric_h_web(sec).is_none()
+        || has_section_loss(ctx)
+        || [sec.property_basis.iy, sec.property_basis.depth]
+            .into_iter()
+            .any(|basis| basis != PropertyBasis::Shape)
+    {
+        return None;
+    }
+    let f = crate::material_strength::section_steel_f(sec, Some(mat)).ok()?;
+    let m_only = MemberForcesAt::from_local(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, mz_nmm]);
+    check_symmetric_h_plate_slenderness(&m_only, sec, mat).ok()?;
+    let sigma_b_mpa = mz_nmm.abs() / section_modulus(sec.iy, sec.depth / 2.0);
+    let ft_mpa = steel_ft(f, ctx.term);
+    let ratio = sigma_b_mpa / ft_mpa;
+    (ratio.is_finite() && ratio > 1.0).then_some((sigma_b_mpa, ft_mpa, ratio))
 }
 
 pub(super) fn asymmetric_built_h_section_reason(

@@ -1,6 +1,6 @@
 use super::{draw_th_detail_content_at, steel_column_lateral_buckling_input, App};
 use sepika_core::dof::{Dof, Dof6Mask};
-use sepika_core::model::{EndCondition, MassMethod};
+use sepika_core::model::{EndCondition, MassMethod, Model};
 use sepika_design_jp::member_design_check::{run_member_design_checks, MemberDesignCheckOptions};
 use sepika_design_jp::{CheckKind, CheckOutcome, LoadTerm};
 use sepika_element::frame::beam::BeamElement;
@@ -48,7 +48,8 @@ fn h_column_direct_c_still_changes_static_checks() {
 }
 
 fn detail_labels(app: &mut App, id: sepika_core::ElemId) -> String {
-    let view = super::super::ViewportState::default();
+    let mut view = super::super::ViewportState::default();
+    view.capture_result_sources(app);
     egui::Context::default()
         .run_ui(
             egui::RawInput {
@@ -70,8 +71,7 @@ fn detail_labels(app: &mut App, id: sepika_core::ElemId) -> String {
         .join("\n")
 }
 
-#[test]
-fn h_column_bending_check_shows_actual_coefficient_and_unstored_step_after_save() {
+fn linear_column(mz_nmm: f64) -> (Model, sepika_job::AnalysisSettings, GroundMotion) {
     let mut model = steel_column_lateral_buckling_input::column(0.0, false);
     model.elements[0].end_cond[1] = EndCondition::Pinned;
     model.nodes[1].restraint = Dof6Mask::FIXED;
@@ -83,7 +83,7 @@ fn h_column_bending_check_shows_actual_coefficient_and_unstored_step_after_save(
     model.steel_design_attrs[0].c_direct = Some(2.3);
     let k = BeamElement::new(&model.elements[0], &model).local_stiffness();
     let dt = 0.01_f64;
-    let u_mm = 259e6 / k.get(5, 7).abs();
+    let u_mm = mz_nmm / k.get(5, 7).abs();
     let wave = GroundMotion {
         dt,
         accel_x: vec![
@@ -95,10 +95,17 @@ fn h_column_bending_check_shows_actual_coefficient_and_unstored_step_after_save(
         accel_theta: None,
     };
     let cfg = sepika_job::AnalysisSettings {
+        mass_method: MassMethod::LumpedOnly,
         th_damping: 0.0,
         th_record_every: 2,
         ..Default::default()
     };
+    (model, cfg, wave)
+}
+
+#[test]
+fn h_column_bending_check_shows_actual_coefficient_and_unstored_step_after_save() {
+    let (model, cfg, wave) = linear_column(259e6);
     let checkpoint =
         sepika_job::time_history_restart::compute_checkpoint(model.clone(), cfg, wave.clone(), 1)
             .unwrap();
@@ -121,8 +128,7 @@ fn h_column_bending_check_shows_actual_coefficient_and_unstored_step_after_save(
     let mut app = App::default();
     assert!(app.load_model(model));
     app.generate_stories_action();
-    app.core.analysis_cfg.th_damping = 0.0;
-    app.core.analysis_cfg.th_record_every = 2;
+    app.core.analysis_cfg = cfg;
     app.run_time_history(wave);
     assert!(
         app.core.scoped.last_error.is_none(),
@@ -144,7 +150,9 @@ fn h_column_bending_check_shows_actual_coefficient_and_unstored_step_after_save(
     restored.open_project_from(path.clone());
     std::fs::remove_file(path).unwrap();
 
+    let before = detail_labels(&mut app, id);
     let text = detail_labels(&mut restored, id);
+    assert_eq!(text, before);
     for expected in [
         "分布と照査条件を確認できた確定時刻 3/3",
         "補剛区間 ξ=0–1",
@@ -159,4 +167,125 @@ fn h_column_bending_check_shows_actual_coefficient_and_unstored_step_after_save(
         assert!(text.contains(expected), "{expected}: {text}");
     }
     assert!(!text.contains("C=2.300"), "{text}");
+}
+
+#[test]
+fn past_case_does_not_approve_the_current_columns_changed_bracing() {
+    let (model, cfg, mut wave) = linear_column(200e6);
+    let id = model.elements[0].id;
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.generate_stories_action();
+    app.core.analysis_cfg = cfg;
+    app.run_time_history(wave.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let first = app.core.scoped.view_vibration_case.unwrap();
+    let text = detail_labels(&mut app, id);
+    assert!(
+        text.lines()
+            .any(|row| row.starts_with("強軸曲げ検定比") && row.contains("(OK)")),
+        "{text}"
+    );
+
+    let attr = &mut app.core.model.steel_design_attrs[0];
+    attr.column_lateral_buckling_end_supports = None;
+    attr.lateral_brace_count = Some(1);
+    wave.accel_x[2] += 10.0;
+    app.run_time_history(wave);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert_ne!(app.core.scoped.view_vibration_case, Some(first));
+    let text = detail_labels(&mut app, id);
+    assert!(text.contains("中間横補剛が入力されています"), "{text}");
+    assert!(app
+        .core
+        .scoped
+        .results
+        .as_ref()
+        .unwrap()
+        .time_history_for(first)
+        .is_some());
+    app.core.scoped.view_vibration_case = Some(first);
+
+    let stale = detail_labels(&mut app, id);
+    assert!(
+        stale.contains("選択中の時刻歴結果の生成入力と現在のモデルの一致を確認できません"),
+        "{stale}"
+    );
+    assert!(
+        !stale.contains("強軸曲げ検定比") && !stale.contains("C=1.750"),
+        "{stale}"
+    );
+}
+
+#[test]
+fn material_only_failure_is_shown_alongside_the_unavailable_lateral_check() {
+    use sepika_solver::dynamic::timehistory::{
+        ColumnBendingMaterialFailure, SymmetricColumnBendingHistory, ThRecording,
+    };
+
+    let original = ThRecording {
+        symmetric_column_bending: [(
+            0,
+            SymmetricColumnBendingHistory {
+                committed_count: 3,
+                evaluated_count: 0,
+                lb_mm: Some(3000.0),
+                material_failure: Some(ColumnBendingMaterialFailure {
+                    step: 1,
+                    time_s: 0.01,
+                    x_mm: 1000.0,
+                    mz_nmm: 280e6,
+                    ratio: 1.03767,
+                }),
+                unavailable: [
+                    "弱軸曲げと強軸曲げが同時に作用するため、強軸曲げの横座屈は未算定です".into(),
+                ]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            },
+        )]
+        .into_iter()
+        .collect(),
+        ..Default::default()
+    };
+    let saved = rmp_serde::to_vec_named(&original).unwrap();
+    let restored: ThRecording = rmp_serde::from_slice(&saved).unwrap();
+    assert_eq!(
+        restored.symmetric_column_bending,
+        original.symmetric_column_bending
+    );
+    let output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+        super::draw_symmetric_column_bending(ui, &restored, 0, 3, false, || true);
+    });
+    let labels: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        labels
+            .iter()
+            .any(|row| row.contains("未算定：弱軸曲げと強軸曲げ")),
+        "{labels:?}"
+    );
+    assert!(
+        labels
+            .iter()
+            .any(|row| row.contains("独立NG")
+                && row.contains("Mz=280.000 kN·m（i端から 1000.000 mm）")),
+        "{labels:?}"
+    );
+    assert!(!labels.iter().any(|row| row.contains("(OK)")), "{labels:?}");
 }

@@ -31,10 +31,10 @@ pub use nonlinear::{
 };
 pub use recording::uses_signed_bending_peaks;
 pub use result::{
-    AsymmetricColumnSectionHistory, AxialForcePeakSnapshot, AxialForcePeaks, ColumnBendingPeak,
-    ForcePeakSnapshot, ResponseHistory, ResponseResult, SectionForceCheckPeak,
-    SectionForceCheckPosition, StoryResponse, StrongAxisMomentPeaks, SymmetricColumnBendingHistory,
-    ThRecording, TimeStepState,
+    AsymmetricColumnSectionHistory, AxialForcePeakSnapshot, AxialForcePeaks,
+    ColumnBendingMaterialFailure, ColumnBendingPeak, ForcePeakSnapshot, ResponseHistory,
+    ResponseResult, SectionForceCheckPeak, SectionForceCheckPosition, StoryResponse,
+    StrongAxisMomentPeaks, SymmetricColumnBendingHistory, ThRecording, TimeStepState,
 };
 
 #[cfg(test)]
@@ -44,7 +44,7 @@ pub(crate) use sepika_element::behavior::MassOption;
 
 use crate::dynamic::damping::Damping;
 
-/// 要素添字と確認済みの実材軸長 [mm] から、同一応答の実材軸全長の曲げ分布を取得する。
+/// 要素添字と実材軸長 [mm] から、同一応答の実材軸全長の曲げ分布を取得する。
 pub type CommittedBendingResponse<'a> = dyn Fn(usize, f64) -> Result<sepika_element::frame::member_load::FrameStrongBendingSpan, String>
     + 'a;
 
