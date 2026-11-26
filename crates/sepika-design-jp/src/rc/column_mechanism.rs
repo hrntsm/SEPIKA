@@ -6,7 +6,7 @@ use num_rational::BigRational;
 use num_traits::Zero;
 use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::dof::{Dof, Dof6Mask};
-use sepika_core::geom::vec3::{norm, sub};
+use sepika_core::geom::vec3::{cross, local_frame_axes_and_fallback_reference, norm, sub};
 use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::{
     Constraint, ElementData, ElementKind, EndCondition, Material, MaterialCategory, Model,
@@ -256,6 +256,48 @@ fn girder_strong_axis_is_parallel(
         && normal_x * exact(axis_y) == normal_y * exact(axis_x)
 }
 
+struct MemberAxis {
+    unit: [f64; 3],
+    exact: [BigRational; 3],
+}
+
+fn cross_exact(a: &[BigRational; 3], b: &[BigRational; 3]) -> [BigRational; 3] {
+    [
+        &a[1] * &b[2] - &a[2] * &b[1],
+        &a[2] * &b[0] - &a[0] * &b[2],
+        &a[0] * &b[1] - &a[1] * &b[0],
+    ]
+}
+
+fn actual_axes(
+    [i, j]: [[f64; 3]; 2],
+    reference: [f64; 3],
+) -> Result<[MemberAxis; 3], &'static str> {
+    let (axes, fallback) = local_frame_axes_and_fallback_reference(i, j, reference)?;
+    // 単位化済みの基底だけの比較では、非零の斜交を丸めて平行と判定することがある。
+    let exact = |value| BigRational::from_float(value).expect("有限な材軸端と断面参照方向");
+    let x = std::array::from_fn(|k| exact(j[k]) - exact(i[k]));
+    let z = cross_exact(&x, &fallback.unwrap_or(reference).map(exact));
+    let y = cross_exact(&z, &x);
+    let [ex, ey, ez] = axes;
+    Ok([
+        MemberAxis { unit: ex, exact: x },
+        MemberAxis { unit: ey, exact: y },
+        MemberAxis { unit: ez, exact: z },
+    ])
+}
+
+impl MemberAxis {
+    fn is_parallel(&self, other: &Self) -> bool {
+        norm(cross(self.unit, other.unit)) <= 1e-12
+            && self.exact.iter().any(|v| !v.is_zero())
+            && other.exact.iter().any(|v| !v.is_zero())
+            && cross_exact(&self.exact, &other.exact)
+                .iter()
+                .all(Zero::is_zero)
+    }
+}
+
 fn node_pair(i: NodeId, j: NodeId) -> [NodeId; 2] {
     [i.min(j), i.max(j)]
 }
@@ -271,12 +313,13 @@ fn sum_beam_my_at_node<'a>(
     model: &'a Model,
     topology: &'a ColumnMechanismTopology,
     node: NodeId,
-    load_h: [f64; 2],
-    peer_h: [f64; 2],
-    prefer_on_tie: bool,
-    column_bending_axis: Option<[f64; 2]>,
+    aligns: impl Fn([f64; 3]) -> bool,
+    legacy_bending_axis: Option<[f64; 2]>,
+    column_bending_axis: Option<&MemberAxis>,
+    unconfirmed_axes: &mut SmallVec<[ElemId; 2]>,
 ) -> Result<Option<GirderMoments<'a>>, String> {
     let mut sum = Some(GirderMoments::default());
+    let mut material_issue = None;
     for other in topology.frame.elements_at(model, node) {
         let (Some(n0), Some(n1)) = (
             other.nodes.first().and_then(|n| model.nodes.get(n.index())),
@@ -285,10 +328,6 @@ fn sum_beam_my_at_node<'a>(
             continue;
         };
         let axis = sub(n1.coord, n0.coord);
-        let aligns = |axis| {
-            horizontal_unit(axis)
-                .is_some_and(|axis_h| aligns_exclusively(load_h, peer_h, axis_h, prefer_on_tie))
-        };
         match MemberKind::try_of_element(other, model) {
             Ok(MemberKind::Girder) => {}
             Err(_) if aligns(axis) => {
@@ -303,15 +342,8 @@ fn sum_beam_my_at_node<'a>(
             continue;
         }
         let has_far_offset = other.end_offsets_mm[1 - end] != [0.0; 3];
-        let actual_axis = if has_far_offset {
-            model
-                .primary_frame_axis_end_positions(other)
-                .ok()
-                .flatten()
-                .map_or(axis, |[i, j]| sub(j, i))
-        } else {
-            axis
-        };
+        let actual_ends = model.primary_frame_axis_end_positions(other).ok().flatten();
+        let actual_axis = actual_ends.map_or(axis, |[i, j]| sub(j, i));
         let end_condition = other.end_cond[end];
         // 材軸方向の腕が柱の曲げ軸と平行な場合だけ、その軸まわりの付加曲げは生じない。
         if end_condition != EndCondition::Fixed {
@@ -322,7 +354,7 @@ fn sum_beam_my_at_node<'a>(
                 norm(actual_axis),
             );
             if [i, j][end] > 0.0
-                && !column_bending_axis.is_some_and(|axis| {
+                && !legacy_bending_axis.is_some_and(|axis| {
                     rigid_arm_is_parallel([n0.coord, n1.coord], other.end_offsets_mm, axis)
                 })
             {
@@ -330,14 +362,37 @@ fn sum_beam_my_at_node<'a>(
                 continue;
             }
         }
+        if matches!(
+            end_condition,
+            EndCondition::Pinned | EndCondition::SemiRigid { k_theta: 0.0 }
+        ) {
+            continue;
+        }
+        let assigned = aligns(axis) || aligns(actual_axis);
+        let matching_strong_axis = column_bending_axis.map(|column_axis| {
+            let axes =
+                actual_ends.and_then(|ends| actual_axes(ends, other.local_axis.ref_vector).ok());
+            if let Some([girder_x, _, girder_z]) = axes {
+                if column_axis.is_parallel(&girder_z) {
+                    return true;
+                }
+                if column_axis.is_parallel(&girder_x) {
+                    return false;
+                }
+            }
+            unconfirmed_axes.push(other.id);
+            false
+        });
         match end_condition {
-            EndCondition::Pinned | EndCondition::SemiRigid { k_theta: 0.0 } => continue,
-            _ if !aligns(axis) && !aligns(actual_axis) => continue,
+            _ if !assigned && matching_strong_axis != Some(true) => continue,
             EndCondition::Fixed if !has_far_offset => {}
             _ => {
                 sum = None;
                 continue;
             }
+        }
+        if matching_strong_axis == Some(false) {
+            continue;
         }
         let Some(sec) = model.element_section(other) else {
             sum = None;
@@ -349,10 +404,10 @@ fn sum_beam_my_at_node<'a>(
         };
         let material = model.element_rebar_material(other);
         if let Some(reason) = main_rebar_category_issue(material) {
-            return Err(format!(
-                "大梁 ID {} の断面「{}」の{reason}",
-                other.id.0, sec.name
-            ));
+            material_issue.get_or_insert_with(|| {
+                format!("大梁 ID {} の断面「{}」の{reason}", other.id.0, sec.name)
+            });
+            continue;
         }
         if topology.has_attached_floor(model, other) {
             if let Some(sum) = &mut sum {
@@ -369,7 +424,14 @@ fn sum_beam_my_at_node<'a>(
                 sum.sum_my.is_finite().then_some(sum)
             });
     }
-    Ok(sum)
+    material_issue.map_or(Ok(sum), Err)
+}
+
+fn girder_ids_text(ids: &[ElemId]) -> String {
+    ids.iter()
+        .map(|id| id.0.to_string())
+        .collect::<Vec<_>>()
+        .join("、")
 }
 
 /// 柱の方向別降伏モーメント和を求めるモデルの接続情報。
@@ -622,7 +684,8 @@ pub struct ColumnMechanism {
     /// Qz（弱軸）方向。
     pub qz: Result<Option<f64>, String>,
     pub(crate) missing_gravity_axial: bool,
-    pub(crate) floor_yield_holds: [Option<String>; 2],
+    pub(crate) girder_yield_holds: [Option<String>; 2],
+    pub(crate) excluded_girder_axes: [bool; 2],
 }
 
 /// 柱のメカニズム ΣMy [N·mm]。方向別に算定値または材料区分の不適合を返す。
@@ -720,12 +783,12 @@ fn column_mechanism_sum_my(
     ) else {
         return None;
     };
-    let frame = LocalFrame::from_nodes(p_i, p_j, column.local_axis.ref_vector)
+    let [_, column_y, column_z] = actual_axes([p_i, p_j], column.local_axis.ref_vector)
         .unwrap_or_else(|reason| panic!("部材 ID {} の局所座標: {reason}", column.id.0));
-    let ey = frame.rot[1];
-    let ez = frame.rot[2];
-    let load_strong = horizontal_unit(ey)?;
-    let load_weak = horizontal_unit(ez)?;
+    let ey = column_y.unit;
+    let ez = column_z.unit;
+    let load_strong = horizontal_unit(ey);
+    let load_weak = horizontal_unit(ez);
 
     let [ref_x, ref_y, _] = column.local_axis.ref_vector;
     let reference_h = [ref_x, ref_y, 0.0];
@@ -749,6 +812,13 @@ fn column_mechanism_sum_my(
     } else {
         (nj, ni, p_i[2])
     };
+    let confirmed_clear_height = match [column.rigid_zone.face_i, column.rigid_zone.face_j] {
+        [Some(i), Some(j)] if i >= 0.0 && j >= 0.0 => {
+            let height_mm = norm(sub(p_j, p_i)) - (i + j);
+            height_mm.is_finite() && height_mm > 0.0
+        }
+        _ => false,
+    };
     let column_head = topology.column_head(model, head, head_z_mm);
     let continuous_rc_joint_pair = column_head == ColumnHead::Continuous
         && p_i[..2] == p_j[..2]
@@ -759,12 +829,40 @@ fn column_mechanism_sum_my(
         && topology.has_direct_rc_continuation(model, column, foot, false);
 
     let sum_for = |strong: bool,
-                   load_h: [f64; 2],
-                   peer_h: [f64; 2],
-                   bending_axis: Option<[f64; 2]>| {
-        let beam_sum =
-            |node| sum_beam_my_at_node(model, topology, node, load_h, peer_h, strong, bending_axis);
-        let beam_ends = beam_sum(ni).and_then(|bi| beam_sum(nj).map(|bj| (bi, bj)));
+                   load_h: Option<[f64; 2]>,
+                   peer_h: Option<[f64; 2]>,
+                   bending_axis: Option<[f64; 2]>,
+                   actual_bending_axis: &MemberAxis| {
+        let aligns = |axis| {
+            horizontal_unit(axis).is_some_and(|axis_h| match (load_h, peer_h) {
+                (Some(load), Some(peer)) => aligns_exclusively(load, peer, axis_h, strong),
+                (Some(load), None) => alignment_score(load, axis_h) + 1e-12 >= 0.5,
+                _ => false,
+            })
+        };
+        let check_axes = column.end_offsets_mm == [[0.0; 3]; 2];
+        let beam_sum = |node, unconfirmed_axes| {
+            sum_beam_my_at_node(
+                model,
+                topology,
+                node,
+                aligns,
+                bending_axis,
+                check_axes.then_some(actual_bending_axis),
+                unconfirmed_axes,
+            )
+        };
+        let mut foot_axes = SmallVec::new();
+        let mut head_axes = SmallVec::new();
+        let (i_axes, j_axes) = if i_is_bottom {
+            (&mut foot_axes, &mut head_axes)
+        } else {
+            (&mut head_axes, &mut foot_axes)
+        };
+        let beams_i = beam_sum(ni, i_axes);
+        let beams_j = beam_sum(nj, j_axes);
+        let beam_ends =
+            beams_i.and_then(|bi| beams_j.map(|bj| if i_is_bottom { (bi, bj) } else { (bj, bi) }));
         let axis = if strong { "Qy" } else { "Qz" };
         let with_context = |reason| {
             format!(
@@ -772,7 +870,23 @@ fn column_mechanism_sum_my(
                 column.id.0
             )
         };
-        let (bi, bj) = match beam_ends {
+        let excludes_foot_axes = !foot_axes.is_empty() && column_head != ColumnHead::Continuous;
+        let excludes_head_axes = !head_axes.is_empty();
+        let excluded_girder_axis = excludes_head_axes || excludes_foot_axes;
+        let mut hold = None;
+        for (end, ids, excludes) in [
+            ("柱頭", &head_axes, excludes_head_axes),
+            ("柱脚", &foot_axes, excludes_foot_axes),
+        ] {
+            if excludes {
+                let ids = girder_ids_text(ids);
+                hold = combine_incomplete_reasons(
+                    hold,
+                    Some(&format!("{axis}方向の{end}: 大梁 ID {ids} と柱の検討曲げ軸の対応を確認できないため、梁降伏の候補を除外")),
+                );
+            }
+        }
+        let (foot_beams, head_beams) = match beam_ends {
             Ok(beams) => beams,
             Err(reason) => {
                 let reason = combine_incomplete_reasons(
@@ -780,18 +894,16 @@ fn column_mechanism_sum_my(
                     design_n.as_ref().err().map(String::as_str),
                 )
                 .expect("接続大梁の未算定理由");
-                return (Err(with_context(reason)), None);
+                return (Err(with_context(reason)), hold, excluded_girder_axis);
             }
         };
-        let (foot_beams, head_beams) = if i_is_bottom { (bi, bj) } else { (bj, bi) };
         let allow_foot_yield = || {
             continuous_rc_joint_pair
                 && foot_beams.as_ref().is_some_and(|beams| {
                     topology.has_opposing_foot_girders(model, foot, &beams.girders, bending_axis)
                 })
         };
-        let mut hold = None;
-        if column.end_offsets_mm == [[0.0; 3]; 2] && foot_beams.is_some() && head_beams.is_some() {
+        if check_axes && foot_beams.is_some() && head_beams.is_some() {
             for (end, beams) in [
                 ("柱頭", head_beams.as_ref()),
                 (
@@ -803,12 +915,7 @@ fn column_mechanism_sum_my(
                 ),
             ] {
                 if let Some(beams) = beams.filter(|beams| !beams.floor_girders.is_empty()) {
-                    let ids = beams
-                        .floor_girders
-                        .iter()
-                        .map(|id| id.0.to_string())
-                        .collect::<Vec<_>>()
-                        .join("、");
+                    let ids = girder_ids_text(&beams.floor_girders);
                     hold = combine_incomplete_reasons(
                         hold,
                         Some(&format!("{axis}方向の{end}: 床板が取り付く大梁 ID {ids} の床板筋の寄与を含む梁端降伏曲げを確認できないため、梁降伏の候補を除外")),
@@ -818,6 +925,9 @@ fn column_mechanism_sum_my(
         }
         let direction = (|| -> Result<Option<f64>, String> {
             let n = design_n.as_ref().map_err(Clone::clone)?;
+            if excluded_girder_axis && !confirmed_clear_height {
+                return Err("柱の内法高さを正の有限な値として確認できないため、設計用せん断力を算定できません".into());
+            }
             let (Some(col_i), Some(col_j)) = (
                 column_my_at_n(model, column, n[0], strong),
                 column_my_at_n(model, column, n[1], strong),
@@ -834,13 +944,16 @@ fn column_mechanism_sum_my(
                 (col_j, col_i)
             };
             let moment = match (&foot_beams, &head_beams) {
-                (Some(foot_beams), Some(head_beams)) if column.end_offsets_mm == [[0.0; 3]; 2] => {
-                    let confirmed_sum = |beams: &GirderMoments<'_>| {
-                        beams.floor_girders.is_empty().then_some(beams.sum_my)
+                (Some(foot_beams), Some(head_beams)) if check_axes => {
+                    let confirmed_sum = |beams: &GirderMoments<'_>, excluded: bool| {
+                        (beams.floor_girders.is_empty() && !excluded).then_some(beams.sum_my)
                     };
                     mechanism_moment(
                         [foot_my, head_my],
-                        [confirmed_sum(foot_beams), confirmed_sum(head_beams)],
+                        [
+                            confirmed_sum(foot_beams, excludes_foot_axes),
+                            confirmed_sum(head_beams, excludes_head_axes),
+                        ],
                         column_head,
                         || {
                             ColumnMechanismTopology::allows_new_head_yield(
@@ -867,17 +980,20 @@ fn column_mechanism_sum_my(
                     combine_incomplete_reasons(Some(reason), hold.as_deref()).expect("未算定理由"),
                 )),
                 hold,
+                excluded_girder_axis,
             ),
-            Ok(moment) => (Ok(moment), hold),
+            Ok(moment) => (Ok(moment), hold, excluded_girder_axis),
         }
     };
-    let (qy, hold_y) = sum_for(true, load_strong, load_weak, bending_z);
-    let (qz, hold_z) = sum_for(false, load_weak, load_strong, bending_y);
+    let (qy, hold_y, excluded_y_axis) = sum_for(true, load_strong, load_weak, bending_z, &column_z);
+    let (qz, hold_z, excluded_z_axis) =
+        sum_for(false, load_weak, load_strong, bending_y, &column_y);
     Some(ColumnMechanism {
         qy,
         qz,
         missing_gravity_axial,
-        floor_yield_holds: [hold_y, hold_z],
+        girder_yield_holds: [hold_y, hold_z],
+        excluded_girder_axes: [excluded_y_axis, excluded_z_axis],
     })
 }
 

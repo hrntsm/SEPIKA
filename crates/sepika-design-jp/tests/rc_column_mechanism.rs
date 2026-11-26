@@ -437,27 +437,15 @@ fn qd1_new_head_yield_requires_the_girders_to_bend_about_the_column_axis() {
             fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
         model.nodes[2].coord = [4000.0, far_y, far_z];
         model.elements[1].local_axis.ref_vector = reference;
-        assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+        assert_time_history_qd1_demand(&model, expected_n);
     }
-
-    let mut prior = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
-    let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut prior.sections[0].shape else {
-        unreachable!();
-    };
-    rebar.x = vec![4];
-    rebar.y = vec![4];
-    prior.elements[1].local_axis.ref_vector = [0.0, 1.0, 0.0];
-    assert_qd1_shear_ratio(
-        &prior,
-        208_303.442_920_260 / reference::COLUMN_ALLOWABLE_SHEAR_N,
-    );
 }
 
 #[test]
-fn qd1_issue1907_compares_legacy_girder_demand_and_real_bending_axes() {
+fn qd1_issue1970_requires_matching_real_bending_axes_for_both_head_candidates() {
     use sepika_element::transform::LocalFrame;
 
-    for (far_y, far_z, ref_vector, far_offset, y_components, legacy_n, new_n) in [
+    for (far_y, far_z, ref_vector, far_offset, y_components, four_bar_n, three_bar_n) in [
         (
             0.0,
             1500.0,
@@ -473,8 +461,8 @@ fn qd1_issue1907_compares_legacy_girder_demand_and_real_bending_axes() {
             [0.0, 1.0, 0.0],
             [0.0; 3],
             [0.0, 1.0, 0.0],
-            208_303.442_920_260,
-            227_114.990_935_399,
+            reference::FOUR_BAR_COLUMN_ENDS_QD1_N,
+            reference::THREE_BAR_COLUMN_ENDS_QD1_N,
         ),
         (
             0.0,
@@ -482,8 +470,8 @@ fn qd1_issue1907_compares_legacy_girder_demand_and_real_bending_axes() {
             [1.0, 0.0, 1e-13],
             [0.0; 3],
             [0.0, 1.0, 0.0],
-            208_303.442_920_260,
-            227_114.990_935_399,
+            reference::FOUR_BAR_COLUMN_ENDS_QD1_N,
+            reference::THREE_BAR_COLUMN_ENDS_QD1_N,
         ),
         (
             3000.0,
@@ -491,8 +479,8 @@ fn qd1_issue1907_compares_legacy_girder_demand_and_real_bending_axes() {
             [0.0, 0.0, 1.0],
             [0.0; 3],
             [0.6, 0.0, 0.8],
-            208_303.442_920_260,
-            227_114.990_935_399,
+            reference::FOUR_BAR_COLUMN_ENDS_QD1_N,
+            reference::THREE_BAR_COLUMN_ENDS_QD1_N,
         ),
         (
             0.0,
@@ -509,13 +497,13 @@ fn qd1_issue1907_compares_legacy_girder_demand_and_real_bending_axes() {
             [0.0, 0.0, 1.0],
             [0.0, 3000.0, 0.0],
             [0.6, 0.0, 0.8],
-            289_718.136_062_013,
-            227_114.990_935_399,
+            reference::FOUR_BAR_COLUMN_ENDS_QD1_N,
+            reference::THREE_BAR_COLUMN_ENDS_QD1_N,
         ),
     ] {
-        for (column_bars, expected_n) in [(4, legacy_n), (3, new_n)] {
+        for (column_bars, expected_n) in [(4, four_bar_n), (3, three_bar_n)] {
             let mut model =
-                fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
+                fixture::column_for_head_axis_comparison(column::column_model(false, 0.0));
             model.nodes[2].coord = [4000.0, far_y, far_z];
             let girder = &mut model.elements[fixture::GIRDER.index()];
             girder.local_axis.ref_vector = ref_vector;
@@ -534,13 +522,25 @@ fn qd1_issue1907_compares_legacy_girder_demand_and_real_bending_axes() {
             };
             rebar.x = vec![column_bars];
             rebar.y = vec![column_bars];
-            assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
-            assert_qd1_issue1907_time_history_demand(&model, expected_n);
+            let strong_ratio = expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N;
+            let weak_column_ends_n = match column_bars {
+                3 => 151_409.993_956_933,
+                4 => 193_145.424_041_342,
+                _ => unreachable!(),
+            };
+            // 幅600 mm、有効せい340.5 mmの短期許容せん断力 [N]。
+            let expected_ratio = if far_z != 1500.0 {
+                strong_ratio.max(weak_column_ends_n / 214_801.725_030_993)
+            } else {
+                strong_ratio
+            };
+            assert_qd1_shear_ratio(&model, expected_ratio);
+            assert_time_history_qd1_demand(&model, expected_n);
         }
     }
 }
 
-fn assert_qd1_issue1907_time_history_demand(model: &Model, expected_n: f64) {
+fn assert_time_history_qd1_demand(model: &Model, expected_n: f64) {
     let time_history = time_history_column_mechanism_sum_my(
         model,
         &ColumnMechanismTopology::new(model),
@@ -553,31 +553,301 @@ fn assert_qd1_issue1907_time_history_demand(model: &Model, expected_n: f64) {
 }
 
 #[test]
-fn qd1_issue1907_compares_legacy_terminal_head_and_foot_with_rotated_girders() {
+fn qd1_issue1970_excludes_legacy_terminal_head_and_foot_candidates_with_rotated_girders() {
     let mut terminal_head = yielding_head_model();
     let mut terminal_foot =
-        fixture::column_with_reversible_girders(column::column_model(false, 0.0), 4, 1);
-    terminal_foot.elements[3].nodes[0] = NodeId(2);
-    terminal_foot.nodes[4].coord[0] = terminal_foot.nodes[2].coord[0];
-    for axis_reference in [[0.0, 0.0, 1.0], [0.0, 1.0, 0.0]] {
+        fixture::column_with_legacy_foot_girders(column::column_model(false, 0.0));
+    for (axis_reference, head_n, foot_n) in [
+        (
+            [0.0, 0.0, 1.0],
+            reference::TWO_HEAD_GIRDERS_HALF_QD1_N,
+            reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N,
+        ),
+        (
+            [0.0, 1.0, 0.0],
+            reference::THREE_BAR_COLUMN_ENDS_QD1_N,
+            reference::THREE_BAR_COLUMN_ENDS_QD1_N,
+        ),
+    ] {
         terminal_head.elements[fixture::GIRDER.index()]
             .local_axis
             .ref_vector = axis_reference;
         terminal_foot.elements[6].local_axis.ref_vector = axis_reference;
-        assert_qd1_shear_ratio(&terminal_head, reference::TERMINAL_SHEAR_RATIO);
-        assert_qd1_issue1907_time_history_demand(
-            &terminal_head,
-            reference::TWO_HEAD_GIRDERS_HALF_QD1_N,
+        for (model, expected_n) in [(&terminal_head, head_n), (&terminal_foot, foot_n)] {
+            assert_qd1_shear_ratio(model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+            assert_time_history_qd1_demand(model, expected_n);
+        }
+    }
+}
+
+#[test]
+fn qd1_issue1970_excludes_an_unassigned_skew_girder_in_both_directions() {
+    let mut model = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
+    assert_qd1_shear_ratio(
+        &model,
+        reference::TWO_HEAD_GIRDERS_HALF_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
+    );
+    for off_axis_x_mm in [3000.0, 1e-14] {
+        model.nodes[3].coord[0] = off_axis_x_mm;
+        assert_qd1_shear_ratio(
+            &model,
+            reference::THREE_BAR_COLUMN_ENDS_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
         );
-        assert_near(
-            column_qd1_by_direction(&terminal_foot, [-100_000.0; 2], 1500.0)[0],
-            reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N,
-            1e-6,
+        let [strong, weak] = column_qd1_by_direction(&model, [-100_000.0; 2], 1500.0);
+        assert_near(strong, reference::THREE_BAR_COLUMN_ENDS_QD1_N, 1e-6);
+        assert_near(weak, 151_409.993_956_933, 1e-6);
+    }
+}
+
+#[test]
+fn qd1_issue1970_keeps_an_independent_candidate_at_the_other_end() {
+    let mut general =
+        fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 1);
+    general.elements[fixture::GIRDER.index()]
+        .local_axis
+        .ref_vector = [0.0, 1.0, 0.0];
+    assert_qd1_shear_ratio(
+        &general,
+        reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
+    );
+
+    let mut general =
+        fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
+    let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut general.sections[0].shape else {
+        unreachable!()
+    };
+    rebar.x = vec![4];
+    rebar.y = vec![4];
+    general.elements[fixture::GIRDER.index()]
+        .local_axis
+        .ref_vector = [0.0, 1.0, 0.0];
+    assert_qd1_shear_ratio(
+        &general,
+        reference::CONTINUOUS_SLAB_HEAD_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
+    );
+
+    let mut terminal = fixture::column_with_legacy_foot_girders(column::column_model(false, 0.0));
+    terminal.elements[6].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    let section = &mut terminal.sections[GIRDER_SECTION.index()];
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut section.shape else {
+        unreachable!()
+    };
+    rebar.top = vec![1];
+    rebar.bottom = vec![1];
+    assert_qd1_shear_ratio(&terminal, TERMINAL_SHEAR_RATIO);
+
+    terminal.elements[fixture::GIRDER.index()]
+        .local_axis
+        .ref_vector = [0.0, 1.0, 0.0];
+    terminal.elements[6].local_axis.ref_vector = [0.0, 0.0, 1.0];
+    assert_qd1_shear_ratio(
+        &terminal,
+        reference::THREE_BAR_COLUMN_ENDS_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
+    );
+}
+
+#[test]
+fn qd1_issue1970_far_end_eccentricity_does_not_confirm_the_same_mechanism_as_section_rotation() {
+    let mut model = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
+    let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut model.sections[0].shape else {
+        unreachable!()
+    };
+    rebar.x = vec![4];
+    rebar.y = vec![4];
+    for (reference_axis, far_offset, expected_n) in [
+        (
+            [0.0, 1.0, 0.0],
+            [0.0; 3],
+            reference::CONTINUOUS_SLAB_HEAD_QD1_N,
+        ),
+        (
+            [0.0, 0.0, 1.0],
+            [0.0, 3000.0, 0.0],
+            reference::FOUR_BAR_COLUMN_ENDS_QD1_N,
+        ),
+    ] {
+        let girder = &mut model.elements[fixture::GIRDER.index()];
+        girder.local_axis.ref_vector = reference_axis;
+        girder.end_offsets_mm[1] = far_offset;
+        assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+        assert_time_history_qd1_demand(&model, expected_n);
+    }
+}
+
+#[test]
+fn qd1_issue1970_does_not_use_seismic_response_if_gravity_is_requested_but_column_is_missing() {
+    let mut model = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
+    let force = [-100_000.0, 1_000_000.0, 400_000.0, 0.0, 0.0, 300e6];
+    let response = [(
+        COLUMN,
+        MemberForces {
+            at: [0.0, 0.5, 1.0].map(|xi| (xi, force)).to_vec(),
+        },
+    )];
+    let other_gravity = [(fixture::GIRDER, response[0].1.clone())];
+    let check_missing = |model: &Model, qd_method, long_member_forces| {
+        run_member_design_checks(
+            model,
+            &response,
+            &[],
+            &MemberDesignCheckOptions {
+                term: LoadTerm::Short,
+                qd_method,
+                long_member_forces,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .member_checks
+        .into_iter()
+        .filter_map(|(elem, pos, row)| (elem == COLUMN && pos == 0.5).then_some(row))
+        .collect::<Vec<_>>()
+    };
+
+    let no_reference_requested = check_missing(&model, QdMethod::Qd1, None);
+    let qd2 = check_missing(&model, QdMethod::Qd2, Some(&[]));
+    let standard_missing = check_missing(&model, QdMethod::Qd1, Some(&[]));
+    model.elements[fixture::GIRDER.index()]
+        .local_axis
+        .ref_vector = [0.0, 1.0, 0.0];
+    assert_eq!(
+        no_reference_requested,
+        check_missing(&model, QdMethod::Qd1, None)
+    );
+    assert_eq!(qd2, check_missing(&model, QdMethod::Qd2, Some(&[])));
+    assert_eq!(no_reference_requested, standard_missing);
+
+    let mut wrong_connected_rebar = model.clone();
+    wrong_connected_rebar.sections[GIRDER_SECTION.index()].rebar_material =
+        Some(fixture::WRONG_REBAR);
+    for model in [&model, &wrong_connected_rebar] {
+        for method in [QdMethod::Qd1, QdMethod::Min] {
+            for gravity in [&[][..], &other_gravity[..]] {
+                let rows = check_missing(model, method, Some(gravity));
+                assert!(
+                    rows.iter().any(|row| matches!(
+                        row,
+                        CheckOutcome::Skipped { reason }
+                            if reason.contains("Qy方向の柱頭")
+                                && reason.contains("検討曲げ軸の対応")
+                                && reason.contains("柱端の重力参照軸力が不足")
+                                && !reason.contains("Qz方向")
+                    )),
+                    "{rows:?}"
+                );
+                let checked = rows
+                    .iter()
+                    .find_map(|row| match row {
+                        CheckOutcome::Checked(result) => Some(result),
+                        _ => None,
+                    })
+                    .expect("独立した軸力・曲げの不適合");
+                assert!(checked
+                    .components
+                    .iter()
+                    .any(|c| c.kind == CheckKind::AxialBending && c.ratio > 1.0));
+                let shear = checked
+                    .components
+                    .iter()
+                    .find(|c| c.kind == CheckKind::Shear)
+                    .unwrap();
+                assert_near(shear.ratio, 400_000.0 / 214_801.725_030_993, 1e-14);
+            }
+        }
+    }
+}
+
+#[test]
+fn qd1_issue1970_unconfirmed_axis_without_end_axial_is_incomplete_only_for_that_direction() {
+    let mut standard = yielding_head_model();
+    let forces = [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 0.0];
+    let stations = &[0.0, 0.5, 1.0];
+    let qd2 = check_stations(&standard, QdMethod::Qd2, Some(-100_000.0), forces, stations);
+    standard.elements[fixture::GIRDER.index()]
+        .local_axis
+        .ref_vector = [0.0, 1.0, 0.0];
+    assert_eq!(
+        qd2,
+        check_stations(&standard, QdMethod::Qd2, Some(-100_000.0), forces, stations)
+    );
+    for face_i in [None, Some(750.0), Some(f64::INFINITY)] {
+        let mut no_clear_span = standard.clone();
+        no_clear_span.elements[COLUMN.index()].rigid_zone.face_i = face_i;
+        no_clear_span.elements[COLUMN.index()].rigid_zone.face_j = Some(750.0);
+        for method in [QdMethod::Qd1, QdMethod::Min] {
+            let rows = check_stations(&no_clear_span, method, Some(-100_000.0), forces, stations);
+            assert!(
+                rows.iter().any(|row| matches!(
+                    row, CheckOutcome::Skipped { reason }
+                        if reason.contains("Qy方向") && reason.contains("柱の内法高さ")
+                            && !reason.contains("Qz方向")
+                )),
+                "{rows:?}"
+            );
+        }
+    }
+    assert_time_history_qd1_demand(&standard, reference::THREE_BAR_COLUMN_ENDS_QD1_N);
+
+    for method in [QdMethod::Qd1, QdMethod::Min] {
+        let mut axial_bending_ng = forces;
+        axial_bending_ng[5] = 300e6;
+        let rows = check(&standard, method, Some(-100_000.0), axial_bending_ng);
+        assert!(
+            rows.iter().any(|row| matches!(
+                row, CheckOutcome::Skipped { reason }
+                    if reason.contains("Qy方向の柱頭")
+                        && reason.contains("検討曲げ軸の対応")
+                        && reason.contains("柱端の重力参照軸力が不足")
+                        && !reason.contains("Qz方向")
+            )),
+            "{rows:?}"
         );
-        assert_qd1_issue1907_time_history_demand(
-            &terminal_foot,
-            reference::REVERSIBLE_ONE_BAR_FOOT_QD1_N,
-        );
+        assert!(rows.iter().any(|row| matches!(
+            row, CheckOutcome::Checked(result)
+                if result.components.iter().any(|c| c.kind == CheckKind::AxialBending && c.ratio > 1.0)
+        )), "{rows:?}");
+    }
+}
+
+#[test]
+fn qd1_issue1970_does_not_use_rebar_of_a_girder_excluded_by_its_axis() {
+    let mut model = fixture::column_with_girder(column::column_model(false, 0.0));
+    model.elements[fixture::GIRDER.index()]
+        .local_axis
+        .ref_vector = [0.0, 1.0, 0.0];
+    assert_qd1_shear_ratio(
+        &model,
+        reference::THREE_BAR_COLUMN_ENDS_QD1_N / reference::COLUMN_ALLOWABLE_SHEAR_N,
+    );
+}
+
+#[test]
+fn qd1_issue1970_retains_an_inclined_column_in_the_same_bending_plane() {
+    let mut model = yielding_head_model();
+    model.elements.pop();
+    model.nodes.pop();
+    for (foot_x, column_ref, girder_far, girder_ref) in [
+        (
+            -1000.0,
+            [1.0, 0.0, 0.0],
+            [4000.0, 0.0, 1500.0],
+            [0.0, 0.0, 1.0],
+        ),
+        (
+            -1125.0,
+            [1.0, 1.0, 0.0],
+            [1200.0, -1200.0, 4700.0],
+            [3.0, 0.0, 4.0],
+        ),
+    ] {
+        model.nodes[0].coord[0] = foot_x;
+        model.elements[COLUMN.index()].local_axis.ref_vector = column_ref;
+        model.nodes[2].coord = girder_far;
+        model.elements[fixture::GIRDER.index()]
+            .local_axis
+            .ref_vector = girder_ref;
+        let [strong, _] = column_qd1_by_direction(&model, [-100_000.0; 2], 1500.0);
+        assert_near(strong, reference::TWO_HEAD_GIRDERS_HALF_QD1_N, 1e-6);
     }
 }
 
@@ -1222,18 +1492,19 @@ fn qd1_accounts_for_rigid_arm_moment_beyond_the_plan_direction_of_a_girder() {
     let head_z_mm = model.nodes[NodeId(1).index()].coord[2];
     let weak_beam_qd1_n = 162_630.279_382_081;
     model.elements[girder].rigid_zone.length_i = 100.0;
-    for (condition, unarmed_strong_qd1_n) in [
-        (EndCondition::Pinned, ONE_GIRDER_QD1_N),
+    for (condition, unarmed_strong_qd1_n, unarmed_weak_qd1_n) in [
+        (EndCondition::Pinned, ONE_GIRDER_QD1_N, weak_beam_qd1_n),
         (
             EndCondition::SemiRigid { k_theta: 1e8 },
             BOTH_COLUMN_ENDS_QD1_N,
+            189_308.326_858_618,
         ),
     ] {
         model.elements[girder].end_cond[0] = condition;
         for (rise_mm, enabled, expected) in [
             (0.0, true, [BOTH_COLUMN_ENDS_QD1_N, weak_beam_qd1_n]),
             (1000.0, true, [BOTH_COLUMN_ENDS_QD1_N, 189_308.326_858_618]),
-            (1000.0, false, [unarmed_strong_qd1_n, weak_beam_qd1_n]),
+            (1000.0, false, [unarmed_strong_qd1_n, unarmed_weak_qd1_n]),
         ] {
             model.nodes[far].coord[2] = head_z_mm + rise_mm;
             model.stress_cfg.consider_rigid_zones = enabled;
@@ -1278,15 +1549,19 @@ fn qd1_keeps_the_orthogonal_girder_only_for_an_exactly_parallel_rigid_arm() {
         assert_near(weak, weak_qd1_n, 1e-6);
     }
 
-    model.nodes[2].coord[..2].copy_from_slice(&[3500.0, 2300.0]);
-    for (column_x_mm, far_offset_x_mm, weak_qd1_n) in [
+    model.elements[COLUMN.index()].local_axis.ref_vector = [1.0, 0.0, 0.0];
+    model.nodes[2].coord[..2].copy_from_slice(&[3500.0, 0.0]);
+    model.nodes[3].coord[..2].copy_from_slice(&[0.0, 3500.0]);
+    model.nodes[4].coord[..2].copy_from_slice(&[-3500.0, 0.0]);
+    for (column_y_mm, far_offset_y_mm, weak_qd1_n) in [
         (1e-14, 0.0, 189_308.326_858_618),
         (0.0, 1e-14, 189_308.326_858_618),
         (1e-14, 1e-14, 162_630.279_382_081),
     ] {
-        model.nodes[0].coord[0] = column_x_mm;
-        model.nodes[1].coord[0] = column_x_mm;
-        model.elements[fixture::GIRDER.index()].end_offsets_mm[1][0] = far_offset_x_mm;
+        model.nodes[0].coord[1] = column_y_mm;
+        model.nodes[1].coord[1] = column_y_mm;
+        model.nodes[4].coord[1] = column_y_mm;
+        model.elements[fixture::GIRDER.index()].end_offsets_mm[1][1] = far_offset_y_mm;
         model.validate().unwrap();
         let [strong, weak] = column_qd1_by_direction(&model, [-200_000.0; 2], 1400.0);
         assert_near(strong, reference::BOTH_COLUMN_ENDS_QD1_N, 1e-6);
@@ -1311,8 +1586,11 @@ fn qd1_uses_both_column_ends_for_an_inclined_column_with_a_pinned_girder_and_rig
         3_367.097_621_526_583_7,
         737.554_717_096_299_4,
     ];
-    model.nodes[3].coord = [-2300.0, 3500.0, 0.0];
-    model.nodes[4].coord = [-3500.0, -2300.0, 0.0];
+    model.nodes[3].coord = [-2760.0, 4200.0, 920.0];
+    model.nodes[4].coord = [-3150.0, -2300.0, 1050.0];
+    for girder in [2, 3] {
+        model.elements[girder].local_axis.ref_vector = [1.0, 0.0, 3.0];
+    }
     let girder = &mut model.elements[fixture::GIRDER.index()];
     girder.end_cond[0] = EndCondition::Pinned;
     girder.rigid_zone.length_i = 100.0;
@@ -1600,7 +1878,7 @@ fn invalid_girder_rebar_category_blocks_only_its_assigned_column_shear_direction
     for (kind, girder_xy, axis) in [
         (ElementKind::Beam, [4000.0, 0.0], "Qy"),
         (ElementKind::Fiber, [0.0, 4000.0], "Qz"),
-        (ElementKind::MultiSpring, [4000.0, 4000.0], "Qy"),
+        (ElementKind::MultiSpring, [-4000.0, 0.0], "Qy"),
     ] {
         let mut model = fixture::column_with_girder(column::column_model(false, 0.0));
         model.elements[fixture::GIRDER.index()].kind = kind;

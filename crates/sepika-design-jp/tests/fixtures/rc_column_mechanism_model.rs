@@ -16,6 +16,8 @@ pub const GRAVITY: &str = "常時";
 
 pub fn column_with_girder(mut model: Model) -> Model {
     model.nodes[1].coord[2] = 1500.0;
+    model.elements[COLUMN.index()].rigid_zone.face_i = Some(0.0);
+    model.elements[COLUMN.index()].rigid_zone.face_j = Some(0.0);
     model.stories[1].elevation = Some(model.nodes[1].coord[2]);
     let mut far_node = model.nodes[1].clone();
     far_node.id = NodeId(2);
@@ -220,6 +222,31 @@ pub fn column_with_reversible_girders(model: Model, head_bars: u32, foot_bars: u
         model.nodes.push(base);
         model.elements.push(side_column);
     }
+    model
+}
+
+pub fn column_for_head_axis_comparison(model: Model) -> Model {
+    let mut model = column_with_reversible_girders(model, 2, 5);
+    let section = &mut model.sections[2];
+    let mut shape = section.shape.take().unwrap();
+    let SectionShape::RcBeamRect { b, .. } = &mut shape else {
+        unreachable!()
+    };
+    *b = 400.0;
+    let mut widened = shape.to_section(section.id, section.name.clone());
+    widened.frame_use = section.frame_use;
+    widened.material = section.material;
+    widened.rebar_material = section.rebar_material;
+    widened.shear_rebar_material = section.shear_rebar_material;
+    *section = widened;
+    model
+}
+
+pub fn column_with_legacy_foot_girders(model: Model) -> Model {
+    let mut model = column_with_reversible_girders(model, 4, 1);
+    model.elements[3].nodes[0] = NodeId(2);
+    model.nodes[4].coord[0] = model.nodes[2].coord[0];
+    model.elements[2].section = Some(SectionId(2));
     model
 }
 

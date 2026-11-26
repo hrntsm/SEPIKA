@@ -792,31 +792,27 @@ pub fn run_member_design_checks(
             == StructureKind::Rc
             && kind == MemberKind::Column
             && options.term == LoadTerm::Short
-            && seismic_qd
-                .as_ref()
-                .is_some_and(|qd| qd.method != QdMethod::Qd2)
+            && !rc_damage_control
+            && options.long_member_forces.is_some()
+            && options.qd_method != QdMethod::Qd2
             && !wrong_main_rebar
         {
             let axial_factor = 1.0;
-            let qd = seismic_qd
+            let long_at = seismic_qd
                 .as_ref()
-                .expect("柱のQD1に使う重力参照を設定済み");
+                .map_or(&[][..], |qd| qd.long_at.as_slice());
             let closest_axial = |at: &[(f64, [f64; 6])], end: f64| {
                 at.iter()
                     .min_by(|a, b| (a.0 - end).abs().total_cmp(&(b.0 - end).abs()))
                     .map(|(pos, values)| (*pos, values[0]))
             };
-            let end_forces = [0.0, 1.0].map(|end| {
-                (
-                    end,
-                    closest_axial(&qd.long_at, end),
-                    closest_axial(&mf.at, end),
-                )
-            });
-            let response_end_axial_issue = end_forces
-                .iter()
-                .any(|(_, _, response)| response.is_some_and(|(_, n)| !n.is_finite()))
-                .then_some("設計用せん断力に必要な柱端の応答軸力が非有限です");
+            let end_forces = [0.0, 1.0]
+                .map(|end| (end, closest_axial(long_at, end), closest_axial(&mf.at, end)));
+            let response_end_axial_issue = (seismic_qd.is_some()
+                && end_forces
+                    .iter()
+                    .any(|(_, _, response)| response.is_some_and(|(_, n)| !n.is_finite())))
+            .then_some("設計用せん断力に必要な柱端の応答軸力が非有限です");
             let [(n_long_i, n_combo_i), (n_long_j, n_combo_j)] =
                 end_forces.map(|(_, long, response)| {
                     (
@@ -824,21 +820,25 @@ pub fn run_member_design_checks(
                         response.map_or(0.0, |(_, n)| n),
                     )
                 });
-            let mut column_sum_my = if response_end_axial_issue.is_some() {
-                None
-            } else {
-                crate::rc::compute_column_mechanism_sum_my(
-                    model,
-                    column_mechanism_topology
-                        .get_or_insert_with(|| crate::rc::ColumnMechanismTopology::new(model)),
-                    elem,
-                    n_long_i,
-                    n_long_j,
-                    n_combo_i,
-                    n_combo_j,
-                    axial_factor,
-                )
-            };
+            let mut column_sum_my = crate::rc::compute_column_mechanism_sum_my(
+                model,
+                column_mechanism_topology
+                    .get_or_insert_with(|| crate::rc::ColumnMechanismTopology::new(model)),
+                elem,
+                n_long_i,
+                n_long_j,
+                n_combo_i,
+                n_combo_j,
+                axial_factor,
+            )
+            .filter(|mechanism| {
+                if seismic_qd.is_none() {
+                    mechanism.excluded_girder_axes.contains(&true)
+                } else {
+                    response_end_axial_issue.is_none()
+                        || mechanism.girder_yield_holds.iter().any(Option::is_some)
+                }
+            });
             let column_end_axial_issue =
                 end_forces.into_iter().find_map(|(end, long, response)| {
                     let end_axial = |point: Option<(f64, f64)>| {
@@ -865,13 +865,17 @@ pub fn run_member_design_checks(
                     }
                 });
             if let (Some(mechanism), Some(reason)) = (&mut column_sum_my, column_end_axial_issue) {
-                for (direction, hold) in [&mut mechanism.qy, &mut mechanism.qz]
+                for ((direction, hold), excluded_axis) in [&mut mechanism.qy, &mut mechanism.qz]
                     .into_iter()
-                    .zip(&mut mechanism.floor_yield_holds)
+                    .zip(&mut mechanism.girder_yield_holds)
+                    .zip(mechanism.excluded_girder_axes)
                 {
-                    if hold.is_some() {
+                    if seismic_qd.is_none() && !excluded_axis {
+                        *direction = Ok(None);
+                        *hold = None;
+                    } else if hold.is_some() {
                         *direction = Err(combine_incomplete_reasons(hold.take(), Some(reason))
-                            .expect("床板付梁を除外した需要を確定できない理由"));
+                            .expect("梁降伏候補を除外した需要を確定できない理由"));
                     }
                 }
             }
