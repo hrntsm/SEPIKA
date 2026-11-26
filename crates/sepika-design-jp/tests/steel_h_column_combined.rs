@@ -720,17 +720,59 @@ fn issue_1943_includes_the_flange_width_to_thickness_limit() {
 }
 
 #[test]
-fn issue_1943_keeps_the_unknown_weak_shear_reason_when_width_to_thickness_is_exceeded() {
+fn issue_1943_keeps_weak_and_nonfinite_shear_reasons_at_an_early_exit() {
     let model = issue_model();
     let section = symmetric_h(200.0, 8.0, 4.0, false);
-    let forces = MemberForcesAt {
-        qz: 1_000.0,
-        ..WEAK_BENDING_ONLY
-    };
-    let outcome = weak_bending_check(&model, &section, &forces);
+    for (qy, qz, weak_unconfirmed, nonfinite) in [
+        (0.0, 1_000.0, true, false),
+        (f64::NAN, 1_000.0, true, true),
+        (0.0, f64::INFINITY, false, true),
+    ] {
+        let forces = MemberForcesAt {
+            qy,
+            qz,
+            ..WEAK_BENDING_ONLY
+        };
+        let outcome = weak_bending_check(&model, &section, &forces);
+        assert!(
+            matches!(&outcome, CheckOutcome::Skipped { reason }
+                if reason.contains("局部座屈")
+                && reason.contains("弱軸せん断力Qzの照査条件を確定できません") == weak_unconfirmed
+                && reason.contains("せん断力が非有限です") == nonfinite),
+            "{outcome:?}"
+        );
+    }
+    let biaxial = weak_bending_check(
+        &model,
+        &section,
+        &MemberForcesAt {
+            mz: 1e6,
+            qz: f64::NAN,
+            ..WEAK_BENDING_ONLY
+        },
+    );
+    assert!(
+        matches!(&biaxial, CheckOutcome::Skipped { reason }
+        if reason.contains("局部座屈") && reason.contains("せん断力が非有限です")
+        && !reason.contains("同時に作用")),
+        "{biaxial:?}"
+    );
+    let mut compact = symmetric_h(200.0, 9.0, 7.0, false);
+    compact.iy *= 2.0;
+    let outcome = weak_bending_check(
+        &model,
+        &compact,
+        &MemberForcesAt {
+            n: -1_000.0,
+            qz: 1_000.0,
+            ..WEAK_BENDING_ONLY
+        },
+    );
     assert!(
         matches!(&outcome, CheckOutcome::Skipped { reason }
-            if reason.contains("局部座屈") && reason.contains("弱軸せん断力Qzの照査条件を確定できません")),
+            if reason.contains("強軸断面二次モーメント")
+            && !reason.contains("局部座屈")
+            && reason.contains("弱軸せん断力Qzの照査条件を確定できません")),
         "{outcome:?}"
     );
 }
@@ -985,6 +1027,7 @@ fn issue_1943_unconfirmed_section_properties_cannot_establish_compression_or_sle
 fn issue_1943_unconfirmed_inertia_preserves_only_independent_material_and_web_shear_failures() {
     let model = issue_model();
     let mut section = symmetric_h(200.0, 8.0, 7.0, false);
+    section.iy /= 16.0;
     section.iz /= 16.0;
     let forces = MemberForcesAt {
         n: -1_600_000.0,
@@ -1022,6 +1065,163 @@ fn issue_1943_unconfirmed_inertia_preserves_only_independent_material_and_web_sh
         reason.contains("有効細長比") && reason.contains("弱軸断面二次モーメント"),
         "{reason}"
     );
+}
+
+#[test]
+fn issue_1943_partial_slenderness_can_prove_a_statutory_limit_or_axial_failure() {
+    let model = issue_model();
+    let section = symmetric_h(200.0, 8.0, 7.0, false);
+    let unresolved_weak = Section {
+        iz: section.iz / 16.0,
+        ..section.clone()
+    };
+    let unresolved_strong = Section {
+        iy: section.iy / 16.0,
+        ..section.clone()
+    };
+    // 強軸半径157.7199178 mm、弱軸半径39.8489911 mm。
+    // 強軸長28,000 mmの確認下限177.5298922に対する短期許容圧縮の上限44.4560022 N/mm²。
+    for (section, ly, lz, axial_n, kind, expected, detail, reason_text) in [
+        (
+            &unresolved_weak,
+            40_000.0,
+            3000.0,
+            -1000.0,
+            CheckKind::Provision,
+            1.268_070_658_533_047,
+            "有効細長比の下限",
+            "弱軸断面二次モーメント",
+        ),
+        (
+            &unresolved_strong,
+            3000.0,
+            10_000.0,
+            -1000.0,
+            CheckKind::Provision,
+            1.254_736_935_790_679_4,
+            "有効細長比の下限",
+            "強軸断面二次モーメント",
+        ),
+        (
+            &section,
+            40_000.0,
+            f64::NAN,
+            -1000.0,
+            CheckKind::Provision,
+            1.268_070_658_533_047,
+            "有効細長比の下限",
+            "弱軸の座屈長さ",
+        ),
+        (
+            &unresolved_weak,
+            28_000.0,
+            3000.0,
+            -500_000.0,
+            CheckKind::Axial,
+            1.910_169_021_415_162_5,
+            "fc上限=44.4560",
+            "弱軸断面二次モーメント",
+        ),
+    ] {
+        let ctx = DesignCtx {
+            lk_y: Some(ly),
+            lk_z: Some(lz),
+            ..column_context(&model, LoadTerm::Short)
+        };
+        let forces = MemberForcesAt {
+            n: axial_n,
+            ..WEAK_BENDING_ONLY
+        };
+        let outcomes = SteelDesign
+            .check_outcomes(&forces, section, &model.materials[0], &ctx)
+            .collect::<Vec<_>>();
+        let [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }] = outcomes.as_slice()
+        else {
+            panic!("{outcomes:?}");
+        };
+        let [failure] = result.components.as_slice() else {
+            panic!("{result:?}")
+        };
+        assert_eq!(failure.kind, kind);
+        assert!((failure.ratio - expected).abs() < 1e-12, "{failure:?}");
+        assert!(failure.detail.contains(detail), "{failure:?}");
+        assert!(reason.contains(reason_text), "{reason}");
+        if kind == CheckKind::Axial {
+            assert!(failure.detail.contains("軸力比の下限"), "{failure:?}");
+        }
+    }
+}
+
+#[test]
+fn issue_1943_partial_compression_limit_includes_the_right_hand_transition_value() {
+    let model = issue_model();
+    let mut section = symmetric_h(200.0, 8.0, 7.0, false);
+    section.iz /= 16.0;
+    let ctx = DesignCtx {
+        lk_y: Some(18_893.123_606_125_55),
+        ..column_context(&model, LoadTerm::Short)
+    };
+    // λはΛの直前。短期fcは左側97.6154 N/mm²付近、右側の上限は97.6425 N/mm²。
+    for (n, failure_is_proven) in [(-574_845.44, false), (-575_257.6, true)] {
+        let forces = MemberForcesAt {
+            n,
+            ..WEAK_BENDING_ONLY
+        };
+        let outcomes = SteelDesign
+            .check_outcomes(&forces, &section, &model.materials[0], &ctx)
+            .collect::<Vec<_>>();
+        if failure_is_proven {
+            assert!(
+                matches!(outcomes.as_slice(), [CheckOutcome::Checked(result), CheckOutcome::Skipped { .. }]
+                    if matches!(result.components.as_slice(), [axial]
+                        if axial.kind == CheckKind::Axial && axial.detail.contains("fc上限=97.6425"))),
+                "{outcomes:?}"
+            );
+        } else {
+            assert!(
+                matches!(outcomes.as_slice(), [CheckOutcome::Skipped { .. }]),
+                "{outcomes:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn issue_1943_invalid_young_modulus_cannot_remove_an_independent_axial_failure() {
+    let model = issue_model();
+    let section = symmetric_h(200.0, 8.0, 7.0, false);
+    let unresolved_weak = Section {
+        iz: section.iz / 16.0,
+        ..section.clone()
+    };
+    let forces = MemberForcesAt {
+        n: -1_600_000.0,
+        qy: 500_000.0,
+        ..WEAK_BENDING_ONLY
+    };
+    for (sec, young, unresolved_reason) in [
+        (&unresolved_weak, 0.0, "有効細長比"),
+        (&section, f64::NAN, "幅厚比または限界値"),
+    ] {
+        let mat = sepika_core::model::Material {
+            young,
+            ..model.materials[0].clone()
+        };
+        let outcomes = SteelDesign
+            .check_outcomes(&forces, sec, &mat, &column_context(&model, LoadTerm::Short))
+            .collect::<Vec<_>>();
+        assert!(
+            matches!(outcomes.as_slice(), [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }]
+                if reason.contains(unresolved_reason)
+                && matches!(result.components.as_slice(), [axial, shear]
+                    if axial.kind == CheckKind::Axial
+                    && (axial.ratio - 1.156_336_725_254_394).abs() < 1e-12
+                    && axial.detail.contains("材料許容上限")
+                    && shear.kind == CheckKind::Shear
+                    && (shear.ratio - 1.193_398_472_859_164_7).abs() < 1e-12)),
+            "{outcomes:?}"
+        );
+    }
 }
 
 fn issue_model() -> Model {

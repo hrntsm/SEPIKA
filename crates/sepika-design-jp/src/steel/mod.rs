@@ -296,6 +296,7 @@ pub fn frame_node_span_mm(
 }
 
 const WEAK_H_SHEAR_UNAVAILABLE: &str = "H形鋼に作用する弱軸せん断力Qzの照査条件を確定できません";
+const NONFINITE_SHEAR_FORCE: &str = "せん断力が非有限です";
 
 fn check_same_point_shear(
     result: &mut CheckResult,
@@ -452,6 +453,44 @@ fn axial_limit_failure(
     })
 }
 
+fn independent_h_column_compression_failure(
+    axial_n: f64,
+    area_mm2: f64,
+    mat: &Material,
+    term: crate::LoadTerm,
+    f_mpa: f64,
+    slenderness: &column::HColumnCompressionSlenderness,
+) -> Option<CheckComponent> {
+    let Some((fc_mpa, label)) = slenderness.allowable_compression_limit(f_mpa, mat.young, term)
+    else {
+        return axial_material_limit_failure(axial_n, area_mm2, term, f_mpa);
+    };
+    let mut check = axial_limit_failure(axial_n, area_mm2, fc_mpa, label)?;
+    if slenderness.reason().is_some() {
+        check
+            .detail
+            .push_str(&format!("、軸力比の下限={:.4}", check.ratio));
+    }
+    Some(check)
+}
+
+fn compression_buckling_lengths_mm(ctx: &DesignCtx, secondary_post: bool) -> [f64; 2] {
+    if secondary_post || ctx.length == 0.0 {
+        [
+            ctx.lk_y.unwrap_or(ctx.length),
+            ctx.lk_z.unwrap_or(ctx.length),
+        ]
+    } else {
+        let (strong_mm, weak_mm) = buckling_lengths_with_defaults(
+            ctx.kind,
+            ctx.node_span_mm.unwrap_or(ctx.length),
+            ctx.lk_y,
+            ctx.lk_z,
+        );
+        [strong_mm, weak_mm]
+    }
+}
+
 fn check_compression_slenderness(
     forces: &MemberForcesAt,
     sec: &Section,
@@ -467,25 +506,17 @@ fn check_compression_slenderness(
             reason: "圧縮山形鋼は幾何軸と主軸が異なり、主軸に対応する有効座屈長さが未確認のため、有効細長比の法定上限を含む鋼部材検定は未算定です".into(),
         });
     }
-    let lengths_mm = if secondary_post || ctx.length == 0.0 {
-        [
-            ctx.lk_y.unwrap_or(ctx.length),
-            ctx.lk_z.unwrap_or(ctx.length),
-        ]
-    } else {
-        let (strong_mm, weak_mm) = buckling_lengths_with_defaults(
-            ctx.kind,
-            ctx.node_span_mm.unwrap_or(ctx.length),
-            ctx.lk_y,
-            ctx.lk_z,
-        );
-        if !(strong_mm > 0.0 && weak_mm > 0.0 && strong_mm.is_finite() && weak_mm.is_finite()) {
-            return Err(CheckOutcome::Skipped {
-                reason: "圧縮材の強軸・弱軸の座屈長さには有限な正値が必要です".into(),
-            });
-        }
-        [strong_mm, weak_mm]
-    };
+    let lengths_mm = compression_buckling_lengths_mm(ctx, secondary_post);
+    if !secondary_post
+        && ctx.length != 0.0
+        && lengths_mm
+            .iter()
+            .any(|&length| !length.is_finite() || length <= 0.0)
+    {
+        return Err(CheckOutcome::Skipped {
+            reason: "圧縮材の強軸・弱軸の座屈長さには有限な正値が必要です".into(),
+        });
+    }
     if !forces.n.is_finite()
         || [sec.area, sec.iy, sec.iz]
             .iter()
@@ -514,15 +545,34 @@ fn check_compression_slenderness(
     if lambda <= limit {
         return Ok(Some(lambda));
     }
+    Err(compression_slenderness_failure(
+        lambda,
+        limit,
+        false,
+        torsion_reason,
+    ))
+}
+
+fn compression_slenderness_failure(
+    lambda: f64,
+    limit: f64,
+    lower_bound: bool,
+    torsion_reason: Option<&str>,
+) -> CheckOutcome {
+    let label = if lower_bound {
+        "有効細長比の下限"
+    } else {
+        "有効細長比"
+    };
     let mut detail = format!(
-        "有効細長比λ={lambda} > 法定上限{limit}。λ/上限={ratio}（応力度比ではありません）",
+        "{label}λ={lambda} > 法定上限{limit}。λ/上限={ratio}（応力度比ではありません）",
         ratio = lambda / limit
     );
     if let Some(reason) = torsion_reason {
         detail.push('。');
         detail.push_str(reason);
     }
-    Err(CheckOutcome::Checked(CheckResult {
+    CheckOutcome::Checked(CheckResult {
         basis: "建築基準法施行令第65条 有効細長比上限".into(),
         detail: String::new(),
         components: vec![CheckComponent {
@@ -530,7 +580,7 @@ fn check_compression_slenderness(
             ratio: lambda / limit,
             detail,
         }],
-    }))
+    })
 }
 
 /// 鋼部材の許容応力度検定。
@@ -921,22 +971,48 @@ impl SteelDesign {
             && check_plate_slenderness)
             .then(|| column::check_symmetric_h_plate_slenderness(forces, sec, mat).err())
             .flatten();
-        let plate_weak_shear_reason = (plate_slenderness_reason.is_some()
-            && forces.my != 0.0
+        let weak_h_slenderness = (ordinary_weak_h_column && forces.n.is_finite() && forces.n < 0.0)
+            .then(|| column::HColumnCompressionSlenderness::resolve(sec, ctx));
+        let weak_h_slenderness_reason = weak_h_slenderness
+            .as_ref()
+            .and_then(column::HColumnCompressionSlenderness::reason);
+        let incomplete_weak_h_column = ordinary_weak_h_column
+            && (plate_slenderness_reason.is_some() || weak_h_slenderness_reason.is_some());
+        let h_combined_reason =
+            h_combined_reason.filter(|_| !incomplete_weak_h_column || forces.qz.is_finite());
+        let weak_shear_reason = (incomplete_weak_h_column
+            && torsion_reason.is_none()
+            && forces.qz.is_finite()
             && forces.qz != 0.0
             && h_combined_reason.is_none())
         .then_some(WEAK_H_SHEAR_UNAVAILABLE);
-        let require_compression_properties = ordinary_weak_h_column && forces.n < 0.0;
-        let compression_properties = if require_compression_properties {
-            column::confirm_h_compression_properties(sec)
+        let invalid_shear = !forces.qy.is_finite() || !forces.qz.is_finite();
+        let invalid_shear_reason =
+            (incomplete_weak_h_column && invalid_shear).then_some(NONFINITE_SHEAR_FORCE);
+        let slenderness = if let Some(verified) = &weak_h_slenderness {
+            let lower_bound = verified.lower_bound();
+            let limit = 200.0;
+            if let Some(lambda) = lower_bound.filter(|&lambda| lambda > limit) {
+                *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                    incomplete.take(),
+                    weak_h_slenderness_reason,
+                );
+                Err(compression_slenderness_failure(
+                    lambda,
+                    limit,
+                    weak_h_slenderness_reason.is_some(),
+                    torsion_reason,
+                ))
+            } else if let Some(reason) = weak_h_slenderness_reason {
+                Err(CheckOutcome::Skipped {
+                    reason: reason.into(),
+                })
+            } else {
+                Ok(lower_bound)
+            }
         } else {
-            Ok(())
+            check_compression_slenderness(forces, sec, ctx, torsion_reason, secondary_post)
         };
-        let slenderness = compression_properties
-            .map_err(|reason| CheckOutcome::Skipped { reason })
-            .and_then(|()| {
-                check_compression_slenderness(forces, sec, ctx, torsion_reason, secondary_post)
-            });
         let lambda = match slenderness {
             Ok(Some(lambda)) if !secondary_post => lambda,
             Ok(_) => crate::effective_slenderness(
@@ -958,7 +1034,8 @@ impl SteelDesign {
                     .filter(|_| forces.n <= 0.0)
                     .into_iter()
                     .chain(built_h_shear_reasons.into_iter().flatten())
-                    .chain(plate_weak_shear_reason)
+                    .chain(weak_shear_reason)
+                    .chain(invalid_shear_reason)
                     .chain(plate_slenderness_reason.as_deref())
                 {
                     match &mut outcome {
@@ -991,18 +1068,24 @@ impl SteelDesign {
                         result.basis.push_str(reason);
                     }
                 }
-                let independent_axial = match &outcome {
-                    CheckOutcome::Skipped { .. }
-                        if plate_slenderness_reason.is_some() || require_compression_properties =>
-                    {
-                        sec.resolved_area()
-                            .ok()
-                            .zip(crate::material_strength::section_steel_f(sec, Some(mat)).ok())
-                            .and_then(|(area_mm2, f)| {
+                let independent_axial = if incomplete_weak_h_column
+                    || (plate_slenderness_reason.is_some()
+                        && matches!(&outcome, CheckOutcome::Skipped { .. }))
+                {
+                    sec.resolved_area()
+                        .ok()
+                        .zip(crate::material_strength::section_steel_f(sec, Some(mat)).ok())
+                        .and_then(|(area_mm2, f)| {
+                            if let Some(verified) = &weak_h_slenderness {
+                                independent_h_column_compression_failure(
+                                    forces.n, area_mm2, mat, ctx.term, f, verified,
+                                )
+                            } else {
                                 axial_material_limit_failure(forces.n, area_mm2, ctx.term, f)
-                            })
-                    }
-                    _ => None,
+                            }
+                        })
+                } else {
+                    None
                 };
                 let independent_checks: Vec<_> = independent_axial
                     .into_iter()
@@ -1077,7 +1160,8 @@ impl SteelDesign {
                 for issue in h_combined_reason
                     .into_iter()
                     .chain(built_h_shear_reasons.into_iter().flatten())
-                    .chain(plate_weak_shear_reason)
+                    .chain(weak_shear_reason)
+                    .chain(invalid_shear_reason)
                     .chain(plate_slenderness_reason.as_deref())
                 {
                     reason.push('。');
@@ -1151,23 +1235,35 @@ impl SteelDesign {
                 None => CheckOutcome::Skipped { reason },
             };
         }
-        if !forces.qy.is_finite() || !forces.qz.is_finite() {
+        if invalid_shear && !incomplete_weak_h_column {
             return CheckOutcome::Skipped {
-                reason: "せん断力が非有限です".into(),
+                reason: NONFINITE_SHEAR_FORCE.into(),
             };
         }
         let combined_and_shear = built_h_shear_unavailable.then(built_h_unavailable_reasons);
         let h_combined_reason = combined_and_shear.as_deref().or(h_combined_reason);
         if let Some(reason) = plate_slenderness_reason {
-            *incomplete = crate::member_design_check::combine_incomplete_reasons(
-                incomplete.take(),
-                h_combined_reason.or(plate_weak_shear_reason),
-            );
+            for other_reason in [
+                h_combined_reason.or(weak_shear_reason),
+                invalid_shear_reason,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                    incomplete.take(),
+                    Some(other_reason),
+                );
+            }
             let components: Vec<_> = sec
                 .resolved_area()
                 .ok()
                 .and_then(|area_mm2| {
-                    if forces.n < 0.0 {
+                    if let Some(verified) = &weak_h_slenderness {
+                        independent_h_column_compression_failure(
+                            forces.n, area_mm2, mat, term, f, verified,
+                        )
+                    } else if forces.n < 0.0 {
                         // 局部座屈で有効面積が減っても、全断面で算定する許容圧縮応力度は変わらない。
                         let fc_mpa = steel_fc(f, mat.young, lambda, term);
                         axial_limit_failure(forces.n, area_mm2, fc_mpa, "fc")

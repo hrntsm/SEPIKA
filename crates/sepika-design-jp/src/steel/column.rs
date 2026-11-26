@@ -1,6 +1,6 @@
 //! 鉄骨造柱の許容応力度検定。
 
-use crate::material_strength::{steel_fc, steel_fs, steel_ft};
+use crate::material_strength::{steel_fc, steel_fs, steel_ft, STEEL_FC_ELASTIC_COEFFICIENT};
 use crate::{
     CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm, MemberForcesAt,
 };
@@ -485,30 +485,130 @@ fn plate_inertia(
     Ok(stored_mm4)
 }
 
-pub(super) fn confirm_h_compression_properties(sec: &Section) -> Result<(), String> {
-    let unresolved = "有効細長比と許容圧縮応力度に必要なH形断面性能を確定できません";
-    let shape = sec.shape.as_ref().expect("上下対称H形鋼の形状が必要");
-    let area_mm2 = sec
-        .resolved_area()
-        .map_err(|reason| format!("{unresolved}。全断面積を確認してください。{reason}"))?;
-    if area_mm2 <= 0.0 {
-        return Err(format!("{unresolved}。全断面積には有限な正値が必要です"));
+pub(super) enum HColumnCompressionSlenderness {
+    Confirmed(f64),
+    Partial {
+        lower_bound: Option<f64>,
+        reason: String,
+    },
+}
+
+impl HColumnCompressionSlenderness {
+    pub(super) fn resolve(sec: &Section, ctx: &DesignCtx) -> Self {
+        let unresolved = "有効細長比と許容圧縮応力度に必要なH形断面性能を確定できません";
+        let shape = sec.shape.as_ref().expect("上下対称H形鋼の形状が必要");
+        let area_mm2 = match sec.resolved_area() {
+            Ok(area_mm2) if area_mm2 > 0.0 => area_mm2,
+            result => {
+                let reason = result
+                    .err()
+                    .unwrap_or_else(|| "有限な正値が必要です".into());
+                return Self::Partial {
+                    lower_bound: None,
+                    reason: format!("{unresolved}。全断面積を確認してください。{reason}"),
+                };
+            }
+        };
+        let lengths_mm = super::compression_buckling_lengths_mm(ctx, false);
+        let axes = [
+            (
+                "強軸",
+                plate_inertia(
+                    sec.property_basis.iy,
+                    sec.iy,
+                    "強軸",
+                    || shape.try_calc_iy(),
+                    unresolved,
+                ),
+            ),
+            (
+                "弱軸",
+                plate_inertia(
+                    sec.property_basis.iz,
+                    sec.iz,
+                    "弱軸",
+                    || shape.try_calc_iz(),
+                    unresolved,
+                ),
+            ),
+        ];
+        let mut lower_bound = None::<f64>;
+        let mut reasons = Vec::new();
+        for ((axis, inertia), length_mm) in axes.into_iter().zip(lengths_mm) {
+            let lambda = inertia.and_then(|inertia_mm4| {
+                if !length_mm.is_finite()
+                    || length_mm < 0.0
+                    || (length_mm == 0.0 && ctx.length != 0.0)
+                {
+                    return Err(format!(
+                        "有効細長比と許容圧縮応力度に必要な{axis}の座屈長さを確定できません"
+                    ));
+                }
+                let radius_mm = (inertia_mm4 / area_mm2).sqrt();
+                let lambda = length_mm / radius_mm;
+                if !radius_mm.is_finite() || radius_mm <= 0.0 || !lambda.is_finite() {
+                    return Err(format!("{axis}の有効細長比を有限値で算定できません"));
+                }
+                Ok(lambda)
+            });
+            match lambda {
+                Ok(lambda) => {
+                    lower_bound = Some(lower_bound.map_or(lambda, |bound| bound.max(lambda)))
+                }
+                Err(reason) => reasons.push(reason),
+            }
+        }
+        if reasons.is_empty() {
+            Self::Confirmed(lower_bound.expect("両軸の有効細長比を確認済み"))
+        } else {
+            Self::Partial {
+                lower_bound,
+                reason: reasons.join("。"),
+            }
+        }
     }
-    plate_inertia(
-        sec.property_basis.iy,
-        sec.iy,
-        "強軸",
-        || shape.try_calc_iy(),
-        unresolved,
-    )?;
-    plate_inertia(
-        sec.property_basis.iz,
-        sec.iz,
-        "弱軸",
-        || shape.try_calc_iz(),
-        unresolved,
-    )?;
-    Ok(())
+
+    pub(super) fn lower_bound(&self) -> Option<f64> {
+        match self {
+            Self::Confirmed(lambda) => Some(*lambda),
+            Self::Partial { lower_bound, .. } => *lower_bound,
+        }
+    }
+
+    pub(super) fn reason(&self) -> Option<&str> {
+        match self {
+            Self::Confirmed(_) => None,
+            Self::Partial { reason, .. } => Some(reason),
+        }
+    }
+
+    pub(super) fn allowable_compression_limit(
+        &self,
+        f_mpa: f64,
+        young_mpa: f64,
+        term: LoadTerm,
+    ) -> Option<(f64, &'static str)> {
+        let lambda = self.lower_bound()?;
+        let transition = super::big_lambda(f_mpa, young_mpa);
+        if !transition.is_finite() || transition <= 1e-9 {
+            return None;
+        }
+        let mut fc_mpa = steel_fc(f_mpa, young_mpa, lambda, term);
+        let label = if self.reason().is_some() {
+            if lambda <= transition {
+                // 境界直後の許容値は丸められた係数により境界値より大きくなり得る。
+                let elastic_supremum_mpa = STEEL_FC_ELASTIC_COEFFICIENT * f_mpa;
+                fc_mpa = fc_mpa.max(match term {
+                    LoadTerm::Long => elastic_supremum_mpa,
+                    LoadTerm::Short => 1.5 * elastic_supremum_mpa,
+                });
+            }
+            "fc上限"
+        } else {
+            "fc"
+        };
+        (fc_mpa.is_finite() && fc_mpa > 0.0).then_some((fc_mpa, label))
+    }
 }
 
 fn tension_compressed_plates(
