@@ -15,7 +15,6 @@ mod mixed_load_tests;
 use super::diagnosis::{nonconvergence_detail, tangent_singular_diagnosis};
 use super::loads::PhysicalPushoverLoads;
 use super::mechanism::determine_mechanism;
-use super::member_response::compute_member_response;
 use super::response::{get_roof_dof, story_heights};
 use super::shear_yield::build_shear_yield_thresholds;
 use super::step_record::StepRecorder;
@@ -571,7 +570,6 @@ pub fn pushover_analysis_recording_signed(
 
     let mechanism = determine_mechanism(recorder.hinges(), model, dir);
     let qu = recorder.qu();
-    let member_response = compute_member_response(model, dofmap, &behaviors, &total_disp, dir)?;
     let detail_elems: std::collections::HashSet<sepika_core::ids::ElemId> = recorder
         .hinges()
         .iter()
@@ -579,6 +577,12 @@ pub fn pushover_analysis_recording_signed(
         .chain(recorder.shear_yields().iter().map(|s| s.elem))
         .collect();
     let recorded = recorder.finish();
+    let member_response = recorded
+        .confirmed_history
+        .last()
+        .ok_or("最終確定ステップの部材別応答がありません")?
+        .members
+        .clone();
     let member_history: Vec<MemberHistory> = model
         .elements
         .iter()

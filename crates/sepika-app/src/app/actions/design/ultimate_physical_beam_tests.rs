@@ -139,6 +139,7 @@ fn adopted(model: Model) -> App {
 }
 
 fn assert_beam(app: &mut App, count: usize, [m, q, capacity, margin]: [f64; 4]) {
+    assert_same_final_proof(stored_run(app));
     let demands = app.ultimate_demand_by_elem().unwrap();
     let mut actions = demands
         .iter()
@@ -156,6 +157,24 @@ fn assert_beam(app: &mut App, count: usize, [m, q, capacity, margin]: [f64; 4]) 
         close(row.qsu, capacity);
         close(row.shear_margin, margin);
     }
+}
+
+fn assert_same_final_proof(run: &PushoverResult) {
+    let evidence = |members: &[PushoverMemberResponse]| {
+        members
+            .iter()
+            .map(|r| (r.elem, r.rc_beam_ultimate_shear))
+            .collect::<Vec<_>>()
+    };
+    let last = &run
+        .confirmed_history
+        .as_ref()
+        .unwrap()
+        .last()
+        .unwrap()
+        .members;
+    assert!(last.iter().any(|r| r.rc_beam_ultimate_shear.is_some()));
+    assert_eq!(evidence(&run.member_response), evidence(last));
 }
 
 fn reopen(app: &mut App, label: &str) -> App {
@@ -230,6 +249,37 @@ fn whole_beam_cannot_be_certified_when_recovery_drops_a_nonzero_load_component()
     let mut input = model(&[1_500.0, 2_750.0], true, true);
     input.load_cases[0].member[0].dir[0] = 1e-16;
     assert_unchecked(&mut adopted(input), Issue::Recovery.reason());
+}
+
+#[test]
+fn axial_loads_lost_by_nodal_addition_do_not_certify_a_zero_axial_range() {
+    use sepika_core::model::RcBeamReference;
+
+    let mut input = model(&[2_000.0], true, false);
+    input.load_cases[0].member.clear();
+    for id in input.girder_groups[0].clone() {
+        input.elements[id.index()].force_regime = ForceRegime::UniaxialBendingShear;
+        input.set_member_rc_beam_reference(
+            id,
+            Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
+        );
+    }
+    // 材軸が自由な側には、釣合い上は 1 N が作用する。
+    input.load_cases[0].nodal.extend(
+        [1e16, 1.0, -1e16].map(|n| NodalLoad::manual(NodeId(3), [n, 0.0, 0.0, 0.0, 0.0, 0.0])),
+    );
+    let mut app = adopted(input);
+    let run = stored_run(&mut app);
+    assert_same_final_proof(run);
+    for row in run
+        .member_response
+        .iter()
+        .filter(|row| row.elem != ElemId(0))
+    {
+        assert_eq!(row.axial, 0.0);
+        assert_eq!(row.rc_beam_ultimate_shear, Some(Err(Issue::Equilibrium)));
+    }
+    assert_unchecked(&mut app, Issue::Equilibrium.reason());
 }
 
 fn assert_unchecked(app: &mut App, reason: &str) {

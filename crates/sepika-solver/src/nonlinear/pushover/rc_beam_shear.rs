@@ -62,9 +62,6 @@ impl BeamShearStep {
     ) -> Result<(), Issue> {
         let axial_needed = actions.axial_range_n != [0.0; 2];
         let weak_needed = actions.max_mq[1] != (0.0, 0.0);
-        if !(axial_needed || weak_needed) || !self.tolerance_n.is_finite() {
-            return Ok(());
-        }
         let elements: HashSet<_> = parts.iter().map(|part| part.elem.id).collect();
         let Some(first) = parts.first() else {
             return Err(Issue::GroupTopology);
@@ -95,21 +92,29 @@ impl BeamShearStep {
                 .all(|part| !has_axis_component(self.member.get(&part.elem.id), axis))
         };
         let free_in_axial = |&node: &&sepika_core::model::Node| {
-            !has_axis_component(self.nodal.get(&node.id), ex)
-                && TRANSLATION.into_iter().zip(ex).all(|(dof, component)| {
-                    component == 0.0
-                        || (!node.restraint.is_fixed(dof)
-                            && node
-                                .support_spring
-                                .is_none_or(|spring| spring[dof as usize] == 0.0))
-                })
+            TRANSLATION.into_iter().zip(ex).all(|(dof, component)| {
+                component == 0.0
+                    || (!node.restraint.is_fixed(dof)
+                        && node
+                            .support_spring
+                            .is_none_or(|spring| spring[dof as usize] == 0.0))
+            })
         };
-        if axial_needed
-            && no_member_component(ex)
-            && [&nodes[1..], &nodes[..nodes.len() - 1]]
-                .into_iter()
-                .any(|side| side.iter().all(free_in_axial))
-        {
+        let mut free_sides = [&nodes[1..], &nodes[..nodes.len() - 1]]
+            .into_iter()
+            .filter(|side| side.iter().all(free_in_axial))
+            .peekable();
+        let has_free_side = free_sides.peek().is_some();
+        let no_axial_load_on_free_side = no_member_component(ex)
+            && free_sides.any(|side| {
+                side.iter()
+                    .all(|node| !has_axis_component(self.nodal.get(&node.id), ex))
+            });
+        if !axial_needed && has_free_side && !no_axial_load_on_free_side {
+            // ゼロの回復値だけでは、軸方向の個別荷重が正しく相殺されたとは確認できない。
+            return Err(Issue::Equilibrium);
+        }
+        if axial_needed && no_axial_load_on_free_side && self.tolerance_n.is_finite() {
             if !actions
                 .axial_range_n
                 .iter()
@@ -126,6 +131,7 @@ impl BeamShearStep {
         };
         // 弱軸とねじりを完全拘束した節点では、拘束方向の節点荷重は直接反力となる。
         if weak_needed
+            && self.tolerance_n.is_finite()
             && no_member_component(ez)
             && nodes.iter().all(|node| {
                 fixed(node, TRANSLATION, ez)

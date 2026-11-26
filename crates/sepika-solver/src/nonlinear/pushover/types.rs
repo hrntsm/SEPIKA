@@ -348,7 +348,7 @@ pub struct PushoverResult {
     pub mechanism: MechanismType,
     /// 性能曲線上の最大ベースシア `[N]`。保有耐力比較の採用点とは独立。
     pub qu: f64,
-    /// 最終確定ステップ時の部材別応答。ステップが 1 つも確定しなかった場合は空。
+    /// 最終確定ステップの部材別応答。同じ確定履歴がある場合はその記録と同一。
     pub member_response: Vec<PushoverMemberResponse>,
     /// この結果を生成した制御方式（[`PushoverControl`]）。
     #[serde(default)]

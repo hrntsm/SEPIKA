@@ -7,8 +7,8 @@
 //!   （軸力・剛域フェイスの局所曲げ・弦からの材端回転）を全部材について記録する
 
 use super::geom::{
-    axial_compression, axial_force_signed, dot3, member_local_frame, member_recording_responses,
-    recording_face_force, recording_force,
+    axial_compression, axial_force_signed, dot3, member_local_frame, recording_face_force,
+    recording_force,
 };
 use super::types::{MemberStepState, PushoverMemberResponse};
 use sepika_core::adjacency::NodeAdjacency;
@@ -181,28 +181,15 @@ fn finite_history_value(value: f64) -> Result<f32, &'static str> {
     }
 }
 
-/// 最終確定ステップの部材別応答（[`PushoverMemberResponse`]）を算定する。
+/// 同一確定ステップの部材別応答と作用荷重から、部材応答を記録する。
 pub(crate) fn compute_member_response(
     model: &Model,
     dofmap: &DofMap,
     behaviors: &[Box<dyn ElementBehavior>],
     total_disp: &[f64],
     dir: crate::statics::analysis::SeismicDir,
-) -> Result<Vec<PushoverMemberResponse>, String> {
-    let responses = member_recording_responses(model, behaviors)?;
-    Ok(compute_member_response_with_responses(
-        model, dofmap, behaviors, total_disp, dir, &responses, None,
-    ))
-}
-
-pub(crate) fn compute_member_response_with_responses(
-    model: &Model,
-    dofmap: &DofMap,
-    behaviors: &[Box<dyn ElementBehavior>],
-    total_disp: &[f64],
-    dir: crate::statics::analysis::SeismicDir,
     responses: &[Option<LoadedFrameResponse>],
-    applied: Option<(&LoadCase, f64)>,
+    (case, force_scale): (&LoadCase, f64),
 ) -> Vec<PushoverMemberResponse> {
     let dir_idx = match dir {
         crate::statics::analysis::SeismicDir::X => 0usize,
@@ -211,14 +198,11 @@ pub(crate) fn compute_member_response_with_responses(
     let ctx = Ctx { model };
     let mut out = Vec::with_capacity(model.elements.len());
     let mut shear_face_geometry = None;
-    let applied = applied
-        .filter(|_| {
-            model
-                .elements
-                .iter()
-                .any(|elem| super::rc_beam_shear::beam_section(model, elem).is_some())
-        })
-        .map(|(case, force_scale)| super::rc_beam_shear::BeamShearStep::new(case, force_scale));
+    let applied = model
+        .elements
+        .iter()
+        .any(|elem| super::rc_beam_shear::beam_section(model, elem).is_some())
+        .then(|| super::rc_beam_shear::BeamShearStep::new(case, force_scale));
     let grouped_rc_actions = super::rc_beam_shear::grouped_actions(
         model,
         responses,

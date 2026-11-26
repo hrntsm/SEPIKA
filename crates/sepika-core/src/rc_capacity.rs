@@ -39,7 +39,7 @@ impl RcBeamUltimateShearIssue {
             Self::FacePosition => "RC梁の実フェースと正の評価区間を確認できません",
             Self::MissingResponse => "梁全体の同一確定ステップの内力を確認できません（区間応答不足）",
             Self::Recovery => "評価区間・部材荷重の位置または荷重の局所軸成分を確認できず、断面力の範囲を回復できません",
-            Self::Equilibrium => "確定総応答が軸力・弱軸の釣合いと一致しません",
+            Self::Equilibrium => "作用荷重・支持条件と確定総応答から軸力または弱軸の釣合いを確認できません",
             Self::Slab => "スラブ付きRC梁の終局せん断の適用条件を確認できません",
             Self::Cutoff => "カットオフ筋があるため内法区間で一様な配筋を確認できません",
             Self::MissingGroupRecord => "一本部材グループ全体の曲げ・せん断の最大値を確認できません。保存応答に梁全体の内力がない場合は増分解析を再実行してください",
