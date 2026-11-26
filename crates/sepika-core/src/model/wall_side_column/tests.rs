@@ -102,7 +102,7 @@ fn classify(model: &Model, id: u32) -> WallSideColumnClassification {
 }
 
 #[test]
-fn c00_c01_c02_all_three_representations_have_identical_physical_roles() {
+fn c00_c01_c02_beam_and_fiber_have_identical_physical_roles() {
     for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let model = fixture(kind);
         let index = WallSideColumnIndex::build(&model);

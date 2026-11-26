@@ -1918,7 +1918,7 @@ fn wall_side_column_rejections_agree_on_analysis_ids_and_reasons() {
 }
 
 #[test]
-fn wall_side_columns_do_not_connect_out_of_scope_rc_panel_for_three_representations() {
+fn beam_and_fiber_side_columns_do_not_connect_out_of_scope_rc_panel() {
     use crate::behavior::Ctx;
     for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = wall_side_column_factory_model();

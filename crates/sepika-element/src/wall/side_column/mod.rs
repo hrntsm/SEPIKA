@@ -318,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn all_three_member_kinds_share_detection_and_index_selection() {
+    fn beam_and_fiber_share_side_column_detection_and_index_selection() {
         for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut model = make_wall_model();
             for member in model.elements.iter_mut().filter(|e| e.id != ElemId(0)) {
