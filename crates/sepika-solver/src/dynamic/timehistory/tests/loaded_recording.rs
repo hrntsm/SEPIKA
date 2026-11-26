@@ -130,7 +130,7 @@ fn loaded_recording_keeps_signed_udl_sections_and_unstored_step_peaks() {
                     )
                     .unwrap();
                 let bytes = behaviors[0].serialize_checkpoint();
-                let forces = member_forces_nonlinear(&model, &behaviors).unwrap();
+                let forces = member_forces_nonlinear(&model, &behaviors).unwrap().forces;
                 assert_eq!(bytes, behaviors[0].serialize_checkpoint());
                 let sections = &forces[0].as_ref().unwrap().at;
                 assert!(sections.len() > 2);
@@ -193,7 +193,9 @@ fn loaded_recording_point_force_keeps_left_limit_and_both_ends() {
         );
         beam.update_state_with_member_loads(&zero(), &[point], false, &Ctx { model: &model })
             .unwrap();
-        let forces = member_forces_nonlinear(&model, &[Box::new(beam)]).unwrap();
+        let forces = member_forces_nonlinear(&model, &[Box::new(beam)])
+            .unwrap()
+            .forces;
         let at = &forces[0].as_ref().unwrap().at;
         assert_eq!(
             at.iter().map(|p| p.0).collect::<Vec<_>>(),
@@ -339,7 +341,8 @@ fn loaded_recording_rejects_bad_owner_before_legacy_getters_and_restores_step() 
         }
         assert_ne!(behaviors[0].serialize_checkpoint(), expected[0]);
         let error = checked_step_member_forces(&model, &mut behaviors, &snapshot, 4, 0.004)
-            .unwrap_err()
+            .err()
+            .expect("不正な試行応答から断面力を復元した")
             .to_string();
         assert!(
             error.contains("要素 ID 11")
@@ -381,7 +384,9 @@ fn loaded_recording_rejects_count_mismatch_and_preserves_nonowner_sections() {
         .unwrap()
         .at;
     assert_eq!(
-        member_forces_nonlinear(&model, &[Box::new(b)]).unwrap()[0]
+        member_forces_nonlinear(&model, &[Box::new(b)])
+            .unwrap()
+            .forces[0]
             .as_ref()
             .unwrap()
             .at,

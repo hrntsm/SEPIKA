@@ -31,20 +31,25 @@ fn moment_ratio_c(ratio: f64) -> f64 {
     (1.75 + 1.05 * ratio + 0.3 * ratio * ratio).min(2.3)
 }
 
+pub(super) fn monotonic_bending_parameters([i, j]: [f64; 2]) -> Option<(f64, f64)> {
+    if !i.is_finite() || !j.is_finite() {
+        return None;
+    }
+    let max = i.abs().max(j.abs());
+    let min = i.abs().min(j.abs());
+    let magnitude = if max == 0.0 { 1.0 } else { min / max };
+    let ratio = if i.is_sign_positive() != j.is_sign_positive() && min > 0.0 {
+        magnitude
+    } else {
+        -magnitude
+    };
+    Some((moment_ratio_c(ratio), 0.6 + 0.3 * ratio))
+}
+
 pub(super) fn steel_beam_lateral_parameters(ctx: &DesignCtx) -> Option<(f64, f64)> {
     use super::SteelBeamMomentDiagram;
     let (c, p_lambda_b) = match ctx.steel_beam_moment_diagram {
-        SteelBeamMomentDiagram::Monotonic([i, j]) if i.is_finite() && j.is_finite() => {
-            let max = i.abs().max(j.abs());
-            let min = i.abs().min(j.abs());
-            let magnitude = if max == 0.0 { 1.0 } else { min / max };
-            let ratio = if i.is_sign_positive() != j.is_sign_positive() && min > 0.0 {
-                magnitude
-            } else {
-                -magnitude
-            };
-            (moment_ratio_c(ratio), 0.6 + 0.3 * ratio)
-        }
+        SteelBeamMomentDiagram::Monotonic(ends) => monotonic_bending_parameters(ends)?,
         SteelBeamMomentDiagram::InteriorMaximum => (1.0, 0.3),
         _ => return None,
     };

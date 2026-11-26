@@ -197,6 +197,20 @@ fn design_member_kind(elem: &ElementData, model: &Model) -> Option<MemberKind> {
     }
 }
 
+fn is_symmetric_h_column(model: &Model, elem: &ElementData) -> bool {
+    matches!(
+        elem.kind,
+        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+    ) && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
+        && model.element_section(elem).is_some_and(|sec| {
+            sepika_design_jp::steel::is_symmetric_h_section(sec)
+                && sepika_core::structure_kind::structure_kind_of(
+                    Some(sec),
+                    model.element_material(elem).map(|mat| mat.category),
+                ) == StructureKind::S
+        })
+}
+
 /// 時刻歴詳細ウィンドウ（`app.ui.scoped.th_detail_elem` があれば表示）。
 pub(crate) fn show_th_detail_window_at(ui: &egui::Ui, app: &mut App, view: &super::ViewportState) {
     let Some(elem_id) = app.ui.scoped.th_detail_elem else {
@@ -245,6 +259,31 @@ fn draw_th_detail_content_at(
         ui.colored_label(theme::GRAY_600, "時刻歴の詳細記録がありません。");
         return;
     };
+    let case_id = view.spatial_case_id(app);
+    let is_target = |model: &Model| {
+        model
+            .element(elem_id)
+            .is_some_and(|elem| is_symmetric_h_column(model, elem))
+    };
+    let selected_input_matches = || {
+        case_id.is_some_and(|id| {
+            app.require_result_input(crate::app::ResultInputKey::TimeHistory(id))
+                .is_ok()
+        })
+    };
+    if (is_target(&app.core.model)
+        || case_id
+            .and_then(|id| app.recorded_time_history_model(id))
+            .as_ref()
+            .is_some_and(is_target))
+        && !selected_input_matches()
+    {
+        ui.colored_label(
+            theme::WARN_TEXT,
+            "未算定：選択中の時刻歴結果の生成入力と現在のモデルの一致を確認できません。解析を再実行してください。",
+        );
+        return;
+    }
     let Some(recording) = th_result.recording.as_ref() else {
         ui.colored_label(
             theme::GRAY_600,
@@ -346,14 +385,12 @@ fn draw_th_detail_content_at(
         elem,
         elem_idx,
         recording,
+        th_result.time.len(),
         th_nonlinear,
         th_applied_long_term,
         || damage_control_gravity_issue(app, view, &display, th_result),
         || {
-            if !view.spatial_case_id(app).is_some_and(|id| {
-                app.require_result_input(crate::app::ResultInputKey::TimeHistory(id))
-                    .is_ok()
-            }) {
+            if !selected_input_matches() {
                 return Err("時刻歴結果の生成入力を確認できないため、初期載荷を照合できません");
             }
             matching_gravity_member_forces(&display, app, |name| {
@@ -715,6 +752,7 @@ fn draw_peak_check<'a>(
     elem: &ElementData,
     elem_idx: usize,
     rec: &ThRecording,
+    expected_count: usize,
     th_nonlinear: bool,
     th_applied_long_term: bool,
     damage_control_gravity_issue: impl FnOnce() -> Option<&'static str>,
@@ -723,7 +761,13 @@ fn draw_peak_check<'a>(
 ) {
     let model = &app.core.model;
     let signed_bending = uses_signed_bending_peaks(model, elem);
-    ui.strong(if signed_bending {
+    let sec = model.element_section(elem);
+    let structure = sepika_core::structure_kind::structure_kind_of(
+        sec,
+        model.element_material(elem).map(|mat| mat.category),
+    );
+    let symmetric_h_column = is_symmetric_h_column(model, elem);
+    ui.strong(if signed_bending || symmetric_h_column {
         "時刻歴の簡易検定（短期）"
     } else {
         "最大応力に対する検定（短期）"
@@ -741,6 +785,16 @@ fn draw_peak_check<'a>(
 
     if signed_bending {
         draw_asymmetric_column_section_history(ui, rec, elem_idx);
+    }
+    let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
+    if symmetric_h_column {
+        draw_symmetric_column_bending(
+            ui,
+            rec,
+            elem_idx,
+            expected_count,
+            attr.and_then(|a| a.c_direct).is_some(),
+        );
     }
     let Some(peak) = rec
         .peak_member_forces
@@ -796,7 +850,6 @@ fn draw_peak_check<'a>(
             .color(theme::GRAY_600),
         );
     }
-    let structure = sepika_core::structure_kind::structure_kind_of(Some(sec), Some(mat.category));
     if structure == StructureKind::Src {
         ui.label(if kind == MemberKind::Column {
             "SRC柱の短期照査は軸力・一軸曲げと、分担を確認できるせん断を表示します。"
@@ -804,11 +857,8 @@ fn draw_peak_check<'a>(
             "SRC梁の短期照査は強軸曲げと、分担を確認できる強軸せん断を表示します。"
         });
     }
-    let steel_column = structure == StructureKind::S && kind == MemberKind::Column;
-    let symmetric_h_column = steel_column && sepika_design_jp::steel::is_symmetric_h_section(sec);
     let torsion_reason =
         |forces: &MemberForcesAt| concrete_member_torsion_reason(structure, forces);
-    let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
     let length = axis.length;
     let face_sum = elem.rigid_zone.face_i_or_zero() + elem.rigid_zone.face_j_or_zero();
     let clear_span = if length - face_sum > 0.0 {
@@ -984,8 +1034,6 @@ fn draw_peak_check<'a>(
         length,
         node_span_mm: (structure == StructureKind::S)
             .then(|| sepika_design_jp::steel::frame_node_span_mm(model, elem)),
-        column_lateral_buckling_length: symmetric_h_column
-            .then(|| sepika_design_jp::steel::column_lateral_buckling_length(model, elem, attr)),
         lk_y,
         lk_z,
         clear_length: Some(clear_span),
@@ -1035,7 +1083,6 @@ fn draw_peak_check<'a>(
         Axial,
         Moment,
     }
-    let mut lateral_detail_shown = false;
     let mut draw_checks =
         |ui: &mut egui::Ui,
          forces: &MemberForces,
@@ -1139,17 +1186,6 @@ fn draw_peak_check<'a>(
                     } else {
                         draw_outcome_row(ui, pos, outcome);
                     }
-                    match outcome {
-                        CheckOutcome::Checked(result)
-                            if symmetric_h_column
-                                && !lateral_detail_shown
-                                && !result.detail.is_empty() =>
-                        {
-                            ui.label(&result.detail);
-                            lateral_detail_shown = true;
-                        }
-                        _ => {}
-                    }
                 };
                 if structure == StructureKind::Src {
                     for outcome in sepika_design_jp::SrcDesign.check_time_history_outcomes(
@@ -1190,7 +1226,15 @@ fn draw_peak_check<'a>(
                         draw_outcome(&outcome);
                     }
                 } else if structure == StructureKind::S {
-                    let outcomes = if selected.is_none() {
+                    let outcomes = if symmetric_h_column {
+                        sepika_design_jp::SteelDesign.check_time_history_h_column_section(
+                            &mfa,
+                            sec,
+                            mat,
+                            &mut ctx,
+                            selected.is_none(),
+                        )
+                    } else if selected.is_none() {
                         sepika_design_jp::SteelDesign
                             .check_time_history_envelope_outcomes(&mfa, sec, mat, &mut ctx)
                     } else {
@@ -1217,7 +1261,11 @@ fn draw_peak_check<'a>(
                 "引張側・圧縮側の記録がありません。確認するには解析を再実行してください。",
             );
         }
-        ui.label("内力包絡");
+        ui.label(if symmetric_h_column {
+            "内力包絡（強軸曲げを含む行は独立に確定できる不適合のみ）"
+        } else {
+            "内力包絡"
+        });
         draw_checks(ui, peak, None);
     }
     if let Some(peaks) = axial_peaks.filter(|peaks| !peaks.snapshots.is_empty()) {
@@ -1238,6 +1286,99 @@ fn draw_peak_check<'a>(
                 Some((snapshot, PeakComponent::Moment)),
             );
         }
+    }
+}
+
+fn draw_symmetric_column_bending(
+    ui: &mut egui::Ui,
+    rec: &ThRecording,
+    elem_idx: usize,
+    expected_count: usize,
+    has_direct_c: bool,
+) {
+    ui.strong("全確定時刻の強軸曲げ・横座屈照査（短期）");
+    ui.label("軸力・弱軸曲げ・弱軸せん断・ねじりを含む部材全体の適否を示すものではありません。");
+    if has_direct_c {
+        ui.label("通常検定用のC直接入力は、対象の時刻と補剛区間での有効性を確認できないため使用しません。");
+    }
+    let Some(history) = rec.symmetric_column_bending.get(&elem_idx) else {
+        ui.colored_label(
+            theme::WARN_TEXT,
+            "未算定：確定時刻ごとの補剛区間の照査記録がありません。先頭から解析を再実行してください。",
+        );
+        return;
+    };
+    let complete = expected_count > 0
+        && history.committed_count == expected_count
+        && history.evaluated_count == expected_count
+        && history.unavailable.is_empty();
+    ui.label(format!(
+        "分布と照査条件を確認できた確定時刻 {}/{}",
+        history.evaluated_count, expected_count
+    ));
+    if let Some(lb_mm) = history.lb_mm {
+        ui.label(format!(
+            "補剛区間 ξ=0–1　両実材端の拘束・中間横補剛なしを確認　lb={lb_mm} mm"
+        ));
+    }
+    if let Some(peak) = &history.peak {
+        let status = if peak.ratio > 1.0 {
+            " (NG)"
+        } else if complete {
+            " (OK)"
+        } else {
+            "（確認できた時刻のみ。適否は未算定）"
+        };
+        let color = if peak.ratio > 1.0 || complete {
+            theme::status_color(peak.ratio)
+        } else {
+            theme::GRAY_600
+        };
+        ui.colored_label(
+            color,
+            format!(
+                "強軸曲げ検定比 {:.5}{status}　支配時刻 t={:.6} s（ステップ {}）",
+                peak.ratio, peak.time_s, peak.step,
+            ),
+        );
+        let basis = if peak.monotonic {
+            "区間で単調変化（式(5.13)・(5.14)）"
+        } else {
+            "区間内部で絶対値最大（式(5.15)・(5.16)）"
+        };
+        let [mi, mj] = peak.end_moments_nmm.map(moment_kn_m);
+        ui.label(format!(
+            "{basis}　C={:.3}　pλb={:.3}　短期fb={:.5} N/mm²",
+            peak.c, peak.p_lambda_b, peak.fb_mpa,
+        ));
+        ui.label(format!(
+            "i端 {mi:.3}、j端 {mj:.3}、最大需要 Mz={:.3} kN·m（i端から {:.3} mm）",
+            moment_kn_m(peak.max_mz_nmm),
+            peak.max_x_mm,
+        ));
+    } else if complete {
+        ui.label("強軸曲げなし（確認した全時刻・全補剛区間でゼロ）");
+    }
+    if history.committed_count != expected_count || expected_count == 0 {
+        ui.colored_label(
+            theme::WARN_TEXT,
+            "未算定：全確定時刻の照査記録が揃っていません。",
+        );
+    }
+    for reason in &history.unavailable {
+        ui.colored_label(theme::WARN_TEXT, format!("未算定：{reason}"));
+    }
+    if let Some(failure) = &history.material_failure {
+        ui.colored_label(
+            theme::status_color(failure.ratio),
+            format!(
+                "独立NG：強軸曲げが短期材料許容上限を超過（比 {:.5}）　t={:.6} s　Mz={:.3} kN·m（i端から {:.3} mm）",
+                failure.ratio,
+                failure.time_s,
+                moment_kn_m(failure.mz_nmm),
+                failure.x_mm,
+            ),
+        );
     }
 }
 
@@ -1454,133 +1595,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn time_history_detail_reports_eccentric_h_column_buckling_length_and_status() {
-        use sepika_solver::dynamic::timehistory::{AxialForcePeaks, ResponseResult};
-        use steel_column_lateral_buckling_input::{column, moments};
+    fn old_h_column_results_do_not_reconstruct_a_diagram_and_keep_independent_ng() {
+        let mut app = App::default();
+        assert!(app.load_model(steel_column_lateral_buckling_input::column(500.0, true)));
 
-        for (offset_mm, confirmed, count, revised, length_text, outcome_text) in [
-            (
-                0.0,
-                true,
-                Some(0),
-                false,
-                Some("lb=3000 mm"),
-                "検定比 0.973 (OK)",
-            ),
-            (
-                500.0,
-                true,
-                None,
-                false,
-                Some("lb=3500 mm"),
-                "検定比 1.039 (NG)",
-            ),
-            (
-                500.0,
-                false,
-                Some(0),
-                false,
-                Some("lb=3000 mm"),
-                "検定比 0.973 (OK)",
-            ),
-            (
-                500.0,
-                true,
-                Some(1),
-                false,
-                None,
-                "中間横補剛が入力されています",
-            ),
-            (
-                500.0,
-                true,
-                None,
-                true,
-                None,
-                "実材端の条件が確認時から変わりました",
-            ),
-        ] {
-            let mut model = column(offset_mm, confirmed);
-            model.steel_design_attrs[0].lateral_brace_count = count;
-            if revised {
-                model.elements[0].end_offsets_mm[1][2] = 0.0;
-            }
-            let id = model.elements[0].id;
-            let mut app = App::default();
-            assert!(app.load_model(model));
-            let times = vec![0.0, 1.0];
-            let forces = moments(215e6);
-            app.core.scoped.results = Some(crate::app::ResultsBundle {
-                time_history: Some(ResponseResult {
-                    wall_capacities: Vec::new(),
-                    rc_wall_shear_method: Default::default(),
-                    time: times.clone(),
-                    peak_disp: Vec::new(),
-                    story_drift_angle: Vec::new(),
-                    history: Default::default(),
-                    recording: Some(ThRecording {
-                        frame_time: times,
-                        node_disp: vec![vec![[0.0; 6]; 2]; 2],
-                        member_forces: vec![vec![Some(forces.clone())]; 2],
-                        peak_member_forces: vec![Some(forces)],
-                        axial_force_peaks: vec![AxialForcePeaks::default()],
-                        ..Default::default()
-                    }),
-                    nonlinear: false,
-                    applied_long_term: false,
-                    non_converged_steps: 0,
-                }),
-                ..Default::default()
-            });
-            let view = super::super::ViewportState::default();
-            let output = egui::Context::default().run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1200.0, 1200.0),
-                    )),
-                    ..Default::default()
-                },
-                |ui| draw_th_detail_content_at(ui, &mut app, id, 0, &view),
+        for mz in [0.0, 215e6] {
+            let text = peak_check_text(&app, 0, [0.0, 600e3, 0.0, 0.0, 0.0, mz]);
+            assert!(
+                text.contains("確定時刻ごとの補剛区間の照査記録がありません"),
+                "{text}"
             );
-            let labels: Vec<_> = output
-                .shapes
-                .iter()
-                .filter_map(|shape| match &shape.shape {
-                    egui::Shape::Text(text) => Some(text.galley.job.text.as_str()),
-                    _ => None,
-                })
-                .collect();
-            if let Some(length_text) = length_text {
-                assert!(
-                    labels.iter().any(|text| text.contains(length_text)
-                        && text.contains(if confirmed {
-                            "両実材端で横移動・ねじれを拘束"
-                        } else {
-                            "節点間距離の既定値"
-                        })),
-                    "{labels:?}"
-                );
-                for pos in ["ξ=0.00:", "ξ=0.50:", "ξ=1.00:"] {
-                    assert!(
-                        labels.windows(2).any(|row| row == [pos, outcome_text]),
-                        "{labels:?}"
-                    );
-                }
-            } else {
-                assert!(
-                    labels.iter().any(|text| text.contains(outcome_text)),
-                    "{labels:?}"
-                );
-                assert!(
-                    !labels.iter().any(|text| text.starts_with("検定比 ")),
-                    "{labels:?}"
-                );
-                assert!(
-                    !labels.iter().any(|text| text.contains("採用横座屈長さ")),
-                    "{labels:?}"
-                );
-            }
+            assert!(text.contains("(NG)"), "{text}");
+            assert!(!text.contains("(OK)"), "{text}");
+            assert!(!text.contains("強軸曲げなし"), "{text}");
+            assert!(
+                !text.contains("lb=3000") && !text.contains("lb=3500"),
+                "{text}"
+            );
         }
     }
 
@@ -1638,6 +1669,7 @@ mod tests {
                     elem,
                     index,
                     rec,
+                    rec.frame_time.len(),
                     with_gravity,
                     with_gravity,
                     || (!with_gravity).then_some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),
@@ -1656,31 +1688,42 @@ mod tests {
     }
 
     #[test]
-    fn h_column_checks_tension_and_strong_bending_at_the_same_axial_peak_step() {
+    fn h_column_keeps_tension_side_ng_only_from_concurrent_axial_peak_step() {
         let mut app = App::default();
         assert!(app.load_model(combined_column::cantilever(77_000.0, 215e6, 0.0)));
-        let recording = ThRecording {
-            peak_member_forces: vec![Some(MemberForces {
-                at: vec![(0.5, [77_000.0, 0.0, 0.0, 0.0, 0.0, 250e6])],
-            })],
-            axial_force_peaks: vec![AxialForcePeaks {
-                snapshots: vec![ForcePeakSnapshot {
-                    time: 1.0,
-                    forces: MemberForces {
-                        at: vec![(0.5, [77_000.0, 0.0, 0.0, 0.0, 0.0, 215e6])],
-                    },
-                    positions: vec![0],
+        for (concurrent_mz, tension_side_ng) in [(215e6, None), (265e6, Some("検定比 1.022 (NG)"))]
+        {
+            let recording = ThRecording {
+                peak_member_forces: vec![Some(MemberForces {
+                    at: vec![(0.5, [77_000.0, 0.0, 0.0, 0.0, 0.0, 268e6])],
+                })],
+                axial_force_peaks: vec![AxialForcePeaks {
+                    snapshots: vec![ForcePeakSnapshot {
+                        time: 1.0,
+                        forces: MemberForces {
+                            at: vec![(0.5, [77_000.0, 0.0, 0.0, 0.0, 0.0, concurrent_mz])],
+                        },
+                        positions: vec![0],
+                    }],
                 }],
-            }],
-            ..Default::default()
-        };
-        let text = peak_recording_text(&app, &app.core.model.elements[0], 0, &recording, false);
-        assert!(
-            text.lines()
-                .zip(text.lines().skip(1))
-                .any(|row| row == ("引張側 t=1.000000 s  ξ=0.50:", "検定比 0.924 (OK)")),
-            "{text}"
-        );
+                ..Default::default()
+            };
+            let text = peak_recording_text(&app, &app.core.model.elements[0], 0, &recording, false);
+            assert!(
+                text.contains("軸力・弱軸曲げ・弱軸せん断との横座屈を考慮する組合せは未算定"),
+                "{text}"
+            );
+            assert!(!text.contains("(OK)"), "{text}");
+            if let Some(ng) = tension_side_ng {
+                assert!(
+                    text.contains(&format!("引張側 t=1.000000 s  ξ=0.50:\n{ng}")),
+                    "{text}"
+                );
+                assert_eq!(text.matches("(NG)").count(), 1, "{text}");
+            } else {
+                assert!(!text.contains("(NG)"), "{text}");
+            }
+        }
     }
 
     fn rc_column_peak_check_app(
@@ -3009,6 +3052,7 @@ mod tests {
                     elem,
                     0,
                     &rec,
+                    rec.frame_time.len(),
                     false,
                     false,
                     || Some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),
