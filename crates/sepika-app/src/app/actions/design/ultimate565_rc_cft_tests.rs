@@ -7,6 +7,9 @@ use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape
 use sepika_design_jp::ultimate::UltimateDemandMode;
 use sepika_solver::nonlinear::pushover::story_response::EvaluationPurpose;
 
+#[path = "ultimate_physical_beam_tests.rs"]
+mod physical_beam;
+
 fn column(cft: bool) -> App {
     let mut model = crate::sample::portal_frame();
     model
@@ -1225,7 +1228,7 @@ fn actual_rc_beam_with_verified_zero_axial_force_displays_arakawa_mean_capacity(
         .iter()
         .find(|member| member.elem == ElemId(1))
         .unwrap();
-    let actions = member.rc_ultimate_shear.unwrap();
+    let actions = member.rc_beam_ultimate_shear.unwrap().unwrap();
     assert_eq!(actions.axial_range_n, [0.0; 2]);
     po.capacity_evaluation = Some(
         po.evaluation_point(
@@ -1239,7 +1242,7 @@ fn actual_rc_beam_with_verified_zero_axial_force_displays_arakawa_mean_capacity(
 
     let demands = app.ultimate_demand_by_elem().unwrap();
     let demand = &demands.iter().find(|(id, _)| *id == ElemId(1)).unwrap().1;
-    assert_eq!(demand.rc_ultimate_shear, Some(actions));
+    assert_eq!(demand.rc_beam_ultimate_shear, Some(Ok(actions)));
     let checks = app.compute_ultimate_checks().unwrap();
     let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
     // Fc24・400×600、主筋4-D22相当、補強筋2-D10相当@100、N=0、M/(Qd)の上限3。
@@ -1267,7 +1270,7 @@ fn actual_rc_beam_with_verified_zero_axial_force_displays_arakawa_mean_capacity(
                 .unwrap();
             for response in po.confirmed_history.as_mut().unwrap() {
                 for member in &mut response.members {
-                    member.rc_ultimate_shear = None;
+                    member.rc_beam_ultimate_shear = None;
                 }
             }
         }
@@ -1572,7 +1575,8 @@ fn actual_rc_beam_shear_uses_a_valid_physical_span_even_if_legacy_span_is_negati
         .iter()
         .find(|member| member.elem == ElemId(1))
         .unwrap()
-        .rc_ultimate_shear
+        .rc_beam_ultimate_shear
+        .unwrap()
         .unwrap();
     assert_eq!(actions.axial_range_n, [0.0; 2]);
     assert_eq!(actions.max_mq[1], (0.0, 0.0));
@@ -1623,20 +1627,28 @@ fn actual_rc_beam_shear_uses_a_valid_physical_span_even_if_legacy_span_is_negati
         .iter_mut()
         .find(|member| member.elem == ElemId(1))
         .unwrap()
-        .rc_ultimate_shear = None;
+        .rc_beam_ultimate_shear = None;
     let checks = app.compute_ultimate_checks().unwrap();
     let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
     assert!(beam.qsu.is_nan() && beam.shear_margin.is_nan(), "{beam:?}");
 }
 
 #[test]
-fn actual_rc_beam_with_member_load_displays_unavailable_capacity_and_reference_mu() {
-    use sepika_core::model::{MemberLoad, MemberLoadKind};
+fn actual_rc_cantilever_with_member_load_displays_capacity_and_reference_mu() {
+    use sepika_core::dof::Dof;
+    use sepika_core::model::{ForceRegime, MemberLoad, MemberLoadKind};
 
-    let mut model = beam_model(&[4], &[2]);
-    model.nodes[3]
-        .restraint
-        .set_fixed(sepika_core::dof::Dof::Uy);
+    let mut model = beam_model(&[4], &[4]);
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[1].shape else {
+        unreachable!()
+    };
+    rebar.main_dia = sepika_core::section_shape::RebarSize::Standard(
+        sepika_core::section_shape::StandardRebar::D22,
+    );
+    for dof in [Dof::Uy, Dof::Rx, Dof::Rz] {
+        model.nodes[3].restraint.set_fixed(dof);
+    }
+    model.elements[1].force_regime = ForceRegime::AxialBendingInteract;
     model.load_cases[0].nodal.push(NodalLoad::manual(
         NodeId(3),
         [0.0, 0.0, -10_000.0, 0.0, 0.0, 0.0],
@@ -1678,9 +1690,9 @@ fn actual_rc_beam_with_member_load_displays_unavailable_capacity_and_reference_m
         .iter()
         .find(|member| member.elem == ElemId(1))
         .unwrap();
-    let shear = member.shear_strong.abs();
-    assert!(shear > 0.0);
-    assert_eq!(member.rc_ultimate_shear, None);
+    let actions = member.rc_beam_ultimate_shear.unwrap().unwrap();
+    close(actions.max_mq[0].0, 69e6);
+    close(actions.max_mq[0].1, 13e3);
     po.capacity_evaluation = Some(
         po.evaluation_point(
             EvaluationPurpose::HoldingCapacity,
@@ -1692,15 +1704,9 @@ fn actual_rc_beam_with_member_load_displays_unavailable_capacity_and_reference_m
     );
     let checks = app.compute_ultimate_checks().unwrap();
     let beam = checks.iter().find(|check| check.elem == ElemId(1)).unwrap();
-    close(beam.qmu, shear);
-    assert!(beam.qsu.is_nan() && beam.shear_margin.is_nan(), "{beam:?}");
-    assert!(
-        beam.unchecked_reason
-            .as_deref()
-            .unwrap()
-            .contains("部材荷重"),
-        "{beam:?}"
-    );
+    close(beam.qmu, 13e3);
+    close(beam.qsu, 332_617.813_860_871_25);
+    close(beam.shear_margin, 25.585_985_681_605_48);
     assert!(
         beam.detail.contains("参考曲げ略算 Mu")
             && beam

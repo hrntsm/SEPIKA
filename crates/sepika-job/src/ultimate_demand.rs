@@ -96,6 +96,7 @@ pub fn member_demand_from_pushover(
                     r.rp,
                 );
                 d.rc_ultimate_shear = r.rc_ultimate_shear;
+                d.rc_beam_ultimate_shear = r.rc_beam_ultimate_shear;
                 d.q_long = q_long_by_elem.and_then(|m| m.get(&r.elem).copied());
                 (r.elem, d)
             })
@@ -437,6 +438,7 @@ mod tests {
             horizontal_force: 0.0,
             wall_shear_signed: None,
             rc_ultimate_shear: None,
+            rc_beam_ultimate_shear: None,
         }];
         let mut ql = HashMap::new();
         ql.insert(ElemId(3), 8_000.0);
@@ -474,6 +476,7 @@ mod wall_availability_tests {
             horizontal_force: 0.0,
             wall_shear_signed: None,
             rc_ultimate_shear: None,
+            rc_beam_ultimate_shear: None,
         };
         let demand = member_demand_from_pushover(&[response], None).unwrap();
         assert_eq!(demand.len(), 1);

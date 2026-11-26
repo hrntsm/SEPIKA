@@ -22,6 +22,7 @@ mod loads;
 mod mechanism;
 pub(crate) mod member_response;
 pub(crate) mod physical_response;
+mod rc_beam_shear;
 mod response;
 mod shear_yield;
 mod step_record;

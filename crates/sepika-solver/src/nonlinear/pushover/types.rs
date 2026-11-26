@@ -265,9 +265,12 @@ pub struct PushoverMemberResponse {
     pub horizontal_force: f64,
     /// 壁下辺a→bを正とする壁の面内せん断力 `[N]`。壁以外はNone。
     pub wall_shear_signed: Option<f64>,
-    /// 荷重のない内法区間で確認したRC終局せん断検定用内力。区間を確認できなければ `None`。
+    /// 荷重のない内法区間で確認したRC終局せん断検定用内力。梁全体の内力を保証しない。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rc_ultimate_shear: Option<sepika_core::rc_capacity::RcUltimateShearActions>,
+    /// 同一確定ステップの梁全体の終局せん断用内力または確認できない理由。対象外・未記録は `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rc_beam_ultimate_shear: Option<sepika_core::rc_capacity::RcBeamUltimateShearResponse>,
 }
 
 /// ヒンジ詳細図用の部材応答履歴（1 部材分）。結果サイズを抑えるため、ヒンジまたは
@@ -345,7 +348,7 @@ pub struct PushoverResult {
     pub mechanism: MechanismType,
     /// 性能曲線上の最大ベースシア `[N]`。保有耐力比較の採用点とは独立。
     pub qu: f64,
-    /// 最終確定ステップ時の部材別応答。ステップが 1 つも確定しなかった場合は空。
+    /// 最終確定ステップの部材別応答。同じ確定履歴がある場合はその記録と同一。
     pub member_response: Vec<PushoverMemberResponse>,
     /// この結果を生成した制御方式（[`PushoverControl`]）。
     #[serde(default)]
