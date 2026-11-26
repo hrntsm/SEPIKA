@@ -822,6 +822,42 @@ mod tests {
     }
 
     #[test]
+    fn axial_components_at_a_shared_node_include_the_adjacent_parts_axis() {
+        use sepika_core::model::{MemberLoad, MemberLoadKind, NodalLoad};
+        use sepika_core::rc_capacity::RcBeamUltimateShearIssue as Issue;
+
+        let model = split_rc_beam_for_axial_cuts([
+            [0.0; 3],
+            [1_024.0, 0.0, 0.0],
+            [2_048.0, 0.0, 2.0_f64.powi(-38)],
+        ]);
+        let mut case = super::super::loads::PhysicalPushoverLoads::empty().reference;
+        case.nodal = [1e32, 1.0, -1e32]
+            .map(|p| NodalLoad::manual(NodeId(1), [0.0, 0.0, p, 0.0, 0.0, 0.0]))
+            .into();
+        assert_eq!(
+            check_axial_cut_with_zero_recovery(&model, &case),
+            Err(Issue::Equilibrium)
+        );
+
+        // 第1区間では直交荷重でも、節点を共有する第2区間の軸には成分がある。
+        case.nodal.clear();
+        case.member = [1e32, 1.0, -1e32]
+            .map(|p| {
+                MemberLoad::manual(
+                    ElemId(0),
+                    [0.0, 0.0, 1.0],
+                    MemberLoadKind::Point { a: 1_024.0, p },
+                )
+            })
+            .into();
+        assert_eq!(
+            check_axial_cut_with_zero_recovery(&model, &case),
+            Err(Issue::Equilibrium)
+        );
+    }
+
+    #[test]
     fn history_conversion_preserves_finite_rounding_at_both_f32_limits() {
         let max = f64::from(f32::MAX);
         let overflow = max + 2.0_f64.powi(103);

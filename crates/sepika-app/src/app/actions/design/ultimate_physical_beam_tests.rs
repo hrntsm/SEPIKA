@@ -306,6 +306,11 @@ fn axial_loads_lost_by_nodal_addition_do_not_certify_a_zero_axial_range() {
 #[test]
 fn a_column_at_the_restrained_outer_end_does_not_hide_the_free_end_axial_cut() {
     let mut input = axial_cancellation_model(NodeId(3));
+    attach_column_at_beam_i(&mut input);
+    assert_axial_cancellation_unchecked(input);
+}
+
+fn attach_column_at_beam_i(input: &mut Model) {
     let mut base = input.nodes[0].clone();
     base.id = NodeId(input.nodes.len() as u32);
     base.coord = [0.0, 6_000.0, 0.0];
@@ -314,7 +319,6 @@ fn a_column_at_the_restrained_outer_end_does_not_hide_the_free_end_axial_cut() {
     column.nodes = [base.id, NodeId(2)].into_iter().collect();
     input.nodes.push(base);
     input.elements.push(column);
-    assert_axial_cancellation_unchecked(input);
 }
 
 #[test]
@@ -347,6 +351,97 @@ fn a_load_on_a_restrained_dof_does_not_enter_the_free_end_axial_cut() {
     let beams: Vec<_> = rows.iter().filter(|row| row.elem != ElemId(0)).collect();
     assert_eq!(beams.len(), 2);
     assert!(beams.iter().all(|row| row.ok && row.qsu.is_finite()));
+}
+
+fn run_axial_member_inputs(
+    mut input: Model,
+    elem: ElemId,
+    dir: [f64; 3],
+    a: f64,
+    forces_n: &[f64],
+) -> PushoverResult {
+    input.nodes[1].restraint.set_fixed(Dof::Ux);
+    input.nodes[3].restraint.set_fixed(Dof::Ux);
+    input.load_cases[0].member = forces_n
+        .iter()
+        .map(|&p| MemberLoad::manual(elem, dir, MemberLoadKind::Point { a, p }))
+        .collect();
+    let settings = sepika_job::AnalysisSettings {
+        push_steps: 3,
+        push_dir: SeismicDir::Y,
+        ..Default::default()
+    };
+    sepika_job::prepare_model_for_analysis(&mut input, &settings, None).unwrap();
+    sepika_job::compute::compute_pushover(input, settings).unwrap()
+}
+
+fn assert_member_axial_input_unchecked(run: &PushoverResult, group: &[ElemId]) {
+    assert_same_final_proof(run);
+    for (step, state) in run.confirmed_history.as_ref().unwrap()[..2]
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(state.step, step as u32);
+        for &id in group {
+            let row = state.members.iter().find(|row| row.elem == id).unwrap();
+            assert_eq!(row.rc_beam_ultimate_shear, Some(Err(Issue::Equilibrium)));
+        }
+    }
+}
+
+#[test]
+fn axial_load_at_or_outside_a_column_face_can_act_in_the_clear_span() {
+    use sepika_core::adjacency::NodeAdjacency;
+    use sepika_core::face_distance::girder_column_faces;
+    use sepika_core::model::ZoneSource;
+
+    let mut input = model(&[1_000.0, 2_750.0], true, true);
+    attach_column_at_beam_i(&mut input);
+    let first = &mut input.elements[1];
+    first.rigid_zone.length_i = 0.0;
+    first.rigid_zone.source_i = ZoneSource::Manual;
+    let [i_face, _] = girder_column_faces(
+        &input,
+        &input.elements[1],
+        &NodeAdjacency::primary_frame(&input),
+    )
+    .unwrap();
+    assert_eq!(i_face.unwrap().position_mm, 300.0);
+    let group = &input.girder_groups[0];
+    let run =
+        |a, forces| run_axial_member_inputs(input.clone(), ElemId(1), [1.0, 0.0, 0.0], a, forces);
+    for a in [290.0, 300.0, 310.0] {
+        assert_member_axial_input_unchecked(&run(a, &[1e32, 1.0, -1e32]), group);
+    }
+    // 1 Nだけなら、両端拘束された4 m梁の内法側軸力の大きさは1 N × 300 mm / 4000 mm。
+    let control = run(300.0, &[1.0]);
+    let proof = control.confirmed_history.unwrap()[1].members[1]
+        .rc_beam_ultimate_shear
+        .unwrap()
+        .unwrap();
+    close(
+        proof.axial_range_n[0]
+            .abs()
+            .max(proof.axial_range_n[1].abs()),
+        0.075,
+    );
+}
+
+#[test]
+fn second_part_member_load_uses_that_parts_own_axis_for_zero_axial_evidence() {
+    let mut input = model(&[1_024.0], true, true);
+    input.nodes[3].coord[0] = 2_048.0;
+    input.nodes[3].coord[2] += 2.0_f64.powi(-38);
+    let group = &input.girder_groups[0];
+    let run =
+        |forces| run_axial_member_inputs(input.clone(), ElemId(2), [0.0, 0.0, 1.0], 512.0, forces);
+    assert_member_axial_input_unchecked(&run(&[1e32, 1.0, -1e32]), group);
+    let control = run(&[1.0]);
+    let proof = control.confirmed_history.unwrap()[1].members[1]
+        .rc_beam_ultimate_shear
+        .unwrap()
+        .unwrap();
+    assert!(proof.axial_range_n.into_iter().any(|n| n != 0.0));
 }
 
 fn assert_unchecked(app: &mut App, reason: &str) {

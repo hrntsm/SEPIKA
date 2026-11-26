@@ -20,6 +20,15 @@ struct BeamPart<'a> {
     elem: &'a ElementData,
     ends: [[f64; 3]; 2],
     length_mm: f64,
+    axial_components: [bool; 3],
+}
+
+impl BeamPart<'_> {
+    fn coincident_node<'a>(&self, model: &'a Model, side: usize) -> Option<&'a Node> {
+        model
+            .node(self.elem.nodes[side])
+            .filter(|node| node.coord == self.ends[side] && !has_end_eccentricity(self.elem, side))
+    }
 }
 
 pub(super) struct BeamShearStep {
@@ -29,7 +38,7 @@ pub(super) struct BeamShearStep {
 }
 
 struct MemberForceLocation {
-    interval_mm: [f64; 2],
+    point_mm: Option<f64>,
     components: [bool; 3],
 }
 
@@ -41,16 +50,16 @@ impl BeamShearStep {
         }
         let mut member = HashMap::<_, Vec<_>>::new();
         for load in &case.member {
-            let interval_mm = match load.kind {
-                MemberLoadKind::Point { p, a } if p != 0.0 => [a, a],
-                MemberLoadKind::Distributed { w1, w2, a, b } if w1 != 0.0 || w2 != 0.0 => [a, b],
+            let point_mm = match load.kind {
+                MemberLoadKind::Point { p, a } if p != 0.0 => Some(a),
+                MemberLoadKind::Distributed { w1, w2, .. } if w1 != 0.0 || w2 != 0.0 => None,
                 _ => continue,
             };
             member
                 .entry(load.elem)
                 .or_default()
                 .push(MemberForceLocation {
-                    interval_mm,
+                    point_mm,
                     components: load.dir.map(|c| c != 0.0),
                 });
         }
@@ -61,113 +70,44 @@ impl BeamShearStep {
         }
     }
 
-    fn member_load_intervals(
-        &self,
-        elem: ElemId,
-        axis: [f64; 3],
-    ) -> impl Iterator<Item = [f64; 2]> + '_ {
-        self.member
-            .get(&elem)
-            .into_iter()
-            .flatten()
-            .filter(move |load| has_axis_component(Some(&load.components), axis))
-            .map(|load| load.interval_mm)
+    fn member_loads(&self, elem: ElemId) -> &[MemberForceLocation] {
+        self.member.get(&elem).map_or(&[], Vec::as_slice)
     }
 
-    fn verify_zero_axial_cuts(
-        &self,
-        model: &Model,
-        geometry: &RcShearFaceGeometry,
-        parts: &[BeamPart<'_>],
-        axis: [f64; 3],
-        [lo_mm, hi_mm]: [f64; 2],
-    ) -> Result<(), Issue> {
-        let first = parts.first().ok_or(Issue::GroupTopology)?;
-        let last = parts.last().ok_or(Issue::GroupTopology)?;
-        let [i, j] = [first.ends[0], last.ends[1]];
-        let length_mm = dist(i, j);
-        for part in parts {
-            let start_mm = dist(i, part.ends[0]);
-            let lo = (lo_mm - start_mm).max(0.0);
-            let hi = (hi_mm - start_mm).min(part.length_mm);
-            if self
-                .member_load_intervals(part.elem.id, axis)
-                .any(|[a, b]| {
-                    if a == b {
-                        lo < a && a < hi
-                    } else {
-                        lo.max(a) < hi.min(b)
+    fn verify_zero_axial_loads(&self, model: &Model, parts: &[BeamPart<'_>]) -> Result<(), Issue> {
+        let mut at_node = vec![[false; 3]; parts.len() + 1];
+        for (index, part) in parts.iter().enumerate() {
+            for load in self.member_loads(part.elem.id) {
+                let side = [0.0, part.length_mm]
+                    .into_iter()
+                    .position(|end| load.point_mm == Some(end))
+                    .filter(|&side| part.coincident_node(model, side).is_some());
+                if let Some(side) = side {
+                    for (marked, component) in at_node[index + side].iter_mut().zip(load.components)
+                    {
+                        *marked |= component;
                     }
-                })
-            {
-                return Err(Issue::Equilibrium);
-            }
-        }
-        let no_reaction = |part: &BeamPart<'_>, side, neighbor| {
-            let node_id = part.elem.nodes[side];
-            model.node(node_id).is_some_and(|node| {
-                node.coord == part.ends[side]
-                    && !has_end_eccentricity(part.elem, side)
-                    && axial_direction_free(node, axis)
-                    && !geometry.other_connections.contains(&node_id)
-                    && !geometry.diaphragm_nodes.contains(&node_id)
-                    && geometry
-                        .frame
-                        .elements_at(model, node_id)
-                        .all(|elem| elem.id == part.elem.id || Some(elem.id) == neighbor)
-            })
-        };
-        for pair in parts.windows(2) {
-            let [left, right] = [&pair[0], &pair[1]];
-            let x_mm = dist(i, right.ends[0]);
-            if lo_mm < x_mm
-                && x_mm < hi_mm
-                && !has_end_eccentricity(left.elem, 1)
-                && no_reaction(right, 0, Some(left.elem.id))
-                && (has_axis_component(self.nodal.get(&right.elem.nodes[0]), axis)
-                    || [(left.elem.id, left.length_mm), (right.elem.id, 0.0)]
-                        .into_iter()
-                        .any(|(elem, x_mm)| {
-                            self.member_load_intervals(elem, axis)
-                                .any(|interval| interval == [x_mm; 2])
-                        }))
-            {
-                return Err(Issue::Equilibrium);
-            }
-        }
-        // 反対側の支持を根拠に自由側を除外せず、反力の入りうる節点の手前まで確認する。
-        for (side, origin, [lo_mm, hi_mm]) in [
-            (0, i, [lo_mm, hi_mm]),
-            (1, j, [length_mm - hi_mm, length_mm - lo_mm]),
-        ] {
-            let part_at = |index| {
-                &parts[if side == 0 {
-                    index
-                } else {
-                    parts.len() - 1 - index
-                }]
-            };
-            let mut has_axial_load = false;
-            for index in 0..parts.len() {
-                let part = part_at(index);
-                let start_mm = dist(origin, part.ends[side]);
-                let end_mm = dist(origin, part.ends[1 - side]);
-                let neighbor = (index > 0).then(|| part_at(index - 1).elem.id);
-                if start_mm >= hi_mm || !no_reaction(part, side, neighbor) {
-                    break;
-                }
-                has_axial_load |= has_axis_component(self.nodal.get(&part.elem.nodes[side]), axis);
-                let first_load_mm = self
-                    .member_load_intervals(part.elem.id, axis)
-                    .map(|[a, b]| if side == 0 { a } else { part.length_mm - b })
-                    .reduce(f64::min);
-                if lo_mm < end_mm
-                    && (has_axial_load
-                        || first_load_mm.is_some_and(|x| x < part.length_mm.min(hi_mm - start_mm)))
+                } else if has_unrestrained_axial_load(load.components, part.axial_components, None)
                 {
                     return Err(Issue::Equilibrium);
                 }
-                has_axial_load |= first_load_mm.is_some();
+            }
+        }
+        for (index, part) in parts.iter().enumerate() {
+            for side in 0..2 {
+                let nodal = self
+                    .nodal
+                    .get(&part.elem.nodes[side])
+                    .copied()
+                    .unwrap_or_default();
+                let components = std::array::from_fn(|i| nodal[i] || at_node[index + side][i]);
+                if has_unrestrained_axial_load(
+                    components,
+                    part.axial_components,
+                    part.coincident_node(model, side),
+                ) {
+                    return Err(Issue::Equilibrium);
+                }
             }
         }
         Ok(())
@@ -211,9 +151,10 @@ impl BeamShearStep {
         let [ex, ey, ez] = axes;
         let no_member_component = |axis| {
             parts.iter().all(|part| {
-                self.member_load_intervals(part.elem.id, axis)
-                    .next()
-                    .is_none()
+                !self
+                    .member_loads(part.elem.id)
+                    .iter()
+                    .any(|load| has_axis_component(Some(&load.components), axis))
             })
         };
         let no_axial_load_on_free_side = no_member_component(ex)
@@ -265,6 +206,16 @@ impl BeamShearStep {
 
 const TRANSLATION: [Dof; 3] = [Dof::Ux, Dof::Uy, Dof::Uz];
 const ROTATION: [Dof; 3] = [Dof::Rx, Dof::Ry, Dof::Rz];
+
+fn has_unrestrained_axial_load(marked: [bool; 3], axial: [bool; 3], node: Option<&Node>) -> bool {
+    marked
+        .into_iter()
+        .zip(axial)
+        .zip(TRANSLATION)
+        .any(|((applied, along_axis), dof)| {
+            applied && along_axis && node.is_none_or(|node| !node.restraint.is_fixed(dof))
+        })
+}
 
 fn axial_direction_free(node: &Node, axis: [f64; 3]) -> bool {
     TRANSLATION.into_iter().zip(axis).all(|(dof, component)| {
@@ -371,7 +322,8 @@ pub(super) fn beam_actions(
             .map_err(|_| Issue::LocalAxis)?;
         let reference = first_axes.get_or_insert(axes);
         let response = response_of(id).ok_or(Issue::MissingResponse)?;
-        for axes in [axes, response.section.frame().rot] {
+        let response_axes = response.section.frame().rot;
+        for axes in [axes, response_axes] {
             if reference
                 .iter()
                 .zip(axes)
@@ -417,6 +369,9 @@ pub(super) fn beam_actions(
             elem,
             ends,
             length_mm: dist(ends[0], ends[1]),
+            axial_components: std::array::from_fn(|i| {
+                axes[0][i] != 0.0 || response_axes[0][i] != 0.0
+            }),
         });
     }
 
@@ -445,6 +400,7 @@ pub(super) fn beam_actions(
         elem,
         ends: [i, j],
         length_mm: member_mm,
+        ..
     } in &parts
     {
         let start_mm = dist(origin, i);
@@ -483,7 +439,7 @@ pub(super) fn beam_actions(
     if let Some(applied) = applied {
         let axes = first_axes.ok_or(Issue::GroupTopology)?;
         if combined.axial_range_n == [0.0; 2] {
-            applied.verify_zero_axial_cuts(model, geometry, &parts, axes[0], [lo, hi])?;
+            applied.verify_zero_axial_loads(model, &parts)?;
         }
         if exact_axes {
             applied.confirm_zero_components(
