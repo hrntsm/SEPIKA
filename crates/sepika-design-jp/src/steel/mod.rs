@@ -560,6 +560,7 @@ pub enum SteelBeamMomentDiagram {
 }
 
 pub(crate) use beam::beam_lateral_buckling_length;
+pub use column::ColumnStrongBendingCheck;
 
 impl DesignCheck for SteelDesign {
     fn check(
@@ -592,6 +593,107 @@ impl SteelDesign {
     ) -> impl Iterator<Item = CheckOutcome> {
         let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx);
         crate::member_design_check::strength_outcomes(outcome, incomplete.as_deref())
+    }
+
+    /// 確認済み単一区間の同一時刻の最大強軸曲げを短期照査する。
+    /// 補剛長は mm、最大曲げ位置の断面力は同じ区間分布の応答を指定する。適用外は理由付きエラー。
+    pub fn time_history_column_strong_bending(
+        &self,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        lb_mm: f64,
+        span: &sepika_element::frame::member_load::FrameStrongBendingSpan,
+        peak: &MemberForcesAt,
+    ) -> Result<ColumnStrongBendingCheck, String> {
+        column::time_history_column_strong_bending(sec, mat, ctx, lb_mm, span, peak)
+    }
+
+    /// 上下対称H形鋼柱の強軸曲げ [N·mm] が材料の許容上限を超える場合だけ、独立した不適合の比を返す。
+    pub fn time_history_column_bending_material_failure(
+        &self,
+        mz_nmm: f64,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+    ) -> Option<f64> {
+        column::strong_bending_material_excess(mz_nmm, sec, mat, ctx).map(|(_, _, ratio)| ratio)
+    }
+
+    /// 対称H形鋼柱の強軸横座屈は別途区間で照査する。
+    /// 強軸曲げを含む行では既知の不適合のみを返し、包絡は成分を組み合わせない。
+    pub fn check_time_history_h_column_section(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &mut DesignCtx,
+        envelope: bool,
+    ) -> Vec<CheckOutcome> {
+        if forces.mz == 0.0 {
+            return self.check_outcomes(forces, sec, mat, ctx).collect();
+        }
+        let mut outcomes = Vec::new();
+        let mut known_checks = |sample: MemberForcesAt, ctx: &DesignCtx| {
+            outcomes.extend(
+                self.check_outcomes(&sample, sec, mat, ctx)
+                    .filter_map(|outcome| {
+                        let CheckOutcome::Checked(mut result) = outcome else {
+                            return None;
+                        };
+                        result.components.retain(|c| c.ratio > 1.0);
+                        (!result.components.is_empty()).then_some(CheckOutcome::Checked(result))
+                    }),
+            );
+        };
+
+        let strong_issue = if envelope {
+            None
+        } else {
+            column::confirmed_time_history_strong_modulus(sec).err()
+        };
+        if envelope || strong_issue.is_some() {
+            for (component, value) in [forces.n, forces.qy, forces.qz, 0.0, forces.my]
+                .into_iter()
+                .enumerate()
+                .filter(|(_, value)| *value != 0.0)
+            {
+                let mut isolated = [0.0; 6];
+                isolated[component] = value;
+                known_checks(MemberForcesAt::from_local(forces.pos, isolated), ctx);
+            }
+            if let Some(failure) = column::strong_bending_material_failure(forces, sec, mat, ctx) {
+                outcomes.push(failure);
+            }
+        } else {
+            let previous_length = ctx.column_lateral_buckling_length.replace(Err(
+                "横座屈を考慮する組合せはこの評価位置だけから確定できません",
+            ));
+            known_checks(forces.clone(), ctx);
+            ctx.column_lateral_buckling_length = previous_length;
+        }
+
+        if let Some(reason) = strong_issue {
+            outcomes.push(CheckOutcome::Skipped {
+                reason: reason.into(),
+            });
+        }
+        if let Some(reason) = steel_torsion_reason(forces, sec) {
+            outcomes.push(CheckOutcome::Skipped {
+                reason: reason.into(),
+            });
+        }
+        if forces.n != 0.0 || forces.my != 0.0 || forces.qz != 0.0 {
+            let reason = if envelope {
+                "時刻歴の成分別包絡から、横座屈を考慮する組合せの適否は確定できません"
+            } else {
+                "軸力・弱軸曲げ・弱軸せん断との横座屈を考慮する組合せは未算定です"
+            };
+            outcomes.push(CheckOutcome::Skipped {
+                reason: reason.into(),
+            });
+        }
+        outcomes
     }
 
     /// 成分別の時刻歴包絡では、単一補剛区間の強軸曲げと組合せは未算定とする。

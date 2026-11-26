@@ -11,7 +11,7 @@ use super::config::{GroundMotion, NewmarkCfg};
 use super::history::{
     choose_record_dir_y, pick_record_node, record_history_step, total_mass, update_story_drift,
 };
-use super::recording::{member_forces_nonlinear, ThRecorder};
+use super::recording::{member_forces_nonlinear, NonlinearMemberResponse, ThRecorder};
 use super::result::{ResponseHistory, ResponseResult};
 use super::CommittedMemberForcesObserver;
 use crate::common::assemble::assemble_global_m;
@@ -316,9 +316,23 @@ pub fn nonlinear_time_history_with_force_observer(
     {
         let (xg_x_init, xg_y_init) = accel_xy_at(wave, 0);
         let mf_init = member_forces_nonlinear(model, &behaviors)?;
+        recorder.observe(0, 0.0, &mf_init.forces, &|index, length_mm| {
+            mf_init.strong_bending(index, length_mm)
+        });
         recorder.record_step(
-            0, 0.0, model, dofmap, m_r_x, m_r_y, &ma_free, &u_free, &v_free, &a_free, xg_x_init,
-            xg_y_init, &mf_init,
+            0,
+            0.0,
+            model,
+            dofmap,
+            m_r_x,
+            m_r_y,
+            &ma_free,
+            &u_free,
+            &v_free,
+            &a_free,
+            xg_x_init,
+            xg_y_init,
+            &mf_init.forces,
         );
     }
 
@@ -567,6 +581,12 @@ pub fn nonlinear_time_history_with_force_observer(
             );
 
             let (xg_x_next, xg_y_next) = accel_xy_at(wave, n + 1);
+            recorder.observe(
+                (n + 1) as u64,
+                t_next,
+                &mf_now.forces,
+                &|index, length_mm| mf_now.strong_bending(index, length_mm),
+            );
             recorder.record_step(
                 (n + 1) as u64,
                 t_next,
@@ -580,7 +600,7 @@ pub fn nonlinear_time_history_with_force_observer(
                 &a_free,
                 xg_x_next,
                 xg_y_next,
-                &mf_now,
+                &mf_now.forces,
             );
         }
     }
@@ -607,7 +627,7 @@ pub(super) fn checked_step_member_forces(
     snapshot: &StateSnapshot,
     step: usize,
     time_s: f64,
-) -> Result<Vec<Option<sepika_element::frame::beam::MemberForces>>, SolveError> {
+) -> Result<NonlinearMemberResponse, SolveError> {
     member_forces_nonlinear(model, behaviors).map_err(|error| {
         rollback_failed_step(behaviors, snapshot, step, time_s, &error.to_string())
     })

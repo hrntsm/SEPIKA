@@ -158,6 +158,23 @@ impl LinearTimeHistoryCheckpoint {
                 "再開状態に上下非対称組立H形鋼柱の全確定時刻の断面照査がありません。再計算してください。",
             ));
         }
+        if self.model.elements.iter().enumerate().any(|(index, elem)| {
+            crate::time_history_check::column_bending::targets(&self.model, elem)
+                && !recording.symmetric_column_bending.contains_key(&index)
+        }) {
+            return Err(invalid(
+                "再開状態に上下対称H形鋼柱の全確定時刻の横座屈照査がありません。先頭から再計算してください。",
+            ));
+        }
+        if !crate::time_history_check::column_bending::valid_prefix(
+            &recording.symmetric_column_bending,
+            &self.result.time,
+            &self.model,
+        ) {
+            return Err(invalid(
+                "再開状態の前半の横座屈照査が不正です。先頭から再計算してください。",
+            ));
+        }
         if !valid_section_checks(recording, &self.result.time, &self.model) {
             return Err(invalid(
                 "再開状態の前半の断面照査が不正です。再計算してください。",
@@ -435,33 +452,28 @@ pub fn compute_checkpoint(
         return Err(invalid("再開可能な自由度がありません。"));
     }
     let zero = vec![0.0; reducer.n_indep];
-    let ((mut result, state), sections) =
-        crate::time_history_check::collect_asymmetric_column_sections(
-            &model,
-            Default::default(),
-            0,
-            |observer| {
-                linear_time_history_until_with_force_observer(
-                    &model,
-                    &dof,
-                    &reducer,
-                    &effective,
-                    &NewmarkCfg::average_accel(),
-                    &damping,
-                    &zero,
-                    &zero,
-                    (cfg.th_record_every > 0).then_some(cfg.th_record_every),
-                    Some(step),
-                    observer,
-                )
-            },
-        )
-        .map_err(crate::compute::dynamic_solve_error)?;
-    result
-        .recording
-        .as_mut()
-        .unwrap()
-        .asymmetric_column_sections = sections;
+    let ((mut result, state), checks) = crate::time_history_check::collect_time_history_checks(
+        &model,
+        Default::default(),
+        0,
+        |observer| {
+            linear_time_history_until_with_force_observer(
+                &model,
+                &dof,
+                &reducer,
+                &effective,
+                &NewmarkCfg::average_accel(),
+                &damping,
+                &zero,
+                &zero,
+                (cfg.th_record_every > 0).then_some(cfg.th_record_every),
+                Some(step),
+                observer,
+            )
+        },
+    )
+    .map_err(crate::compute::dynamic_solve_error)?;
+    checks.store(result.recording.as_mut().unwrap());
     let checkpoint = LinearTimeHistoryCheckpoint {
         contract: sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION,
         model: model.calculation_model(),
@@ -507,33 +519,28 @@ pub fn resume_checkpoint(
         return Err(invalid("再開状態と現在の自由度対応・減衰が一致しません。"));
     }
     let effective = crate::compute::effective_time_history_wave(&cfg, wave)?;
-    let prefix = &mut checkpoint
-        .result
-        .recording
-        .as_mut()
-        .unwrap()
-        .asymmetric_column_sections;
-    let ((continuation, _), sections) =
-        crate::time_history_check::collect_asymmetric_column_sections(
-            &model,
-            std::mem::take(prefix),
-            checkpoint.state.step + 1,
-            |observer| {
-                linear_time_history_from_state_with_force_observer(
-                    &model,
-                    &dof,
-                    &reducer,
-                    &effective,
-                    &NewmarkCfg::average_accel(),
-                    &damping,
-                    &checkpoint.state,
-                    (cfg.th_record_every > 0).then_some(cfg.th_record_every),
-                    observer,
-                )
-            },
-        )
-        .map_err(crate::compute::dynamic_solve_error)?;
-    *prefix = sections;
+    let prefix = checkpoint.result.recording.as_mut().unwrap();
+    let prior_checks = crate::time_history_check::TimeHistoryChecks::take(prefix);
+    let ((continuation, _), checks) = crate::time_history_check::collect_time_history_checks(
+        &model,
+        prior_checks,
+        checkpoint.state.step + 1,
+        |observer| {
+            linear_time_history_from_state_with_force_observer(
+                &model,
+                &dof,
+                &reducer,
+                &effective,
+                &NewmarkCfg::average_accel(),
+                &damping,
+                &checkpoint.state,
+                (cfg.th_record_every > 0).then_some(cfg.th_record_every),
+                observer,
+            )
+        },
+    )
+    .map_err(crate::compute::dynamic_solve_error)?;
+    checks.store(prefix);
     Ok(merge(checkpoint.result, continuation))
 }
 
