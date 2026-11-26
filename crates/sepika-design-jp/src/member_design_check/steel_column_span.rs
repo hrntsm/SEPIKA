@@ -8,8 +8,13 @@ use sepika_element::frame::member_load::{
 
 use super::steel_beam_span::BeamSpanLoads;
 use super::{combine_incomplete_reasons, strength_outcomes};
-use crate::steel::{check_symmetric_h_plate_slenderness, column_span_parameters};
-use crate::{CheckKind, CheckOutcome, DesignCtx, MemberForcesAt, SteelDesign};
+use crate::steel::{
+    check_symmetric_h_plate_slenderness, column_span_parameters, StaticColumnSectionCheck,
+    SAME_POINT_SHEAR_FORMULA,
+};
+use crate::{
+    CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, MemberForcesAt, SteelDesign,
+};
 use FrameStaticBendingError::{Distribution, Stations};
 
 pub(super) fn check(
@@ -124,7 +129,8 @@ pub(super) fn check(
                          x_mm: f64,
                          force: [f64; 6],
                          cut_side: &str,
-                         local_issue: Option<&str>|
+                         local_issue: Option<&str>,
+                         zero_shear_limit|
      -> Vec<CheckOutcome> {
         let section_issue = section_issue.or(local_issue).or_else(|| {
             force
@@ -139,7 +145,17 @@ pub(super) fn check(
             parameters
         };
         let evaluate = |parameters| {
-            SteelDesign.check_static_column_section(&f, sec, mat, ctx, parameters, section_issue)
+            SteelDesign.check_static_column_section(
+                &f,
+                sec,
+                mat,
+                ctx,
+                StaticColumnSectionCheck {
+                    parameters,
+                    zero_shear_limit,
+                },
+                section_issue,
+            )
         };
         let (mut outcome, mut section_reason) = evaluate(parameters);
         if let Some((recovered, saved)) = parameters
@@ -207,10 +223,12 @@ pub(super) fn check(
         strength_outcomes(outcome, incomplete.as_deref()).collect()
     };
 
-    let sections = recovered
+    let (sections, combination_confirmed) = recovered
         .as_ref()
         .ok()
-        .map_or(&[][..], |(span, _)| span.sections.as_slice());
+        .map_or((&[][..], false), |(span, _)| {
+            (span.sections.as_slice(), span.combination_issue.is_none())
+        });
     let at_i_end =
         |kind: &MemberLoadKind| matches!(kind, MemberLoadKind::Point { a: 0.0, p } if *p != 0.0);
     let load_at_i_end = loads.map_or_else(
@@ -240,13 +258,16 @@ pub(super) fn check(
             continue;
         }
         outcomes.extend(
-            check_section(xi, xi * ctx.length, force, "", None)
+            check_section(xi, xi * ctx.length, force, "", None, false)
                 .into_iter()
                 .map(|outcome| (elem.id, xi, outcome)),
         );
     }
     for section in sections {
         let saved_left = section.saved_left;
+        let [left_zero_limit, right_zero_limit] = section
+            .zero_shear_limits
+            .map(|limit| limit && combination_confirmed);
         let section = &section.recovered;
         let right = section.right.as_ref().ok().and_then(Option::as_ref);
         if !section.is_i_face || right.is_none() {
@@ -263,27 +284,17 @@ pub(super) fn check(
                 None
             };
             let issue = disagreement.as_deref();
-            let mut checked = check_section(section.xi, section.x_mm, section.left, side, issue);
+            let mut checked = check_section(
+                section.xi,
+                section.x_mm,
+                section.left,
+                side,
+                issue,
+                left_zero_limit,
+            );
             if let Some(saved) = saved_left.filter(|saved| *saved != section.left) {
-                let mut observed = check_section(section.xi, section.x_mm, saved, side, issue);
-                observed.retain(|outcome| adds_unavailable_or_failure(outcome, &checked));
-                for mut outcome in observed {
-                    match &mut outcome {
-                        CheckOutcome::Checked(result) => {
-                            result.detail.push_str("。同じ切断面の保存断面力による照査")
-                        }
-                        CheckOutcome::Skipped { reason } => {
-                            reason.push_str("。同じ切断面の保存断面力による照査")
-                        }
-                    }
-                    if let Some(prior) = checked
-                        .iter_mut()
-                        .find(|prior| same_check_covered_by(prior, &outcome))
-                    {
-                        *prior = outcome;
-                    } else {
-                        checked.push(outcome);
-                    }
+                for outcome in check_section(section.xi, section.x_mm, saved, side, issue, false) {
+                    add_saved_check(&mut checked, outcome, section.left[1], saved[1]);
                 }
             }
             outcomes.extend(
@@ -294,9 +305,16 @@ pub(super) fn check(
         }
         if let Some(&force) = right {
             outcomes.extend(
-                check_section(section.xi, section.x_mm, force, "（集中荷重の右側）", None)
-                    .into_iter()
-                    .map(|outcome| (elem.id, section.xi, outcome)),
+                check_section(
+                    section.xi,
+                    section.x_mm,
+                    force,
+                    "（集中荷重の右側）",
+                    None,
+                    right_zero_limit,
+                )
+                .into_iter()
+                .map(|outcome| (elem.id, section.xi, outcome)),
             );
         }
     }
@@ -345,40 +363,81 @@ fn axial_bending_ratio(outcome: &CheckOutcome) -> Option<f64> {
         .map(|component| component.ratio)
 }
 
-fn same_check_covered_by(prior: &CheckOutcome, replacement: &CheckOutcome) -> bool {
-    let (CheckOutcome::Checked(prior), CheckOutcome::Checked(replacement)) = (prior, replacement)
-    else {
-        return false;
-    };
-    prior.basis == replacement.basis
-        && prior.components.len() == replacement.components.len()
-        && prior
-            .components
-            .iter()
-            .zip(&replacement.components)
-            .all(|(prior, replacement)| {
-                prior.kind == replacement.kind
-                    && prior.ratio >= 0.0
-                    && replacement.ratio.is_finite()
-                    && prior.ratio <= replacement.ratio
-            })
+fn includes_formula(other: &CheckComponent, component: &CheckComponent) -> bool {
+    other.kind == component.kind
+        && (component.kind != CheckKind::Shear
+            || !component.detail.contains(SAME_POINT_SHEAR_FORMULA)
+            || other.detail.contains(SAME_POINT_SHEAR_FORMULA))
 }
 
-fn adds_unavailable_or_failure(saved: &CheckOutcome, recovered: &[CheckOutcome]) -> bool {
-    match saved {
-        CheckOutcome::Skipped { reason } => !recovered.iter().any(
-            |outcome| matches!(outcome, CheckOutcome::Skipped { reason: prior } if prior == reason),
-        ),
-        CheckOutcome::Checked(result) => result.components.iter().any(|saved| {
-            saved.ratio > 1.0
-                && !recovered.iter().any(|outcome| {
-                    matches!(outcome, CheckOutcome::Checked(prior) if prior.basis == result.basis
-                    && prior.components.iter().any(|component| {
-                        component.kind == saved.kind && component.ratio.is_finite()
-                            && component.ratio >= saved.ratio
-                    }))
-                })
-        }),
+fn covers_check(other: &CheckResult, other_qy_n: f64, check: &CheckResult, qy_n: f64) -> bool {
+    !check.components.is_empty()
+        && check.components.iter().all(|component| {
+            other.components.iter().any(|other| {
+                includes_formula(other, component)
+                    && other.ratio.is_finite()
+                    && component.ratio >= 0.0
+                    && other.ratio >= component.ratio
+                    && (component.kind != CheckKind::Shear || other_qy_n.abs() >= qy_n.abs())
+            })
+        })
+}
+
+fn add_saved_check(
+    recovered: &mut Vec<CheckOutcome>,
+    mut outcome: CheckOutcome,
+    recovered_qy_n: f64,
+    saved_qy_n: f64,
+) {
+    const SAVED_CUT: &str = "。同じ切断面の保存断面力による照査";
+    let mut replacement = None;
+    match &mut outcome {
+        CheckOutcome::Skipped { reason } => {
+            if recovered.iter().any(
+                |row| matches!(row, CheckOutcome::Skipped { reason: prior } if prior == reason),
+            ) {
+                return;
+            }
+            reason.push_str(SAVED_CUT);
+        }
+        CheckOutcome::Checked(saved) => {
+            if saved.components.is_empty() {
+                return;
+            }
+            if let Some((index, prior)) =
+                recovered
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, row)| match row {
+                        CheckOutcome::Checked(prior) if prior.basis == saved.basis => {
+                            Some((index, prior))
+                        }
+                        _ => None,
+                    })
+            {
+                if covers_check(prior, recovered_qy_n, saved, saved_qy_n) {
+                    return;
+                }
+                if covers_check(saved, saved_qy_n, prior, recovered_qy_n) {
+                    replacement = Some(index);
+                } else if saved.components.iter().all(|component| {
+                    (0.0..=1.0).contains(&component.ratio)
+                        && prior.components.iter().any(|prior| {
+                            prior.ratio.is_finite()
+                                && prior.ratio >= 0.0
+                                && includes_formula(prior, component)
+                        })
+                }) {
+                    return;
+                }
+            }
+            saved.detail.push_str(SAVED_CUT);
+        }
+    }
+    if let Some(index) = replacement {
+        recovered[index] = outcome;
+    } else {
+        recovered.push(outcome);
     }
 }
 

@@ -241,12 +241,24 @@ fn independent_h_web_shear_failure(
     mat: &Material,
     ctx: &DesignCtx,
 ) -> Option<CheckComponent> {
+    forces
+        .n
+        .is_finite()
+        .then(|| h_web_shear_failure(forces, sec, mat, ctx))
+        .flatten()
+}
+
+fn h_web_shear_failure(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    mat: &Material,
+    ctx: &DesignCtx,
+) -> Option<CheckComponent> {
     if !matches!(ctx.kind, MemberKind::Girder | MemberKind::Column)
         || symmetric_h_web(sec).is_none()
         || forces.mx != 0.0
-        || ![forces.n, forces.qy, forces.qz]
-            .iter()
-            .all(|v| v.is_finite())
+        || !forces.qy.is_finite()
+        || !forces.qz.is_finite()
     {
         return None;
     }
@@ -299,6 +311,7 @@ pub fn frame_node_span_mm(
 
 const WEAK_H_SHEAR_UNAVAILABLE: &str = "H形鋼に作用する弱軸せん断力Qzの照査条件を確定できません";
 const NONFINITE_SHEAR_FORCE: &str = "せん断力が非有限です";
+pub(crate) const SAME_POINT_SHEAR_FORMULA: &str = "式(5.24): 同一点";
 
 fn check_same_point_shear(
     result: &mut CheckResult,
@@ -306,8 +319,10 @@ fn check_same_point_shear(
     sec: &Section,
     ctx: &DesignCtx,
     f: f64,
+    zero_shear_limit: bool,
 ) -> Option<&'static str> {
-    if ctx.kind == MemberKind::Brace || (forces.qy == 0.0 && forces.qz == 0.0) {
+    if ctx.kind == MemberKind::Brace || (!zero_shear_limit && forces.qy == 0.0 && forces.qz == 0.0)
+    {
         return None;
     }
     if forces.qz != 0.0 && symmetric_h_web(sec).is_some() {
@@ -358,7 +373,7 @@ fn check_same_point_shear(
         if ratio.is_finite() {
             shear.ratio = shear.ratio.max(ratio);
             shear.detail.push_str(&format!(
-                "。式(5.24): 同一点 σ={sigma:.4} N/mm², τ={tau:.4} N/mm², 組合せ応力度比={ratio:.4}"
+                "。{SAME_POINT_SHEAR_FORMULA} σ={sigma:.4} N/mm², τ={tau:.4} N/mm², 組合せ応力度比={ratio:.4}"
             ));
             return None;
         }
@@ -598,9 +613,15 @@ fn compression_slenderness_failure(
 pub struct SteelDesign;
 
 #[derive(Clone, Copy)]
+pub(crate) struct StaticColumnSectionCheck {
+    pub(crate) parameters: Option<(f64, f64)>,
+    pub(crate) zero_shear_limit: bool,
+}
+
+#[derive(Clone, Copy)]
 enum SteelCheckScope {
     Ordinary,
-    StaticColumn(Option<(f64, f64)>),
+    StaticColumn(StaticColumnSectionCheck),
     TimeHistory,
     SecondaryPost,
 }
@@ -851,7 +872,7 @@ impl SteelDesign {
         sec: &Section,
         mat: &Material,
         ctx: &DesignCtx,
-        parameters: Option<(f64, f64)>,
+        scope: StaticColumnSectionCheck,
         section_issue: Option<&str>,
     ) -> (CheckOutcome, Option<String>) {
         let section_issue = section_issue.or_else(|| {
@@ -867,7 +888,7 @@ impl SteelDesign {
             }
         });
         let mut incomplete = None;
-        let outcome = match section_issue {
+        let mut outcome = match section_issue {
             Some(reason) => CheckOutcome::Skipped {
                 reason: reason.into(),
             },
@@ -876,10 +897,38 @@ impl SteelDesign {
                 sec,
                 mat,
                 ctx,
-                SteelCheckScope::StaticColumn(parameters),
+                SteelCheckScope::StaticColumn(scope),
                 &mut incomplete,
             ),
         };
+        let material_cap = || {
+            symmetric_h_web(sec)?;
+            let (_, flange_thick_mm, web_thick_mm) = shape_of(sec);
+            let plate_f = |thick_mm| {
+                sepika_core::material_grade::resolve_steel_f(Some(mat), Some(thick_mm)).ok()
+            };
+            plate_f(flange_thick_mm)
+                .zip(plate_f(web_thick_mm))
+                .map(|(flange, web)| flange.max(web))
+        };
+        if let CheckOutcome::Checked(result) = &mut outcome {
+            if incomplete.is_some()
+                && forces.mx == 0.0
+                && !result.components.iter().any(|component| {
+                    matches!(component.kind, CheckKind::AxialBending | CheckKind::Bending)
+                        && component.ratio.is_finite()
+                        && component.ratio > 1.0
+                })
+            {
+                if let Some(CheckOutcome::Checked(bending)) = material_cap().and_then(|cap| {
+                    column::strong_bending_material_failure(forces, sec, mat, ctx, Some(cap))
+                }) {
+                    result.basis.push('。');
+                    result.basis.push_str(&bending.basis);
+                    result.components.extend(bending.components);
+                }
+            }
+        }
         if let CheckOutcome::Skipped { reason } = &outcome {
             let mut components = Vec::new();
             let shape_confirmed = symmetric_h_web(sec).is_some();
@@ -913,38 +962,23 @@ impl SteelDesign {
                     );
                 }
             }
-            if shape_confirmed {
-                let (_, flange_thick_mm, web_thick_mm) = shape_of(sec);
-                let plate_f = |thick_mm| {
-                    sepika_core::material_grade::resolve_steel_f(Some(mat), Some(thick_mm)).ok()
-                };
-                if let Some(f_cap_mpa) = plate_f(flange_thick_mm)
-                    .zip(plate_f(web_thick_mm))
-                    .map(|(flange, web)| flange.max(web))
+            if let Some(f_cap_mpa) = material_cap() {
+                if sec.property_basis.area == PropertyBasis::Shape
+                    && !components
+                        .iter()
+                        .any(|component| component.kind == CheckKind::Axial)
                 {
-                    if sec.property_basis.area == PropertyBasis::Shape
-                        && !components
-                            .iter()
-                            .any(|component| component.kind == CheckKind::Axial)
-                    {
-                        components.extend(sec.resolved_area().ok().and_then(|area| {
-                            axial_material_limit_failure(forces.n, area, ctx.term, f_cap_mpa)
-                        }));
-                    }
-                    if let Some(CheckOutcome::Checked(bending)) =
-                        column::strong_bending_material_failure(
-                            forces,
-                            sec,
-                            mat,
-                            ctx,
-                            Some(f_cap_mpa),
-                        )
-                    {
-                        components.extend(bending.components);
-                    }
+                    components.extend(sec.resolved_area().ok().and_then(|area| {
+                        axial_material_limit_failure(forces.n, area, ctx.term, f_cap_mpa)
+                    }));
+                }
+                if let Some(CheckOutcome::Checked(bending)) =
+                    column::strong_bending_material_failure(forces, sec, mat, ctx, Some(f_cap_mpa))
+                {
+                    components.extend(bending.components);
                 }
             }
-            components.extend(independent_h_web_shear_failure(forces, sec, mat, ctx));
+            components.extend(h_web_shear_failure(forces, sec, mat, ctx));
             if !components.is_empty() {
                 return (
                     CheckOutcome::Checked(CheckResult {
@@ -1039,7 +1073,14 @@ impl SteelDesign {
         let secondary_post = matches!(scope, SteelCheckScope::SecondaryPost);
         let lateral_buckling = if secondary_post {
             column::ColumnLateralBuckling::OutsideScope
-        } else if matches!(scope, SteelCheckScope::StaticColumn(None)) && forces.mz != 0.0 {
+        } else if matches!(
+            scope,
+            SteelCheckScope::StaticColumn(StaticColumnSectionCheck {
+                parameters: None,
+                ..
+            })
+        ) && forces.mz != 0.0
+        {
             column::ColumnLateralBuckling::Unconfirmed("単一補剛区間の強軸曲げ・横座屈は未算定です")
         } else {
             column::ColumnLateralBuckling::resolve(ctx, sec, forces)
@@ -1426,7 +1467,7 @@ impl SteelDesign {
                 Some(lambda),
                 lateral_buckling.length_mm(ctx.length).map(|length_mm| {
                     let parameters = match scope {
-                        SteelCheckScope::StaticColumn(parameters) => parameters,
+                        SteelCheckScope::StaticColumn(scope) => scope.parameters,
                         _ => None,
                     };
                     (length_mm, parameters)
@@ -1441,7 +1482,15 @@ impl SteelDesign {
         };
         match cr {
             Ok(CheckOutcome::Checked(mut result)) => {
-                let shear_reason = check_same_point_shear(&mut result, forces, sec, ctx, f);
+                let zero_shear_limit = matches!(
+                    scope,
+                    SteelCheckScope::StaticColumn(StaticColumnSectionCheck {
+                        zero_shear_limit: true,
+                        ..
+                    })
+                );
+                let shear_reason =
+                    check_same_point_shear(&mut result, forces, sec, ctx, f, zero_shear_limit);
                 if let Some(reason) = h_combined_reason.or(shear_reason) {
                     result
                         .components

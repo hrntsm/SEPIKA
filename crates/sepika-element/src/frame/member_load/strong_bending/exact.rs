@@ -75,16 +75,22 @@ impl LoadedFrameSection {
 struct ExactBending {
     length_mm: BigRational,
     end_moments_nmm: [BigRational; 2],
-    candidates: Vec<(BigRational, BigRational)>,
+    candidates: Vec<ExactBendingCandidate>,
     flat_ranges: Vec<([f64; 2], BigRational)>,
     monotonic: bool,
+}
+
+struct ExactBendingCandidate {
+    x: BigRational,
+    mz: BigRational,
+    adjacent_shear: [bool; 2],
 }
 
 impl ExactBending {
     fn absolute_maximum(&self) -> BigRational {
         self.candidates
             .iter()
-            .map(|(_, mz)| mz.abs())
+            .map(|cut| cut.mz.abs())
             .max()
             .unwrap_or_else(BigRational::zero)
     }
@@ -149,7 +155,12 @@ impl StrongBendingResponse<'_> {
         let mut shear_n = rational(self.response.node_force_local[1])?;
         let mut moment_nmm = rational(-self.response.node_force_local[5])?;
         let i_moment_nmm = moment_nmm.clone();
-        let mut candidates = vec![(BigRational::zero(), moment_nmm.clone())];
+        let mut candidate = ExactBendingCandidate {
+            x: BigRational::zero(),
+            mz: moment_nmm.clone(),
+            adjacent_shear: [false; 2],
+        };
+        let mut candidates = Vec::new();
         let mut flat_ranges = Vec::new();
         let mut has_positive_shear = false;
         let mut has_negative_shear = false;
@@ -167,16 +178,27 @@ impl StrongBendingResponse<'_> {
             if !intensity_gradient.is_zero() {
                 return Err(ExactSpanError::VaryingStrongLoad);
             }
+            let has_shear = !shear_n.is_zero() || !intensity_n_per_mm.is_zero();
+            candidate.adjacent_shear[1] = has_shear;
+            candidates.push(candidate);
             if intensity_n_per_mm.is_zero() {
                 if shear_n.is_zero() {
                     flat_ranges.push(([lo, hi], moment_nmm.abs()));
-                    candidates.push(((&lo_mm + &hi_mm) / &two, moment_nmm.clone()));
+                    candidates.push(ExactBendingCandidate {
+                        x: (&lo_mm + &hi_mm) / &two,
+                        mz: moment_nmm.clone(),
+                        adjacent_shear: [false; 2],
+                    });
                 }
             } else {
                 let extremum_mm = -&shear_n / &intensity_n_per_mm;
                 if extremum_mm.is_positive() && extremum_mm < width_mm {
                     let extremum_nmm = &moment_nmm + &shear_n * &extremum_mm / &two;
-                    candidates.push((lo_mm + extremum_mm, extremum_nmm));
+                    candidates.push(ExactBendingCandidate {
+                        x: lo_mm + extremum_mm,
+                        mz: extremum_nmm,
+                        adjacent_shear: [true; 2],
+                    });
                 }
             }
             let shear_increment_n = intensity_n_per_mm * &width_mm;
@@ -184,10 +206,15 @@ impl StrongBendingResponse<'_> {
             has_positive_shear |= shear_n.is_positive() || end_shear_n.is_positive();
             has_negative_shear |= shear_n.is_negative() || end_shear_n.is_negative();
             moment_nmm += (&shear_n + &shear_increment_n / &two) * width_mm;
-            candidates.push((hi_mm, moment_nmm.clone()));
+            candidate = ExactBendingCandidate {
+                x: hi_mm,
+                mz: moment_nmm.clone(),
+                adjacent_shear: [has_shear, false],
+            };
             shear_n = end_shear_n;
         }
 
+        candidates.push(candidate);
         Ok(ExactBending {
             length_mm,
             end_moments_nmm: [i_moment_nmm, moment_nmm],
@@ -217,8 +244,8 @@ impl StrongBendingResponse<'_> {
         let demand_peaks = bending
             .candidates
             .into_iter()
-            .filter(|(_, mz)| mz.abs() == maximum_abs_nmm)
-            .map(|(x, mz)| self.response.exact_peak(x, mz, &bending.length_mm))
+            .filter(|cut| cut.mz.abs() == maximum_abs_nmm)
+            .map(|cut| self.response.exact_peak(cut.x, cut.mz, &bending.length_mm))
             .collect::<Result<Vec<_>, _>>()?;
         Ok(FrameStrongBendingSpan {
             end_moments_nmm,
@@ -237,16 +264,43 @@ impl StrongBendingResponse<'_> {
         let maximum = bending.absolute_maximum();
         let end_moments_nmm = bending.end_moments()?;
         let [i, j] = &bending.end_moments_nmm;
-        let monotonic = bending.monotonic
-            && self.stations_mm.iter().skip(1).all(|(_, force)| {
-                let qy_n = force[1];
-                qy_n == 0.0 || qy_n > 0.0 && j > i || qy_n < 0.0 && j < i
-            });
+        let direction = j.cmp(i);
+        let mut monotonic = bending.monotonic;
+        if monotonic {
+            for &(x_mm, force) in self.stations_mm.iter().skip(1) {
+                let left_n = force[1];
+                if left_n != 0.0 && left_n.partial_cmp(&0.0) != Some(direction) {
+                    monotonic = false;
+                    break;
+                }
+                if x_mm < self.length_mm {
+                    let mut jumps = self.strong_loads.iter().filter_map(|load| match *load {
+                        Comp::Point { a, p } if a == x_mm => Some(p),
+                        _ => None,
+                    });
+                    if let Some(first) = jumps.next() {
+                        let mut right = rational(left_n)? + rational(first)?;
+                        for jump in jumps {
+                            right += rational(jump)?;
+                        }
+                        if !right.is_zero() && right.cmp(&BigRational::zero()) != direction {
+                            monotonic = false;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         let mut interior_maximum = false;
         let mut sections: Vec<FrameStaticBendingSection> =
             Vec::with_capacity(bending.candidates.len());
         let mut compression_at_zero_crossing_n = None::<f64>;
-        for (x, mz) in bending.candidates {
+        for ExactBendingCandidate {
+            x,
+            mz,
+            adjacent_shear,
+        } in bending.candidates
+        {
             interior_maximum |= !x.is_zero() && x != bending.length_mm && mz.abs() == maximum;
             let x_mm = finite(&x)?;
             let saved_left = if rational(x_mm)? == x {
@@ -258,6 +312,15 @@ impl StrongBendingResponse<'_> {
                 None
             };
             let section = self.response.exact_peak(x, mz, &bending.length_mm)?;
+            let [left, right] = adjacent_shear;
+            let zero_shear_limits = if let Ok(Some(right_force)) = &section.right {
+                [
+                    left && section.left[1] == 0.0,
+                    right && right_force[1] == 0.0,
+                ]
+            } else {
+                [(left || right) && section.left[1] == 0.0, false]
+            };
             if let Some(previous) = sections.last().map(|section| &section.recovered) {
                 let after_point = previous.right.as_ref().ok().and_then(Option::as_ref);
                 let [n, _, _, _, my, _] = *after_point.unwrap_or(&previous.left);
@@ -274,6 +337,7 @@ impl StrongBendingResponse<'_> {
             sections.push(FrameStaticBendingSection {
                 recovered: section,
                 saved_left,
+                zero_shear_limits,
             });
         }
         let issue = self.static_combination_issue(&sections)?;
