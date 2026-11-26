@@ -322,6 +322,8 @@ pub fn frame_node_span_mm(
 const WEAK_H_SHEAR_UNAVAILABLE: &str = "H形鋼に作用する弱軸せん断力Qzの照査条件を確定できません";
 const NONFINITE_SHEAR_FORCE: &str = "せん断力が非有限です";
 pub(crate) const SAME_POINT_SHEAR_FORMULA: &str = "式(5.24): 同一点";
+const NONFINITE_STATIC_COLUMN_FORCE: &str =
+    "この断面の保存断面力に非有限な成分があるため、組合せを確定できません";
 
 fn check_same_point_shear(
     shear: Option<&mut CheckComponent>,
@@ -1007,7 +1009,12 @@ impl SteelDesign {
         section_issue: Option<&str>,
     ) -> (CheckOutcome, Option<String>) {
         let section_issue = section_issue.or_else(|| {
-            if has_section_loss(ctx) {
+            if [forces.n, forces.mx, forces.my, forces.mz]
+                .into_iter()
+                .any(|value| !value.is_finite())
+            {
+                Some(NONFINITE_STATIC_COLUMN_FORCE)
+            } else if has_section_loss(ctx) {
                 Some("断面欠損の位置と断面性能を確定できないため、上下対称H形鋼柱の強軸曲げ・横座屈は未算定です")
             } else if [sec.area, sec.iy, sec.iz, sec.depth, sec.width]
                 .into_iter()
@@ -1032,6 +1039,13 @@ impl SteelDesign {
                 &mut incomplete,
             ),
         };
+        let missing_shear = !forces.qy.is_finite() || !forces.qz.is_finite();
+        if missing_shear {
+            incomplete = crate::member_design_check::combine_incomplete_reasons(
+                incomplete,
+                Some(NONFINITE_STATIC_COLUMN_FORCE),
+            );
+        }
         if scope.weak_shear_disagreement {
             incomplete = crate::member_design_check::combine_incomplete_reasons(
                 incomplete,
@@ -1059,7 +1073,15 @@ impl SteelDesign {
             verified.allowable_compression_limit(f, mat.young, ctx.term)?;
             independent_h_column_compression_failure(forces.n, area_mm2, mat, ctx.term, f, verified)
         };
+        let web_shear_failure = || {
+            scope
+                .same_cut_component(forces, |force| h_web_shear_check(force, sec, mat, ctx))
+                .filter(|component| component.ratio > 1.0)
+        };
         if let CheckOutcome::Checked(result) = &mut outcome {
+            if missing_shear && !result.components.iter().any(|c| c.kind == CheckKind::Shear) {
+                result.components.extend(web_shear_failure());
+            }
             if incomplete.is_some()
                 && !result.components.iter().any(|component| {
                     matches!(component.kind, CheckKind::Axial | CheckKind::AxialBending)
@@ -1121,11 +1143,7 @@ impl SteelDesign {
                     components.extend(bending.components);
                 }
             }
-            components.extend(
-                scope
-                    .same_cut_component(forces, |force| h_web_shear_check(force, sec, mat, ctx))
-                    .filter(|component| component.ratio > 1.0),
-            );
+            components.extend(web_shear_failure());
             if scope.independent_stress_available {
                 components.extend(scope.same_cut_component(forces, |force| {
                     static_column_same_point_failure(force, sec, mat, ctx, scope)
@@ -1226,6 +1244,10 @@ impl SteelDesign {
         incomplete: &mut Option<String>,
     ) -> CheckOutcome {
         let secondary_post = matches!(scope, SteelCheckScope::SecondaryPost);
+        let static_column = match scope {
+            SteelCheckScope::StaticColumn(scope) => Some(scope),
+            _ => None,
+        };
         let lateral_buckling = if secondary_post {
             column::ColumnLateralBuckling::OutsideScope
         } else if matches!(
@@ -1264,7 +1286,8 @@ impl SteelDesign {
             sec,
             !secondary_post && ctx.kind == MemberKind::Column,
             torsion_reason,
-        );
+        )
+        .filter(|_| static_column.is_none() || forces.qz.is_finite());
         let built_h_unavailable_reasons = || {
             built_h_shear_reasons
                 .into_iter()
@@ -1559,7 +1582,7 @@ impl SteelDesign {
                 None => CheckOutcome::Skipped { reason },
             };
         }
-        if invalid_shear && !incomplete_weak_h_column {
+        if invalid_shear && !incomplete_weak_h_column && static_column.is_none() {
             return CheckOutcome::Skipped {
                 reason: NONFINITE_SHEAR_FORCE.into(),
             };
@@ -1635,20 +1658,22 @@ impl SteelDesign {
                 forces, sec, mat, ctx, f, term, lambda,
             ))),
         };
-        let static_column = match scope {
-            SteelCheckScope::StaticColumn(scope) => Some(scope),
-            _ => None,
-        };
         let zero_shear_limit = static_column.is_some_and(|scope| scope.zero_shear_limit);
         let weak_shear_disagreement =
             static_column.is_some_and(|scope| scope.weak_shear_disagreement);
         match cr {
             Ok(CheckOutcome::Checked(mut result)) => {
+                let shear_unconfirmed = static_column.is_some() && invalid_shear;
+                if shear_unconfirmed {
+                    result
+                        .components
+                        .retain(|c| c.kind != CheckKind::Shear || c.ratio.is_finite());
+                }
                 let shear = result
                     .components
                     .iter_mut()
                     .find(|c| c.kind == CheckKind::Shear);
-                let shear_reason = if weak_shear_disagreement {
+                let shear_reason = if weak_shear_disagreement || shear_unconfirmed {
                     None
                 } else {
                     check_same_point_shear(

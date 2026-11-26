@@ -55,18 +55,28 @@ pub(super) fn check(
             .at
             .iter()
             .any(|(_, cut)| cut.iter().any(|value| !value.is_finite()));
-    if !partial_recovery
+    let no_strong_bending = !partial_recovery
         && recovered
             .as_ref()
             .is_ok_and(|(span, _)| !span.has_strong_bending)
-        && forces.at.iter().all(|(_, force)| force[5] == 0.0)
-    {
+        && forces.at.iter().all(|(_, force)| force[5] == 0.0);
+    let i_end_has_jump = recovered.as_ref().is_ok_and(|(span, _)| {
+        span.sections.first().is_some_and(|cut| {
+            cut.recovered.is_i_face && cut.recovered.right.as_ref().is_ok_and(Option::is_some)
+        })
+    });
+    // 強軸曲げがなくても、i端集中荷重で断面力が跳ぶ場合は保存左側を区間内の照査に使えない。
+    if no_strong_bending && !i_end_has_jump {
         return false;
     }
     let mut span_reason = None;
     let mut span_description = None;
     let mut saved_parameters = None;
     let parameters = match &recovered {
+        Ok((span, _)) if no_strong_bending => {
+            span_reason = span.combination_issue.map(str::to_owned);
+            None
+        }
         Ok((span, axes)) => {
             let length_mm = dist(axes[0], axes[1]);
             let interval = format!("実材軸の補剛区間 [0, {length_mm:.3}] mm");
@@ -145,12 +155,8 @@ pub(super) fn check(
                          scope: StaticColumnSectionCheck,
                          local_issue: Option<&str>|
      -> Vec<CheckOutcome> {
-        let section_issue = section_issue.or(local_issue).or_else(|| {
-            force
-                .iter()
-                .any(|value| !value.is_finite())
-                .then_some("この断面の保存断面力に非有限な成分があるため、組合せを確定できません")
-        });
+        let section_issue =
+            combine_incomplete_reasons(section_issue.map(str::to_owned), local_issue);
         let f = MemberForcesAt::from_local(xi, force);
         let parameters = if f.n > 0.0 && f.my != 0.0 {
             None
@@ -167,7 +173,7 @@ pub(super) fn check(
                     parameters,
                     ..scope
                 },
-                section_issue,
+                section_issue.as_deref(),
             )
         };
         let (mut outcome, mut section_reason) = evaluate(parameters);
@@ -247,11 +253,8 @@ pub(super) fn check(
                     }
                 }
             }
-            let disagreement = if section_issue.is_none() {
-                saved.and_then(|saved| section_applicability_difference(sec, mat, saved, recovered))
-            } else {
-                None
-            };
+            let disagreement = saved
+                .and_then(|saved| section_applicability_difference(sec, mat, saved, recovered));
             let issue = disagreement.as_deref();
             let weak_shear_disagreement = saved.is_some_and(|saved| {
                 saved[2].is_finite()
