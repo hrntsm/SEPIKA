@@ -309,6 +309,13 @@ struct GirderMoments<'a> {
     floor_girders: SmallVec<[ElemId; 2]>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GirderAxisRelation {
+    StrongBending,
+    TorsionOnly,
+    Unconfirmed,
+}
+
 fn sum_beam_my_at_node<'a>(
     model: &'a Model,
     topology: &'a ColumnMechanismTopology,
@@ -369,29 +376,37 @@ fn sum_beam_my_at_node<'a>(
             continue;
         }
         let assigned = aligns(axis) || aligns(actual_axis);
-        let matching_strong_axis = column_bending_axis.map(|column_axis| {
-            let axes =
-                actual_ends.and_then(|ends| actual_axes(ends, other.local_axis.ref_vector).ok());
-            if let Some([girder_x, _, girder_z]) = axes {
-                if column_axis.is_parallel(&girder_z) {
-                    return true;
+        let axis_relation = column_bending_axis.map(|column_axis| {
+            match actual_ends.and_then(|ends| actual_axes(ends, other.local_axis.ref_vector).ok()) {
+                Some([_, _, girder_z]) if column_axis.is_parallel(&girder_z) => {
+                    GirderAxisRelation::StrongBending
                 }
-                if column_axis.is_parallel(&girder_x) {
-                    return false;
+                Some([girder_x, _, _]) if column_axis.is_parallel(&girder_x) => {
+                    GirderAxisRelation::TorsionOnly
                 }
+                _ => GirderAxisRelation::Unconfirmed,
             }
-            unconfirmed_axes.push(other.id);
-            false
         });
+        if axis_relation == Some(GirderAxisRelation::Unconfirmed) {
+            unconfirmed_axes.push(other.id);
+        }
+        let affects_direction = assigned
+            || matches!(
+                axis_relation,
+                Some(GirderAxisRelation::StrongBending | GirderAxisRelation::Unconfirmed)
+            );
         match end_condition {
-            _ if !assigned && matching_strong_axis != Some(true) => continue,
+            _ if !affects_direction => continue,
             EndCondition::Fixed if !has_far_offset => {}
             _ => {
                 sum = None;
                 continue;
             }
         }
-        if matching_strong_axis == Some(false) {
+        if matches!(
+            axis_relation,
+            Some(GirderAxisRelation::TorsionOnly | GirderAxisRelation::Unconfirmed)
+        ) {
             continue;
         }
         let Some(sec) = model.element_section(other) else {

@@ -675,6 +675,45 @@ fn qd1_issue1970_far_end_eccentricity_does_not_confirm_the_same_mechanism_as_sec
 }
 
 #[test]
+fn qd1_issue1970_applies_end_conditions_to_a_skew_girder_outside_the_plan_assignment() {
+    let mut model = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
+    let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut model.sections[0].shape else {
+        unreachable!()
+    };
+    rebar.x = vec![4];
+    rebar.y = vec![4];
+    model.stress_cfg.consider_rigid_zones = false;
+
+    for (node_y_mm, far_offset_y_mm, connection, expected_n) in [
+        (
+            4000.0,
+            0.0,
+            EndCondition::Fixed,
+            reference::CONTINUOUS_SLAB_HEAD_QD1_N,
+        ),
+        (
+            4000.0,
+            0.0,
+            EndCondition::SemiRigid { k_theta: 1e8 },
+            reference::FOUR_BAR_COLUMN_ENDS_QD1_N,
+        ),
+        (
+            5000.0,
+            -1000.0,
+            EndCondition::Fixed,
+            reference::FOUR_BAR_COLUMN_ENDS_QD1_N,
+        ),
+    ] {
+        model.nodes[2].coord = [3000.0, node_y_mm, 1500.0];
+        let girder = &mut model.elements[fixture::GIRDER.index()];
+        girder.end_cond[0] = connection;
+        girder.end_offsets_mm[1][1] = far_offset_y_mm;
+        assert_qd1_shear_ratio(&model, expected_n / reference::COLUMN_ALLOWABLE_SHEAR_N);
+        assert_time_history_qd1_demand(&model, expected_n);
+    }
+}
+
+#[test]
 fn qd1_issue1970_does_not_use_seismic_response_if_gravity_is_requested_but_column_is_missing() {
     let mut model = fixture::column_with_reversible_girders(column::column_model(false, 0.0), 2, 4);
     let force = [-100_000.0, 1_000_000.0, 400_000.0, 0.0, 0.0, 300e6];
