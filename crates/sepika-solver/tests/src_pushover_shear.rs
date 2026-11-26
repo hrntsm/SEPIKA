@@ -525,10 +525,16 @@ fn directional_shear_specimen(frame_use: FrameSectionUse, weak: bool) -> Model {
         SectionShape::SrcBeamRect { rebar, .. } => {
             rebar.main_dia = main_dia;
             rebar.stirrup.dia = hoop_dia;
+            if weak {
+                rebar.top = vec![2];
+                rebar.bottom = vec![2];
+            }
         }
         SectionShape::SrcColumnRect { rebar, .. } => {
             rebar.main_dia = main_dia;
             rebar.hoop.dia = hoop_dia;
+            rebar.x = vec![3];
+            rebar.y = vec![3];
         }
         _ => unreachable!(),
     }
@@ -613,7 +619,7 @@ fn src_article_33_reference_is_compared_to_confirmed_directional_face_forces() {
             SeismicDir::Y,
             true,
             600.0,
-            786_223.567,
+            782_111.067,
             -840_000.0,
         ),
         (
@@ -629,7 +635,7 @@ fn src_article_33_reference_is_compared_to_confirmed_directional_face_forces() {
             SeismicDir::Y,
             true,
             1_000.0,
-            412_447.650,
+            409_980.150,
             440_000.0,
         ),
     ] {
