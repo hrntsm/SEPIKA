@@ -251,8 +251,7 @@ fn whole_beam_cannot_be_certified_when_recovery_drops_a_nonzero_load_component()
     assert_unchecked(&mut adopted(input), Issue::Recovery.reason());
 }
 
-#[test]
-fn axial_loads_lost_by_nodal_addition_do_not_certify_a_zero_axial_range() {
+fn axial_cancellation_model(loaded: NodeId) -> Model {
     use sepika_core::model::RcBeamReference;
 
     let mut input = model(&[2_000.0], true, false);
@@ -264,22 +263,90 @@ fn axial_loads_lost_by_nodal_addition_do_not_certify_a_zero_axial_range() {
             Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
         );
     }
-    // 材軸が自由な側には、釣合い上は 1 N が作用する。
+    // 通常加算でゼロに丸められても、釣合い上の節点荷重は1 N。
     input.load_cases[0].nodal.extend(
-        [1e16, 1.0, -1e16].map(|n| NodalLoad::manual(NodeId(3), [n, 0.0, 0.0, 0.0, 0.0, 0.0])),
+        [1e16, 1.0, -1e16].map(|n| NodalLoad::manual(loaded, [n, 0.0, 0.0, 0.0, 0.0, 0.0])),
     );
+    input
+}
+
+fn assert_axial_cancellation_unchecked(input: Model) {
+    let group = input.girder_groups[0].clone();
     let mut app = adopted(input);
     let run = stored_run(&mut app);
     assert_same_final_proof(run);
-    for row in run
-        .member_response
+    for rows in [
+        &run.member_response,
+        &run.confirmed_history.as_ref().unwrap()[1].members,
+    ] {
+        for member in &group {
+            let row = rows.iter().find(|row| row.elem == *member).unwrap();
+            assert_eq!(row.axial, 0.0);
+            assert_eq!(row.rc_beam_ultimate_shear, Some(Err(Issue::Equilibrium)));
+        }
+    }
+    for rows in [
+        app.compute_ultimate_checks().unwrap(),
+        reference_checks(&mut app),
+    ] {
+        let beams: Vec<_> = rows
+            .into_iter()
+            .filter(|row| group.contains(&row.elem))
+            .collect();
+        assert_eq!(beams.len(), group.len());
+        assert_unchecked_rows(&beams, Issue::Equilibrium.reason());
+    }
+}
+
+#[test]
+fn axial_loads_lost_by_nodal_addition_do_not_certify_a_zero_axial_range() {
+    assert_axial_cancellation_unchecked(axial_cancellation_model(NodeId(3)));
+}
+
+#[test]
+fn a_column_at_the_restrained_outer_end_does_not_hide_the_free_end_axial_cut() {
+    let mut input = axial_cancellation_model(NodeId(3));
+    let mut base = input.nodes[0].clone();
+    base.id = NodeId(input.nodes.len() as u32);
+    base.coord = [0.0, 6_000.0, 0.0];
+    let mut column = input.elements[0].clone();
+    column.id = ElemId(input.elements.len() as u32);
+    column.nodes = [base.id, NodeId(2)].into_iter().collect();
+    input.nodes.push(base);
+    input.elements.push(column);
+    assert_axial_cancellation_unchecked(input);
+}
+
+#[test]
+fn an_interior_axial_restraint_does_not_hide_the_free_end_axial_cut() {
+    let mut input = axial_cancellation_model(NodeId(3));
+    input.nodes[4].restraint.set_fixed(Dof::Ux);
+    assert_axial_cancellation_unchecked(input);
+}
+
+#[test]
+fn an_axially_free_interior_joint_cannot_balance_a_lost_load_with_two_zero_cuts() {
+    let mut input = axial_cancellation_model(NodeId(4));
+    input.nodes[3].restraint.set_fixed(Dof::Ux);
+    assert_axial_cancellation_unchecked(input);
+}
+
+#[test]
+fn a_load_on_a_restrained_dof_does_not_enter_the_free_end_axial_cut() {
+    let mut app = adopted(axial_cancellation_model(NodeId(2)));
+    for row in adopted_beam_rows(&mut app)
         .iter()
         .filter(|row| row.elem != ElemId(0))
     {
-        assert_eq!(row.axial, 0.0);
-        assert_eq!(row.rc_beam_ultimate_shear, Some(Err(Issue::Equilibrium)));
+        assert_eq!(
+            row.rc_beam_ultimate_shear.unwrap().unwrap().axial_range_n,
+            [0.0; 2]
+        );
     }
-    assert_unchecked(&mut app, Issue::Equilibrium.reason());
+    let rows = app.compute_ultimate_checks().unwrap();
+    let beams: Vec<_> = rows.iter().filter(|row| row.elem != ElemId(0)).collect();
+    assert_eq!(beams.len(), 2);
+    assert!(beams.iter().all(|row| row.ok && row.qsu.is_finite()));
 }
 
 fn assert_unchecked(app: &mut App, reason: &str) {

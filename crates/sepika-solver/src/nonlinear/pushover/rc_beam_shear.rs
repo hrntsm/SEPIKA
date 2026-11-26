@@ -6,7 +6,7 @@ use sepika_core::face_distance::girder_column_faces;
 use sepika_core::geom::vec3::{cross, dist, local_frame_axes, norm};
 use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::{
-    ElementData, EndCondition, FrameSectionUse, LoadCase, MemberLoadKind, Model, Section,
+    ElementData, EndCondition, FrameSectionUse, LoadCase, MemberLoadKind, Model, Node, Section,
 };
 use sepika_core::rc_capacity::{
     RcBeamUltimateShearIssue as Issue, RcBeamUltimateShearResponse, RcUltimateShearActions,
@@ -24,7 +24,7 @@ struct BeamPart<'a> {
 
 pub(super) struct BeamShearStep {
     nodal: HashMap<NodeId, [bool; 3]>,
-    member: HashMap<ElemId, [bool; 3]>,
+    member: HashMap<ElemId, [Option<[f64; 2]>; 3]>,
     tolerance_n: f64,
 }
 
@@ -36,12 +36,16 @@ impl BeamShearStep {
         }
         let mut member = HashMap::new();
         for load in &case.member {
-            let nonzero = match load.kind {
-                MemberLoadKind::Point { p, .. } => p != 0.0,
-                MemberLoadKind::Distributed { w1, w2, .. } => w1 != 0.0 || w2 != 0.0,
+            let bounds = match load.kind {
+                MemberLoadKind::Point { p, a } if p != 0.0 => [a, a],
+                MemberLoadKind::Distributed { w1, w2, a, b } if w1 != 0.0 || w2 != 0.0 => [a, b],
+                _ => continue,
             };
-            if nonzero {
-                mark_components(member.entry(load.elem).or_default(), &load.dir);
+            let by_axis: &mut [Option<[f64; 2]>; 3] = member.entry(load.elem).or_default();
+            for (extent, component) in by_axis.iter_mut().zip(load.dir) {
+                if component != 0.0 {
+                    *extent = Some(extent.map_or(bounds, |old| enclosing_bounds(old, bounds)));
+                }
             }
         }
         Self {
@@ -49,6 +53,95 @@ impl BeamShearStep {
             member,
             tolerance_n: crate::common::newton::STATIC_NEWTON.tol * force_scale,
         }
+    }
+
+    fn member_load_bounds(&self, elem: ElemId, axis: [f64; 3]) -> Option<[f64; 2]> {
+        self.member
+            .get(&elem)?
+            .iter()
+            .zip(axis)
+            .filter(|(_, projection)| *projection != 0.0)
+            .filter_map(|(&bounds, _)| bounds)
+            .reduce(enclosing_bounds)
+    }
+
+    fn verify_zero_axial_cuts(
+        &self,
+        model: &Model,
+        geometry: &RcShearFaceGeometry,
+        parts: &[BeamPart<'_>],
+        axis: [f64; 3],
+        [lo_mm, hi_mm]: [f64; 2],
+    ) -> Result<(), Issue> {
+        let first = parts.first().ok_or(Issue::GroupTopology)?;
+        let last = parts.last().ok_or(Issue::GroupTopology)?;
+        let [i, j] = [first.ends[0], last.ends[1]];
+        let length_mm = dist(i, j);
+        let no_reaction = |part: &BeamPart<'_>, side, neighbor| {
+            let node_id = part.elem.nodes[side];
+            model.node(node_id).is_some_and(|node| {
+                node.coord == part.ends[side]
+                    && !has_end_eccentricity(part.elem, side)
+                    && axial_direction_free(node, axis)
+                    && !geometry.other_connections.contains(&node_id)
+                    && !geometry.diaphragm_nodes.contains(&node_id)
+                    && geometry
+                        .frame
+                        .elements_at(model, node_id)
+                        .all(|elem| elem.id == part.elem.id || Some(elem.id) == neighbor)
+            })
+        };
+        for pair in parts.windows(2) {
+            let [left, right] = [&pair[0], &pair[1]];
+            let x_mm = dist(i, right.ends[0]);
+            if lo_mm < x_mm
+                && x_mm < hi_mm
+                && !has_end_eccentricity(left.elem, 1)
+                && no_reaction(right, 0, Some(left.elem.id))
+                && has_axis_component(self.nodal.get(&right.elem.nodes[0]), axis)
+            {
+                return Err(Issue::Equilibrium);
+            }
+        }
+        // 反対側の支持を根拠に自由側を除外せず、反力の入りうる節点の手前まで確認する。
+        for (side, origin, [lo_mm, hi_mm]) in [
+            (0, i, [lo_mm, hi_mm]),
+            (1, j, [length_mm - hi_mm, length_mm - lo_mm]),
+        ] {
+            let part_at = |index| {
+                &parts[if side == 0 {
+                    index
+                } else {
+                    parts.len() - 1 - index
+                }]
+            };
+            let mut has_axial_load = false;
+            for index in 0..parts.len() {
+                let part = part_at(index);
+                let start_mm = dist(origin, part.ends[side]);
+                let end_mm = dist(origin, part.ends[1 - side]);
+                let neighbor = (index > 0).then(|| part_at(index - 1).elem.id);
+                if start_mm >= hi_mm || !no_reaction(part, side, neighbor) {
+                    break;
+                }
+                has_axial_load |= has_axis_component(self.nodal.get(&part.elem.nodes[side]), axis);
+                let first_load_mm = self.member_load_bounds(part.elem.id, axis).map(|[a, b]| {
+                    if side == 0 {
+                        a
+                    } else {
+                        part.length_mm - b
+                    }
+                });
+                if lo_mm < end_mm
+                    && (has_axial_load
+                        || first_load_mm.is_some_and(|x| x < part.length_mm.min(hi_mm - start_mm)))
+                {
+                    return Err(Issue::Equilibrium);
+                }
+                has_axial_load |= first_load_mm.is_some();
+            }
+        }
+        Ok(())
     }
 
     fn confirm_zero_components(
@@ -62,6 +155,9 @@ impl BeamShearStep {
     ) -> Result<(), Issue> {
         let axial_needed = actions.axial_range_n != [0.0; 2];
         let weak_needed = actions.max_mq[1] != (0.0, 0.0);
+        if !(axial_needed || weak_needed) || !self.tolerance_n.is_finite() {
+            return Ok(());
+        }
         let elements: HashSet<_> = parts.iter().map(|part| part.elem.id).collect();
         let Some(first) = parts.first() else {
             return Err(Issue::GroupTopology);
@@ -77,44 +173,28 @@ impl BeamShearStep {
                     .frame
                     .elements_at(model, node.id)
                     .any(|elem| !elements.contains(&elem.id))
-        }) || parts.iter().any(|part| {
-            let elem = part.elem;
-            elem.end_offsets_mm != [[0.0; 3]; 2]
-                || elem.rigid_zone.panel_offset_i != 0.0
-                || elem.rigid_zone.panel_offset_j != 0.0
-        }) {
+        }) || parts
+            .iter()
+            .any(|part| has_end_eccentricity(part.elem, 0) || has_end_eccentricity(part.elem, 1))
+        {
             return Ok(());
         }
         let [ex, ey, ez] = axes;
         let no_member_component = |axis| {
             parts
                 .iter()
-                .all(|part| !has_axis_component(self.member.get(&part.elem.id), axis))
+                .all(|part| self.member_load_bounds(part.elem.id, axis).is_none())
         };
-        let free_in_axial = |&node: &&sepika_core::model::Node| {
-            TRANSLATION.into_iter().zip(ex).all(|(dof, component)| {
-                component == 0.0
-                    || (!node.restraint.is_fixed(dof)
-                        && node
-                            .support_spring
-                            .is_none_or(|spring| spring[dof as usize] == 0.0))
-            })
-        };
-        let mut free_sides = [&nodes[1..], &nodes[..nodes.len() - 1]]
-            .into_iter()
-            .filter(|side| side.iter().all(free_in_axial))
-            .peekable();
-        let has_free_side = free_sides.peek().is_some();
         let no_axial_load_on_free_side = no_member_component(ex)
-            && free_sides.any(|side| {
-                side.iter()
-                    .all(|node| !has_axis_component(self.nodal.get(&node.id), ex))
-            });
-        if !axial_needed && has_free_side && !no_axial_load_on_free_side {
-            // ゼロの回復値だけでは、軸方向の個別荷重が正しく相殺されたとは確認できない。
-            return Err(Issue::Equilibrium);
-        }
-        if axial_needed && no_axial_load_on_free_side && self.tolerance_n.is_finite() {
+            && [&nodes[1..], &nodes[..nodes.len() - 1]]
+                .into_iter()
+                .any(|side| {
+                    side.iter().all(|node| {
+                        axial_direction_free(node, ex)
+                            && !has_axis_component(self.nodal.get(&node.id), ex)
+                    })
+                });
+        if axial_needed && no_axial_load_on_free_side {
             if !actions
                 .axial_range_n
                 .iter()
@@ -124,14 +204,13 @@ impl BeamShearStep {
             }
             actions.axial_range_n = [0.0; 2];
         }
-        let fixed = |node: &sepika_core::model::Node, dofs: [Dof; 3], axis: [f64; 3]| {
+        let fixed = |node: &Node, dofs: [Dof; 3], axis: [f64; 3]| {
             dofs.into_iter()
                 .zip(axis)
                 .all(|(dof, component)| component == 0.0 || node.restraint.is_fixed(dof))
         };
         // 弱軸とねじりを完全拘束した節点では、拘束方向の節点荷重は直接反力となる。
         if weak_needed
-            && self.tolerance_n.is_finite()
             && no_member_component(ez)
             && nodes.iter().all(|node| {
                 fixed(node, TRANSLATION, ez)
@@ -155,6 +234,29 @@ impl BeamShearStep {
 
 const TRANSLATION: [Dof; 3] = [Dof::Ux, Dof::Uy, Dof::Uz];
 const ROTATION: [Dof; 3] = [Dof::Rx, Dof::Ry, Dof::Rz];
+
+fn enclosing_bounds([a, b]: [f64; 2], [c, d]: [f64; 2]) -> [f64; 2] {
+    [a.min(c), b.max(d)]
+}
+
+fn axial_direction_free(node: &Node, axis: [f64; 3]) -> bool {
+    TRANSLATION.into_iter().zip(axis).all(|(dof, component)| {
+        component == 0.0
+            || (!node.restraint.is_fixed(dof)
+                && node
+                    .support_spring
+                    .is_none_or(|spring| spring[dof as usize] == 0.0))
+    })
+}
+
+fn has_end_eccentricity(elem: &ElementData, side: usize) -> bool {
+    elem.end_offsets_mm[side] != [0.0; 3]
+        || [
+            elem.rigid_zone.panel_offset_i,
+            elem.rigid_zone.panel_offset_j,
+        ][side]
+            != 0.0
+}
 
 fn mark_components(marked: &mut [bool; 3], components: &[f64]) {
     for (marked, component) in marked.iter_mut().zip(components) {
@@ -352,11 +454,15 @@ pub(super) fn beam_actions(
         return Err(Issue::Recovery);
     }
     if let Some(applied) = applied.filter(|_| exact_axes) {
+        let axes = first_axes.ok_or(Issue::GroupTopology)?;
+        if combined.axial_range_n == [0.0; 2] {
+            applied.verify_zero_axial_cuts(model, geometry, &parts, axes[0], [lo, hi])?;
+        }
         applied.confirm_zero_components(
             model,
             geometry,
             &parts,
-            first_axes.ok_or(Issue::GroupTopology)?,
+            axes,
             torsion_nmm,
             &mut combined,
         )?;
