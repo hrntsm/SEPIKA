@@ -907,15 +907,17 @@ impl SteelDesign {
             .filter(|_| ctx.kind == MemberKind::Column && forces.n <= 0.0 && forces.mz != 0.0);
         let asymmetric_girder =
             asymmetric_built_h.filter(|_| ctx.kind == MemberKind::Girder && forces.mz != 0.0);
+        let symmetric_h_column = ctx.kind == MemberKind::Column && symmetric_h_web(sec).is_some();
+        let ordinary_weak_h_column =
+            symmetric_h_column && scope == SteelCheckScope::Ordinary && forces.my != 0.0;
         let check_plate_slenderness = if forces.my == 0.0 {
             forces.n < 0.0 || forces.mz != 0.0
         } else {
-            scope == SteelCheckScope::Ordinary
+            ordinary_weak_h_column
         };
         let plate_slenderness_reason = (!secondary_post
-            && ctx.kind == MemberKind::Column
+            && symmetric_h_column
             && torsion_reason.is_none()
-            && symmetric_h_web(sec).is_some()
             && check_plate_slenderness)
             .then(|| column::check_symmetric_h_plate_slenderness(forces, sec, mat).err())
             .flatten();
@@ -924,100 +926,109 @@ impl SteelDesign {
             && forces.qz != 0.0
             && h_combined_reason.is_none())
         .then_some(WEAK_H_SHEAR_UNAVAILABLE);
-        let lambda =
-            match check_compression_slenderness(forces, sec, ctx, torsion_reason, secondary_post) {
-                Ok(Some(lambda)) if !secondary_post => lambda,
-                Ok(_) => crate::effective_slenderness(
-                    sec.iy,
-                    sec.iz,
-                    nonzero(sec.area),
-                    ctx.length,
-                    ctx.lk_y,
-                    ctx.lk_z,
-                ),
-                Err(mut outcome) => {
-                    if let (Some(torsion_reason), CheckOutcome::Skipped { reason }) =
-                        (torsion_reason, &mut outcome)
-                    {
-                        reason.push('。');
-                        reason.push_str(torsion_reason);
+        let require_compression_properties = ordinary_weak_h_column && forces.n < 0.0;
+        let compression_properties = if require_compression_properties {
+            column::confirm_h_compression_properties(sec)
+        } else {
+            Ok(())
+        };
+        let slenderness = compression_properties
+            .map_err(|reason| CheckOutcome::Skipped { reason })
+            .and_then(|()| {
+                check_compression_slenderness(forces, sec, ctx, torsion_reason, secondary_post)
+            });
+        let lambda = match slenderness {
+            Ok(Some(lambda)) if !secondary_post => lambda,
+            Ok(_) => crate::effective_slenderness(
+                sec.iy,
+                sec.iz,
+                nonzero(sec.area),
+                ctx.length,
+                ctx.lk_y,
+                ctx.lk_z,
+            ),
+            Err(mut outcome) => {
+                if let (Some(torsion_reason), CheckOutcome::Skipped { reason }) =
+                    (torsion_reason, &mut outcome)
+                {
+                    reason.push('。');
+                    reason.push_str(torsion_reason);
+                }
+                for shear_reason in h_combined_reason
+                    .filter(|_| forces.n <= 0.0)
+                    .into_iter()
+                    .chain(built_h_shear_reasons.into_iter().flatten())
+                    .chain(plate_weak_shear_reason)
+                    .chain(plate_slenderness_reason.as_deref())
+                {
+                    match &mut outcome {
+                        CheckOutcome::Checked(_) => {
+                            *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                                incomplete.take(),
+                                Some(shear_reason),
+                            );
+                        }
+                        CheckOutcome::Skipped { reason } => {
+                            reason.push('。');
+                            reason.push_str(shear_reason);
+                        }
                     }
-                    for shear_reason in h_combined_reason
-                        .filter(|_| forces.n <= 0.0)
+                }
+                if let (Some(_), CheckOutcome::Checked(result)) = (asymmetric_shape, &mut outcome) {
+                    for reason in column::asymmetric_built_h_section_reason(forces, sec, ctx)
                         .into_iter()
-                        .chain(built_h_shear_reasons.into_iter().flatten())
-                        .chain(plate_weak_shear_reason)
-                        .chain(plate_slenderness_reason.as_deref())
+                        .chain(column::asymmetric_built_h_combination_reasons(forces, ctx))
                     {
-                        match &mut outcome {
-                            CheckOutcome::Checked(_) => {
-                                *incomplete =
-                                    crate::member_design_check::combine_incomplete_reasons(
-                                        incomplete.take(),
-                                        Some(shear_reason),
-                                    );
-                            }
-                            CheckOutcome::Skipped { reason } => {
-                                reason.push('。');
-                                reason.push_str(shear_reason);
-                            }
-                        }
+                        result.basis.push('。');
+                        result.basis.push_str(reason);
                     }
-                    if let (Some(_), CheckOutcome::Checked(result)) =
-                        (asymmetric_shape, &mut outcome)
+                }
+                if let (Some(_), None, CheckOutcome::Checked(result)) =
+                    (asymmetric_girder, torsion_reason, &mut outcome)
+                {
+                    for reason in beam::asymmetric_built_h_combination_reasons(forces) {
+                        result.basis.push('。');
+                        result.basis.push_str(reason);
+                    }
+                }
+                let independent_axial = match &outcome {
+                    CheckOutcome::Skipped { .. }
+                        if plate_slenderness_reason.is_some() || require_compression_properties =>
                     {
-                        for reason in column::asymmetric_built_h_section_reason(forces, sec, ctx)
-                            .into_iter()
-                            .chain(column::asymmetric_built_h_combination_reasons(forces, ctx))
-                        {
-                            result.basis.push('。');
-                            result.basis.push_str(reason);
-                        }
-                    }
-                    if let (Some(_), None, CheckOutcome::Checked(result)) =
-                        (asymmetric_girder, torsion_reason, &mut outcome)
-                    {
-                        for reason in beam::asymmetric_built_h_combination_reasons(forces) {
-                            result.basis.push('。');
-                            result.basis.push_str(reason);
-                        }
-                    }
-                    let independent_axial = match (&outcome, &plate_slenderness_reason) {
-                        (CheckOutcome::Skipped { .. }, Some(_)) => sec
-                            .resolved_area()
+                        sec.resolved_area()
                             .ok()
                             .zip(crate::material_strength::section_steel_f(sec, Some(mat)).ok())
                             .and_then(|(area_mm2, f)| {
                                 axial_material_limit_failure(forces.n, area_mm2, ctx.term, f)
-                            }),
-                        _ => None,
-                    };
-                    let independent_checks: Vec<_> = independent_axial
-                        .into_iter()
-                        .chain(independent_h_web_shear_failure(forces, sec, mat, ctx))
-                        .collect();
-                    if !independent_checks.is_empty() {
-                        match &mut outcome {
-                            CheckOutcome::Checked(result) => {
-                                result.components.extend(independent_checks)
-                            }
-                            CheckOutcome::Skipped { reason } => {
-                                *incomplete =
-                                    crate::member_design_check::combine_incomplete_reasons(
-                                        incomplete.take(),
-                                        Some(reason),
-                                    );
-                                outcome = CheckOutcome::Checked(CheckResult {
-                                    basis: "鋼構造許容応力度設計規準 H形鋼の独立照査".into(),
-                                    detail: String::new(),
-                                    components: independent_checks,
-                                });
-                            }
+                            })
+                    }
+                    _ => None,
+                };
+                let independent_checks: Vec<_> = independent_axial
+                    .into_iter()
+                    .chain(independent_h_web_shear_failure(forces, sec, mat, ctx))
+                    .collect();
+                if !independent_checks.is_empty() {
+                    match &mut outcome {
+                        CheckOutcome::Checked(result) => {
+                            result.components.extend(independent_checks)
+                        }
+                        CheckOutcome::Skipped { reason } => {
+                            *incomplete = crate::member_design_check::combine_incomplete_reasons(
+                                incomplete.take(),
+                                Some(reason),
+                            );
+                            outcome = CheckOutcome::Checked(CheckResult {
+                                basis: "鋼構造許容応力度設計規準 H形鋼の独立照査".into(),
+                                detail: String::new(),
+                                components: independent_checks,
+                            });
                         }
                     }
-                    return outcome;
                 }
-            };
+                return outcome;
+            }
+        };
         if let Some(reason) = torsion_reason {
             return CheckOutcome::Skipped {
                 reason: reason.into(),

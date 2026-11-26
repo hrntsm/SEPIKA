@@ -920,6 +920,110 @@ fn issue_1943_unchecked_axial_bending_retains_independent_failures() {
     }
 }
 
+#[test]
+fn issue_1943_unconfirmed_section_properties_cannot_establish_compression_or_slenderness_failure() {
+    let model = issue_model();
+    let section = symmetric_h(200.0, 8.0, 7.0, false);
+    let ctx = column_context(&model, LoadTerm::Short);
+    let forces = MemberForcesAt {
+        n: -500_000.0,
+        ..WEAK_BENDING_ONLY
+    };
+    let check = |section: &Section| {
+        SteelDesign
+            .check_outcomes(&forces, section, &model.materials[0], &ctx)
+            .collect::<Vec<_>>()
+    };
+    let baseline = check(&section);
+    assert!(matches!(
+        baseline.as_slice(),
+        [CheckOutcome::Skipped { reason }] if reason.contains("ウェブ d/t=48.2500")
+    ));
+
+    // 正しい λ=75.284、軸力比0.504。Izを1/4にすると見かけの軸力比1.374、1/16では見かけのλ=301.137。
+    for (section, property) in [
+        (
+            Section {
+                iz: section.iz / 4.0,
+                ..section.clone()
+            },
+            "弱軸断面二次モーメント",
+        ),
+        (
+            Section {
+                iz: section.iz / 16.0,
+                ..section.clone()
+            },
+            "弱軸断面二次モーメント",
+        ),
+        (
+            Section {
+                iy: section.iy / 16.0,
+                ..section.clone()
+            },
+            "強軸断面二次モーメント",
+        ),
+        (
+            Section {
+                area: section.area / 4.0,
+                ..section.clone()
+            },
+            "全断面積",
+        ),
+    ] {
+        let outcomes = check(&section);
+        assert!(
+            matches!(outcomes.as_slice(), [CheckOutcome::Skipped { reason }]
+                if reason.contains("有効細長比と許容圧縮応力度に必要なH形断面性能")
+                && reason.contains(property)),
+            "{outcomes:?}"
+        );
+    }
+}
+
+#[test]
+fn issue_1943_unconfirmed_inertia_preserves_only_independent_material_and_web_shear_failures() {
+    let model = issue_model();
+    let mut section = symmetric_h(200.0, 8.0, 7.0, false);
+    section.iz /= 16.0;
+    let forces = MemberForcesAt {
+        n: -1_600_000.0,
+        qy: 500_000.0,
+        ..WEAK_BENDING_ONLY
+    };
+    let outcomes = SteelDesign
+        .check_outcomes(
+            &forces,
+            &section,
+            &model.materials[0],
+            &column_context(&model, LoadTerm::Short),
+        )
+        .collect::<Vec<_>>();
+    let [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }] = outcomes.as_slice()
+    else {
+        panic!("{outcomes:?}");
+    };
+    // 全断面積5,888 mm²、ウェブ内法386 mm、短期許容圧縮の材料上限235・許容せん断235/√3 N/mm²。
+    let [axial, shear] = result.components.as_slice() else {
+        panic!("{result:?}");
+    };
+    assert_eq!(axial.kind, CheckKind::Axial);
+    assert!(
+        (axial.ratio - 1.156_336_725_254_394).abs() < 1e-12,
+        "{axial:?}"
+    );
+    assert!(axial.detail.contains("材料許容上限"));
+    assert_eq!(shear.kind, CheckKind::Shear);
+    assert!(
+        (shear.ratio - 1.193_398_472_859_164_7).abs() < 1e-12,
+        "{shear:?}"
+    );
+    assert!(
+        reason.contains("有効細長比") && reason.contains("弱軸断面二次モーメント"),
+        "{reason}"
+    );
+}
+
 fn issue_model() -> Model {
     input::cantilever(ISSUE_FORCES.n, ISSUE_FORCES.mz, ISSUE_FORCES.qz)
 }

@@ -485,6 +485,32 @@ fn plate_inertia(
     Ok(stored_mm4)
 }
 
+pub(super) fn confirm_h_compression_properties(sec: &Section) -> Result<(), String> {
+    let unresolved = "有効細長比と許容圧縮応力度に必要なH形断面性能を確定できません";
+    let shape = sec.shape.as_ref().expect("上下対称H形鋼の形状が必要");
+    let area_mm2 = sec
+        .resolved_area()
+        .map_err(|reason| format!("{unresolved}。全断面積を確認してください。{reason}"))?;
+    if area_mm2 <= 0.0 {
+        return Err(format!("{unresolved}。全断面積には有限な正値が必要です"));
+    }
+    plate_inertia(
+        sec.property_basis.iy,
+        sec.iy,
+        "強軸",
+        || shape.try_calc_iy(),
+        unresolved,
+    )?;
+    plate_inertia(
+        sec.property_basis.iz,
+        sec.iz,
+        "弱軸",
+        || shape.try_calc_iz(),
+        unresolved,
+    )?;
+    Ok(())
+}
+
 fn tension_compressed_plates(
     forces: &MemberForcesAt,
     sec: &Section,
