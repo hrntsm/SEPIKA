@@ -92,7 +92,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 
 | [0063](0063-wall-side-column-foundations.md) | accepted | 側柱の物理分類・回転接続・局所釣合いを要素表現から分離する |
 
-| [0064](0064-fiber-ms-axial-biaxial-consistency.md) | accepted | Fiber と MS の軸・二軸曲げを同じ材料応答へ整合させる |
+| [0064](0064-fiber-ms-axial-biaxial-consistency.md) | partially superseded by ADR-0176 | Fiber と MS の軸・二軸曲げを同じ材料応答へ整合させる |
 
 | [0065](0065-elastic-wall-top-bottom-girders.md) | accepted | 壁上下の剛梁を連続した壁板の弾性高剛性部材として扱う |
 
