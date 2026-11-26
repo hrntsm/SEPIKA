@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use sepika_core::dof::{Dof, Dof6Mask};
-use sepika_core::ids::ElemId;
+use sepika_core::ids::{ElemId, LoadCaseId};
 use sepika_core::model::{EndCondition, Model};
 use sepika_core::section_shape::SectionShape;
 use sepika_design_jp::{
@@ -25,6 +25,17 @@ fn check(
     rows: &[(f64, [f64; 6])],
     ql: f64,
 ) -> Vec<(ElemId, f64, CheckOutcome)> {
+    check_with_load_evidence(model, method, q0, rows, ql, None)
+}
+
+fn check_with_load_evidence(
+    model: &Model,
+    method: QdMethod,
+    q0: Option<f64>,
+    rows: &[(f64, [f64; 6])],
+    ql: f64,
+    terms: Option<&[(LoadCaseId, f64)]>,
+) -> Vec<(ElemId, f64, CheckOutcome)> {
     let response = [(ElemId(0), MemberForces { at: rows.to_vec() })];
     let gravity = [(
         ElemId(0),
@@ -45,6 +56,7 @@ fn check(
             qd_method: method,
             long_member_forces: Some(&gravity),
             q_simple_by_elem: q0_by_elem.as_ref(),
+            rc_beam_qd1_haunch_load_terms: terms,
             ..Default::default()
         },
     )
@@ -75,6 +87,19 @@ fn assert_shear_n(outcome: &CheckOutcome, expected_n: f64) {
         (actual_n - expected_n).abs() < 0.1,
         "{actual_n} != {expected_n}: {shear:?}"
     );
+}
+
+fn assert_haunch_demand_without_qa(outcome: &CheckOutcome, qd1_n: f64, adopted_min_n: Option<f64>) {
+    let CheckOutcome::Skipped { reason } = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert!(
+        reason.contains("許容せん断力QAは未算定") && reason.contains(&format!("QD1={qd1_n:.1} N")),
+        "{reason}"
+    );
+    if let Some(qd_n) = adopted_min_n {
+        assert!(reason.contains(&format!("採用QD={qd_n:.1} N")), "{reason}");
+    }
 }
 
 #[test]
@@ -148,8 +173,14 @@ fn haunch_qd1_uses_confirmed_face_rebar_and_only_checks_the_general_section() {
                         matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("ハンチ区間や実フェース外")),
                         "{outcome:?}"
                     );
-                } else {
+                } else if method == QdMethod::Qd2 {
                     assert_shear_n(outcome, expected_n);
+                } else {
+                    assert_haunch_demand_without_qa(
+                        outcome,
+                        qd1_n,
+                        (method == QdMethod::Min).then_some(expected_n),
+                    );
                 }
             }
         }
@@ -182,7 +213,7 @@ fn haunch_qd1_j_side_uses_the_own_face_and_preserves_the_general_section_boundar
                 matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("ハンチ区間"))
             );
         } else {
-            assert_shear_n(&outcome, 104_767.678_125);
+            assert_haunch_demand_without_qa(&outcome, 104_767.678_125, None);
         }
     }
 }
@@ -247,7 +278,68 @@ fn haunch_qd1_accepts_only_the_recorded_transition_for_an_equivalent_face_roundi
 }
 
 #[test]
-fn haunch_qd1_uses_depth_and_shear_at_the_actual_governing_bending_station() {
+fn haunch_qd1_uses_the_verified_maximum_between_samples_and_both_sides_of_a_point_load() {
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+
+    let mut model = model();
+    add_confirmed_i_haunch(&mut model);
+    model.load_cases[0].member = vec![MemberLoad::manual(
+        ElemId(0),
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Point {
+            a: 2_400.0,
+            p: 60_000.0,
+        },
+    )];
+    // x=2.4mでの最大曲げ57 kN·mを挟み、左Q=40 kN、右Q=-20 kN。αは右側1.000。
+    // 中央の保存点は51 kN·m、Q=40 kNで、そこを採ればα=1.205になる。
+    let rows = [
+        (0.0, 40_000.0, -39e6),
+        (250.0, 40_000.0, -29e6),
+        (850.0, 40_000.0, -5e6),
+        (2250.0, 40_000.0, 51e6),
+        (4250.0, -20_000.0, 20e6),
+        (4500.0, -20_000.0, 15e6),
+    ]
+    .map(|(x, q, m)| (x / 4500.0, [0.0, q, 0.0, 0.0, 0.0, m]));
+    for (terms, expected_issue) in [
+        (Some(&[(LoadCaseId(0), 1.0)][..]), None),
+        (Some(&[(LoadCaseId(0), 2.0)][..]), Some("部材荷重の釣合い")),
+        (None, Some("荷重組合せの由来")),
+    ] {
+        let outcomes = check_with_load_evidence(
+            &model,
+            QdMethod::Qd1,
+            Some(8_000.0),
+            &rows,
+            -10_000.0,
+            terms,
+        );
+        let (_, _, centre) = outcomes.iter().find(|(_, p, _)| *p == 0.5).unwrap();
+        if let Some(expected_issue) = expected_issue {
+            assert_haunch_demand_without_qa(centre, 112_767.678_125, None);
+            assert!(
+                matches!(centre, CheckOutcome::Skipped { reason } if reason.contains(expected_issue))
+            );
+        } else {
+            assert_shear_n(centre, 112_767.678_125);
+            let CheckOutcome::Checked(centre) = centre else {
+                unreachable!()
+            };
+            let shear = centre
+                .components
+                .iter()
+                .find(|c| c.kind == CheckKind::Shear)
+                .unwrap();
+            assert!(shear.detail.contains("α=1.000"), "{shear:?}");
+        }
+    }
+}
+
+#[test]
+fn haunch_qd1_uses_the_actual_depth_at_a_governing_face_but_not_inside_a_haunch() {
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+
     let mut model = model();
     add_confirmed_i_haunch(&mut model);
     model.member_detail_attrs[0]
@@ -259,23 +351,45 @@ fn haunch_qd1_uses_depth_and_shear_at_the_actual_governing_bending_station() {
         .unwrap()
         .bottom
         .effective_depth_mm = 450.0;
-    let face_i = 250.0 / 4_500.0;
-    let face_j = 1.0 - 250.0 / 4_500.0;
-    let response = [
-        (0.0, 1e12),
-        (face_i, 42e6),
-        (0.1, 12e6),
-        (850.0 / 4500.0, 10e6),
-        (0.5, 10e6),
-        (face_j, -42e6),
-        (1.0, -1e12),
+    let terms = Some(&[(LoadCaseId(0), 1.0)][..]);
+    model.load_cases[0].member = vec![
+        MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Point {
+                a: 250.0,
+                p: 50_000.0,
+            },
+        ),
+        MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, 1.0],
+            MemberLoadKind::Point {
+                a: 800.0,
+                p: 60_000.0,
+            },
+        ),
+    ];
+    // 節点芯44.5 kN·mとi実フェース外側のQ=-10 kNは範囲外。
+    // i実フェースの42 kN·m、内側Q=-60 kN、d=450 mmで α=1.565。
+    let rows = [
+        (0.0, -10_000.0, 44.5e6),
+        (250.0, -10_000.0, 42e6),
+        (850.0, 0.0, 9e6),
+        (2250.0, 0.0, 9e6),
+        (4250.0, 0.0, 9e6),
+        (4500.0, 0.0, 9e6),
     ]
-    .map(|(xi, mz)| {
-        let qy = if xi == 0.5 { 120_000.0 } else { 60_000.0 };
-        (xi, [0.0, qy, 0.0, 0.0, 0.0, mz])
-    });
-    let outcomes = check(&model, QdMethod::Qd1, Some(8_000.0), &response, -10_000.0);
-    let (_, _, centre) = outcomes.iter().find(|(_, pos, _)| *pos == 0.5).unwrap();
+    .map(|(x, q, m)| (x / 4500.0, [0.0, q, 0.0, 0.0, 0.0, m]));
+    let outcomes = check_with_load_evidence(
+        &model,
+        QdMethod::Qd1,
+        Some(8_000.0),
+        &rows,
+        -10_000.0,
+        terms,
+    );
+    let (_, _, centre) = outcomes.iter().find(|(_, p, _)| *p == 0.5).unwrap();
     assert_shear_n(centre, 112_767.678_125);
     let CheckOutcome::Checked(centre) = centre else {
         unreachable!()
@@ -285,47 +399,66 @@ fn haunch_qd1_uses_depth_and_shear_at_the_actual_governing_bending_station() {
         .iter()
         .find(|c| c.kind == CheckKind::Shear)
         .unwrap();
-    // 同値の実フェースのうちd=450 mmが支配し、M/Q=700 mmでα=1.565。一般部代用では1.760。
     assert!(shear.detail.contains("α=1.565"), "{shear:?}");
 
-    let mut with_unrelated_nonfinite = response;
-    with_unrelated_nonfinite[1].1[3] = f64::NAN;
-    let outcomes = check(
+    model.load_cases[0].member = vec![MemberLoad::manual(
+        ElemId(0),
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Point {
+            a: 450.0,
+            p: 65_000.0,
+        },
+    )];
+    // 最大曲げ17 kN·mは x=450 mm のハンチ内部にあり、その位置のdは未確認。
+    let rows = [
+        (0.0, 60_000.0, -10e6),
+        (250.0, 60_000.0, 5e6),
+        (850.0, -5_000.0, 15e6),
+        (2250.0, -5_000.0, 8e6),
+        (4250.0, -5_000.0, -2e6),
+        (4500.0, -5_000.0, -3.25e6),
+    ]
+    .map(|(x, q, m)| (x / 4500.0, [0.0, q, 0.0, 0.0, 0.0, m]));
+    let outcomes = check_with_load_evidence(
         &model,
         QdMethod::Qd1,
         Some(8_000.0),
-        &with_unrelated_nonfinite,
+        &rows,
         -10_000.0,
+        terms,
     );
-    assert_shear_n(
-        &outcomes.iter().find(|(_, pos, _)| *pos == 0.5).unwrap().2,
-        112_767.678_125,
+    let (_, _, centre) = outcomes.iter().find(|(_, p, _)| *p == 0.5).unwrap();
+    assert_haunch_demand_without_qa(centre, 112_767.678_125, None);
+    assert!(
+        matches!(centre, CheckOutcome::Skipped { reason } if reason.contains("最大曲げ位置・引張側の有効せい"))
     );
+}
 
-    for (reference, expected) in [
-        (
-            Some([0.0, 60_000.0, 0.0, 0.0, 0.0, -42e6]),
-            "最大曲げ位置・引張側の有効せい",
-        ),
-        (
-            Some([0.0, f64::NAN, 0.0, 0.0, 0.0, 42e6]),
-            "最大曲げ位置の解析せん断力が非有限",
-        ),
-        (None, "実フェースの応答が欠落"),
-    ] {
-        let mut rows = response.to_vec();
-        if let Some(reference) = reference {
-            rows[2].1 = reference;
-        } else {
-            rows.remove(1);
-        }
-        let outcomes = check(&model, QdMethod::Min, Some(8_000.0), &rows, -10_000.0);
-        assert!(outcomes.iter().any(|(_, pos, outcome)| *pos == 0.5 &&
-            matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(expected) && reason.contains("QD1=112767.7 N"))), "{outcomes:?}");
-        assert!(outcomes.iter().all(
-            |(_, _, outcome)| !matches!(outcome, CheckOutcome::Checked(r)
-            if r.components.iter().any(|c| c.kind == CheckKind::Shear))
-        ));
+#[test]
+fn haunch_qd1_retains_bending_at_the_rounded_opposite_face_and_with_missing_shear() {
+    let mut model = model();
+    add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    add_confirmed_i_haunch(&mut model);
+    model.elements[0].rigid_zone.face_j = Some(249.999_999_999_999);
+    let recorded_j = 1.0 - 249.999_999_999_999 / 4_500.0;
+    assert!(recorded_j > 1.0 - 250.0 / 4_500.0);
+    for (pos, known_face) in [(recorded_j, true), (recorded_j + f64::EPSILON, false)] {
+        let rows = [
+            (250.0 / 4500.0, 0.0, 0.0),
+            (850.0 / 4500.0, 0.0, 0.0),
+            (0.5, f64::NAN, 1e9),
+            (pos, 60_000.0, 1e9),
+        ]
+        .map(|(xi, q, m)| (xi, [0.0, q, 0.0, 0.0, 0.0, m]));
+        let outcomes = check(&model, QdMethod::Qd1, Some(8_000.0), &rows, -10_000.0);
+        let bending_ng_at = |xi| {
+            outcomes.iter().any(|(_, p, outcome)| *p == xi &&
+            matches!(outcome, CheckOutcome::Checked(r) if r.components.iter().any(|c| c.kind == CheckKind::Bending && c.ratio > 1.0)))
+        };
+        assert!(bending_ng_at(0.5), "{outcomes:?}");
+        assert_eq!(bending_ng_at(pos), known_face, "{outcomes:?}");
+        assert!(outcomes.iter().any(|(_, p, outcome)| *p == 0.5 &&
+            matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("Qyが非有限") && reason.contains("QD1=112767.7 N"))), "{outcomes:?}");
     }
 }
 

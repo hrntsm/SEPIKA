@@ -63,12 +63,27 @@ pub fn same_qd1_station(expected: f64, actual: f64) -> bool {
 
 /// 指定の検定位置の一意かつ有限な保存断面力を選ぶ際の診断。
 pub fn qd1_saved_station_issue(position: f64, forces: &[(f64, [f64; 6])]) -> Option<&'static str> {
+    saved_station_issue(position, forces, true)
+}
+
+/// ハンチ付きQD1では保存行の一意性だけを確認し、成分別の検定条件と分ける。
+pub fn qd1_haunch_station_issue(position: f64, forces: &[(f64, [f64; 6])]) -> Option<&'static str> {
+    saved_station_issue(position, forces, false)
+}
+
+fn saved_station_issue(
+    position: f64,
+    forces: &[(f64, [f64; 6])],
+    requires_finite: bool,
+) -> Option<&'static str> {
     let mut rows = forces
         .iter()
         .filter(|(pos, _)| same_qd1_station(position, *pos));
     match (rows.next(), rows.next()) {
-        (Some((_, force)), None) if force.iter().all(|value| value.is_finite()) => None,
+        (Some((_, force)), None) if !requires_finite || force.iter().all(|v| v.is_finite()) => None,
+        (None, _) if !requires_finite => Some("RC梁の検定位置に対応する保存解析断面力がありません"),
         (None, _) => Some("RC梁の実材端または実柱面に対応する保存解析断面力がありません"),
+        _ if !requires_finite => Some("RC梁の検定位置の保存解析断面力が重複しています"),
         _ => Some("RC梁の実材端または実柱面の保存解析断面力が非有限、または重複しています"),
     }
 }

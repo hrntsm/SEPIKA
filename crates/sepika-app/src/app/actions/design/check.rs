@@ -332,7 +332,7 @@ impl App {
         } else {
             RcColumnLongTermShearInput::Unverified
         };
-        let steel_beam_span_load_terms = if load_error.is_none() && matches_saved_member_forces {
+        let verified_member_load_terms = if load_error.is_none() && matches_saved_member_forces {
             load_terms.as_deref()
         } else {
             None
@@ -377,7 +377,8 @@ impl App {
                     src_holding_reviewed: self.src_wall_holding_reviewed(is_seismic_combo),
                     src_wall_gravity_forces: gravity_long_owned.as_deref(),
                     load_terms: load_terms.as_deref(),
-                    steel_beam_span_load_terms,
+                    steel_beam_span_load_terms: verified_member_load_terms,
+                    rc_beam_qd1_haunch_load_terms: verified_member_load_terms,
                     rc_column_long_term_shear,
                     rc_damage_control: self.core.analysis_cfg.rc_damage_control,
                     bond_method: self.core.analysis_cfg.bond_method,

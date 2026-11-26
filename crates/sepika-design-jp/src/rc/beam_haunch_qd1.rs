@@ -5,17 +5,19 @@ use super::beam_slab_qd1::beam_supports_line_attached_slab;
 use super::{axis_props_from_shape, shear_alpha};
 use crate::design_position::same_qd1_station;
 use crate::ultimate::rc_props::RcDirection;
-use sepika_core::model::{ElementData, Haunch, Model};
+use sepika_core::model::{ElementData, Haunch, MemberLoad, Model};
 use sepika_core::section_shape::SectionShape;
+use sepika_element::frame::beam::MemberForces;
+use sepika_element::frame::member_load::{frame_strong_bending_span, FrameStrongBendingSpan};
+use sepika_element::transform::LocalFrame;
 
 /// ハンチ付き端の方向別降伏曲げと、一般断面で検定できる範囲。
 #[derive(Clone, Debug)]
 pub struct BeamQd1Haunches {
     general_section_range: Option<GeneralSectionRange>,
-    actual_faces_xi: Option<[f64; 2]>,
     general_depths_mm: [Option<f64>; 2],
     sections: Result<[Option<ValidatedFace>; 2], String>,
-    alpha: Result<f64, &'static str>,
+    alpha: Result<f64, String>,
     mixed_response: bool,
 }
 
@@ -28,13 +30,13 @@ struct ValidatedFace {
 #[derive(Clone, Debug)]
 struct GeneralSectionRange {
     actual_bounds_xi: [f64; 2],
-    recorded_haunch_ends_xi: [Option<f64>; 2],
+    recorded_bounds_xi: [Option<f64>; 2],
 }
 
 impl GeneralSectionRange {
     fn contains(&self, xi: f64) -> bool {
         let [i, j] = self.actual_bounds_xi;
-        (i..=j).contains(&xi) || self.recorded_haunch_ends_xi.contains(&Some(xi))
+        (i..=j).contains(&xi) || self.recorded_bounds_xi.contains(&Some(xi))
     }
 }
 
@@ -46,89 +48,98 @@ impl BeamQd1Haunches {
             .map_err(Clone::clone)
     }
 
-    /// 同じ確定応答の解析断面力をαに使う。異時刻の包絡しかない場合は None を渡す。
-    pub fn set_shear_span_reference(&mut self, rows: Option<&[(f64, [f64; 6])]>) {
-        self.mixed_response = rows.is_none();
-        self.alpha = rows.map_or(
-            Err("異時刻の内力包絡では、同じ確定ステップの曲げ・せん断力を確認できません"),
-            |rows| self.resolve_shear_alpha(rows),
-        );
+    /// 時刻歴の保存断面行だけでは実フェース間の曲げ分布を確定しない。同一確定ステップかどうかは需要側に伝える。
+    pub fn set_time_history_reference(&mut self, same_step: bool) {
+        self.mixed_response = !same_step;
+        self.alpha = Err(if same_step {
+            "確定ステップの保存断面力だけでは実フェース間の最大曲げ位置とせん断力を確認できません"
+        } else {
+            "異時刻の内力包絡では実フェース間の最大曲げ位置とせん断力を確認できません"
+        }
+        .into());
     }
 
-    pub(super) fn shear_alpha(&self) -> Result<f64, &'static str> {
-        self.alpha
+    pub(crate) fn set_static_shear_span_reference(
+        &mut self,
+        model: &Model,
+        elem: &ElementData,
+        geometry: Option<BeamQd1Geometry>,
+        loads: Result<&[(f64, &MemberLoad)], &'static str>,
+        forces: &MemberForces,
+    ) {
+        self.alpha = (|| {
+            let geometry = geometry.ok_or("実フェース間の位置を確認できません")?;
+            let [i, j] = super::frame_end_positions(model, elem).ok_or("梁の実材軸が未確認です")?;
+            let frame = LocalFrame::from_nodes(i, j, elem.local_axis.ref_vector)?;
+            let [i_mm, j_mm] = geometry.face_distances_mm;
+            let span = frame_strong_bending_span(
+                &frame,
+                geometry.axis_length_mm,
+                [i_mm, geometry.axis_length_mm - j_mm],
+                loads?,
+                forces,
+            )?;
+            self.resolve_shear_alpha(span)
+        })();
+    }
+
+    pub(super) fn shear_alpha(&self) -> Result<f64, &str> {
+        self.alpha.as_ref().copied().map_err(String::as_str)
     }
 
     pub(super) fn mixes_response_steps(&self) -> bool {
         self.mixed_response
     }
 
-    fn resolve_shear_alpha(&self, rows: &[(f64, [f64; 6])]) -> Result<f64, &'static str> {
-        let [i, j] = self
-            .actual_faces_xi
-            .ok_or("実フェース間の位置を確認できません")?;
-        let has_unique_row = |xi| {
-            rows.iter()
-                .filter(|(pos, _)| same_qd1_station(xi, *pos))
-                .take(2)
-                .count()
-                == 1
-        };
-        if [i, j].into_iter().any(|xi| !has_unique_row(xi)) {
-            return Err("実フェースの応答が欠落または重複しています");
+    fn resolve_shear_alpha(&self, span: FrameStrongBendingSpan) -> Result<f64, String> {
+        if let Some(reason) = span.unverified_distribution {
+            return Err(reason.into());
         }
-        if rows.iter().any(|(xi, _)| !xi.is_finite()) {
-            return Err("解析断面の位置が非有限です");
+        let mut minimum = None::<f64>;
+        for peak in span.demand_peaks {
+            let right = peak.right?;
+            let left = (!peak.is_i_face || right.is_none()).then_some(peak.left);
+            let face_index = if peak.is_i_face {
+                Some(0)
+            } else if peak.is_j_face {
+                Some(1)
+            } else {
+                None
+            };
+            for force in [left, right].into_iter().flatten() {
+                let tension_side = usize::from(force[5] >= 0.0);
+                let depth_mm = self
+                    .depth_for_alpha(peak.xi, face_index, tension_side)
+                    .filter(|d| d.is_finite() && *d > 0.0)
+                    .ok_or("最大曲げ位置・引張側の有効せいを確認できません")?;
+                let alpha = shear_alpha(force[5].abs(), force[1], depth_mm, 2.0);
+                if !alpha.is_finite() {
+                    return Err("最大曲げ位置のせん断スパン比が非有限です".into());
+                }
+                minimum = Some(minimum.map_or(alpha, |min| min.min(alpha)));
+            }
         }
-        let in_clear_span =
-            |xi| (i..=j).contains(&xi) || same_qd1_station(xi, i) || same_qd1_station(xi, j);
-        let physical_rows = || rows.iter().filter(|(xi, _)| in_clear_span(*xi));
-        let mut max_mz_nmm: f64 = 0.0;
-        for (_, force) in physical_rows() {
-            if !force[5].is_finite() {
-                return Err("実フェース間の解析曲げモーメントが非有限です");
-            }
-            max_mz_nmm = max_mz_nmm.max(force[5].abs());
-        }
-        let mut min_alpha: f64 = 2.0;
-        for &(xi, force) in physical_rows().filter(|(_, force)| force[5].abs() == max_mz_nmm) {
-            if !has_unique_row(xi) {
-                return Err("最大曲げ位置の解析断面が重複しています");
-            }
-            let qy_n = force[1];
-            if !qy_n.is_finite() {
-                return Err("最大曲げ位置の解析せん断力が非有限です");
-            }
-            let tension_side = usize::from(force[5] >= 0.0);
-            let depth_mm = self
-                .depth_for_alpha(xi, tension_side)
-                .filter(|d| d.is_finite() && *d > 0.0)
-                .ok_or("最大曲げ位置・引張側の有効せいを確認できません")?;
-            let alpha = shear_alpha(max_mz_nmm, qy_n, depth_mm, 2.0);
-            if !alpha.is_finite() {
-                return Err("最大曲げ位置のせん断スパン比が非有限です");
-            }
-            min_alpha = min_alpha.min(alpha);
-        }
-        Ok(min_alpha)
+        minimum.ok_or_else(|| "実フェース間の最大曲げ位置を確認できません".into())
     }
 
-    fn depth_for_alpha(&self, xi: f64, tension_side: usize) -> Option<f64> {
-        if self
-            .general_section_range
-            .as_ref()
-            .is_some_and(|range| range.contains(xi))
-        {
+    fn depth_for_alpha(
+        &self,
+        xi: f64,
+        face_index: Option<usize>,
+        tension_side: usize,
+    ) -> Option<f64> {
+        if let Some(index) = face_index {
+            return match self.sections.as_ref().ok()?[index] {
+                Some(face) => Some(face.depths_mm[tension_side]),
+                None => self.general_depths_mm[tension_side],
+            };
+        }
+        if self.general_section_range.as_ref().is_some_and(|range| {
+            (range.actual_bounds_xi[0]..=range.actual_bounds_xi[1]).contains(&xi)
+        }) {
             return self.general_depths_mm[tension_side];
         }
-        let index = self
-            .actual_faces_xi?
-            .into_iter()
-            .position(|pos| same_qd1_station(pos, xi))?;
-        match self.sections.as_ref().ok()?[index] {
-            Some(face) => Some(face.depths_mm[tension_side]),
-            None => self.general_depths_mm[tension_side],
-        }
+        None
     }
 
     /// 無次元材軸座標が一般部でない、または一般部と確認できない場合に理由を返す。
@@ -202,10 +213,9 @@ pub fn beam_qd1_haunches(
     });
     Some(BeamQd1Haunches {
         general_section_range: range.ok(),
-        actual_faces_xi: geometry.map(|geometry| geometry.end_positions),
         general_depths_mm,
         sections,
-        alpha: Err("同じ確定応答の曲げ・せん断力を確認できません"),
+        alpha: Err("同じ確定応答の曲げ分布を確認できません".into()),
         mixed_response: false,
     })
 }
@@ -225,9 +235,23 @@ fn general_section_range(
     let recorded_faces_mm = [elem.rigid_zone.face_i, elem.rigid_zone.face_j];
     let mut lengths_mm = [0.0; 2];
     let mut inner_boundaries_xi = geometry.end_positions;
-    let mut recorded_haunch_ends_xi = [None; 2];
+    let mut recorded_bounds_xi = [None; 2];
     for (index, end) in ends.into_iter().enumerate() {
-        let Some(end) = end else { continue };
+        let to_xi = |distance_mm| {
+            let from_end_xi = distance_mm / geometry.axis_length_mm;
+            if index == 0 {
+                from_end_xi
+            } else {
+                1.0 - from_end_xi
+            }
+        };
+        let Some(end) = end else {
+            recorded_bounds_xi[index] = recorded_faces_mm[index]
+                .filter(|&distance_mm| distance_mm.is_finite() && distance_mm >= 0.0)
+                .map(to_xi)
+                .filter(|&xi| same_qd1_station(geometry.end_positions[index], xi));
+            continue;
+        };
         let label = ["i端", "j端"][index];
         if geometry.uses_material_end[index] {
             return Err(format!(
@@ -248,14 +272,7 @@ fn general_section_range(
             ));
         }
         lengths_mm[index] = end.length;
-        let haunch_end = |start_mm| {
-            let from_end_xi = (start_mm + end.length) / geometry.axis_length_mm;
-            if index == 0 {
-                from_end_xi
-            } else {
-                1.0 - from_end_xi
-            }
-        };
+        let haunch_end = |start_mm| to_xi(start_mm + end.length);
         inner_boundaries_xi[index] = haunch_end(face_mm);
         let recorded_end_xi = haunch_end(recorded_mm);
         if [inner_boundaries_xi[index], recorded_end_xi]
@@ -266,7 +283,7 @@ fn general_section_range(
                 "QD1用のハンチ付き梁の{label}で材端フェースとハンチ端を区別できません"
             ));
         }
-        recorded_haunch_ends_xi[index] = Some(recorded_end_xi);
+        recorded_bounds_xi[index] = Some(recorded_end_xi);
     }
     if lengths_mm[0] + lengths_mm[1] >= geometry.clear_span_mm
         || inner_boundaries_xi[0] >= inner_boundaries_xi[1]
@@ -275,7 +292,7 @@ fn general_section_range(
     }
     Ok(GeneralSectionRange {
         actual_bounds_xi: inner_boundaries_xi,
-        recorded_haunch_ends_xi,
+        recorded_bounds_xi,
     })
 }
 
