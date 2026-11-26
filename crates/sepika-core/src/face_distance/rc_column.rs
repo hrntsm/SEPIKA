@@ -229,8 +229,6 @@ fn contact_distance(
     ];
     let transverse = 3 - normal;
     let delta = sub(beam.actual_ends[0], column_end);
-    let center_normal = dot(delta, inward);
-    let distance_mm = center_normal + beam_half[normal];
     let axes = [beam.axes[0], beam.axes[transverse]];
     let half = [beam_half[0], beam_half[transverse]];
     let offset = [dot(delta, axes[0]) + half[0], dot(delta, axes[1])];
@@ -269,13 +267,7 @@ fn contact_distance(
     let SupportMemberId::Primary(id) = beam.member else {
         unreachable!()
     };
-    if !beam_half.into_iter().all(valid)
-        || !valid(column_size_mm)
-        || !margin_mm.is_finite()
-        || !distance_mm.is_finite()
-        || distance_mm < 0.0
-        || center_normal > beam_half[normal]
-    {
+    if !beam_half.into_iter().all(valid) || !valid(column_size_mm) || !margin_mm.is_finite() {
         return Err(format!(
             "大梁 ID {} の実外形と柱の実材端が正の面積で接触しません",
             id.0
@@ -286,6 +278,30 @@ fn contact_distance(
         .chain(delta.map(f64::abs))
         .fold(column_size_mm.max(1.0), f64::max);
     let roundoff_mm = 32.0 * f64::EPSILON * scale_mm;
+    let axial_half_mm = beam_half[normal];
+    let cardinal =
+        cardinal_axis(inward).filter(|axis| cardinal_axis(beam.axes[normal]) == Some(*axis));
+    let [entry_mm, distance_mm] = if let Some(axis) = cardinal {
+        let center_mm = beam.actual_ends[0][axis] * inward[axis];
+        let end_mm = column_end[axis] * inward[axis];
+        [-axial_half_mm, axial_half_mm]
+            .map(|offset_mm| plane_offset_mm(center_mm, offset_mm, end_mm))
+    } else {
+        let center_mm = dot(delta, inward);
+        [center_mm - axial_half_mm, center_mm + axial_half_mm]
+    };
+    if cardinal.is_none() && entry_mm.abs().min(distance_mm.abs()) <= roundoff_mm {
+        return Err(format!(
+            "大梁 ID {} と柱の実材端が柱軸方向で接触することを丸め誤差の範囲で確認できません",
+            id.0
+        ));
+    }
+    if !entry_mm.is_finite() || !distance_mm.is_finite() || entry_mm > 0.0 || distance_mm < 0.0 {
+        return Err(format!(
+            "大梁 ID {} の実外形と柱の実材端が正の面積で接触しません",
+            id.0
+        ));
+    }
     if margin_mm <= roundoff_mm {
         return Err(if margin_mm >= -roundoff_mm {
             format!(
@@ -300,4 +316,19 @@ fn contact_distance(
         });
     }
     Ok(distance_mm)
+}
+
+fn cardinal_axis(vector: [f64; 3]) -> Option<usize> {
+    (0..3).find(|&axis| {
+        vector[axis].abs() == 1.0 && (0..3).all(|other| other == axis || vector[other] == 0.0)
+    })
+}
+
+fn plane_offset_mm(center_mm: f64, half_offset_mm: f64, end_mm: f64) -> f64 {
+    // 柱端を先に引くと、梁の面が柱端に近いときに離隔が丸めで消える。
+    let plane_mm = center_mm + half_offset_mm;
+    let offset_in_sum_mm = plane_mm - center_mm;
+    let residual_mm =
+        (center_mm - (plane_mm - offset_in_sum_mm)) + (half_offset_mm - offset_in_sum_mm);
+    (plane_mm - end_mm) + residual_mm
 }

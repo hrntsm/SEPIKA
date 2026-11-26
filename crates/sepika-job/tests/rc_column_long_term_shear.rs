@@ -523,6 +523,108 @@ fn 丸め帯の集中荷重で不明な成分だけ保留して独立な短期qd
 }
 
 #[test]
+fn 長期単独の実面で片方の曲げが未算定でも直交曲げの不適合を残す() {
+    let mut model = model(false, false);
+    model.elements[1].local_axis.ref_vector = Y;
+    model.load_cases[0].member = vec![point(150.0 + 1e-11, 50_000.0)];
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [0.0, 0.0, 0.0, 150_000_000.0, 0.0, 0.0],
+    )];
+    let response = analyze(&mut model);
+    let rows = check(&model, &response, RcColumnLongTermShearInput::SingleCase);
+    assert!(rows.iter().any(|(xi, outcome)| *xi == 0.05 && matches!(
+        outcome, CheckOutcome::Skipped { reason } if reason.contains("曲げMz") && reason.contains("丸め誤差")
+    )), "{rows:?}");
+    assert!(rows.iter().any(|(xi, outcome)| *xi == 0.05 && matches!(
+        outcome, CheckOutcome::Checked(result) if result.components.iter().any(|part|
+            part.kind == CheckKind::AxialBending && part.ratio.is_finite() && part.ratio > 1.0)
+    )), "{rows:?}");
+}
+
+#[test]
+fn 実面でqd1またはminを選んだ場合は検証済みの汎用柱端軸力を要する() {
+    use sepika_design_jp::{LoadTerm, QdMethod};
+    let mut model = model(false, false);
+    model.elements[1].local_axis.ref_vector = Y;
+    model.load_cases[0].member.clear();
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [100_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    )];
+    let solved = analyze(&mut model);
+    let mut incomplete_gravity = solved.member_forces.clone();
+    let (_, column) = incomplete_gravity
+        .iter_mut()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap();
+    column.at.retain(|(pos, _)| *pos != 1.0);
+    let mut incomplete_response = solved.member_forces.clone();
+    let (_, column) = incomplete_response
+        .iter_mut()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap();
+    column.at.iter_mut().find(|(pos, _)| *pos == 0.0).unwrap().1[0] = f64::NAN;
+    let run = |method, regular, gravity| {
+        run_member_design_checks(
+            &model,
+            regular,
+            &solved.panel_moments,
+            &MemberDesignCheckOptions {
+                term: LoadTerm::Short,
+                qd_method: method,
+                long_member_forces: gravity,
+                rc_column_face_forces: &solved.rc_column_face_forces,
+                rc_column_gravity_face_forces: &solved.rc_column_face_forces,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .member_checks
+        .into_iter()
+        .filter(|(id, xi, _)| *id == COLUMN && *xi == 0.05)
+        .map(|(_, _, outcome)| outcome)
+        .collect::<Vec<_>>()
+    };
+    for method in [QdMethod::Qd1, QdMethod::Min] {
+        for (regular, gravity, reason) in [
+            (
+                solved.member_forces.as_slice(),
+                &[][..],
+                "柱端の重力参照軸力",
+            ),
+            (
+                solved.member_forces.as_slice(),
+                incomplete_gravity.as_slice(),
+                "柱端の重力参照軸力",
+            ),
+            (
+                incomplete_response.as_slice(),
+                solved.member_forces.as_slice(),
+                "柱端の応答軸力",
+            ),
+        ] {
+            let rows = run(method, regular, Some(gravity));
+            assert!(
+                rows.iter().any(
+                    |outcome| matches!(outcome, CheckOutcome::Skipped { reason: detail }
+                if detail.contains(reason))
+                ),
+                "{rows:?}"
+            );
+            assert!(rows.iter().any(|outcome| matches!(outcome, CheckOutcome::Checked(result)
+                if result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0)
+                && result.components.iter().all(|part| part.kind != CheckKind::Shear))), "{rows:?}");
+        }
+        let rows = run(method, &solved.member_forces, None);
+        assert!(rows
+            .iter()
+            .any(|outcome| matches!(outcome, CheckOutcome::Checked(result)
+            if result.components.iter().any(|part| part.kind == CheckKind::Shear))));
+    }
+}
+
+#[test]
 fn 偏心で柱軸を外れても正面積の接触なら実面を定め線接触では定めない() {
     for (circle, tangent) in [(false, 350.0), (true, 450.0)] {
         let mut model = model(circle, false);
@@ -607,6 +709,36 @@ fn 回転した平面内で丸めにより正となる線接触を面接触に�
                     "{i:?}"
                 );
             }
+        }
+    }
+}
+
+#[test]
+fn 柱軸方向の丸めで消える隙間を拒否して真の接触を保持する() {
+    for (beam_z_mm, column_z_mm, expected_face_mm) in [
+        (300.0, -1e-14, None),
+        (300.0, 0.0, Some(600.0)),
+        (-300.0, 1e-14, None),
+        (-300.0, 0.0, Some(0.0)),
+    ] {
+        let mut model = model(false, false);
+        model.elements[0].end_offsets_mm = [[0.0, 0.0, column_z_mm]; 2];
+        model.elements[1].end_offsets_mm = [[0.0, 0.0, beam_z_mm]; 2];
+        let adjacency = sepika_core::adjacency::NodeAdjacency::primary_frame(&model);
+        let faces = sepika_core::face_distance::rc_column_girder_faces(
+            &model,
+            &model.elements[0],
+            &adjacency,
+        )
+        .unwrap();
+        let cut = faces.ends[0].as_ref().unwrap();
+        if let Some(expected) = expected_face_mm {
+            assert_eq!(cut.as_ref().unwrap().position_mm, expected);
+        } else {
+            assert!(
+                matches!(cut, Err(reason) if reason.contains("接触しません")),
+                "{cut:?}"
+            );
         }
     }
 }

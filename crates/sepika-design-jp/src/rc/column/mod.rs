@@ -320,7 +320,15 @@ pub(super) fn column_check(
         shear_rebar_valid.then(|| shear_rebar_grade(ctx.shear_rebar_material.as_ref())),
         long_term,
     );
-    let check_finite = saved_long_term || !long_term;
+    let check_finite = saved_long_term
+        || !long_term
+        || matches!(
+            column_gravity,
+            ColumnGravityMode::Ordinary {
+                at_real_face: true,
+                ..
+            }
+        );
     let axial_available = !check_finite || forces.n.is_finite();
     let bending_partial = check_finite && !(forces.my.is_finite() && forces.mz.is_finite());
     let short_force_issue = !long_term && (!axial_available || bending_partial);

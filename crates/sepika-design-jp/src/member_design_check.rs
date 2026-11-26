@@ -138,7 +138,8 @@ pub struct MemberDesignCheckOptions<'a> {
     /// 呼出側が解析対象の組合せ・部材・局所加力の向きとの一致を確認する。
     /// Some は当該組合せのルート2-1検定を指定し、該当部材の入力がなければ未算定とする。
     pub src_column_route21_shear: Option<&'a HashMap<ElemId, SrcColumnRoute21Shear>>,
-    /// 地震時短期 QD 用の長期（DL+LL 等）内力。None なら QD 割増なし。
+    /// 地震時短期QD用の長期（DL+LL等）内力。NoneならQDを用いない。
+    /// `Some(&[])` は汎用の参照がない短期地震QDを指定し、RC柱実材端のQD2単独では専用参照を用いる。
     pub long_member_forces: Option<&'a [(ElemId, MemberForces)]>,
     /// RC 梁 QD1 用の単純梁せん断 Q0 `[N]`（部材 ID → 絶対値）。RC梁のQD1で不足すれば未検定。
     pub q_simple_by_elem: Option<&'a HashMap<ElemId, f64>>,
@@ -1287,6 +1288,14 @@ pub fn run_member_design_checks(
             })
             .chain(peak_sections);
         for (pos, forces, cut_side, interval) in section_forces {
+            let at_rc_column_face = column_geometry.is_some_and(|geometry| {
+                geometry
+                    .ends
+                    .iter()
+                    .flatten()
+                    .filter_map(|end| end.as_ref().ok())
+                    .any(|face| face.position_mm / face.length_mm == pos)
+            });
             let face_gravity = column_face_gravity.iter().find(|(xi, _)| *xi == pos);
             let saved_gravity = face_gravity.map(|(_, gravity)| {
                 let at_face = gravity.map(|forces| (pos, forces));
@@ -1364,6 +1373,16 @@ pub fn run_member_design_checks(
                     } else {
                         column_end_axial_issue
                     };
+                let face_mechanism_issue = if at_rc_column_face
+                    && options.term == LoadTerm::Short
+                    && !rc_damage_control
+                    && options.long_member_forces.is_some()
+                    && options.qd_method != QdMethod::Qd2
+                {
+                    column_end_axial_issue
+                } else {
+                    None
+                };
                 let (outcome, incomplete) = crate::RcDesign.check_ordinary_with_incomplete(
                     &mfa,
                     sec,
@@ -1374,6 +1393,7 @@ pub fn run_member_design_checks(
                         boundary_shear_issue,
                         response_end_axial_issue,
                         saved_long_term: long_term_shear.is_some(),
+                        at_real_face: at_rc_column_face,
                         require_same_position_gravity: saved_gravity.is_some(),
                         gravity_error: if column_geometry.is_some()
                             && options.term == LoadTerm::Short
@@ -1381,7 +1401,7 @@ pub fn run_member_design_checks(
                             && !(face_qd2
                                 && face_gravity.is_some_and(|(_, gravity)| gravity.is_some()))
                         {
-                            options.rc_column_gravity_error
+                            options.rc_column_gravity_error.or(face_mechanism_issue)
                         } else {
                             None
                         },

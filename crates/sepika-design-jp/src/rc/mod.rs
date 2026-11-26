@@ -70,6 +70,7 @@ pub(crate) enum ColumnGravityMode<'a> {
         boundary_shear_issue: Option<&'static str>,
         response_end_axial_issue: Option<&'static str>,
         saved_long_term: bool,
+        at_real_face: bool,
         require_same_position_gravity: bool,
         gravity_error: Option<&'a str>,
         separate_provisions: bool,
