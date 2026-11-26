@@ -26,7 +26,9 @@ pub(super) fn check(
     section_issue: Option<&str>,
     outcomes: &mut Vec<(ElemId, f64, CheckOutcome)>,
 ) -> bool {
-    if !forces.at.is_empty()
+    let duplicate = forces.at.windows(2).any(|pair| pair[0].0 == pair[1].0);
+    if !duplicate
+        && !forces.at.is_empty()
         && forces.at.iter().all(|(_, f)| f[1] == 0.0 && f[5] == 0.0)
         && loads.as_ref().map_or_else(
             |_| {
@@ -66,14 +68,14 @@ pub(super) fn check(
         })
     });
     // 強軸曲げがなくても、i端集中荷重で断面力が跳ぶ場合は保存左側を区間内の照査に使えない。
-    if no_strong_bending && !i_end_has_jump {
+    if no_strong_bending && !i_end_has_jump && !duplicate {
         return false;
     }
     let mut span_reason = None;
     let mut span_description = None;
     let mut saved_parameters = None;
     let parameters = match &recovered {
-        Ok((span, _)) if no_strong_bending => {
+        Ok((span, _)) if no_strong_bending || duplicate => {
             span_reason = span.combination_issue.map(str::to_owned);
             None
         }

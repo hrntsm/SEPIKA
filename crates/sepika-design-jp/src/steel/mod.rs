@@ -1063,8 +1063,13 @@ impl SteelDesign {
                 .map(|(flange, web)| flange.max(web))
         };
         let compression_slenderness = || {
-            (!has_section_loss(ctx) && forces.n.is_finite() && forces.n < 0.0)
-                .then(|| column::HColumnCompressionSlenderness::resolve(sec, ctx))
+            let compressive = |n: f64| n.is_finite() && n < 0.0;
+            (!has_section_loss(ctx)
+                && compressive(forces.n)
+                && scope
+                    .other_cut_on_disagreement
+                    .is_none_or(|other| compressive(other[0])))
+            .then(|| column::HColumnCompressionSlenderness::resolve(sec, ctx))
         };
         let compression_failure = |verified: &column::HColumnCompressionSlenderness| {
             symmetric_h_web(sec)?;

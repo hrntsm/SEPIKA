@@ -404,6 +404,86 @@ fn an_i_end_point_load_checks_the_inside_without_changing_the_adjacent_column() 
 }
 
 #[test]
+fn duplicate_i_end_rows_do_not_hide_the_unique_middle_cuts_torsion_disagreement() {
+    let mut model = input::column(0.0, 0.0);
+    model.load_cases[0].member = [(1400.0, 500_000.0), (1600.0, -500_000.0)]
+        .map(|(a, p)| {
+            MemberLoad::manual(
+                model.elements[0].id,
+                [1.0, 0.0, 0.0],
+                MemberLoadKind::Point { a, p },
+            )
+        })
+        .to_vec();
+    for (recovered_mx, saved_mx, end_qz, expect_ng) in [
+        (1e-10, 0.0, 0.0, false),
+        (1e-10, 0.0, f64::NAN, false),
+        (0.0, 0.0, 0.0, true),
+    ] {
+        let mut saved = MemberForces {
+            at: vec![
+                (0.0, [0.0, 0.0, 0.0, recovered_mx, 0.0, -50e6]),
+                (0.5, [0.0, 500_000.0, 0.0, saved_mx, 0.0, 0.0]),
+                (1.0, [0.0, 0.0, end_qz, recovered_mx, 0.0, 50e6]),
+            ],
+        };
+        saved.at.insert(0, saved.at[0]);
+        let result = rows(&model, saved, Some(&[(input::CASE, 1.0)]));
+        assert!(!result.iter().any(|(xi, _)| *xi == 0.0), "{result:?}");
+        let shear = checked(&result, 0.5)
+            .flat_map(|row| &row.components)
+            .find(|c| c.kind == CheckKind::Shear);
+        assert_eq!(shear.is_some(), expect_ng, "{result:?}");
+        if let Some(shear) = shear {
+            close(shear.ratio, 1.231_689_332_950_902_7);
+        }
+        assert!(
+            result.iter().any(|(xi, row)| *xi == 0.5
+                && matches!(row, CheckOutcome::Skipped { reason }
+            if reason.contains("重複") && (expect_ng || reason.contains("材軸ねじりの有無")))),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn a_disagreement_about_compression_does_not_prove_a_statutory_slenderness_failure() {
+    let mut model = input::column(0.0, 0.0);
+    model.steel_design_attrs[0].lk_z_direct = Some(10_000.0);
+    for (recovered_n, saved_n, saved_mx, expect_ng) in [
+        (0.0, -1e-9, 0.0, false),
+        (-1e-9, 0.0, 0.0, false),
+        (-1000.0, -1000.0, 1e-10, true),
+    ] {
+        let mut forces = support_column::moments(20e6);
+        for (_, force) in &mut forces.at {
+            force[0] = recovered_n;
+        }
+        forces.at[2].1[0] = saved_n;
+        forces.at[2].1[3] = saved_mx;
+        let result = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+        let at_j: Vec<_> = checked(&result, 1.0)
+            .flat_map(|row| &row.components)
+            .collect();
+        if expect_ng {
+            let [component] = at_j.as_slice() else {
+                panic!("{result:?}")
+            };
+            assert_eq!(component.kind, CheckKind::Provision);
+            close(component.ratio, 1.086_485_949_989_539_2);
+        } else {
+            assert!(at_j.is_empty(), "{result:?}");
+        }
+        assert!(
+            result.iter().any(|(xi, row)| *xi == 1.0
+                && matches!(row, CheckOutcome::Skipped { reason }
+            if reason.contains(if expect_ng { "材軸ねじりの有無" } else { "圧縮軸力の有無" }))),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
 fn monotonic_distribution_uses_signed_ends_and_the_matching_default_span() {
     let mut model = input::column(80_000.0, 0.0);
     model.steel_design_attrs[0].column_lateral_buckling_end_supports = None;
@@ -1526,6 +1606,35 @@ fn identical_duplicate_i_end_forces_can_verify_the_unique_j_end_ng() {
 }
 
 #[test]
+fn duplicate_cuts_do_not_certify_a_column_without_strong_bending() {
+    let model = input::column(0.0, 0.0);
+    for duplicate in [false, true] {
+        let mut saved = support_column::moments(0.0);
+        if duplicate {
+            saved.at.push(saved.at[2]);
+        }
+        let results = rows(&model, saved, Some(&[(input::CASE, 1.0)]));
+        assert_eq!(results.len(), if duplicate { 2 } else { 3 }, "{results:?}");
+        if duplicate {
+            assert!(
+                results.iter().all(|(xi, row)| *xi < 1.0
+                    && matches!(row,
+                CheckOutcome::Skipped { reason } if reason.contains("重複"))),
+                "{results:?}"
+            );
+        } else {
+            assert!(
+                results
+                    .iter()
+                    .all(|(_, row)| matches!(row, CheckOutcome::Checked(r)
+                if r.ok() && !r.detail.contains("C="))),
+                "{results:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn an_interior_maximum_tied_with_an_end_needs_agreement_with_saved_cuts() {
     let mut model = input::column(0.0, 0.0);
     for (a, p) in [(1000.0, 200_000.0), (2000.0, -200_000.0)] {
@@ -1795,6 +1904,49 @@ fn weak_shear_elsewhere_does_not_hide_the_local_zero_shear_limit_ng() {
             if reason.contains("弱軸せん断"))),
             "{result:?}"
         );
+    }
+}
+
+#[test]
+fn identical_duplicate_middle_rows_keep_the_independent_tension_edge_at_the_unique_end() {
+    let mut model = input::column(0.0, 0.0);
+    model.sections[0].iz = f64::NAN;
+    for (change_nmm, expect_ng) in [(0.0, true), (0.25, false)] {
+        let mut forces = support_column::moments(200e6);
+        for (_, force) in &mut forces.at {
+            force[0] = 650_000.0;
+        }
+        forces.at.insert(1, forces.at[1]);
+        forces.at[2].1[5] += change_nmm;
+        let result = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+        assert!(
+            !result.iter().any(|(xi, _)| *xi == 0.5 && expect_ng),
+            "{result:?}"
+        );
+        let at_j: Vec<_> = checked(&result, 1.0)
+            .flat_map(|row| &row.components)
+            .collect();
+        if expect_ng {
+            let [edge] = at_j.as_slice() else {
+                panic!("{result:?}")
+            };
+            assert!(edge.detail.contains("式(6.3)"), "{edge:?}");
+            close(edge.ratio, 1.078_828_933_475_746);
+            assert!(
+                result.iter().any(|(xi, row)| *xi == 1.0
+                    && matches!(row, CheckOutcome::Skipped { reason }
+                if reason.contains("Iz") && reason.contains("重複"))),
+                "{result:?}"
+            );
+        } else {
+            assert!(
+                result
+                    .iter()
+                    .all(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+                if reason.contains("重複") && reason.contains("釣合いを確認できません"))),
+                "{result:?}"
+            );
+        }
     }
 }
 
