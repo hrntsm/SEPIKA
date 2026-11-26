@@ -11,7 +11,7 @@ use super::result::{AxialForcePeaks, StoryResponse, StrongAxisMomentPeaks, ThRec
 use sepika_core::dof::{DofMap, DOF_PER_NODE};
 use sepika_core::model::{ElementData, ElementKind, FrameSectionUse, Model};
 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
-use sepika_element::behavior::{Ctx, ElementBehavior};
+use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
 use sepika_element::frame::beam::MemberForces;
 
 /// 時刻歴簡易検定で正負の局所 Mz 極値を記録する対象かを返す。
@@ -72,11 +72,36 @@ pub(crate) fn member_forces_linear(
         .collect()
 }
 
-/// 同一試行状態の荷重込み断面力を既存評価位置で返す。欠落・不正応答はエラー。
+pub(crate) struct NonlinearMemberResponse {
+    pub forces: Vec<Option<MemberForces>>,
+    pub loaded: Vec<Option<LoadedFrameResponse>>,
+}
+
+impl NonlinearMemberResponse {
+    pub fn strong_bending(
+        &self,
+        index: usize,
+        length_mm: f64,
+    ) -> Result<sepika_element::frame::member_load::FrameStrongBendingSpan, String> {
+        let section = self
+            .loaded
+            .get(index)
+            .and_then(Option::as_ref)
+            .ok_or("同じ確定時刻の荷重込み部材応答がありません")?;
+        let forces = self
+            .forces
+            .get(index)
+            .and_then(Option::as_ref)
+            .ok_or("同じ確定時刻の断面力がありません")?;
+        section.section.full_span_strong_bending(length_mm, forces)
+    }
+}
+
+/// 同一試行状態の荷重込み断面力と回復元の応答を返す。欠落・不正応答はエラー。
 pub(crate) fn member_forces_nonlinear(
     model: &Model,
     behaviors: &[Box<dyn ElementBehavior>],
-) -> Result<Vec<Option<MemberForces>>, sepika_math::solver::SolveError> {
+) -> Result<NonlinearMemberResponse, sepika_math::solver::SolveError> {
     use sepika_math::solver::SolveError;
     let responses = crate::common::member_recording::member_recording_responses(
         model,
@@ -85,11 +110,11 @@ pub(crate) fn member_forces_nonlinear(
     )
     .map_err(SolveError::InvalidInput)?;
     let ctx = Ctx { model };
-    model
+    let forces = model
         .elements
         .iter()
         .zip(behaviors)
-        .zip(responses)
+        .zip(&responses)
         .map(|((elem, behavior), response)| {
             let error = |reason: &str| {
                 SolveError::InvalidInput(format!(
@@ -132,7 +157,11 @@ pub(crate) fn member_forces_nonlinear(
                 None => Ok(Some(forces)),
             }
         })
-        .collect()
+        .collect::<Result<_, _>>()?;
+    Ok(NonlinearMemberResponse {
+        forces,
+        loaded: responses,
+    })
 }
 
 /// 部材端力の包絡を更新する（各成分・各評価位置の絶対値最大。符号は極値の符号を保持）。
@@ -427,6 +456,18 @@ impl<'a, 'env> ThRecorder<'a, 'env> {
         (shear, accel, vel, disp)
     }
 
+    pub(crate) fn observe(
+        &mut self,
+        step: u64,
+        time_s: f64,
+        forces: &[Option<MemberForces>],
+        bending_response: &super::CommittedBendingResponse<'_>,
+    ) {
+        if let Some(observer) = &mut self.observer {
+            observer(step, time_s, forces, bending_response);
+        }
+    }
+
     /// 1 ステップ分の記録を追加する。`step` は確定した時刻ステップ番号
     /// （0 が初期状態、`n_steps` が最終ステップ）。`u_free`/`v_free`/`a_free` は
     /// 呼び出し側で展開済みの自由 DOF 空間の変位・速度・加速度（`dofmap` の
@@ -450,9 +491,6 @@ impl<'a, 'env> ThRecorder<'a, 'env> {
         xg_y: f64,
         member_forces_now: &[Option<MemberForces>],
     ) {
-        if let Some(observer) = &mut self.observer {
-            observer(step, time, member_forces_now);
-        }
         merge_peak_member_forces(&mut self.peak_member_forces, member_forces_now);
         for (peaks, forces) in self.axial_force_peaks.iter_mut().zip(member_forces_now) {
             if let Some(forces) = forces {
@@ -536,6 +574,7 @@ impl<'a, 'env> ThRecorder<'a, 'env> {
             axial_force_peaks: self.axial_force_peaks,
             strong_axis_moment_peaks: self.strong_axis_moment_peaks,
             asymmetric_column_sections: BTreeMap::new(),
+            symmetric_column_bending: BTreeMap::new(),
         }
     }
 }

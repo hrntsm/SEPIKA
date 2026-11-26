@@ -1,4 +1,6 @@
-//! 確定時刻ごとの断面単独照査と支配値の集計。
+//! 確定時刻ごとの簡易検定と支配値の集計。
+
+pub(crate) mod column_bending;
 
 use std::collections::BTreeMap;
 
@@ -7,8 +9,9 @@ use sepika_design_jp::steel::SteelDesign;
 use sepika_design_jp::{DesignCtx, LoadTerm, MemberForcesAt, MemberKind};
 use sepika_element::frame::beam::{eval_sections_of, MemberForces};
 use sepika_solver::dynamic::timehistory::{
-    uses_signed_bending_peaks, AsymmetricColumnSectionHistory, CommittedMemberForcesObserver,
-    SectionForceCheckPeak, SectionForceCheckPosition,
+    uses_signed_bending_peaks, AsymmetricColumnSectionHistory, CommittedBendingResponse,
+    CommittedMemberForcesObserver, SectionForceCheckPeak, SectionForceCheckPosition,
+    SymmetricColumnBendingHistory, ThRecording,
 };
 
 struct Column<'a> {
@@ -18,12 +21,35 @@ struct Column<'a> {
     ctx: DesignCtx,
 }
 
-pub(crate) fn collect_asymmetric_column_sections<T, E>(
+#[derive(Default)]
+pub(crate) struct TimeHistoryChecks {
+    asymmetric_columns: BTreeMap<usize, AsymmetricColumnSectionHistory>,
+    symmetric_columns: BTreeMap<usize, SymmetricColumnBendingHistory>,
+}
+
+impl TimeHistoryChecks {
+    pub(crate) fn take(recording: &mut ThRecording) -> Self {
+        Self {
+            asymmetric_columns: std::mem::take(&mut recording.asymmetric_column_sections),
+            symmetric_columns: std::mem::take(&mut recording.symmetric_column_bending),
+        }
+    }
+
+    pub(crate) fn store(self, recording: &mut ThRecording) {
+        recording.asymmetric_column_sections = self.asymmetric_columns;
+        recording.symmetric_column_bending = self.symmetric_columns;
+    }
+}
+
+pub(crate) fn collect_time_history_checks<T, E>(
     model: &Model,
-    mut history: BTreeMap<usize, AsymmetricColumnSectionHistory>,
+    mut checks: TimeHistoryChecks,
     first_step: u64,
     run: impl FnOnce(Option<&mut CommittedMemberForcesObserver<'_>>) -> Result<T, E>,
-) -> Result<(T, BTreeMap<usize, AsymmetricColumnSectionHistory>), E> {
+) -> Result<(T, TimeHistoryChecks), E> {
+    let history = &mut checks.asymmetric_columns;
+    let bending_histories = &mut checks.symmetric_columns;
+    let bending_columns = column_bending::columns(model, bending_histories);
     let columns: Vec<_> = model
         .elements
         .iter()
@@ -75,13 +101,20 @@ pub(crate) fn collect_asymmetric_column_sections<T, E>(
             })
         })
         .collect();
-    let result = if history.is_empty() {
+    let result = if history.is_empty() && bending_histories.is_empty() {
         run(None)?
     } else {
         run(Some(
-            &mut |step, time_s, forces: &[Option<MemberForces>]| {
+            &mut |step,
+                  time_s,
+                  forces: &[Option<MemberForces>],
+                  bending: &CommittedBendingResponse<'_>| {
                 // 再開点の内力は前半結果で照査済みなので二重計上しない。
                 if step >= first_step {
+                    for column in &bending_columns {
+                        let item = bending_histories.get_mut(&column.index).unwrap();
+                        column_bending::record(item, column, step, time_s, bending);
+                    }
                     for item in history.values_mut() {
                         item.committed_count += 1;
                     }
@@ -99,7 +132,7 @@ pub(crate) fn collect_asymmetric_column_sections<T, E>(
             },
         ))?
     };
-    Ok((result, history))
+    Ok((result, checks))
 }
 
 fn record_section_forces(
@@ -167,15 +200,29 @@ mod tests {
         first_step: u64,
         samples: &[(u64, Option<MemberForces>)],
     ) -> BTreeMap<usize, AsymmetricColumnSectionHistory> {
-        collect_asymmetric_column_sections(model, prior, first_step, |observer| {
-            let observer = observer.unwrap();
-            for (step, member) in samples {
-                observer(*step, *step as f64, std::slice::from_ref(member));
-            }
-            Ok::<_, ()>(())
-        })
+        collect_time_history_checks(
+            model,
+            TimeHistoryChecks {
+                asymmetric_columns: prior,
+                ..Default::default()
+            },
+            first_step,
+            |observer| {
+                let observer = observer.unwrap();
+                for (step, member) in samples {
+                    observer(
+                        *step,
+                        *step as f64,
+                        std::slice::from_ref(member),
+                        &|_, _| unreachable!("上下非対称H形鋼柱では確認しない"),
+                    );
+                }
+                Ok::<_, ()>(())
+            },
+        )
         .unwrap()
         .1
+        .asymmetric_columns
     }
 
     #[test]
