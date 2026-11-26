@@ -14,8 +14,9 @@ use crate::{
 };
 use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::dof::Dof;
-use sepika_core::face_distance::girder_column_faces;
+use sepika_core::face_distance::{girder_column_face_misses_due_to_offset, girder_column_faces};
 use sepika_core::geom::vec3::{cross, dist, dot, local_frame_axes, unit, unit_from};
+use sepika_core::ids::ElemId;
 use sepika_core::model::{
     ElementData, EndCondition, FrameSectionUse, Material, MaterialCategory, Model, Node,
     SupportMemberId,
@@ -147,13 +148,24 @@ fn bending_component(
     })
 }
 
+/// 単一のRC矩形梁のQD1用検定位置と内法。
+#[derive(Clone, Copy)]
+pub struct BeamQd1Geometry {
+    pub clear_span_mm: f64,
+    pub(crate) axis_length_mm: f64,
+    /// i/j端それぞれの解析断面位置。
+    pub end_positions: [f64; 2],
+    /// 偏心による実柱面非交差で実材端を採ったか（i/j順）。
+    pub uses_material_end: [bool; 2],
+}
+
 /// 単一のRC矩形梁で両端の接合と内法長さ [mm] を確認する。接続柱の遠端支持は問わない。
 /// `adjacency` は同一モデルの `NodeAdjacency::primary_frame` を渡す。
-pub fn beam_qd1_clear_span(
+pub fn beam_qd1_geometry(
     model: &Model,
     adjacency: &NodeAdjacency,
     elem: &ElementData,
-) -> Result<f64, String> {
+) -> Result<BeamQd1Geometry, String> {
     if model
         .girder_groups
         .iter()
@@ -166,13 +178,34 @@ pub fn beam_qd1_clear_span(
     validate_beam_qd1_section_geometry(model, elem)?;
     let [i, j] = frame_end_positions(model, elem).ok_or("QD1用の梁の材軸を確定できません")?;
     let [_, _, ez] = local_frame_axes(i, j, elem.local_axis.ref_vector)?;
-    let span_mm = dist(i, j)
-        - beam_qd1_face_distance(model, adjacency, elem, 0, ez, None)?
-        - beam_qd1_face_distance(model, adjacency, elem, 1, ez, None)?;
-    if !span_mm.is_finite() || span_mm <= 0.0 {
+    let length_mm = dist(i, j);
+    let displaced = model
+        .element_section(elem)
+        .is_some_and(|sec| matches!(sec.shape, Some(SectionShape::RcBeamRect { .. })))
+        .then(|| girder_column_face_misses_due_to_offset(model, elem, adjacency))
+        .flatten()
+        .unwrap_or_default();
+    let from_i_mm = beam_qd1_end_distance(model, adjacency, elem, 0, ez, None, &displaced[0])?;
+    let from_j_mm = beam_qd1_end_distance(model, adjacency, elem, 1, ez, None, &displaced[1])?;
+    let clear_span_mm = length_mm - from_i_mm - from_j_mm;
+    if !clear_span_mm.is_finite() || clear_span_mm <= 0.0 {
         return Err("QD1に必要な有限で正の内法長さが成立しません".into());
     }
-    Ok(span_mm)
+    Ok(BeamQd1Geometry {
+        clear_span_mm,
+        axis_length_mm: length_mm,
+        end_positions: [from_i_mm / length_mm, 1.0 - from_j_mm / length_mm],
+        uses_material_end: displaced.map(|cols| !cols.is_empty()),
+    })
+}
+
+/// 単一のRC矩形梁で両端の接合と内法長さ [mm] を確認する。
+pub fn beam_qd1_clear_span(
+    model: &Model,
+    adjacency: &NodeAdjacency,
+    elem: &ElementData,
+) -> Result<f64, String> {
+    beam_qd1_geometry(model, adjacency, elem).map(|geometry| geometry.clear_span_mm)
 }
 
 pub(super) fn validate_beam_qd1_section_geometry(
@@ -197,6 +230,18 @@ pub(super) fn beam_qd1_face_distance(
     index: usize,
     ez: [f64; 3],
     grouped_qy_axis: Option<[f64; 3]>,
+) -> Result<f64, String> {
+    beam_qd1_end_distance(model, adjacency, elem, index, ez, grouped_qy_axis, &[])
+}
+
+fn beam_qd1_end_distance(
+    model: &Model,
+    adjacency: &NodeAdjacency,
+    elem: &ElementData,
+    index: usize,
+    ez: [f64; 3],
+    grouped_qy_axis: Option<[f64; 3]>,
+    displaced_columns: &[ElemId],
 ) -> Result<f64, String> {
     if !elem.kind.is_primary_frame_support() {
         return Err("QD1用に両端の強軸曲げを伝達する梁要素を確認できません".into());
@@ -237,14 +282,25 @@ pub(super) fn beam_qd1_face_distance(
         grouped_qy_axis.filter(|&ey| !restrains_direction(node, ey, [Dof::Ux, Dof::Uy, Dof::Uz]));
     let distance_mm = if column_connected {
         let column_faces = girder_column_faces(model, elem, adjacency);
-        let face = column_faces
+        let physical_face = column_faces
             .as_ref()
             .ok_or_else(|| format!("QD1用の内法長さ: {end}の実柱面を確認できません"))?[index]
-            .as_ref()
-            .map_err(|reason| format!("QD1用の内法長さ: {reason}"))?;
+            .as_ref();
+        let (columns, distance_mm) = match physical_face {
+            Ok(face) => (
+                &face.columns[..],
+                if index == 0 {
+                    face.position_mm
+                } else {
+                    length_mm - face.position_mm
+                },
+            ),
+            Err(_) if !displaced_columns.is_empty() => (displaced_columns, 0.0),
+            Err(reason) => return Err(format!("QD1用の内法長さ: {reason}")),
+        };
         if !restrained
             && !others().any(|column| {
-                face.columns.contains(&column.id)
+                columns.contains(&column.id)
                     && if grouped_qy_axis.is_some() {
                         column_transmits_bending(model, column, node, ez)
                     } else {
@@ -256,18 +312,14 @@ pub(super) fn beam_qd1_face_distance(
         }
         if let Some(ey) = required_qy_axis {
             let supported = others().any(|column| {
-                face.columns.contains(&column.id)
+                columns.contains(&column.id)
                     && column_transmits_qy_reaction(model, column, node, ey)
             });
             if !supported {
                 return Err(unrecoverable_reaction());
             }
         }
-        if index == 0 {
-            face.position_mm
-        } else {
-            length_mm - face.position_mm
-        }
+        distance_mm
     } else {
         if !restrained {
             return Err(unsupported());
@@ -518,6 +570,7 @@ pub(crate) fn beam_check(
             forces.pos,
             forces.qy,
             ctx.rc_beam_qd1_issue.as_deref(),
+            ctx.rc_beam_qd1_at_material_end,
             || {
                 ctx.rc_grouped_beam_qd1_sum_my_nmm
                     .map_or_else(|| beam_qd1_sum_my(shape, ctx, main_rebar_valid), Ok)

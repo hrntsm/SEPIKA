@@ -1340,3 +1340,177 @@ fn slab_qd1_inputs_and_checked_warning_round_trip_in_ovika_without_changing_anal
         .unwrap()
         .contains("過小評価"));
 }
+
+#[test]
+fn time_history_eccentric_beam_separates_real_end_force_from_old_face_failure() {
+    use sepika_core::ids::ElemId;
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+    let mut model = rc_beam_qd1_model::model();
+    rc_beam_qd1_model::add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, 1000.0], [500.0, 0.0, 1000.0]];
+    model.load_cases[0].member = vec![MemberLoad::manual(
+        ElemId(0),
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Point {
+            a: 1500.0,
+            p: 1_000.0,
+        },
+    )];
+    // L=5000 mmの実材軸で、左反力は1 kN × 3500/5000 = 0.7 kN。
+    let q0 =
+        sepika_job::design_q0::rc_beam_q0_for_gravity_cases(&model, &model.elements[0]).unwrap();
+    assert_eq!(q0, Some(700.0));
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+    set_gravity_forces(
+        &mut app,
+        Some(
+            [0.0, 0.5, 1.0]
+                .map(|x| (x, [0., -10_000., 0., 0., 0., 0.]))
+                .to_vec(),
+        ),
+    );
+    let mut record = gravity_test_record(
+        [0., 30_000., 0., 0., 0., 10e6],
+        [0., 30_000., 0., 0., 0., 10e6],
+    );
+    let forces = record.peak_member_forces[0].as_mut().unwrap();
+    forces.at.insert(1, (0.05, [0., 30_000., 0., 0., 0., 1e10]));
+    let text = labels(&app, &record, true);
+    assert!(
+        text.contains("ξ=0.00:") && text.contains("ξ=1.00:"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("ξ=0.05:") && !text.contains("実柱面:") && text.contains("せん断 "),
+        "{text}"
+    );
+    assert!(
+        text.contains("旧評価位置 ξ=0.050000:") && text.contains("(NG)"),
+        "{text}"
+    );
+    let forces = record.peak_member_forces[0].as_mut().unwrap();
+    forces.at[0].0 = 1e-8;
+    let text = labels(&app, &record, true);
+    assert!(text.contains("保存解析断面力がありません"), "{text}");
+}
+
+#[test]
+fn eccentric_beam_static_check_uses_saved_rotated_column_face_for_both_response_and_ql() {
+    use sepika_core::ids::{ElemId, StoryId};
+    use sepika_core::model::Story;
+    use sepika_design_jp::{CheckKind, CheckOutcome};
+    let mut model = rc_beam_qd1_model::model();
+    rc_beam_qd1_model::add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, 1000.0], [0.0, 0.0, -500.0]];
+    model.elements[2].local_axis.ref_vector = [1.0, 1.0, 0.0];
+    model.sections[1].rebar_material = model.sections[0].rebar_material;
+    model.sections[1].shear_rebar_material = model.sections[0].shear_rebar_material;
+    for node in &mut model.nodes {
+        node.coord[2] += 3000.0;
+    }
+    model.stories = vec![
+        Story::new(StoryId(0), "1F".into(), Some(0.0), Some(0.0)),
+        Story::new(StoryId(1), "2F".into(), Some(3000.0), Some(0.0)),
+    ];
+    for story in &mut model.stories {
+        story.weight_override = Some(100_000.0);
+    }
+    let source = fixture::model();
+    model.load_cases = source.load_cases;
+    model.combinations = source.combinations;
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+    app.run_preparation();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app.run_combination(0);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let result = app.current_static().unwrap();
+    let (_, member) = result
+        .member_forces
+        .iter()
+        .find(|(id, _)| *id == ElemId(0))
+        .unwrap();
+    let (_, faces) = result
+        .girder_column_face_forces
+        .iter()
+        .find(|(id, _)| *id == ElemId(0))
+        .unwrap();
+    assert!(faces[0].is_err());
+    let j = faces[1].as_ref().unwrap();
+    let xi = 1.0 - 250.0 * std::f64::consts::SQRT_2 / 4500.0;
+    let length_mm = f64::hypot(4500.0, 1500.0);
+    assert!((j.face.position_mm - xi * length_mm).abs() < 1e-8);
+    assert!(member.at.iter().all(|(pos, _)| (pos - xi).abs() > 1e-6));
+    let checked = app.current_design_results().unwrap();
+    let check = checked
+        .member_checks
+        .iter()
+        .find(|m| m.elem == ElemId(0))
+        .unwrap();
+    let row = check
+        .positions
+        .iter()
+        .find(|p| (p.xi - xi).abs() < 1e-12)
+        .unwrap();
+    let CheckOutcome::Checked(checked) = &row.outcome else {
+        panic!("{:?}", check.positions);
+    };
+    let demand_n = 1200.0 + 293_562_225.0 / (xi * length_mm);
+    let shear = checked
+        .components
+        .iter()
+        .find(|c| c.kind == CheckKind::Shear)
+        .unwrap();
+    assert!(
+        shear.detail.contains(&format!("QD={demand_n:.1} N")),
+        "{shear:?}"
+    );
+    assert!(checked
+        .components
+        .iter()
+        .any(|c| c.kind == CheckKind::Bending
+            && c.detail
+                .contains(&format!("|mz|={:.1}", j.forces.as_ref().unwrap()[5].abs()))));
+}
+
+#[test]
+fn history_eccentric_beam_does_not_substitute_a_nominal_face_for_an_unsaved_physical_face() {
+    let mut model = rc_beam_qd1_model::model();
+    rc_beam_qd1_model::add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, 1000.0], [0.0, 0.0, -500.0]];
+    model.elements[2].local_axis.ref_vector = [1.0, 1.0, 0.0];
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+    let rows = [0.0, 0.5, 0.95, 1.0];
+    set_gravity_forces(
+        &mut app,
+        Some(rows.map(|xi| (xi, [0., -10_000., 0., 0., 0., 0.])).to_vec()),
+    );
+    let values = [0., 30_000., 0., 0., 0., 10e6];
+    let mut record = gravity_test_record(values, values);
+    record.peak_member_forces[0].as_mut().unwrap().at = rows.map(|xi| (xi, values)).to_vec();
+    let text = labels(&app, &record, true);
+    assert!(
+        text.contains("ξ=0.92:") && text.contains("保存解析断面力がありません"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("ξ=0.95:") && !text.contains("ξ=1.00:"),
+        "{text}"
+    );
+}

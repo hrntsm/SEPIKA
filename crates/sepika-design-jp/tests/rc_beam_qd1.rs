@@ -979,3 +979,191 @@ fn supports_outside_the_actual_floor_boundary_cannot_confirm_flange_or_anchorage
         }
     }
 }
+
+#[test]
+fn eccentric_rc_beam_uses_the_end_force_at_a_missed_column_and_the_real_face_at_the_other_end() {
+    use sepika_core::adjacency::NodeAdjacency;
+    let mut model = model();
+    add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    for (j_offset, j_xi, length_mm) in [
+        (1_000.0, 1.0, 4_500.0),
+        (
+            -500.0,
+            4_250.0 / 4_500.0,
+            f64::hypot(4_500.0, 1_500.0) * 4_250.0 / 4_500.0,
+        ),
+    ] {
+        model.elements[0].end_offsets_mm = [[0.0, 0.0, 1_000.0], [0.0, 0.0, j_offset]];
+        let geometry = sepika_design_jp::rc::beam_qd1_geometry(
+            &model,
+            &NodeAdjacency::primary_frame(&model),
+            &model.elements[0],
+        )
+        .unwrap();
+        assert_eq!(geometry.uses_material_end, [true, j_offset > 0.0]);
+        assert!((geometry.end_positions[1] - j_xi).abs() < 1e-12);
+        assert!((geometry.clear_span_mm - length_mm).abs() < 1e-9);
+        let rows = [
+            (0.0, 10e6),
+            (1e-8, 9e8),
+            (0.055, 9e8),
+            (0.5, 10e6),
+            (j_xi, 20e6),
+        ]
+        .map(|(xi, mz)| (xi, [0., 60_000., 0., 0., 0., mz]));
+        let outcomes = check(&model, QdMethod::Qd1, Some(8_000.0), &rows, -10_000.0);
+        assert_eq!(
+            outcomes.iter().map(|(_, xi, _)| *xi).collect::<Vec<_>>(),
+            [0.0, 0.5, j_xi]
+        );
+        // 上下端の降伏曲げの和は293.562225 kN·m。重力反力8 kNを加える。
+        for (_, _, result) in &outcomes {
+            assert_shear_n(result, 8_000.0 + 293_562_225.0 / length_mm);
+        }
+        let CheckOutcome::Checked(result) = &outcomes[0].2 else {
+            unreachable!()
+        };
+        assert!(result
+            .components
+            .iter()
+            .any(|c| c.kind == CheckKind::Bending && c.detail.contains("|mz|=10000000.0")));
+        let outcomes = check(&model, QdMethod::Qd1, Some(8_000.0), &rows[1..], -10_000.0);
+        assert!(outcomes.iter().any(|(_, x, result)| *x == 0.0 &&
+            matches!(result, CheckOutcome::Skipped { reason } if reason.contains("保存解析断面力がありません"))));
+    }
+}
+
+#[test]
+fn eccentric_end_cannot_bypass_unresolved_column_candidates_or_a_pinned_connection() {
+    use sepika_core::adjacency::NodeAdjacency;
+    let mut model = model();
+    add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, 1_000.0]; 2];
+    let mut invalid = model.clone();
+    invalid.sections[1].shape = None;
+    let mut ambiguous = model.clone();
+    let wide_id = sepika_core::ids::SectionId(2);
+    let mut wide = ambiguous.sections[1].clone();
+    wide.id = wide_id;
+    if let Some(SectionShape::RcColumnRect { b, d, .. }) = &mut wide.shape {
+        *b = 750.0;
+        *d = 750.0;
+    }
+    ambiguous.sections.push(wide);
+    let mut second_column = ambiguous.elements[1].clone();
+    second_column.id = ElemId(3);
+    second_column.section = Some(wide_id);
+    ambiguous.elements.push(second_column);
+    let mut nonfinite = model.clone();
+    nonfinite.elements[0].end_offsets_mm[0][2] = f64::NAN;
+    model.elements[0].end_cond[0] = EndCondition::Pinned;
+    for (model, expected) in [
+        (invalid, "実材軸が接続柱"),
+        (ambiguous, "実材軸が接続柱"),
+        (nonfinite, "材軸を確定できません"),
+        (model, "強軸曲げが解放"),
+    ] {
+        let result = sepika_design_jp::rc::beam_qd1_clear_span(
+            &model,
+            &NodeAdjacency::primary_frame(&model),
+            &model.elements[0],
+        );
+        let reason = result.unwrap_err();
+        assert!(reason.contains(expected), "{reason}");
+    }
+}
+
+#[test]
+fn material_end_remains_exact_beside_joint_positions_and_does_not_borrow_their_gravity_force() {
+    use sepika_core::model::{MemberDetailAttr, MemberJoint};
+    let mut model = model();
+    add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, 1000.0]; 2];
+    let near = 1.0 - 5e-7;
+    let almost_same = 1.0 - 5e-10;
+    let mut detail = MemberDetailAttr::new(ElemId(0));
+    detail.joints = [near, almost_same]
+        .map(|xi| MemberJoint {
+            distance: xi * 4500.0,
+            kind: Default::default(),
+        })
+        .to_vec();
+    model.member_detail_attrs.push(detail);
+    let rows = [
+        (0.0, [0., 60_000., 0., 0., 0., 10e6]),
+        (0.5, [0., 60_000., 0., 0., 0., 10e6]),
+        (near, [0., 60_000., 0., 0., 0., 10e6]),
+        (almost_same, [0., 60_000., 0., 0., 0., 10e6]),
+        (1.0, [0., 60_000., 0., 0., 0., 10e6]),
+    ];
+    let response = [(ElemId(0), MemberForces { at: rows.to_vec() })];
+    let gravity = [(
+        ElemId(0),
+        MemberForces {
+            at: rows[..4]
+                .iter()
+                .map(|(xi, _)| (*xi, [0., -10_000., 0., 0., 0., 0.]))
+                .collect(),
+        },
+    )];
+    let checks = run_member_design_checks(
+        &model,
+        &response,
+        &[],
+        &MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            qd_method: QdMethod::Qd1,
+            long_member_forces: Some(&gravity),
+            q_simple_by_elem: Some(&HashMap::from([(ElemId(0), 0.0)])),
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .member_checks;
+    let end = checks
+        .iter()
+        .find(|(_, xi, _)| *xi == 1.0)
+        .expect("厳密な実材端");
+    assert!(
+        matches!(&end.2, CheckOutcome::Skipped { reason } if reason.contains("同位置の重力参照内力"))
+    );
+    assert!(checks.iter().any(|(_, xi, _)| *xi == near));
+    assert!(!checks.iter().any(|(_, xi, _)| *xi == almost_same));
+}
+
+#[test]
+fn rounding_tolerance_does_not_substitute_a_material_end_for_an_internal_face() {
+    use sepika_design_jp::design_position::{qd1_saved_station_issue, same_qd1_station};
+    let inner = 1.0 - 4.0 * f64::EPSILON;
+    assert!(!same_qd1_station(inner, 1.0));
+    assert!(!same_qd1_station(1.0, inner));
+    assert!(same_qd1_station(inner, 1.0 - 5.0 * f64::EPSILON));
+    assert!(qd1_saved_station_issue(inner, &[(1.0, [0.0; 6])]).is_some());
+}
+
+#[test]
+fn old_face_keeps_independent_bending_failure_without_a_qd1_shear_check() {
+    let mut model = model();
+    add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, 1000.0]; 2];
+    let old = 250.0 / 4500.0;
+    let rows = [(0.0, 10e6), (old, 1e10), (0.5, 10e6), (1.0, 10e6)]
+        .map(|(xi, mz)| (xi, [0.0, 60_000.0, 0.0, 0.0, 0.0, mz]));
+    let result = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
+    let old = &result.iter().find(|(_, xi, _)| *xi == old).unwrap().2;
+    let CheckOutcome::Checked(old) = old else {
+        panic!("{old:?}")
+    };
+    assert!(old.basis.contains("旧評価位置"));
+    assert!(old
+        .components
+        .iter()
+        .any(|c| c.kind == CheckKind::Bending && c.ratio > 1.0));
+    assert!(old.components.iter().all(|c| c.kind != CheckKind::Shear));
+    for (i, xi, current) in result {
+        if xi == 0.0 || xi == 1.0 {
+            assert_eq!(i, ElemId(0));
+            assert_shear_n(&current, 293_562_225.0 / 4500.0);
+        }
+    }
+}

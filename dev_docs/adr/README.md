@@ -227,6 +227,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0161](0161-rc-grouped-beam-qd1.md) | accepted | 一本部材のRC矩形梁は物理スパン全体の釣合いでQD1を求める |
 | [0162](0162-rc-beam-qd1-slab-reinforcement-source.md) | accepted | RC梁のQD1に用いるスラブ筋は床版の実配筋から判定する |
 | [0163](0163-rc-beam-qd1-support-path.md) | accepted | RC梁のQD1の算定条件に接続先の支持経路を含めない |
+| [0164](0164-rc-beam-qd1-eccentric-material-end.md) | accepted | 偏心で実柱面を取れないRC梁端は実材端で検定する |
 
 ## 規約
 

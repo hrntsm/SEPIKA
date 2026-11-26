@@ -408,6 +408,8 @@ pub struct DesignCtx {
     pub rc_beam_qd1_issue: Option<String>,
     /// 床板が取り付き、QD1でスラブ筋の寄与を確定できない場合に true。
     pub rc_beam_qd1_slab_unverified: bool,
+    /// 実材端を採るQD1で重力の保存断面位置を厳密に照合する場合に true。
+    pub rc_beam_qd1_at_material_end: bool,
     /// i端・j端それぞれで上端引張時に算入する床板筋の寄与 [N·mm]。
     pub rc_beam_qd1_slab_end_moments_nmm: Option<[f64; 2]>,
     /// 一本部材の外端断面から確認した正負方向の降伏曲げ和の最大値 [N·mm]。
@@ -446,6 +448,7 @@ impl Default for DesignCtx {
             beam_has_slab: false,
             rc_beam_qd1_issue: None,
             rc_beam_qd1_slab_unverified: false,
+            rc_beam_qd1_at_material_end: false,
             rc_beam_qd1_slab_end_moments_nmm: None,
             rc_grouped_beam_qd1_sum_my_nmm: None,
             steel_attr: None,

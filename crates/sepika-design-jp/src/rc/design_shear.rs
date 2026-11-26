@@ -101,12 +101,19 @@ pub(super) fn beam_design_shear(
     pos: f64,
     q_signed: f64,
     mechanism_issue: Option<&str>,
+    exact_station: bool,
     sum_my_nmm: impl FnOnce() -> Result<f64, String>,
 ) -> Result<f64, String> {
     let ql_signed = qd
         .long_at
         .iter()
-        .find(|(p, _)| (p - pos).abs() < 1e-6)
+        .find(|(p, _)| {
+            if exact_station {
+                crate::design_position::same_qd1_station(pos, *p)
+            } else {
+                (p - pos).abs() < 1e-6
+            }
+        })
         .map(|(_, forces)| forces[1])
         .filter(|q| q.is_finite());
     let qd2 = |ql_signed| {

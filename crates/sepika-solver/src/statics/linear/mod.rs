@@ -357,7 +357,8 @@ fn superpose_column_end_forces<T: Copy + Default>(
     sums
 }
 
-fn superpose_girder_column_faces(
+/// 同じ解析条件の符号付き実柱面断面力を係数付きで合成する。
+pub fn superpose_girder_column_faces(
     terms: &[(&StaticOnce, f64)],
 ) -> Result<Vec<(ElemId, GirderColumnFaceEnds)>, SolveError> {
     let nonzero = || terms.iter().filter(|(_, factor)| *factor != 0.0);

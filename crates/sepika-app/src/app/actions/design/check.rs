@@ -213,12 +213,34 @@ impl App {
             .map_or_else(Vec::new, |terms| {
                 sepika_job::design_gravity_terms(&self.core.model, terms)
             });
+        let capture_qd1_faces = is_seismic_combo
+            && !damage_control
+            && self.core.analysis_cfg.qd_method != sepika_design_jp::QdMethod::Qd2
+            && design_model.elements.iter().any(|e| {
+                e.end_offsets_mm != [[0.0; 3]; 2]
+                    && design_model.element_section(e).is_some_and(|sec| {
+                        matches!(
+                            sec.shape,
+                            Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
+                        )
+                    })
+            });
+        let mut gravity_face_responses = Vec::new();
         let mut gravity_error = None;
         let gravity_long_owned = if needs_gravity {
             match sepika_job::complete_design_gravity_forces(&gravity_terms, |lc| {
                 sepika_job::compute::compute_linear_static(self.core.model.clone(), lc)
                     .ok()
-                    .map(|r| r.member_forces)
+                    .map(|r| {
+                        if capture_qd1_faces {
+                            let factor = gravity_terms[gravity_face_responses.len()].1;
+                            let rows = r.member_forces.clone();
+                            gravity_face_responses.push((r, factor));
+                            rows
+                        } else {
+                            r.member_forces
+                        }
+                    })
             }) {
                 Ok(forces) => Some(forces),
                 Err(reason) => {
@@ -229,6 +251,16 @@ impl App {
             }
         } else {
             None
+        };
+        let gravity_faces = if capture_qd1_faces && gravity_long_owned.is_some() {
+            let terms: Vec<_> = gravity_face_responses
+                .iter()
+                .map(|(r, factor)| (r, *factor))
+                .collect();
+            sepika_solver::statics::linear::superpose_girder_column_faces(&terms)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
         };
         let long_member_forces = gravity_long_owned.as_deref().filter(|_| is_seismic_combo);
         let group_overrides =
@@ -325,6 +357,10 @@ impl App {
                     term: self.core.design_term,
                     girder_column_face_forces: selected_response
                         .map_or(&[], |response| &response.girder_column_face_forces),
+                    rc_beam_qd1_face_forces: selected_response
+                        .filter(|_| matches_saved_member_forces)
+                        .map_or(&[], |response| &response.girder_column_face_forces),
+                    rc_beam_qd1_gravity_faces: &gravity_faces,
                     steel_panel_column_face_forces: selected_response
                         .filter(|response| {
                             response.panel_moments == results.panel_moments
