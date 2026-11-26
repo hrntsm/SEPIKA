@@ -214,7 +214,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0148](0148-steel-calculation-sources.md) | accepted | S造・SRC造の算定根拠を指定の5資料にそろえる |
 | [0149](0149-src-shear-wall-scope.md) | accepted | SRC耐震壁は両側SRC柱付きの壁を対象にする |
 | [0150](0150-rc-beam-directional-bond-stress.md) | accepted | 非降伏RC梁の大地震時付着照査は確認済みの方向別応力度から行う |
-| [0151](0151-rc-column-qd1-mechanism-comparison.md) | partially superseded by ADR-0155 | 一般階のRC柱のQD1は適用条件を満たす片側梁降伏を係数適用後に比較する |
+| [0151](0151-rc-column-qd1-mechanism-comparison.md) | partially superseded by ADR-0155 / ADR-0165 | 一般階のRC柱のQD1は適用条件を満たす片側梁降伏を係数適用後に比較する |
 | [0152](0152-rc-beam-directional-hinge-shear-demand.md) | accepted | RC梁の方向別両端降伏による要求せん断力は独立した直接入力で求める |
 | [0153](0153-rc-column-ductility-advisory.md) | accepted | RC柱の短期圧縮靱性推奨は設計者の適用判断と独立した付記で扱う |
 | [0154](0154-src-column-route21-shear-evidence.md) | accepted | SRC柱のルート2-1設計用せん断力には組合せと方向に対応する確認済み入力を用いる |
@@ -228,6 +228,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0162](0162-rc-beam-qd1-slab-reinforcement-source.md) | accepted | RC梁のQD1に用いるスラブ筋は床版の実配筋から判定する |
 | [0163](0163-rc-beam-qd1-support-path.md) | accepted | RC梁のQD1の算定条件に接続先の支持経路を含めない |
 | [0164](0164-rc-beam-qd1-eccentric-material-end.md) | accepted | 偏心で実柱面を取れないRC梁端は実材端で検定する |
+| [0165](0165-rc-column-qd1-girder-bending-axis.md) | accepted | RC柱QD1の片端梁降伏は検討曲げ軸に対応する場合に採用する |
 | [0166](0166-symmetric-column-time-history-lateral-buckling.md) | accepted | 上下対称H形鋼柱の時刻歴横座屈を同時刻・補剛区間で照査する |
 
 ## 規約

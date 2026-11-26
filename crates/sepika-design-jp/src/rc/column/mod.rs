@@ -23,21 +23,33 @@ use nm_interaction::*;
 const MAX_SHEAR_ALPHA: f64 = 1.5;
 
 pub(super) fn qd1_mechanism(ctx: &DesignCtx) -> Option<&ColumnMechanism> {
-    (ctx.kind == MemberKind::Column
-        && ctx.term == LoadTerm::Short
-        && !ctx.rc_damage_control
-        && ctx
-            .seismic_qd
-            .as_ref()
-            .is_some_and(|qd| qd.method != QdMethod::Qd2))
-    .then_some(ctx.column_sum_my.as_ref())
-    .flatten()
+    ctx.column_sum_my.as_ref().filter(|mechanism| {
+        ctx.kind == MemberKind::Column
+            && ctx.term == LoadTerm::Short
+            && !ctx.rc_damage_control
+            && ctx.seismic_qd.as_ref().map_or_else(
+                || mechanism.excluded_girder_axes.contains(&true),
+                |qd| qd.method != QdMethod::Qd2,
+            )
+    })
 }
 
-fn floor_yield_note(ctx: &DesignCtx, demand_n: [Option<f64>; 2]) -> String {
+fn response_shear_without_qd(
+    ctx: &DesignCtx,
+    forces: &MemberForcesAt,
+) -> (Option<f64>, Option<f64>) {
+    let [excluded_y, excluded_z] =
+        qd1_mechanism(ctx).map_or([false; 2], |m| m.excluded_girder_axes);
+    (
+        (!excluded_y).then(|| forces.qy.abs()),
+        (!excluded_z).then(|| forces.qz.abs()),
+    )
+}
+
+fn girder_yield_note(ctx: &DesignCtx, demand_n: [Option<f64>; 2]) -> String {
     let mut detail = String::new();
     if let Some(mechanism) = qd1_mechanism(ctx) {
-        for (reason, demand_n) in mechanism.floor_yield_holds.iter().zip(demand_n) {
+        for (reason, demand_n) in mechanism.girder_yield_holds.iter().zip(demand_n) {
             if let (Some(reason), Some(demand_n)) = (reason, demand_n.filter(|q| q.is_finite())) {
                 use std::fmt::Write;
                 write!(
@@ -109,7 +121,7 @@ fn seismic_column_design_shear(
                       q_index: usize,
                       sum_my: Option<&Result<Option<f64>, String>>,
                       fallback| {
-        if let Some(hold) = mechanism.and_then(|m| m.floor_yield_holds[q_index - 1].as_deref()) {
+        if let Some(hold) = mechanism.and_then(|m| m.girder_yield_holds[q_index - 1].as_deref()) {
             let Some(Ok(Some(sum_my))) = sum_my else {
                 return None;
             };
@@ -388,13 +400,13 @@ pub(super) fn column_check(
                 .any(|index| super::column_qd2_reference_issue(qd, forces.pos, index).is_some())
                 || qd1_mechanism(ctx).is_some_and(|m| m.missing_gravity_axial))
     });
-    let floor_yield_held =
-        qd1_mechanism(ctx).is_some_and(|m| m.floor_yield_holds.iter().any(Option::is_some));
+    let girder_yield_held =
+        qd1_mechanism(ctx).is_some_and(|m| m.girder_yield_holds.iter().any(Option::is_some));
     let finish_bending = |bending_issue: Option<String>, incomplete: &mut Option<String>| {
         if let Some(reason) = bending_issue {
             if !(ordinary
                 || short_force_issue
-                || strict_gravity && (missing_gravity || floor_yield_held || incomplete.is_some()))
+                || strict_gravity && (missing_gravity || girder_yield_held || incomplete.is_some()))
             {
                 return Err(CheckOutcome::Skipped { reason });
             }
@@ -424,7 +436,7 @@ pub(super) fn column_check(
         } else {
             0.0
         };
-        if (ordinary || short_force_issue || floor_yield_held) && bending_unchecked {
+        if (ordinary || short_force_issue || girder_yield_held) && bending_unchecked {
             if let Some(axial_ng) = column_axial_overload(n_design, na, nt) {
                 components.push(axial_ng);
                 // 有限曲げ成分の下限に、単独で記録した軸力比を重ねない。
@@ -634,7 +646,7 @@ pub(super) fn column_check(
                     incomplete,
                 )
             } else {
-                (Some(forces.qy.abs()), Some(forces.qz.abs()))
+                response_shear_without_qd(ctx, forces)
             };
 
         let (qay, alpha_y) = shear_capacity(&props, 0);
@@ -663,7 +675,7 @@ pub(super) fn column_check(
                     alpha_z,
                     props.pw,
                     shear_ratio_note(lower_bound),
-                    floor_yield_note(ctx, [q_design_y, q_design_z]),
+                    girder_yield_note(ctx, [q_design_y, q_design_z]),
                 ),
             });
         }
@@ -799,7 +811,7 @@ pub(super) fn column_check(
                     incomplete,
                 )
             } else {
-                (Some(forces.qy.abs()), Some(forces.qz.abs()))
+                response_shear_without_qd(ctx, forces)
             };
 
         let (qay, alpha_y) = shear_capacity(&props_z, 0);
@@ -829,7 +841,7 @@ pub(super) fn column_check(
                     props_z.pw,
                     props_y.pw,
                     shear_ratio_note(lower_bound),
-                    floor_yield_note(ctx, [q_design_y, q_design_z]),
+                    girder_yield_note(ctx, [q_design_y, q_design_z]),
                 ),
             });
         }
@@ -1175,7 +1187,8 @@ mod tests {
             qy: Ok(None),
             qz: Ok(None),
             missing_gravity_axial: false,
-            floor_yield_holds: [None, None],
+            girder_yield_holds: [None, None],
+            excluded_girder_axes: [false; 2],
         });
 
         let design = crate::rc::RcDesign;

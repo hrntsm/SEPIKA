@@ -2058,6 +2058,125 @@ mod tests {
     }
 
     #[test]
+    fn rc_column_peak_qd1_issue1970_excludes_a_girder_that_does_not_match_the_bending_axis() {
+        use super::rc_column_mechanism_input as input;
+        use super::rc_column_mechanism_reference::{
+            COLUMN_ALLOWABLE_SHEAR_N, FOUR_BAR_COLUMN_ENDS_QD1_N, REVERSIBLE_ONE_BAR_FOOT_QD1_N,
+            THREE_BAR_COLUMN_ENDS_QD1_N, TWO_HEAD_GIRDERS_HALF_QD1_N,
+        };
+        use crate::app::rc_column_boundary_tests::input as column;
+        use sepika_core::section_shape::SectionShape;
+        use sepika_design_jp::QdMethod;
+
+        let mut general = input::column_for_head_axis_comparison(column::column_model(false, 0.0));
+        let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut general.sections[0].shape else {
+            unreachable!()
+        };
+        rebar.x = vec![4];
+        rebar.y = vec![4];
+
+        for (model, girder, original_n, excluded_n) in [
+            (
+                general,
+                input::GIRDER.index(),
+                208_303.442_920_260,
+                FOUR_BAR_COLUMN_ENDS_QD1_N,
+            ),
+            (
+                input::column_with_yielding_head_girders(column::column_model(false, 0.0)),
+                input::GIRDER.index(),
+                TWO_HEAD_GIRDERS_HALF_QD1_N,
+                THREE_BAR_COLUMN_ENDS_QD1_N,
+            ),
+            (
+                input::column_with_legacy_foot_girders(column::column_model(false, 0.0)),
+                6,
+                REVERSIBLE_ONE_BAR_FOOT_QD1_N,
+                THREE_BAR_COLUMN_ENDS_QD1_N,
+            ),
+        ] {
+            let mut app = rc_column_peak_check_app(model.clone(), QdMethod::Qd1, -100_000.0);
+            let original = rc_column_peak_check_text(&app, -100_000.0);
+            assert!(
+                original.contains(&format!(
+                    "せん断 {:.2}",
+                    original_n / COLUMN_ALLOWABLE_SHEAR_N
+                )),
+                "{original}"
+            );
+            app.core.model.elements[girder].local_axis.ref_vector = [0.0, 1.0, 0.0];
+
+            let excluded = rc_column_peak_check_text(&app, -100_000.0);
+            assert!(
+                excluded.contains(&format!(
+                    "せん断 {:.2}",
+                    excluded_n / COLUMN_ALLOWABLE_SHEAR_N
+                )),
+                "{excluded}"
+            );
+            assert!(!excluded.contains("検定不能"), "{excluded}");
+
+            app.core.analysis_cfg.qd_method = QdMethod::Qd2;
+            let original_qd2 = rc_column_peak_check_app(model, QdMethod::Qd2, -100_000.0);
+            assert_eq!(
+                rc_column_peak_check_text(&app, -100_000.0),
+                rc_column_peak_check_text(&original_qd2, -100_000.0)
+            );
+        }
+    }
+
+    #[test]
+    fn rc_column_peak_qd1_issue1970_reports_missing_end_axial_without_erasing_bending_failure() {
+        use super::rc_column_mechanism_input as input;
+        use crate::app::rc_column_boundary_tests::input as column;
+        use sepika_design_jp::QdMethod;
+
+        let mut model = input::column_with_yielding_head_girders(column::column_model(false, 0.0));
+        model.elements[input::GIRDER.index()].local_axis.ref_vector = [0.0, 1.0, 0.0];
+        let app = rc_column_peak_check_app(model, QdMethod::Min, -100_000.0);
+        let recording = ThRecording {
+            peak_member_forces: vec![Some(MemberForces {
+                at: vec![(0.5, [-100_000.0, 1000.0, 1000.0, 0.0, 0.0, 300e6])],
+            })],
+            ..Default::default()
+        };
+        let i = input::COLUMN.index();
+        let text = peak_recording_text(&app, &app.core.model.elements[i], i, &recording, true);
+        for expected in [
+            "Qy方向の柱頭",
+            "検討曲げ軸の対応",
+            "時刻歴軸力Nが不足",
+            "(NG)",
+        ] {
+            assert!(text.contains(expected), "{text}");
+        }
+        assert!(!text.contains("せん断 "), "{text}");
+    }
+
+    #[test]
+    fn rc_column_peak_qd1_issue1970_reports_an_entirely_missing_gravity_reference() {
+        use super::rc_column_mechanism_input as input;
+        use crate::app::rc_column_boundary_tests::input as column;
+        use sepika_design_jp::QdMethod;
+
+        let mut model = input::column_with_yielding_head_girders(column::column_model(false, 0.0));
+        model.elements[input::GIRDER.index()].local_axis.ref_vector = [0.0, 1.0, 0.0];
+        for method in [QdMethod::Qd1, QdMethod::Min] {
+            let mut app = rc_column_peak_check_app(model.clone(), method, -100_000.0);
+            app.core.scoped.results.as_mut().unwrap().combos[0]
+                .1
+                .member_forces
+                .clear();
+            let text = rc_column_peak_check_text(&app, -100_000.0);
+            for expected in ["Qy方向の柱頭", "検討曲げ軸の対応", "重力参照軸力Nが不足"]
+            {
+                assert!(text.contains(expected), "{text}");
+            }
+            assert!(!text.contains("せん断 "), "{text}");
+        }
+    }
+
+    #[test]
     fn rc_column_peak_qd1_does_not_reduce_demand_for_a_slab_supported_girder() {
         use super::rc_column_mechanism_input as input;
         use super::rc_column_mechanism_reference::{

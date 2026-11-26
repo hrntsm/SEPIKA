@@ -87,6 +87,17 @@ pub(crate) fn local_frame_axes_with_fallback(
     p_j: [f64; 3],
     reference: [f64; 3],
 ) -> Result<([[f64; 3]; 3], bool), &'static str> {
+    local_frame_axes_and_fallback_reference(p_i, p_j, reference)
+        .map(|(axes, fallback)| (axes, fallback.is_some()))
+}
+
+/// 局所基底と、断面参照方向を補った場合に限りその代替参照方向を返す。
+#[allow(clippy::type_complexity)]
+pub fn local_frame_axes_and_fallback_reference(
+    p_i: [f64; 3],
+    p_j: [f64; 3],
+    reference: [f64; 3],
+) -> Result<([[f64; 3]; 3], Option<[f64; 3]>), &'static str> {
     if reference.iter().any(|value| !value.is_finite()) {
         return Err("断面参照方向に非有限値があります");
     }
@@ -120,12 +131,13 @@ pub(crate) fn local_frame_axes_with_fallback(
     let mut ey_length = norm(ey);
     let used_fallback =
         cross(d_scaled, reference_scaled) == [0.0; 3] || ey_length <= 1e-12 / reference_scale;
-    if used_fallback {
-        ey = reject_ex(if ex[0].abs() < 0.9 {
-            [1.0, 0.0, 0.0]
-        } else {
-            [0.0, 1.0, 0.0]
-        });
+    let fallback = used_fallback.then_some(if ex[0].abs() < 0.9 {
+        [1.0, 0.0, 0.0]
+    } else {
+        [0.0, 1.0, 0.0]
+    });
+    if let Some(fallback) = fallback {
+        ey = reject_ex(fallback);
         ey_length = norm(ey);
     }
     if !ey_length.is_finite() || ey_length == 0.0 {
@@ -142,7 +154,7 @@ pub(crate) fn local_frame_axes_with_fallback(
     {
         return Err("断面参照方向から単位直交基底を解決できません");
     }
-    Ok((axes, used_fallback))
+    Ok((axes, fallback))
 }
 
 #[cfg(test)]
