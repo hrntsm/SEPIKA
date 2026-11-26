@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use sepika_core::dof::Dof6Mask;
+use sepika_core::dof::{Dof, Dof6Mask};
 use sepika_core::ids::ElemId;
 use sepika_core::model::{EndCondition, Model};
 use sepika_core::section_shape::SectionShape;
@@ -162,6 +162,77 @@ fn unavailable_qd1_preserves_independent_bending_failure_and_never_switches_to_q
         assert_eq!(outcomes.len(), 1, "{outcomes:?}");
         assert_shear_n(&outcomes[0].2, 70_000.0);
     }
+}
+
+#[test]
+fn qd1_requires_a_transverse_reaction_at_each_direct_support_even_with_a_finite_q0() {
+    let mut model = model();
+    model.nodes[1].coord[0] = 4_000.0;
+    model.elements[0].rigid_zone.face_i = Some(0.0);
+    model.elements[0].rigid_zone.face_j = Some(0.0);
+    let rows = [(0.5, [0.0, 60_000.0, 0.0, 0.0, 0.0, 1e9])];
+    // 4 mに10 kN/mを載せた単純支持の端反力は20 kNずつ。
+    let q0 = Some(20_000.0);
+    for (index, end) in [(0, "i端"), (1, "j端")] {
+        for (fixed, spring, supported) in [
+            (true, None, true),
+            (false, Some(1.0), true),
+            (false, None, false),
+            (false, Some(0.0), false),
+            (false, Some(-1.0), false),
+            (false, Some(f64::INFINITY), false),
+            (false, Some(f64::NAN), false),
+        ] {
+            model.nodes[index].restraint.set(Dof::Uz, fixed);
+            model.nodes[index].support_spring = spring.map(|kz| [0.0, 0.0, kz, 0.0, 0.0, 0.0]);
+            for method in [QdMethod::Qd1, QdMethod::Min] {
+                let outcomes = check(&model, method, q0, &rows, -10_000.0);
+                if supported {
+                    assert_eq!(outcomes.len(), 1, "{outcomes:?}");
+                    assert_shear_n(&outcomes[0].2, 93_390.556_25);
+                } else {
+                    let [(_, _, CheckOutcome::Checked(ng)), (_, _, CheckOutcome::Skipped { reason })] =
+                        outcomes.as_slice()
+                    else {
+                        panic!("{end}, {spring:?}, {method:?}: {outcomes:?}");
+                    };
+                    assert!(
+                        reason.contains(end) && reason.contains("局所Qy方向の反力"),
+                        "{reason}"
+                    );
+                    assert!(ng
+                        .components
+                        .iter()
+                        .any(|c| c.kind == CheckKind::Bending && c.ratio > 1.0));
+                    assert!(ng.components.iter().all(|c| c.kind != CheckKind::Shear));
+                }
+            }
+            let outcomes = check(&model, QdMethod::Qd2, None, &rows, -10_000.0);
+            assert_eq!(outcomes.len(), 1, "{outcomes:?}");
+            assert_shear_n(&outcomes[0].2, 115_000.0);
+        }
+        model.nodes[index].restraint = Dof6Mask::FIXED;
+        model.nodes[index].support_spring = None;
+    }
+}
+
+#[test]
+fn qd1_direct_support_combines_restraint_and_spring_along_the_rotated_local_y_axis() {
+    let mut model = model();
+    model.elements[0].local_axis.ref_vector = [0.0, 1.0, 1.0];
+    model.nodes[1].restraint.set_free(Dof::Uy);
+    let rows = [(0.5, [0.0, 30_000.0, 0.0, 0.0, 0.0, 10e6])];
+    model.nodes[1].support_spring = Some([1e6, 0.0, 1e6, 0.0, 0.0, 0.0]);
+    let outcomes = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
+    assert!(
+        matches!(outcomes.as_slice(), [(_, _, CheckOutcome::Skipped { reason })]
+        if reason.contains("j端") && reason.contains("局所Qy方向の反力")),
+        "{outcomes:?}"
+    );
+    model.nodes[1].support_spring = Some([0.0, 1e6, 0.0, 0.0, 0.0, 0.0]);
+    let outcomes = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
+    assert_eq!(outcomes.len(), 1, "{outcomes:?}");
+    assert_shear_n(&outcomes[0].2, 73_390.556_25);
 }
 
 #[test]
@@ -1031,6 +1102,40 @@ fn eccentric_rc_beam_uses_the_end_force_at_a_missed_column_and_the_real_face_at_
         assert!(outcomes.iter().any(|(_, x, result)| *x == 0.0 &&
             matches!(result, CheckOutcome::Skipped { reason } if reason.contains("保存解析断面力がありません"))));
     }
+}
+
+#[test]
+fn qd1_direct_support_failure_does_not_discard_the_opposite_eccentric_material_end() {
+    let mut model = model();
+    add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    model.elements.pop().unwrap();
+    model.nodes.pop().unwrap();
+    model.nodes[1].restraint = Dof6Mask::FIXED;
+    model.nodes[1].restraint.set_free(Dof::Uz);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, 1_000.0]; 2];
+    let rows = [
+        (0.0, 1e9),
+        (250.0 / 4500.0, 10e6),
+        (0.5, 10e6),
+        (1.0 - 250.0 / 4500.0, 10e6),
+    ]
+    .map(|(xi, mz)| (xi, [0.0, 60_000.0, 0.0, 0.0, 0.0, mz]));
+    let outcomes = check(&model, QdMethod::Min, Some(20_000.0), &rows, -10_000.0);
+    assert!(
+        outcomes.iter().any(|(_, xi, result)| *xi == 0.0
+            && matches!(
+                result, CheckOutcome::Checked(ng) if ng.components.iter().any(|c|
+                    c.kind == CheckKind::Bending && c.ratio > 1.0)
+            )),
+        "{outcomes:?}"
+    );
+    assert!(outcomes.iter().any(|(_, xi, result)| *xi == 0.0 && matches!(
+        result, CheckOutcome::Skipped { reason } if reason.contains("j端") && reason.contains("局所Qy方向の反力")
+    )), "{outcomes:?}");
+    assert!(
+        outcomes.iter().all(|(_, xi, _)| *xi != rows[1].0),
+        "{outcomes:?}"
+    );
 }
 
 #[test]

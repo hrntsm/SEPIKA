@@ -77,6 +77,7 @@ pub fn model() -> Model {
         .collect();
     model.nodes[0].restraint = sepika_core::dof::Dof6Mask::FIXED;
     for dof in [
+        sepika_core::dof::Dof::Uz,
         sepika_core::dof::Dof::Rx,
         sepika_core::dof::Dof::Ry,
         sepika_core::dof::Dof::Rz,

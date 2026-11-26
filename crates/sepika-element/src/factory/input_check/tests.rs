@@ -462,6 +462,41 @@ fn test_issue_when_src_section_has_no_steel_yield() {
     assert!(issues[0].contains("降伏強度"), "{}", issues[0]);
 }
 
+#[test]
+fn src_concentrated_spring_builder_and_hinge_view_share_unavailability_reason() {
+    use crate::factory::{
+        build_hinge_view, build_nonlinear_behavior, AnalysisHingeModel, StrengthBasis,
+    };
+    use sepika_core::model::AnalysisKind;
+
+    let mut model = beam_model(src_section(), concrete_material());
+    model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+    model.validate_local_frames().unwrap();
+    let data = &model.elements[0];
+    for (kind, basis) in [
+        (AnalysisKind::Incremental, StrengthBasis::MaterialStrength),
+        (AnalysisKind::TimeHistory, StrengthBasis::Nominal),
+    ] {
+        let issues = nonlinear_input_issues_with_basis(&model, kind, basis);
+        assert_eq!(issues.len(), 1, "{issues:?}");
+        assert!(issues[0].contains("部材 ID 0 のSRC材端集中ばね"));
+
+        let panic = std::panic::catch_unwind(|| {
+            build_nonlinear_behavior(data, &model, basis, kind, None);
+        })
+        .expect_err("材端集中ばねを直接生成してはならない");
+        assert_eq!(panic.downcast_ref::<String>(), Some(&issues[0]));
+
+        let view = build_hinge_view(data, &model, basis, kind, 0.0, 8, 24).unwrap();
+        assert_eq!(view.model, AnalysisHingeModel::ConcentratedSpring);
+        assert_eq!(view.unavailability_reason.as_ref(), Some(&issues[0]));
+        assert!(view.backbone.is_none());
+        assert!(view.total_backbone.is_none());
+        assert!(view.mn_linear.is_none());
+        assert!(view.mn_surface.is_none());
+    }
+}
+
 /// 断面に材料が割り当てられていない部材はエラーとする。
 #[test]
 fn test_issue_when_member_has_no_material() {
@@ -801,7 +836,7 @@ fn src_stiffness_errors_reach_nonlinear_input_diagnostics_and_public_factories()
     for (kind, regime) in [
         (ElementKind::Fiber, ForceRegime::Auto),
         (ElementKind::MultiSpring, ForceRegime::Auto),
-        (ElementKind::Beam, ForceRegime::UniaxialBendingShear),
+        (ElementKind::Beam, ForceRegime::AxialBendingInteract),
     ] {
         model.elements[0].kind = kind;
         model.elements[0].force_regime = regime;

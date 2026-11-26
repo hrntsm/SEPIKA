@@ -920,9 +920,18 @@ fn draw_peak_check<'a>(
     let rc_beam_adjacency =
         (wire_qd && rc_beam && kind != MemberKind::Column && qd_method != QdMethod::Qd2)
             .then(|| sepika_core::adjacency::NodeAdjacency::primary_frame(model));
-    let rc_beam_qd1 = rc_beam_adjacency
+    let rc_beam_qd1_geometry = rc_beam_adjacency
         .as_ref()
         .map(|adjacency| sepika_design_jp::rc::beam_qd1_geometry(model, adjacency, elem));
+    use sepika_design_jp::design_position::{
+        qd1_saved_station_issue, rc_beam_qd1_positions, same_qd1_station,
+    };
+    let qd1_positions = rc_beam_qd1_geometry
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .and_then(|geometry| rc_beam_qd1_positions(model, elem, *geometry));
+    let rc_beam_qd1 = rc_beam_qd1_geometry
+        .map(|result| result.and_then(|geometry| geometry.demand_clear_span_mm()));
     let (q_simple, q0_issue) = if rc_beam_qd1.is_some() {
         match sepika_job::design_q0::rc_beam_q0_for_gravity_cases(model, elem) {
             Ok(q0) => (q0, None),
@@ -934,13 +943,6 @@ fn draw_peak_check<'a>(
     } else {
         (None, None)
     };
-    use sepika_design_jp::design_position::{
-        qd1_saved_station_issue, rc_beam_qd1_positions, same_qd1_station,
-    };
-    let qd1_positions = rc_beam_qd1
-        .as_ref()
-        .and_then(|result| result.as_ref().ok())
-        .and_then(|geometry| rc_beam_qd1_positions(model, elem, *geometry));
     let slab_moments_nmm = rc_beam_adjacency
         .as_ref()
         .filter(|_| matches!(rc_beam_qd1, Some(Ok(_))))
@@ -970,7 +972,7 @@ fn draw_peak_check<'a>(
             n_mechanism: 1.0,
             q_simple,
             clear_length: match &rc_beam_qd1 {
-                Some(Ok(geometry)) => geometry.clear_span_mm,
+                Some(Ok(span_mm)) => *span_mm,
                 Some(Err(_)) => f64::NAN,
                 None => clear_span,
             },
