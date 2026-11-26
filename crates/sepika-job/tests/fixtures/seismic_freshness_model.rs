@@ -181,6 +181,7 @@ pub fn two_storeys_with_weightless_steel_girders() -> Model {
                 extent: [2000.0, 2000.0],
             },
             plate: SlabPlate {
+                top_reinforcement: None,
                 section: Some(SectionId(2)),
                 loads: Vec::new(),
                 usage: None,

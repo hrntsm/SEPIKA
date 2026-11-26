@@ -1357,8 +1357,6 @@ fn design_check_covers_every_member() {
     const SLAB_GIRDERS: [u32; 17] = [
         40, 41, 48, 49, 56, 57, 66, 67, 76, 77, 78, 91, 92, 93, 103, 104, 105,
     ];
-    const QD1_SLAB_REASON: &str =
-        "QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません";
 
     let mut app = analyzed();
     app.core.analysis_cfg.rc_damage_control = false;
@@ -1396,6 +1394,8 @@ fn design_check_covers_every_member() {
     let mut steel_unavailable_shear_positions = 0usize;
     let mut rc_src_zero_torsion_positions = 0usize;
     let mut slab_girder_positions = 0usize;
+    let mut slab_girder_checked = 0usize;
+    let adjacency = sepika_core::adjacency::NodeAdjacency::primary_frame(&app.core.model);
     let mut max_rc_src_mx_nmm = 0.0_f64;
     let mut recovered_h_girder_peaks = 0;
     let mut symmetric_h_girders = 0;
@@ -1430,11 +1430,24 @@ fn design_check_covers_every_member() {
                             || attr.lateral_brace_count.is_some_and(|n| n > 0))
                 }));
         }
-        let regular_positions = sepika_design_jp::design_position::design_positions(
-            elem,
-            &app.core.model,
-            app.core.model.member_length(elem),
-        );
+        let regular_positions = if SLAB_GIRDERS.contains(&mc.elem.0) {
+            let g =
+                sepika_design_jp::rc::beam_qd1_geometry(&app.core.model, &adjacency, elem).unwrap();
+            let expected_span_mm = match mc.elem.0 {
+                40 | 48 | 56 | 66 => 4000.0,
+                41 | 49 | 57 | 67 => 8800.0,
+                _ => 6400.0,
+            };
+            assert_eq!(g.clear_span_mm, expected_span_mm, "部材 {:?}", mc.elem);
+            assert_eq!(g.uses_material_end, [true, true]);
+            vec![0.0, 0.5, 1.0]
+        } else {
+            sepika_design_jp::design_position::design_positions(
+                elem,
+                &app.core.model,
+                app.core.model.member_length(elem),
+            )
+        };
         assert_eq!(regular_positions.len(), 3, "部材 {:?}", mc.elem);
         assert!(
             regular_positions
@@ -1527,39 +1540,59 @@ fn design_check_covers_every_member() {
                     section.shape,
                     Some(SectionShape::RcBeamRect { .. })
                 ));
-                let reasons: Vec<_> = outcomes
-                    .iter()
-                    .filter_map(|outcome| match outcome {
-                        CheckOutcome::Skipped { reason } => Some(reason.as_str()),
-                        _ => None,
-                    })
-                    .collect();
-                let expected_reason = match reasons.as_slice() {
-                    [reason] if mx_nmm == 0.0 => *reason == QD1_SLAB_REASON,
-                    [reason] => {
-                        reason.starts_with(QD1_SLAB_REASON)
-                            && reason.contains("Mx")
-                            && reason.contains("同時に作用")
-                    }
-                    _ => false,
-                };
-                assert!(
-                    expected_reason,
-                    "部材 {:?} 位置 {xi}: {outcomes:?}",
-                    mc.elem
-                );
-                assert!(
-                    outcomes.iter().all(|outcome| match outcome {
-                        CheckOutcome::Checked(result) =>
-                            !result.ok()
-                                && result.components.iter().all(|c| c.ratio.is_finite()
-                                    && c.ratio > 1.0
-                                    && c.kind != CheckKind::Shear),
-                        CheckOutcome::Skipped { .. } => true,
-                    }),
-                    "部材 {:?} 位置 {xi}: {outcomes:?}",
-                    mc.elem
-                );
+                if mx_nmm == 0.0 {
+                    let [CheckOutcome::Checked(result)] = &outcomes[..] else {
+                        panic!("部材 {:?} 位置 {xi}: {outcomes:?}", mc.elem);
+                    };
+                    assert!(result
+                        .components
+                        .iter()
+                        .all(|c| c.ratio.is_finite() && c.ratio >= 0.0));
+                    assert!(
+                        result.components.iter().any(|c| c.kind == CheckKind::Shear
+                            && c.rc_beam_qd1_slab_warning().is_some()),
+                        "部材 {:?} 位置 {xi}: {result:?}",
+                        mc.elem
+                    );
+                    assert!(
+                        result
+                            .components
+                            .iter()
+                            .any(|c| c.kind == CheckKind::Bending
+                                && c.detail
+                                    .contains(&format!("|mz|={:.1}", local_forces[5].abs()))),
+                        "部材 {:?} 位置 {xi}: {result:?}",
+                        mc.elem
+                    );
+                    slab_girder_checked += 1;
+                } else {
+                    let reasons: Vec<_> = outcomes
+                        .iter()
+                        .filter_map(|outcome| match outcome {
+                            CheckOutcome::Skipped { reason } => Some(reason.as_str()),
+                            _ => None,
+                        })
+                        .collect();
+                    assert!(
+                        matches!(&reasons[..], [reason] if reason.starts_with("ねじりモーメントMx")
+                        && reason.contains("同時に作用")),
+                        "部材 {:?} 位置 {xi}: {outcomes:?}",
+                        mc.elem
+                    );
+                    assert!(
+                        outcomes.iter().all(|outcome| match outcome {
+                            CheckOutcome::Checked(result) =>
+                                !result.ok()
+                                    && result.components.iter().all(|c| c.ratio.is_finite()
+                                        && c.ratio > 1.0
+                                        && (c.kind != CheckKind::Shear
+                                            || c.rc_beam_qd1_slab_warning().is_some())),
+                            CheckOutcome::Skipped { .. } => true,
+                        }),
+                        "部材 {:?} 位置 {xi}: {outcomes:?}",
+                        mc.elem
+                    );
+                }
                 slab_girder_positions += 1;
                 continue;
             }
@@ -1664,6 +1697,7 @@ fn design_check_covers_every_member() {
     assert!(max_rc_src_mx_nmm > 0.0, "RC/SRC 部材に非零の Mx がない");
     println!("RC/SRC 部材の検定位置の最大 |Mx| = {max_rc_src_mx_nmm} N·mm");
     assert_eq!(slab_girder_positions, SLAB_GIRDERS.len() * 3);
+    assert!(slab_girder_checked > 0);
 
     let beam_id = ElemId(40);
     let (_, forces) = app
@@ -1697,10 +1731,9 @@ fn design_check_covers_every_member() {
         .filter(|p| p.xi == 0.5)
         .map(|p| &p.outcome)
         .collect();
-    let [CheckOutcome::Checked(ng), CheckOutcome::Skipped { reason }] = outcomes.as_slice() else {
+    let [CheckOutcome::Checked(ng)] = outcomes.as_slice() else {
         panic!("スラブ付き梁 {beam_id:?} 中央: {outcomes:?}");
     };
-    assert_eq!(reason, QD1_SLAB_REASON);
     assert!(ng
         .components
         .iter()
@@ -1708,7 +1741,10 @@ fn design_check_covers_every_member() {
     assert!(ng
         .components
         .iter()
-        .all(|c| c.ratio.is_finite() && c.ratio > 1.0 && c.kind != CheckKind::Shear));
+        .any(|c| c.kind == CheckKind::Bond && c.ratio > 1.0));
+    assert!(ng.components.iter().any(|c| c.kind == CheckKind::Shear
+        && c.ratio.is_finite()
+        && c.rc_beam_qd1_slab_warning().is_some()));
 }
 
 fn story_metrics(app: &App, dir: SeismicDir) -> Vec<sepika_app::summary::StoryMetric> {

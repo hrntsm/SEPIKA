@@ -319,6 +319,7 @@ pub(super) fn make_rect_slab_model(
     let slab_id = model.add_enclosed_slab_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         SlabPlate {
+            top_reinforcement: None,
             section: None,
             loads: vec![AreaLoad {
                 kind: "DL".into(),
@@ -526,6 +527,7 @@ pub(super) fn polygon_slab_model(
     let slab_id = model.add_enclosed_slab_from_nodes(
         &boundary,
         SlabPlate {
+            top_reinforcement: None,
             section: None,
             loads: vec![AreaLoad {
                 kind: "DL".into(),

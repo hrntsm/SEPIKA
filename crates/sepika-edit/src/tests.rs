@@ -5179,6 +5179,7 @@ fn test_copy_story_overwrite_keeps_slabs_outside_source_plan() {
     model.add_enclosed_slab_from_nodes(
         &b,
         SlabPlate {
+            top_reinforcement: None,
             section: None,
             loads: Vec::new(),
             usage: None,

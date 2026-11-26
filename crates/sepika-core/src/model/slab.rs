@@ -49,9 +49,36 @@ impl TipLoadDirection {
     }
 }
 
+/// 上端配筋の実配置。未対応の配筋・継手がある場合は配筋全体を未確認とする。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SlabTopReinforcement {
+    /// 梁と一体打ちの床版区画に付ける打設区分。同じ区分は同一打設を表す。
+    pub monolithic_pour: String,
+    /// 直線で継手のない実筋の全長。同じ実筋は始点を含む床板1枚だけに登録する。
+    pub straight_bars: Vec<SlabStraightBar>,
+}
+
+/// 両端が直線定着された、継手のない異形鉄筋。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SlabStraightBar {
+    /// 両端の鉄筋中心の全体座標 [mm]。
+    pub ends_mm: [[f64; 3]; 2],
+    pub size: crate::section_shape::StandardRebar,
+    /// 鉄筋の材種名。
+    pub grade: String,
+    /// QD1の降伏曲げに用いる降伏点 [N/mm²]。
+    pub yield_strength_n_mm2: f64,
+    /// 実降伏強度の上昇を考慮した付着照査用の確認済み応力度 [N/mm²]。未確認は None。
+    #[serde(default)]
+    pub bond_yield_strength_n_mm2: Option<f64>,
+}
+
 /// 床板の版（仕様）。
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SlabPlate {
+    /// 上端実配筋。未確認の None と、配筋一覧が確認済みで空の Some を区別する。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_reinforcement: Option<SlabTopReinforcement>,
     /// スラブ断面（符号・板厚・コンクリート材料）。
     ///
     /// **板厚と自重はこの断面から解決する**（[`Model::slab_plate_thickness`]・
@@ -887,6 +914,7 @@ mod tests {
             id: crate::ids::SlabId(0),
             shape: SlabShape::Enclosed,
             plate: SlabPlate {
+                top_reinforcement: None,
                 section: None,
                 loads: vec![AreaLoad {
                     kind: "DL".into(),

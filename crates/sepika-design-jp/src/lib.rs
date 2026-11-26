@@ -217,6 +217,17 @@ pub struct CheckComponent {
     pub detail: String,
 }
 
+pub(crate) const RC_BEAM_QD1_SLAB_WARNING: &str =
+    "スラブ筋の寄与を確認できずQD1に算入していません。設計用せん断力を過小評価する可能性があります";
+
+impl CheckComponent {
+    /// スラブ筋の寄与を未確認としてQD1を算定した場合に警告を返す。
+    pub fn rc_beam_qd1_slab_warning(&self) -> Option<&'static str> {
+        (self.kind == CheckKind::Shear && self.detail.ends_with(RC_BEAM_QD1_SLAB_WARNING))
+            .then_some(RC_BEAM_QD1_SLAB_WARNING)
+    }
+}
+
 /// 1 検定位置の検定結果（検定を実施できた場合）。
 ///
 /// `ratio`/`ok` は保持せず、`components`（式別内訳）から
@@ -395,6 +406,12 @@ pub struct DesignCtx {
     /// RC矩形梁のQD1を適用できない理由。QD1/minで `None` を渡す呼出側は、
     /// 両端の強軸曲げ伝達、有限で正のフェース間内法、両端が同じ断面であることを確認する。
     pub rc_beam_qd1_issue: Option<String>,
+    /// 床板が取り付き、QD1でスラブ筋の寄与を確定できない場合に true。
+    pub rc_beam_qd1_slab_unverified: bool,
+    /// 実材端を採るQD1で重力の保存断面位置を厳密に照合する場合に true。
+    pub rc_beam_qd1_at_material_end: bool,
+    /// i端・j端それぞれで上端引張時に算入する床板筋の寄与 [N·mm]。
+    pub rc_beam_qd1_slab_end_moments_nmm: Option<[f64; 2]>,
     /// 一本部材の外端断面から確認した正負方向の降伏曲げ和の最大値 [N·mm]。
     pub rc_grouped_beam_qd1_sum_my_nmm: Option<f64>,
     /// S 造部材の断面検定属性（継手・スカラップ欠損率、横座屈長さ入力）。
@@ -430,6 +447,9 @@ impl Default for DesignCtx {
             column_sum_my: None,
             beam_has_slab: false,
             rc_beam_qd1_issue: None,
+            rc_beam_qd1_slab_unverified: false,
+            rc_beam_qd1_at_material_end: false,
+            rc_beam_qd1_slab_end_moments_nmm: None,
             rc_grouped_beam_qd1_sum_my_nmm: None,
             steel_attr: None,
         }

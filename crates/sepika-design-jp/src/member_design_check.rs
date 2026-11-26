@@ -37,6 +37,37 @@ use crate::{
     SrcColumnRoute21Shear,
 };
 
+fn with_qd1_column_faces(
+    id: ElemId,
+    rows: &MemberForces,
+    geometry: crate::rc::BeamQd1Geometry,
+    saved_faces: &[(ElemId, GirderColumnFaceEnds)],
+) -> MemberForces {
+    use crate::design_position::same_qd1_station;
+    let mut at = rows.at.clone();
+    let mut candidates = saved_faces.iter().filter(|(elem_id, _)| *elem_id == id);
+    if let (Some((_, faces)), None) = (candidates.next(), candidates.next()) {
+        for (side, col) in faces.iter().enumerate() {
+            let xi = geometry.end_positions[side];
+            if geometry.uses_material_end[side] || at.iter().any(|(p, _)| same_qd1_station(xi, *p))
+            {
+                continue;
+            }
+            let Ok(face) = col else { continue };
+            let Ok(forces) = face.forces else { continue };
+            if (face.face.length_mm - geometry.axis_length_mm).abs()
+                <= 32.0 * f64::EPSILON * geometry.axis_length_mm
+                && same_qd1_station(xi, face.face.position_mm / face.face.length_mm)
+                && forces.iter().all(|value| value.is_finite())
+            {
+                at.push((xi, forces));
+            }
+        }
+    }
+    at.sort_by(|a, b| a.0.total_cmp(&b.0));
+    MemberForces { at }
+}
+
 /// 一本部材グループ合成値（断面検定の採用応力上書き用）。
 ///
 /// `Model.girder_groups` から合成した部材長・端部/中央モーメント等を、
@@ -62,6 +93,10 @@ pub struct MemberDesignCheckOptions<'a> {
     pub term: LoadTerm,
     /// 同じ解析結果の大梁実柱面断面力。欠落時は対応するSRC接合部を未算定とする。
     pub girder_column_face_forces: &'a [(ElemId, GirderColumnFaceEnds)],
+    /// RC梁実材端検定と同じ保存応答の実柱面内力。通常の評価断面に同位置がない場合だけ使う。
+    pub rc_beam_qd1_face_forces: &'a [(ElemId, GirderColumnFaceEnds)],
+    /// 上記と同じ実柱面の重力参照内力。保存位置を推定して補わない。
+    pub rc_beam_qd1_gravity_faces: &'a [(ElemId, GirderColumnFaceEnds)],
     /// 同じ解析結果のS造仕口フランジ位置における荷重込み柱軸力。
     pub steel_panel_column_face_forces: &'a [SteelPanelColumnFaceForce],
     /// 壁展開時の元壁版と生成要素の対応。壁版のない要素fixtureではNoneを許す。
@@ -669,6 +704,7 @@ pub fn run_member_design_checks(
             None => length,
         };
 
+        let mut single_qd1_geometry = None;
         let rc_beam_qd1 = (!rc_damage_control
             && structure == StructureKind::Rc
             && matches!(sec.shape, Some(SectionShape::RcBeamRect { .. }))
@@ -684,20 +720,49 @@ pub fn run_member_design_checks(
                 let adjacency = rc_beam_adjacency.get_or_insert_with(|| {
                     sepika_core::adjacency::NodeAdjacency::primary_frame(model)
                 });
-                crate::rc::beam_qd1_clear_span(model, adjacency, elem).map(|span_mm| {
+                crate::rc::beam_qd1_geometry(model, adjacency, elem).map(|geometry| {
+                    single_qd1_geometry = Some(geometry);
                     let q0_n = options
                         .q_simple_by_elem
                         .and_then(|m| m.get(elem_id).copied());
-                    (span_mm, None, q0_n)
+                    (geometry.clear_span_mm, None, q0_n)
                 })
             });
+        let qd1_positions = single_qd1_geometry.and_then(|geometry| {
+            crate::design_position::rc_beam_qd1_positions(model, elem, geometry)
+        });
         let mf_long = long_mf_by_id
             .as_ref()
             .filter(|_| !rc_damage_control)
-            .and_then(|map| map.get(elem_id));
+            .and_then(|map| map.get(elem_id).copied());
+        let verified_geometry = single_qd1_geometry.filter(|_| qd1_positions.is_some());
+        let response_with_faces = verified_geometry.map(|geometry| {
+            with_qd1_column_faces(*elem_id, mf, geometry, options.rc_beam_qd1_face_forces)
+        });
+        let gravity_with_faces = verified_geometry.zip(mf_long).map(|(geometry, long)| {
+            with_qd1_column_faces(*elem_id, long, geometry, options.rc_beam_qd1_gravity_faces)
+        });
+        let mf = response_with_faces.as_ref().unwrap_or(mf);
+        let mf_long = gravity_with_faces.as_ref().or(mf_long);
         let checks_grouped_rc_qd1 = grouped_girders.contains(elem_id) && rc_beam_qd1.is_some();
         let seismic_qd = (mf_long.is_some() || checks_grouped_rc_qd1).then(|| SeismicQd {
-            long_at: mf_long.map_or_else(Vec::new, |mf| mf.at.clone()),
+            long_at: mf_long.map_or_else(Vec::new, |mf| match &qd1_positions {
+                Some(positions) => mf
+                    .at
+                    .iter()
+                    .filter(|(pos, _)| {
+                        positions.iter().any(|expected| {
+                            crate::design_position::same_qd1_station(*expected, *pos)
+                                && crate::design_position::qd1_saved_station_issue(
+                                    *expected, &mf.at,
+                                )
+                                .is_none()
+                        })
+                    })
+                    .copied()
+                    .collect(),
+                None => mf.at.clone(),
+            }),
             n_factor: 1.5,
             n_mechanism: 1.0,
             q_simple: match &rc_beam_qd1 {
@@ -819,6 +884,10 @@ pub fn run_member_design_checks(
             (None, None, None)
         };
 
+        let slab_moments_nmm = (matches!(rc_beam_qd1, Some(Ok(_)))
+            && !grouped_girders.contains(elem_id))
+        .then(|| crate::rc::beam_qd1_slab_end_moments(model, rc_beam_adjacency.as_ref()?, elem))
+        .flatten();
         let mut ctx = DesignCtx {
             rebar_material: rebar_material.cloned(),
             shear_rebar_material: shear_rebar_material.cloned(),
@@ -861,6 +930,11 @@ pub fn run_member_design_checks(
                 .as_ref()
                 .and_then(|value| value.as_ref().ok())
                 .and_then(|(_, sum_my, _)| *sum_my),
+            rc_beam_qd1_slab_end_moments_nmm: slab_moments_nmm,
+            rc_beam_qd1_at_material_end: qd1_positions.is_some(),
+            rc_beam_qd1_slab_unverified: slab_moments_nmm.is_none()
+                && matches!(rc_beam_qd1, Some(Ok(_)))
+                && !grouped_girders.contains(elem_id),
             rc_beam_qd1_issue: rc_beam_qd1.and_then(Result::err),
             steel_attr,
         };
@@ -966,7 +1040,22 @@ pub fn run_member_design_checks(
         } else {
             length
         };
-        let positions = design_positions(elem, model, position_length);
+        let positions = qd1_positions
+            .clone()
+            .unwrap_or_else(|| design_positions(elem, model, position_length));
+        if let Some(positions) = &qd1_positions {
+            for &pos in positions {
+                if let Some(reason) = crate::design_position::qd1_saved_station_issue(pos, &mf.at) {
+                    member_checks.push((
+                        *elem_id,
+                        pos,
+                        CheckOutcome::Skipped {
+                            reason: reason.into(),
+                        },
+                    ));
+                }
+            }
+        }
         let route21_matches = ctx.src_column_route21_shear.as_ref().map(|_| {
             let mut counts = vec![0; positions.len()];
             let stations: Vec<_> = mf
@@ -1038,6 +1127,11 @@ pub fn run_member_design_checks(
             .filter(|(row, (pos, _))| {
                 let selected_position = match &route21_matches {
                     Some((stations, counts)) => stations[*row].is_some_and(|i| counts[i] == 1),
+                    None if qd1_positions.is_some() => positions.iter().any(|expected| {
+                        crate::design_position::same_qd1_station(*expected, *pos)
+                            && crate::design_position::qd1_saved_station_issue(*expected, &mf.at)
+                                .is_none()
+                    }),
                     None => is_near_design_position(*pos, &positions),
                 };
                 selected_position

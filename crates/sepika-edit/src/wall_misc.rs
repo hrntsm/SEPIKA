@@ -1324,6 +1324,52 @@ impl EditCommand for SetMiscWallConditions {
     }
 }
 
+/// 床板の上端実配筋を変更する。未確認と、確認済みで該当筋がない状態を区別する。
+pub struct SetSlabTopReinforcement {
+    pub id: SlabId,
+    pub layout: Option<sepika_core::model::SlabTopReinforcement>,
+}
+
+impl EditCommand for SetSlabTopReinforcement {
+    fn apply(&self, model: &mut Model) -> Box<dyn EditCommand> {
+        let Some(slab) = model
+            .slabs
+            .get_mut(self.id.index())
+            .filter(|slab| slab.id == self.id)
+        else {
+            return Box::new(Noop);
+        };
+        if self.layout.as_ref().is_some_and(|layout| {
+            layout.monolithic_pour.trim().is_empty()
+                || layout.straight_bars.iter().any(|bar| {
+                    bar.grade.trim().is_empty()
+                        || !bar.yield_strength_n_mm2.is_finite()
+                        || bar.yield_strength_n_mm2 <= 0.0
+                        || bar
+                            .bond_yield_strength_n_mm2
+                            .is_some_and(|v| !v.is_finite() || v <= bar.yield_strength_n_mm2)
+                        || !bar.ends_mm.iter().flatten().all(|coord| coord.is_finite())
+                        || bar.ends_mm[0] == bar.ends_mm[1]
+                })
+        }) {
+            return Box::new(RejectedEdit(
+                "打設区分・鉄筋の両端座標と材種・降伏点を確認してください".into(),
+            ));
+        }
+        if slab.plate.top_reinforcement == self.layout {
+            return Box::new(Noop);
+        }
+        Box::new(Self {
+            id: self.id,
+            layout: std::mem::replace(&mut slab.plate.top_reinforcement, self.layout.clone()),
+        })
+    }
+
+    fn label(&self) -> &str {
+        "床板上端実配筋変更"
+    }
+}
+
 #[cfg(test)]
 mod misc_wall_condition_tests {
     use super::*;

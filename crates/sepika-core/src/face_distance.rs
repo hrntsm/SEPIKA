@@ -121,6 +121,58 @@ pub fn girder_column_faces(
     Some(faces)
 }
 
+/// 梁の偏心前には一意の柱面があり、偏心後はどの接続柱の側面にも交差しない端の柱ID（i/j順）。
+pub fn girder_column_face_misses_due_to_offset(
+    model: &Model,
+    elem: &ElementData,
+    adjacency: &NodeAdjacency,
+) -> Option<[Vec<ElemId>; 2]> {
+    if elem.end_offsets_mm == [[0.0; 3]; 2] {
+        return None;
+    }
+    let ends = model.primary_frame_axis_ends(elem).ok()??;
+    let direction = axis_direction(ends[0], ends[1]).ok()?;
+    let length_mm = vec3::dist(ends[0], ends[1]);
+    let mut unoffset = elem.clone();
+    unoffset.end_offsets_mm = [[0.0; 3]; 2];
+    let references = girder_column_faces(model, &unoffset, adjacency)?;
+    Some(std::array::from_fn(|side| {
+        let Ok(reference) = &references[side] else {
+            return Vec::new();
+        };
+        if elem.end_offsets_mm[side] == [0.0; 3] {
+            return Vec::new();
+        }
+        let inward = if side == 0 {
+            direction
+        } else {
+            vec3::scale(direction, -1.0)
+        };
+        let columns: Vec<_> = adjacency
+            .elements_at(model, elem.nodes[side])
+            .filter(|col| {
+                col.id != elem.id
+                    && model
+                        .element_section(col)
+                        .is_some_and(|sec| sec.frame_use == Some(FrameSectionUse::Column))
+            })
+            .collect();
+        if columns.len() == reference.columns.len()
+            && columns.iter().all(|col| {
+                reference.columns.contains(&col.id)
+                    && matches!(
+                        model.girder_exit_at_column_face_mm(col, ends[side], inward, length_mm),
+                        Ok(None)
+                    )
+            })
+        {
+            reference.columns.clone()
+        } else {
+            Vec::new()
+        }
+    }))
+}
+
 fn axis_direction(a: [f64; 3], b: [f64; 3]) -> Result<[f64; 3], String> {
     let delta = vec3::sub(b, a);
     let len = vec3::norm(delta);

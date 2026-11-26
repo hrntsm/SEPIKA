@@ -706,6 +706,7 @@ mod tests {
 
     fn plate(section: Option<SectionId>, loads: Vec<AreaLoad>) -> SlabPlate {
         SlabPlate {
+            top_reinforcement: None,
             section,
             loads,
             usage: None,

@@ -810,6 +810,7 @@ mod tests {
         let slab_id = model.add_enclosed_slab_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             SlabPlate {
+                top_reinforcement: None,
                 section: None,
                 loads: vec![AreaLoad {
                     kind: "DL".into(),
@@ -2708,6 +2709,7 @@ mod cascade_tests {
             mk_beam(3, 3, 0),
         ];
         let plate = SlabPlate {
+            top_reinforcement: None,
             section: None,
             loads: vec![AreaLoad {
                 kind: "DL".into(),

@@ -867,38 +867,60 @@ fn draw_peak_check<'a>(
     let wrong_shear_rebar = shear_rebar_material
         .is_some_and(|material| material.category != sepika_core::model::MaterialCategory::Rebar);
     let long_mf = gravity_reference.and_then(Result::ok);
-    let (rc_beam_qd1, q_simple) =
-        if wire_qd && rc_beam && kind != MemberKind::Column && qd_method != QdMethod::Qd2 {
-            match sepika_job::design_q0::rc_beam_q0_for_gravity_cases(model, elem) {
-                Ok(q0) => (
-                    Some(sepika_design_jp::rc::beam_qd1_clear_span(
-                        model,
-                        &sepika_core::adjacency::NodeAdjacency::primary_frame(model),
-                        elem,
-                    )),
-                    q0,
-                ),
-                Err(reason) => (
-                    Some(Err(format!(
-                        "QD1用の部材荷重由来Q0を算定できません（{reason}）"
-                    ))),
-                    None,
-                ),
-            }
-        } else {
-            (None, None)
-        };
+    let rc_beam_adjacency =
+        (wire_qd && rc_beam && kind != MemberKind::Column && qd_method != QdMethod::Qd2)
+            .then(|| sepika_core::adjacency::NodeAdjacency::primary_frame(model));
+    let rc_beam_qd1 = rc_beam_adjacency
+        .as_ref()
+        .map(|adjacency| sepika_design_jp::rc::beam_qd1_geometry(model, adjacency, elem));
+    let (q_simple, q0_issue) = if rc_beam_qd1.is_some() {
+        match sepika_job::design_q0::rc_beam_q0_for_gravity_cases(model, elem) {
+            Ok(q0) => (q0, None),
+            Err(reason) => (
+                None,
+                Some(format!("QD1用の部材荷重由来Q0を算定できません（{reason}）")),
+            ),
+        }
+    } else {
+        (None, None)
+    };
+    use sepika_design_jp::design_position::{
+        qd1_saved_station_issue, rc_beam_qd1_positions, same_qd1_station,
+    };
+    let qd1_positions = rc_beam_qd1
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .and_then(|geometry| rc_beam_qd1_positions(model, elem, *geometry));
+    let slab_moments_nmm = rc_beam_adjacency
+        .as_ref()
+        .filter(|_| matches!(rc_beam_qd1, Some(Ok(_))))
+        .and_then(|adjacency| {
+            sepika_design_jp::rc::beam_qd1_slab_end_moments(model, adjacency, elem)
+        });
     let long_at = long_mf.and_then(|list| list.iter().find(|(id, _)| *id == elem.id));
     let missing_gravity = wire_qd && long_at.is_none();
     let seismic_qd = (long_at.is_some()
         || (wire_qd && (rc_beam || rc_column || structure == StructureKind::Cft)))
         .then(|| sepika_design_jp::SeismicQd {
-            long_at: long_at.map_or_else(Vec::new, |(_, mf)| mf.at.clone()),
+            long_at: long_at.map_or_else(Vec::new, |(_, mf)| match &qd1_positions {
+                Some(positions) => mf
+                    .at
+                    .iter()
+                    .filter(|(pos, _)| {
+                        positions.iter().any(|expected| {
+                            same_qd1_station(*expected, *pos)
+                                && qd1_saved_station_issue(*expected, &mf.at).is_none()
+                        })
+                    })
+                    .copied()
+                    .collect(),
+                None => mf.at.clone(),
+            }),
             n_factor: 1.5,
             n_mechanism: 1.0,
             q_simple,
             clear_length: match &rc_beam_qd1 {
-                Some(Ok(span)) => *span,
+                Some(Ok(geometry)) => geometry.clear_span_mm,
                 Some(Err(_)) => f64::NAN,
                 None => clear_span,
             },
@@ -997,7 +1019,11 @@ fn draw_peak_check<'a>(
             }),
         beam_has_slab: kind == MemberKind::Girder
             && sepika_design_jp::beam_has_attached_slab(&app.core.model, elem),
-        rc_beam_qd1_issue: rc_beam_qd1.and_then(Result::err),
+        rc_beam_qd1_slab_end_moments_nmm: slab_moments_nmm,
+        rc_beam_qd1_at_material_end: qd1_positions.is_some(),
+        rc_beam_qd1_slab_unverified: slab_moments_nmm.is_none()
+            && matches!(rc_beam_qd1, Some(Ok(_))),
+        rc_beam_qd1_issue: q0_issue.or_else(|| rc_beam_qd1.and_then(Result::err)),
         rc_grouped_beam_qd1_sum_my_nmm: None,
         seismic_qd,
         ..Default::default()
@@ -1053,11 +1079,38 @@ fn draw_peak_check<'a>(
                     end_axial(&forces.at),
                 )
             });
+            if let Some(positions) = &qd1_positions {
+                if selected.is_none() {
+                    for &pos in positions {
+                        if let Some(reason) = qd1_saved_station_issue(pos, &forces.at) {
+                            draw_labeled_outcome_row(
+                                ui,
+                                &format!("ξ={pos:.2}:"),
+                                &CheckOutcome::Skipped {
+                                    reason: reason.into(),
+                                },
+                                false,
+                            );
+                        }
+                    }
+                }
+            }
             for (index, &(pos, f)) in forces.at.iter().enumerate() {
                 if selected
                     .is_some_and(|(snapshot, _)| snapshot.positions.binary_search(&index).is_err())
                 {
                     continue;
+                }
+                if let Some(positions) = &qd1_positions {
+                    let Some(&expected) = positions
+                        .iter()
+                        .find(|expected| same_qd1_station(**expected, pos))
+                    else {
+                        continue;
+                    };
+                    if qd1_saved_station_issue(expected, &forces.at).is_some() {
+                        continue;
+                    }
                 }
                 let mfa = MemberForcesAt::from_local(pos, f);
                 let mut draw_outcome = |outcome: &CheckOutcome| {
@@ -1362,6 +1415,9 @@ fn draw_labeled_outcome_row(
                         },
                     )
                     .on_hover_text(&c.detail);
+                    if let Some(warning) = c.rc_beam_qd1_slab_warning() {
+                        ui.colored_label(theme::WARN_TEXT, warning);
+                    }
                 }
             }
             CheckOutcome::Skipped { reason } => {

@@ -188,6 +188,7 @@ fn build_grid_model(nx: usize, ny: usize, n_stories: usize, with_slabs: bool) ->
                     let new_slab = model.add_enclosed_slab_from_nodes(
                         &boundary,
                         SlabPlate {
+                            top_reinforcement: None,
                             section: None,
                             loads: vec![AreaLoad {
                                 kind: "DL".into(),

@@ -871,6 +871,16 @@ impl App {
                 .src_joint_hoops
                 .clone_from(&self.core.model.src_joint_hoops);
         }
+        if seismic_combination
+            && !self.core.analysis_cfg.rc_damage_control
+            && self.core.analysis_cfg.qd_method != sepika_design_jp::QdMethod::Qd2
+        {
+            for (slab, input) in model.slabs.iter_mut().zip(&self.core.model.slabs) {
+                slab.plate
+                    .top_reinforcement
+                    .clone_from(&input.plate.top_reinforcement);
+            }
+        }
         rmp_serde::to_vec_named(&(
             model,
             term,

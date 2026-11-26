@@ -225,7 +225,9 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0159](0159-rc-beam-round-bar-primary-bond-hold.md) | accepted | 丸鋼主筋を使うRC梁の一次付着は未算定とする |
 | [0160](0160-steel-beam-intermediate-bracing.md) | accepted | 等間隔の中間横補剛を指定したH形鋼梁は区間ごとに最大曲げを照査する |
 | [0161](0161-rc-grouped-beam-qd1.md) | accepted | 一本部材のRC矩形梁は物理スパン全体の釣合いでQD1を求める |
+| [0162](0162-rc-beam-qd1-slab-reinforcement-source.md) | accepted | RC梁のQD1に用いるスラブ筋は床版の実配筋から判定する |
 | [0163](0163-rc-beam-qd1-support-path.md) | accepted | RC梁のQD1の算定条件に接続先の支持経路を含めない |
+| [0164](0164-rc-beam-qd1-eccentric-material-end.md) | accepted | 偏心で実柱面を取れないRC梁端は実材端で検定する |
 
 ## 規約
 

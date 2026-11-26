@@ -1010,6 +1010,7 @@ fn test_model_issues_rejects_slab_without_section() {
     let slab_id = model.add_enclosed_slab_from_nodes(
         &boundary,
         SlabPlate {
+            top_reinforcement: None,
             section: None,
             loads: Vec::new(),
             usage: None,
@@ -2736,6 +2737,7 @@ fn test_model_issues_warns_floating_plate() {
         id: slab_id,
         shape: SlabShape::Enclosed,
         plate: SlabPlate {
+            top_reinforcement: None,
             section: Some(sid),
             loads: Vec::new(),
             usage: None,

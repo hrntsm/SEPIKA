@@ -7,6 +7,7 @@ use sepika_core::model::{Material, Section};
 use sepika_core::section_shape::SectionShape;
 
 mod beam;
+mod beam_slab_qd1;
 mod bond;
 mod clear_span;
 mod column;
@@ -23,7 +24,8 @@ mod design_shear;
 pub(crate) mod section_props;
 mod shear_capacity;
 
-pub use beam::beam_qd1_clear_span;
+pub use beam::{beam_qd1_clear_span, beam_qd1_geometry, BeamQd1Geometry};
+pub use beam_slab_qd1::beam_qd1_slab_end_moments;
 mod grouped_beam;
 pub(crate) use beam::{
     beam_supports_slab, column_transmits_bending, frame_end_positions, restrains_direction,
