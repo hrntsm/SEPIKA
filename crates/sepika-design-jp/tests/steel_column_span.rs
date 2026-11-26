@@ -377,9 +377,11 @@ fn the_same_saved_cut_keeps_its_failure_across_the_unrounded_ratio_limit() {
             .to_vec(),
         };
         let results = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
-        let failure = checked(&results, 1.0)
-            .find(|result| !result.ok())
-            .unwrap_or_else(|| panic!("{results:?}"));
+        let at_j: Vec<_> = checked(&results, 1.0).collect();
+        let [failure] = at_j.as_slice() else {
+            panic!("{results:?}");
+        };
+        assert!(!failure.ok(), "{failure:?}");
         assert!(ratio(failure) > 1.0, "{failure:?}");
         assert!(failure.detail.contains("C=1.7500"), "{failure:?}");
         assert_eq!(
@@ -390,6 +392,87 @@ fn the_same_saved_cut_keeps_its_failure_across_the_unrounded_ratio_limit() {
         assert!(!results
             .iter()
             .any(|(_, result)| matches!(result, CheckOutcome::Skipped { .. })));
+    }
+}
+
+#[test]
+fn same_cut_ng_rows_keep_the_governing_components_without_mixing_forces() {
+    let qy_n = 500_000.0;
+    let j_mz_nmm = 1_500e6;
+    let mut model = input::column(-qy_n, 0.0);
+    model.load_cases[0].nodal[0].values[4] = j_mz_nmm;
+    let terms = [(input::CASE, 1.0)];
+    let forces = MemberForces {
+        at: [(0.0, 0.0), (0.5, 750e6), (1.0, j_mz_nmm)]
+            .map(|(xi, mz)| (xi, [0.0, qy_n, 0.0, 0.0, 0.0, mz]))
+            .to_vec(),
+    };
+    let components = |result: &CheckResult| {
+        let [axial_bending, shear] = result.components.as_slice() else {
+            panic!("{result:?}");
+        };
+        assert_eq!(axial_bending.kind, CheckKind::AxialBending);
+        assert_eq!(shear.kind, CheckKind::Shear);
+        assert!(axial_bending.ratio > 1.0 && shear.ratio > 1.0, "{result:?}");
+        [axial_bending.ratio, shear.ratio]
+    };
+    let reference = rows(&model, forces.clone(), Some(&terms));
+    let recovered_ratios = components(checked(&reference, 1.0).next().unwrap());
+
+    for saved_shear_delta_n in [-0.004, 0.004] {
+        let mut observed = forces.clone();
+        observed.at[2].1[1] += saved_shear_delta_n;
+        observed.at[2].1[5] += 0.25;
+        let result = rows(&model, observed, Some(&terms));
+        assert!(
+            result
+                .iter()
+                .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))),
+            "{result:?}"
+        );
+        let (saved, recovered): (Vec<_>, Vec<_>) =
+            checked(&result, 1.0).partition(|row| row.detail.contains("保存断面力による照査"));
+        let [saved] = saved.as_slice() else {
+            panic!("{result:?}");
+        };
+        let [axial_bending, shear] = components(saved);
+        assert!(axial_bending > recovered_ratios[0], "{result:?}");
+        if saved_shear_delta_n > 0.0 {
+            assert!(shear > recovered_ratios[1], "{result:?}");
+            assert!(recovered.is_empty(), "{result:?}");
+        } else {
+            assert!(shear < recovered_ratios[1], "{result:?}");
+            let [recovered] = recovered.as_slice() else {
+                panic!("{result:?}");
+            };
+            assert_eq!(components(recovered), recovered_ratios);
+        }
+    }
+}
+
+#[test]
+fn a_nonfinite_ratio_cannot_replace_a_finite_ng_at_the_same_cut() {
+    let mut model = input::column(0.0, 0.0);
+    model.materials[0].fy = Some(1e-10);
+    // Z=1148243.4133333 mm³ と除算分母の下限1e-9 N/mm²で検定比が溢れる境界。
+    let moment_limit_nmm = 2.064_189_301_300_206e305;
+    for margin in [-2e-9, 2e-9] {
+        let constant_mz_nmm = moment_limit_nmm * (1.0 + margin);
+        model.load_cases[0].nodal[0].values[4] = constant_mz_nmm;
+        let mut force = support_column::moments(constant_mz_nmm);
+        force.at[2].1[5] = moment_limit_nmm * (1.0 - margin);
+        let results = rows(&model, force, Some(&[(input::CASE, 1.0)]));
+        let at_j: Vec<_> = checked(&results, 1.0).collect();
+        assert_eq!(at_j.len(), 2, "{at_j:?}");
+        assert!(at_j.iter().any(|row| !ratio(row).is_finite()), "{at_j:?}");
+        assert!(
+            at_j.iter().any(|row| {
+                ratio(row).is_finite()
+                    && ratio(row) > 1.0
+                    && row.detail.contains("保存断面力による照査") == (margin > 0.0)
+            }),
+            "{at_j:?}"
+        );
     }
 }
 

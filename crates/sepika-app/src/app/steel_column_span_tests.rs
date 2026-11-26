@@ -90,7 +90,7 @@ fn steel_column_span_short_combination_rechecks_old_saved_design_without_reanaly
     );
     assert_off_center_result(&app);
 
-    for version in [128, DESIGN_CONTRACT_VERSION] {
+    for version in [128, 130, 131, 132, DESIGN_CONTRACT_VERSION] {
         let (mut restored, path) = super::result_contract_tests::restore(
             &app,
             Some(ANALYSIS_CONTRACT_VERSION),

@@ -267,8 +267,8 @@ pub(super) fn check(
             if let Some(saved) = saved_left.filter(|saved| *saved != section.left) {
                 let mut observed = check_section(section.xi, section.x_mm, saved, side, issue);
                 observed.retain(|outcome| adds_unavailable_or_failure(outcome, &checked));
-                for outcome in &mut observed {
-                    match outcome {
+                for mut outcome in observed {
+                    match &mut outcome {
                         CheckOutcome::Checked(result) => {
                             result.detail.push_str("。同じ切断面の保存断面力による照査")
                         }
@@ -276,8 +276,15 @@ pub(super) fn check(
                             reason.push_str("。同じ切断面の保存断面力による照査")
                         }
                     }
+                    if let Some(prior) = checked
+                        .iter_mut()
+                        .find(|prior| same_check_covered_by(prior, &outcome))
+                    {
+                        *prior = outcome;
+                    } else {
+                        checked.push(outcome);
+                    }
                 }
-                checked.extend(observed);
             }
             outcomes.extend(
                 checked
@@ -338,6 +345,25 @@ fn axial_bending_ratio(outcome: &CheckOutcome) -> Option<f64> {
         .map(|component| component.ratio)
 }
 
+fn same_check_covered_by(prior: &CheckOutcome, replacement: &CheckOutcome) -> bool {
+    let (CheckOutcome::Checked(prior), CheckOutcome::Checked(replacement)) = (prior, replacement)
+    else {
+        return false;
+    };
+    prior.basis == replacement.basis
+        && prior.components.len() == replacement.components.len()
+        && prior
+            .components
+            .iter()
+            .zip(&replacement.components)
+            .all(|(prior, replacement)| {
+                prior.kind == replacement.kind
+                    && prior.ratio >= 0.0
+                    && replacement.ratio.is_finite()
+                    && prior.ratio <= replacement.ratio
+            })
+}
+
 fn adds_unavailable_or_failure(saved: &CheckOutcome, recovered: &[CheckOutcome]) -> bool {
     match saved {
         CheckOutcome::Skipped { reason } => !recovered.iter().any(
@@ -346,8 +372,11 @@ fn adds_unavailable_or_failure(saved: &CheckOutcome, recovered: &[CheckOutcome])
         CheckOutcome::Checked(result) => result.components.iter().any(|saved| {
             saved.ratio > 1.0
                 && !recovered.iter().any(|outcome| {
-                    matches!(outcome, CheckOutcome::Checked(result) if result.components.iter()
-                    .any(|prior| prior.kind == saved.kind && prior.ratio >= saved.ratio))
+                    matches!(outcome, CheckOutcome::Checked(prior) if prior.basis == result.basis
+                    && prior.components.iter().any(|component| {
+                        component.kind == saved.kind && component.ratio.is_finite()
+                            && component.ratio >= saved.ratio
+                    }))
                 })
         }),
     }
