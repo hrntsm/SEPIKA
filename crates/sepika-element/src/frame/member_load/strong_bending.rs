@@ -164,31 +164,61 @@ impl<'a> StrongBendingResponse<'a> {
     }
 
     fn has_exact_tied_maximum(&self) -> Option<bool> {
-        let mut point_loads = Vec::new();
-        for &load in &self.strong_loads {
-            match load {
-                Comp::Point { a, p } if p != 0.0 => point_loads.push((a, p)),
-                Comp::Dist { a, b, w1, w2 } if a < b && (w1 != 0.0 || w2 != 0.0) => return None,
-                _ => {}
-            }
-        }
-        point_loads.sort_by(|(x, _), (other, _)| x.total_cmp(other));
-        let mut x_mm = BigRational::zero();
-        let mut shear_n = BigRational::from_float(self.response.node_force_local[1])?;
-        let mut moment_nmm = BigRational::from_float(-self.response.node_force_local[5])?;
+        let rational = BigRational::from_float;
+        let mut lo = 0.0;
+        let mut shear_n = rational(self.response.node_force_local[1])?;
+        let mut moment_nmm = rational(-self.response.node_force_local[5])?;
         let first_abs = moment_nmm.abs();
         let mut interior_max = BigRational::zero();
-        for (x, p) in point_loads.into_iter().chain([(self.length_mm, 0.0)]) {
-            let next_mm = BigRational::from_float(x)?;
-            if x_mm < next_mm && shear_n.is_zero() {
+        let two = BigRational::from_integer(2.into());
+        let breaks = self
+            .breaks
+            .iter()
+            .copied()
+            .filter(|&x| 0.0 < x && x < self.length_mm);
+        for hi in breaks.chain([self.length_mm]) {
+            let lo_mm = rational(lo)?;
+            let width_mm = rational(hi)? - &lo_mm;
+            let mut intensity_n_per_mm = BigRational::zero();
+            let mut intensity_gradient = BigRational::zero();
+            for &load in &self.strong_loads {
+                match load {
+                    Comp::Point { a, p } if a == lo => shear_n += rational(p)?,
+                    Comp::Dist { a, b, w1, w2 } if a <= lo && hi <= b => {
+                        let w1 = rational(w1)?;
+                        let w2 = rational(w2)?;
+                        if w1 != w2 {
+                            let a_mm = rational(a)?;
+                            let gradient = (w2 - &w1) / (rational(b)? - &a_mm);
+                            intensity_n_per_mm += &gradient * (&lo_mm - a_mm);
+                            intensity_gradient += gradient;
+                        }
+                        intensity_n_per_mm += w1;
+                    }
+                    _ => {}
+                }
+            }
+            if !intensity_gradient.is_zero() {
+                return None;
+            }
+            if intensity_n_per_mm.is_zero() {
+                if shear_n.is_zero() {
+                    interior_max = interior_max.max(moment_nmm.abs());
+                }
+            } else {
+                let extremum_mm = -&shear_n / &intensity_n_per_mm;
+                if extremum_mm.is_positive() && extremum_mm < width_mm {
+                    let extremum_nmm = &moment_nmm + &shear_n * extremum_mm / &two;
+                    interior_max = interior_max.max(extremum_nmm.abs());
+                }
+            }
+            let shear_increment_n = intensity_n_per_mm * &width_mm;
+            moment_nmm += (&shear_n + &shear_increment_n / &two) * width_mm;
+            if hi < self.length_mm {
                 interior_max = interior_max.max(moment_nmm.abs());
             }
-            moment_nmm += &shear_n * (&next_mm - &x_mm);
-            if 0.0 < x && x < self.length_mm {
-                interior_max = interior_max.max(moment_nmm.abs());
-            }
-            shear_n += BigRational::from_float(p)?;
-            x_mm = next_mm;
+            shear_n += shear_increment_n;
+            lo = hi;
         }
         Some(interior_max == first_abs.max(moment_nmm.abs()))
     }
@@ -610,6 +640,71 @@ mod tests {
                 &forces,
             )
             .unwrap();
+            assert!(!static_span.interior_maximum);
+        }
+    }
+
+    #[test]
+    fn time_history_confirms_a_uniform_load_maximum_tied_with_an_end() {
+        let length_mm = 3000.0;
+        let frame =
+            LocalFrame::from_nodes([0.0; 3], [length_mm, 0.0, 0.0], [0.0, 1.0, 0.0]).unwrap();
+        let distributed = |a, b, w1, w2| {
+            MemberLoad::manual(
+                ElemId(0),
+                [0.0, 1.0, 0.0],
+                MemberLoadKind::Distributed { a, b, w1, w2 },
+            )
+        };
+        let uniform = [
+            distributed(0.0, 500.0, -400.0, -400.0),
+            distributed(500.0, 1500.0, 400.0, 400.0),
+            distributed(1500.0, 2500.0, -400.0, -400.0),
+        ];
+        let cancelled_gradient = [
+            distributed(0.0, 500.0, -400.0, -400.0),
+            distributed(500.0, 1500.0, 400.0, 400.0),
+            distributed(1500.0, 2500.0, -100.0, -250.0),
+            distributed(1500.0, 2500.0, -300.0, -150.0),
+        ];
+        let varying = [
+            distributed(0.0, 500.0, -400.0, -400.0),
+            distributed(500.0, 1500.0, 400.0, 400.0),
+            distributed(1500.0, 2500.0, (-400.0_f64).next_up(), -400.0),
+        ];
+        for (loads, confirmed) in [
+            (uniform.as_slice(), true),
+            (cancelled_gradient.as_slice(), true),
+            (varying.as_slice(), false),
+        ] {
+            let map = FrameDeadLoadMap::new(loads, &frame, length_mm, 0.0, 0.0).unwrap();
+            let mut node_force = [0.0; 12];
+            node_force[5] = -250e6;
+            let response = LoadedFrameSection::new(map, node_force);
+            let forces = response
+                .recover(&[0.0, 1.0 / 6.0, 1.0 / 3.0, 0.5, 2.0 / 3.0, 5.0 / 6.0, 1.0])
+                .unwrap();
+            if confirmed {
+                for ((_, force), expected_nmm) in forces
+                    .at
+                    .iter()
+                    .zip([250e6, 200e6, 150e6, 200e6, 250e6, 200e6, 100e6])
+                {
+                    assert!((force[5] - expected_nmm).abs() < 1e-6);
+                }
+            }
+            let span = response
+                .full_span_strong_bending(length_mm, &forces)
+                .unwrap();
+            assert!(span.demand_peaks.iter().any(|peak| {
+                (peak.x_mm - 2000.0).abs() < 1e-9 && (peak.left[5] - 250e6).abs() < 1e-6
+            }));
+            assert!(!span.monotonic);
+            assert_eq!(span.interior_maximum, confirmed, "{loads:?}");
+            let terms = loads.iter().map(|load| (1.0, load)).collect::<Vec<_>>();
+            let static_span =
+                frame_strong_bending_span(&frame, length_mm, [0.0, length_mm], &terms, &forces)
+                    .unwrap();
             assert!(!static_span.interior_maximum);
         }
     }
