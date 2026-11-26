@@ -6,6 +6,7 @@ use num_rational::BigRational;
 use num_traits::{Signed, ToPrimitive, Zero};
 use sepika_core::model::MemberLoadKind;
 use std::cell::OnceCell;
+use std::cmp::Ordering;
 
 pub(super) enum ExactSpanError {
     VaryingStrongLoad,
@@ -77,7 +78,7 @@ struct ExactBending {
     end_moments_nmm: [BigRational; 2],
     candidates: Vec<ExactBendingCandidate>,
     flat_ranges: Vec<([f64; 2], BigRational)>,
-    monotonic: bool,
+    shear_extrema_n: [BigRational; 2],
 }
 
 struct ExactBendingCandidate {
@@ -87,6 +88,11 @@ struct ExactBendingCandidate {
 }
 
 impl ExactBending {
+    fn monotonic(&self) -> bool {
+        let [min, max] = &self.shear_extrema_n;
+        !min.is_negative() || !max.is_positive()
+    }
+
     fn absolute_maximum(&self) -> BigRational {
         self.candidates
             .iter()
@@ -162,8 +168,7 @@ impl StrongBendingResponse<'_> {
         };
         let mut candidates = Vec::new();
         let mut flat_ranges = Vec::new();
-        let mut has_positive_shear = false;
-        let mut has_negative_shear = false;
+        let mut shear_extrema_n = None;
         let two = integer(2);
         for (lo, hi) in self.load_intervals() {
             let lo_mm = rational(lo)?;
@@ -203,8 +208,16 @@ impl StrongBendingResponse<'_> {
             }
             let shear_increment_n = intensity_n_per_mm * &width_mm;
             let end_shear_n = &shear_n + &shear_increment_n;
-            has_positive_shear |= shear_n.is_positive() || end_shear_n.is_positive();
-            has_negative_shear |= shear_n.is_negative() || end_shear_n.is_negative();
+            let [min_shear_n, max_shear_n] =
+                shear_extrema_n.get_or_insert_with(|| [shear_n.clone(), shear_n.clone()]);
+            for qy in [&shear_n, &end_shear_n] {
+                if qy < min_shear_n {
+                    *min_shear_n = qy.clone();
+                }
+                if qy > max_shear_n {
+                    *max_shear_n = qy.clone();
+                }
+            }
             moment_nmm += (&shear_n + &shear_increment_n / &two) * width_mm;
             candidate = ExactBendingCandidate {
                 x: hi_mm,
@@ -220,7 +233,7 @@ impl StrongBendingResponse<'_> {
             end_moments_nmm: [i_moment_nmm, moment_nmm],
             candidates,
             flat_ranges,
-            monotonic: !(has_positive_shear && has_negative_shear),
+            shear_extrema_n: shear_extrema_n.ok_or(ExactSpanError::Unconfirmed)?,
         })
     }
 
@@ -228,6 +241,7 @@ impl StrongBendingResponse<'_> {
         let bending = self.exact_bending()?;
         let maximum_abs_nmm = bending.absolute_maximum();
         let end_moments_nmm = bending.end_moments()?;
+        let monotonic = bending.monotonic();
         let mut unverified_maximum_plateau = false;
         if !maximum_abs_nmm.is_zero() {
             for ([lo, hi], mz) in bending.flat_ranges {
@@ -249,7 +263,7 @@ impl StrongBendingResponse<'_> {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(FrameStrongBendingSpan {
             end_moments_nmm,
-            monotonic: bending.monotonic,
+            monotonic,
             interior_maximum: demand_peaks
                 .iter()
                 .any(|peak| !peak.is_i_face && !peak.is_j_face),
@@ -259,38 +273,39 @@ impl StrongBendingResponse<'_> {
         })
     }
 
+    fn saved_shear_confirms_monotonicity(
+        &self,
+        bending: &ExactBending,
+    ) -> Result<bool, ExactSpanError> {
+        if !bending.monotonic() {
+            return Ok(false);
+        }
+        let [i, j] = &bending.end_moments_nmm;
+        let [min, max] = &bending.shear_extrema_n;
+        let mut min_offset_n = BigRational::zero();
+        let mut max_offset_n = BigRational::zero();
+        for &(x_mm, force) in self.stations_mm.iter().skip(1) {
+            let [_, qy_n, ..] = self.response.exact_cut(&rational(x_mm)?, false)?;
+            let offset_n = rational(force[1])? - qy_n;
+            if offset_n < min_offset_n {
+                min_offset_n = offset_n;
+            } else if offset_n > max_offset_n {
+                max_offset_n = offset_n;
+            }
+        }
+        // 保存測点だけを見ると、同じ荷重を積算した未保存の切断面で符号が反転し得る。
+        Ok(match j.cmp(i) {
+            Ordering::Greater => !(min + min_offset_n).is_negative(),
+            Ordering::Less => !(max + max_offset_n).is_positive(),
+            Ordering::Equal => (min + min_offset_n).is_zero() && (max + max_offset_n).is_zero(),
+        })
+    }
+
     pub(super) fn exact_static_sections(&self) -> Result<FrameStaticStrongBending, ExactSpanError> {
         let bending = self.exact_bending()?;
         let maximum = bending.absolute_maximum();
         let end_moments_nmm = bending.end_moments()?;
-        let [i, j] = &bending.end_moments_nmm;
-        let direction = j.cmp(i);
-        let mut monotonic = bending.monotonic;
-        if monotonic {
-            for &(x_mm, force) in self.stations_mm.iter().skip(1) {
-                let left_n = force[1];
-                if left_n != 0.0 && left_n.partial_cmp(&0.0) != Some(direction) {
-                    monotonic = false;
-                    break;
-                }
-                if x_mm < self.length_mm {
-                    let mut jumps = self.strong_loads.iter().filter_map(|load| match *load {
-                        Comp::Point { a, p } if a == x_mm => Some(p),
-                        _ => None,
-                    });
-                    if let Some(first) = jumps.next() {
-                        let mut right = rational(left_n)? + rational(first)?;
-                        for jump in jumps {
-                            right += rational(jump)?;
-                        }
-                        if !right.is_zero() && right.cmp(&BigRational::zero()) != direction {
-                            monotonic = false;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+        let monotonic = self.saved_shear_confirms_monotonicity(&bending)?;
         let mut interior_maximum = false;
         let mut sections: Vec<FrameStaticBendingSection> =
             Vec::with_capacity(bending.candidates.len());
@@ -312,6 +327,10 @@ impl StrongBendingResponse<'_> {
                 None
             };
             let section = self.response.exact_peak(x, mz, &bending.length_mm)?;
+            let saved_right = saved_left
+                .filter(|_| section.right.as_ref().is_ok_and(Option::is_some))
+                .map(|left| self.response.saved_right_cut(x_mm, left))
+                .transpose();
             let [left, right] = adjacent_shear;
             let zero_shear_limits = if let Ok(Some(right_force)) = &section.right {
                 [
@@ -337,6 +356,7 @@ impl StrongBendingResponse<'_> {
             sections.push(FrameStaticBendingSection {
                 recovered: section,
                 saved_left,
+                saved_right,
                 zero_shear_limits,
             });
         }
@@ -394,6 +414,31 @@ impl StrongBendingResponse<'_> {
 }
 
 impl LoadedFrameSection {
+    fn saved_right_cut(&self, x_mm: f64, saved_left: [f64; 6]) -> Result<[f64; 6], String> {
+        let recover = || {
+            let [n, qy, qz, mx, my, mz] = saved_left;
+            let mut right = [
+                rational(n)?,
+                rational(qy)?,
+                rational(qz)?,
+                rational(mx)?,
+                rational(my)?,
+            ];
+            for load in &self.map.loads {
+                if matches!(load.kind, MemberLoadKind::Point { a, .. } if a == x_mm) {
+                    for (axis, comp) in resolve(load, self.frame()).into_iter().enumerate() {
+                        if let Some(Comp::Point { p, .. }) = comp {
+                            right[axis] += rational(if axis == 0 { -p } else { p })?;
+                        }
+                    }
+                }
+            }
+            exact_forces_to_f64(right, &rational(mz)?)
+        };
+        recover()
+            .map_err(|_| "保存断面力から集中荷重の右側の断面力を有限な値で確認できません".into())
+    }
+
     pub(super) fn exact_static_cut_mm(&self, x_mm: f64) -> Result<[f64; 6], String> {
         let recover = || {
             let x = rational(x_mm)?;

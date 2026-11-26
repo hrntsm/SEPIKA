@@ -222,6 +222,22 @@ pub(super) fn check(
         let incomplete = combine_incomplete_reasons(section_reason, span_reason.as_deref());
         strength_outcomes(outcome, incomplete.as_deref()).collect()
     };
+    let check_same_cut =
+        |xi, x_mm, recovered: [f64; 6], saved: Option<[f64; 6]>, side, zero_shear_limit| {
+            let disagreement = if section_issue.is_none() {
+                saved.and_then(|saved| section_applicability_difference(sec, mat, saved, recovered))
+            } else {
+                None
+            };
+            let issue = disagreement.as_deref();
+            let mut checked = check_section(xi, x_mm, recovered, side, issue, zero_shear_limit);
+            if let Some(saved) = saved.filter(|saved| *saved != recovered) {
+                for outcome in check_section(xi, x_mm, saved, side, issue, zero_shear_limit) {
+                    add_saved_check(&mut checked, outcome, recovered[1], saved[1]);
+                }
+            }
+            checked
+        };
 
     let (sections, combination_confirmed) = recovered
         .as_ref()
@@ -264,57 +280,59 @@ pub(super) fn check(
         );
     }
     for section in sections {
-        let saved_left = section.saved_left;
         let [left_zero_limit, right_zero_limit] = section
             .zero_shear_limits
             .map(|limit| limit && combination_confirmed);
-        let section = &section.recovered;
-        let right = section.right.as_ref().ok().and_then(Option::as_ref);
-        if !section.is_i_face || right.is_none() {
+        let cut = &section.recovered;
+        let right = cut.right.as_ref().ok().and_then(Option::as_ref);
+        if !cut.is_i_face || right.is_none() {
             let side = if right.is_some() {
                 "（集中荷重の左側）"
             } else {
                 ""
             };
-            let disagreement = if section_issue.is_none() {
-                saved_left.and_then(|saved| {
-                    section_applicability_difference(sec, mat, saved, section.left)
-                })
-            } else {
-                None
-            };
-            let issue = disagreement.as_deref();
-            let mut checked = check_section(
-                section.xi,
-                section.x_mm,
-                section.left,
-                side,
-                issue,
-                left_zero_limit,
+            outcomes.extend(
+                check_same_cut(
+                    cut.xi,
+                    cut.x_mm,
+                    cut.left,
+                    section.saved_left,
+                    side,
+                    left_zero_limit,
+                )
+                .into_iter()
+                .map(|outcome| (elem.id, cut.xi, outcome)),
             );
-            if let Some(saved) = saved_left.filter(|saved| *saved != section.left) {
-                for outcome in check_section(section.xi, section.x_mm, saved, side, issue, false) {
-                    add_saved_check(&mut checked, outcome, section.left[1], saved[1]);
+        }
+        if let Some(&force) = right {
+            let side = "（集中荷重の右側）";
+            let mut checked = check_same_cut(
+                cut.xi,
+                cut.x_mm,
+                force,
+                section.saved_right.as_ref().ok().copied().flatten(),
+                side,
+                right_zero_limit,
+            );
+            if let Err(reason) = &section.saved_right {
+                let reason = format!("実材軸i端から x={:.6} mm{side}。{reason}", cut.x_mm);
+                if let Some(CheckOutcome::Skipped { reason: prior }) = checked
+                    .iter_mut()
+                    .find(|row| matches!(row, CheckOutcome::Skipped { .. }))
+                {
+                    prior.push('。');
+                    prior.push_str(&reason);
+                } else {
+                    checked = checked
+                        .into_iter()
+                        .flat_map(|outcome| strength_outcomes(outcome, Some(&reason)))
+                        .collect();
                 }
             }
             outcomes.extend(
                 checked
                     .into_iter()
-                    .map(|outcome| (elem.id, section.xi, outcome)),
-            );
-        }
-        if let Some(&force) = right {
-            outcomes.extend(
-                check_section(
-                    section.xi,
-                    section.x_mm,
-                    force,
-                    "（集中荷重の右側）",
-                    None,
-                    right_zero_limit,
-                )
-                .into_iter()
-                .map(|outcome| (elem.id, section.xi, outcome)),
+                    .map(|outcome| (elem.id, cut.xi, outcome)),
             );
         }
     }

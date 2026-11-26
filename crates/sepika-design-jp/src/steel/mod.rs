@@ -241,9 +241,7 @@ fn independent_h_web_shear_failure(
     mat: &Material,
     ctx: &DesignCtx,
 ) -> Option<CheckComponent> {
-    forces
-        .n
-        .is_finite()
+    (forces.n.is_finite() && forces.qz.is_finite())
         .then(|| h_web_shear_failure(forces, sec, mat, ctx))
         .flatten()
 }
@@ -258,7 +256,6 @@ fn h_web_shear_failure(
         || symmetric_h_web(sec).is_none()
         || forces.mx != 0.0
         || !forces.qy.is_finite()
-        || !forces.qz.is_finite()
     {
         return None;
     }
@@ -314,7 +311,7 @@ const NONFINITE_SHEAR_FORCE: &str = "せん断力が非有限です";
 pub(crate) const SAME_POINT_SHEAR_FORMULA: &str = "式(5.24): 同一点";
 
 fn check_same_point_shear(
-    result: &mut CheckResult,
+    shear: Option<&mut CheckComponent>,
     forces: &MemberForcesAt,
     sec: &Section,
     ctx: &DesignCtx,
@@ -328,11 +325,7 @@ fn check_same_point_shear(
     if forces.qz != 0.0 && symmetric_h_web(sec).is_some() {
         return Some(WEAK_H_SHEAR_UNAVAILABLE);
     }
-    let Some(shear) = result
-        .components
-        .iter_mut()
-        .find(|c| c.kind == CheckKind::Shear)
-    else {
+    let Some(shear) = shear else {
         return Some("作用するせん断力の断面形状・方向に対応する照査条件を確定できません");
     };
     if !shear.ratio.is_finite() {
@@ -1480,17 +1473,21 @@ impl SteelDesign {
                 forces, sec, mat, ctx, f, term, lambda,
             ))),
         };
+        let zero_shear_limit = matches!(
+            scope,
+            SteelCheckScope::StaticColumn(StaticColumnSectionCheck {
+                zero_shear_limit: true,
+                ..
+            })
+        );
         match cr {
             Ok(CheckOutcome::Checked(mut result)) => {
-                let zero_shear_limit = matches!(
-                    scope,
-                    SteelCheckScope::StaticColumn(StaticColumnSectionCheck {
-                        zero_shear_limit: true,
-                        ..
-                    })
-                );
+                let shear = result
+                    .components
+                    .iter_mut()
+                    .find(|c| c.kind == CheckKind::Shear);
                 let shear_reason =
-                    check_same_point_shear(&mut result, forces, sec, ctx, f, zero_shear_limit);
+                    check_same_point_shear(shear, forces, sec, ctx, f, zero_shear_limit);
                 if let Some(reason) = h_combined_reason.or(shear_reason) {
                     result
                         .components
@@ -1508,17 +1505,42 @@ impl SteelDesign {
                     Some(combined) => format!("鋼横座屈検定: {reason}。{combined}"),
                     None => format!("鋼横座屈検定: {reason}"),
                 };
-                let Some(component) = independent_h_web_shear_failure(forces, sec, mat, ctx) else {
+                let mut components: Vec<_> = independent_h_web_shear_failure(forces, sec, mat, ctx)
+                    .into_iter()
+                    .collect();
+                let mut basis = "強軸ウェブせん断が許容値を超えるため不適合";
+                if matches!(scope, SteelCheckScope::StaticColumn(_))
+                    && forces.mz != 0.0
+                    && h_combined_reason.is_none()
+                {
+                    if let Some(mut shear) = shear_component(forces, sec, ctx, steel_fs(f, term)) {
+                        if check_same_point_shear(
+                            Some(&mut shear),
+                            forces,
+                            sec,
+                            ctx,
+                            f,
+                            zero_shear_limit,
+                        )
+                        .is_none()
+                            && shear.ratio > 1.0
+                        {
+                            basis = "式(5.24)の同一点組合せ応力度が許容値を超えるため不適合";
+                            components.push(shear);
+                        }
+                    }
+                }
+                if components.is_empty() {
                     return CheckOutcome::Skipped { reason };
-                };
+                }
                 *incomplete = crate::member_design_check::combine_incomplete_reasons(
                     incomplete.take(),
                     Some(&reason),
                 );
                 CheckOutcome::Checked(CheckResult {
-                    basis: "強軸ウェブせん断が許容値を超えるため不適合".into(),
+                    basis: basis.into(),
                     detail: String::new(),
-                    components: vec![component],
+                    components,
                 })
             }
         }

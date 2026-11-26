@@ -472,12 +472,200 @@ fn a_saved_left_cut_cannot_hide_reversal_after_an_interior_point_load() {
 }
 
 #[test]
+fn saved_shear_offsets_are_checked_at_unsampled_load_boundaries() {
+    let terms = [(input::CASE, 1.0)];
+    for (point_mm, before_jump, sign) in [
+        (1500.0, false, 1.0),
+        (2000.0, false, 1.0),
+        (2000.0, false, -1.0),
+        (2000.0, true, 1.0),
+    ] {
+        let w_n_per_mm = if before_jump { 1.0 / 1_048_576.0 } else { 1e-6 };
+        let i_qy_n = if before_jump {
+            w_n_per_mm * point_mm
+        } else {
+            120_000.0
+        };
+        let mut model = input::column(0.0, 0.0);
+        let (jump_n, a, b, w) = if before_jump {
+            (120_000.0, 0.0, point_mm, -w_n_per_mm)
+        } else {
+            (-120_000.0, point_mm, 3000.0, w_n_per_mm)
+        };
+        model.load_cases[0].member = [
+            MemberLoadKind::Point {
+                a: point_mm,
+                p: jump_n,
+            },
+            MemberLoadKind::Distributed { a, b, w1: w, w2: w },
+        ]
+        .map(|kind| MemberLoad::manual(model.elements[0].id, [sign, 0.0, 0.0], kind))
+        .to_vec();
+        let (mid_qy_n, mid_mz_nmm, j_qy_n, j_mz_nmm) = if before_jump {
+            (
+                w_n_per_mm * 500.0,
+                w_n_per_mm * 1500.0 * 1250.0,
+                120_000.0,
+                w_n_per_mm * 2e6 + 120e6,
+            )
+        } else {
+            let length_mm = 3000.0 - point_mm;
+            (
+                120_000.0,
+                180e6,
+                w_n_per_mm * length_mm,
+                120_000.0 * point_mm + w_n_per_mm * length_mm * length_mm / 2.0,
+            )
+        };
+        let delta_n = if before_jump {
+            0.00025
+        } else if point_mm == 1500.0 {
+            0.0005
+        } else {
+            0.00075
+        };
+        for offset_n in [-delta_n, 0.0, delta_n] {
+            let forces = MemberForces {
+                at: [
+                    (0.0, i_qy_n, 0.0),
+                    (0.5, mid_qy_n + offset_n, mid_mz_nmm + 1500.0 * offset_n),
+                    (1.0, j_qy_n + offset_n, j_mz_nmm + 3000.0 * offset_n),
+                ]
+                .map(|(xi, qy, mz)| (xi, [0.0, sign * qy, 0.0, 0.0, 0.0, sign * mz]))
+                .to_vec(),
+            };
+            let result = rows(&model, forces, Some(&terms));
+            assert!(!result.is_empty());
+            if offset_n < 0.0 {
+                assert!(
+                    result
+                        .iter()
+                        .all(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+                    if reason.contains("符号付き強軸曲げの単調変化"))),
+                    "{result:?}"
+                );
+            } else {
+                assert!(
+                    result
+                        .iter()
+                        .all(|(_, row)| matches!(row, CheckOutcome::Checked(check)
+                    if check.ok() && check.detail.contains("C=1.7500"))),
+                    "{result:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn verified_saved_point_load_right_cut_keeps_its_unrounded_shear_failure() {
+    let mut model = input::column(0.0, 0.0);
+    model.load_cases[0].member = [(1500.0, 305_946.521_022_61), (1500.01, -405_946.521_022_61)]
+        .map(|(a, p)| {
+            MemberLoad::manual(
+                model.elements[0].id,
+                [1.0, 0.0, 0.0],
+                MemberLoadKind::Point { a, p },
+            )
+        })
+        .to_vec();
+    let terms = [(input::CASE, 1.0)];
+    for (saved_xi, offset_n, ng) in [
+        (0.5, 0.0005, true),
+        (0.5, 0.0, false),
+        (0.25, 0.0005, false),
+    ] {
+        let forces = MemberForces {
+            at: [
+                (0.0, 100_000.0, -150e6),
+                (saved_xi, 100_000.0 + offset_n, -150e6 + 300e6 * saved_xi),
+                (1.0, 0.0, 4_059.465_21),
+            ]
+            .map(|(xi, qy, mz)| (xi, [0.0, qy, 0.0, 0.0, 0.0, mz]))
+            .to_vec(),
+        };
+        let result = rows(&model, forces, Some(&terms));
+        let right = checked(&result, 0.5)
+            .find(|row| row.detail.contains("集中荷重の右側"))
+            .unwrap_or_else(|| panic!("{result:?}"));
+        let shear = right
+            .components
+            .iter()
+            .find(|c| c.kind == CheckKind::Shear)
+            .unwrap();
+        assert_eq!(shear.ratio > 1.0, ng, "{right:?}");
+        close(
+            shear.ratio,
+            if ng {
+                1.000_000_000_62
+            } else {
+                0.999_999_999_38
+            },
+        );
+        assert_eq!(right.detail.contains("保存断面力による照査"), ng);
+        let nearby: Vec<_> = checked(&result, 1500.01 / 3000.0).collect();
+        assert_eq!(nearby.len(), 2, "{result:?}");
+        for row in nearby {
+            assert!(
+                row.ok() && !row.detail.contains("保存断面力による照査"),
+                "{row:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_unrepresentable_saved_right_cut_does_not_erase_recovered_ng() {
+    let mut model = input::column(0.0, 0.0);
+    model.steel_design_attrs[0].column_lateral_buckling_end_supports = None;
+    model.nodes[1].coord[2] = 1.0;
+    let qy_n = f64::MAX / 2.0;
+    let point_n = qy_n * (1.0 - 2e-10);
+    for (a, p) in [(0.5, point_n), (0.75, -point_n)] {
+        model.load_cases[0].member.push(MemberLoad::manual(
+            model.elements[0].id,
+            [1.0, 0.0, 0.0],
+            MemberLoadKind::Point { a, p },
+        ));
+    }
+    let forces = MemberForces {
+        at: [
+            (0.0, qy_n, -qy_n / 2.0),
+            (0.5, qy_n * (1.0 + 4e-10), 0.0),
+            (1.0, qy_n, qy_n / 2.0 + point_n / 4.0),
+        ]
+        .map(|(xi, qy, mz)| (xi, [0.0, qy, 0.0, 0.0, 0.0, mz]))
+        .to_vec(),
+    };
+    let result = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+    assert!(
+        result.iter().any(|(xi, row)| *xi == 0.5
+            && matches!(row,
+        CheckOutcome::Skipped { reason } if reason.contains("集中荷重の右側")
+            && reason.contains("有限な値で確認できません"))),
+        "{result:?}"
+    );
+    let right = checked(&result, 0.5)
+        .find(|row| row.detail.contains("集中荷重の右側"))
+        .unwrap_or_else(|| panic!("{result:?}"));
+    let [shear] = right.components.as_slice() else {
+        panic!("{right:?}")
+    };
+    assert_eq!(shear.kind, CheckKind::Shear);
+    assert!(shear.ratio.is_finite() && shear.ratio > 1.0, "{right:?}");
+    assert!(!right.detail.contains("保存断面力による照査"));
+}
+
+#[test]
 fn missing_torsional_constant_keeps_both_material_bending_and_web_shear_ng() {
     let mut model = input::column(-500_000.0, 0.0);
     model.steel_design_attrs[0].column_lateral_buckling_end_supports = None;
     model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
     model.sections[0].j = 0.0;
-    for (j_mz_nmm, expected_bending) in [(1500e6, Some(5.558_907_326_865_969)), (100e6, None)] {
+    for (j_mz_nmm, expected_bending, expected_combination) in [
+        (1500e6, Some(5.558_907_326_865_969), 5.341_524_063_760_777),
+        (100e6, None, 1.279_501_654_055_574_8),
+    ] {
         model.load_cases[0].nodal[0].values[4] = j_mz_nmm;
         let forces = MemberForces {
             at: [
@@ -494,16 +682,24 @@ fn missing_torsional_constant_keeps_both_material_bending_and_web_shear_ng() {
             .collect();
         assert_eq!(
             failures.len(),
-            1 + usize::from(expected_bending.is_some()),
+            2 + usize::from(expected_bending.is_some()),
             "{result:?}"
         );
         close(
             failures
                 .iter()
-                .find(|c| c.kind == CheckKind::Shear)
+                .find(|c| c.kind == CheckKind::Shear && !c.detail.contains("式(5.24)"))
                 .unwrap()
                 .ratio,
             1.231_689_332_950_902_7,
+        );
+        close(
+            failures
+                .iter()
+                .find(|c| c.kind == CheckKind::Shear && c.detail.contains("式(5.24)"))
+                .unwrap()
+                .ratio,
+            expected_combination,
         );
         if let Some(expected) = expected_bending {
             close(
@@ -520,6 +716,111 @@ fn missing_torsional_constant_keeps_both_material_bending_and_web_shear_ng() {
                 && matches!(row,
                 CheckOutcome::Skipped { reason } if reason.contains("横座屈に必要な断面性能"))),
             "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn missing_torsional_constant_does_not_hide_a_verified_same_point_shear_ng() {
+    let mut model = input::column(0.0, 0.0);
+    model.steel_design_attrs[0].column_lateral_buckling_end_supports = None;
+    model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
+    model.sections[0].j = 0.0;
+    let terms = [(input::CASE, 1.0)];
+    for (mz_nmm, qy_n, qz_n, mx_nmm, axial_n, expected) in [
+        (200e6, 300_000.0, 0.0, 0.0, 0.0, Some(1.013_116_271_683_298)),
+        (196e6, 320_000.0, 0.0, 0.0, 0.0, Some(1.040_496_157_306_278)),
+        (150e6, 300_000.0, 0.0, 0.0, 0.0, None),
+        (200e6, 300_000.0, 1.0, 0.0, 0.0, None),
+        (200e6, 300_000.0, 0.0, 1.0, 0.0, None),
+        (200e6, 300_000.0, 0.0, 0.0, f64::NAN, None),
+    ] {
+        let forces = MemberForces {
+            at: [0.0, 0.5, 1.0]
+                .map(|xi| {
+                    let x_mm = 3000.0 * xi;
+                    let n = if xi == 1.0 { axial_n } else { 0.0 };
+                    (
+                        xi,
+                        [
+                            n,
+                            qy_n,
+                            qz_n,
+                            mx_nmm,
+                            -qz_n * x_mm,
+                            mz_nmm - qy_n * (3000.0 - x_mm),
+                        ],
+                    )
+                })
+                .to_vec(),
+        };
+        let result = rows(&model, forces, Some(&terms));
+        let failures: Vec<_> = checked(&result, 1.0).flat_map(|r| &r.components).collect();
+        if let Some(expected) = expected {
+            let [combined] = failures.as_slice() else {
+                panic!("{result:?}")
+            };
+            assert_eq!(combined.kind, CheckKind::Shear);
+            assert!(combined.detail.contains("式(5.24)"));
+            close(combined.ratio, expected);
+            assert!(result.iter().any(|(xi, outcome)| *xi == 1.0
+                && matches!(outcome,
+                CheckOutcome::Skipped { reason } if reason.contains("横座屈に必要な断面性能"))));
+        } else {
+            assert!(failures.is_empty(), "{result:?}");
+            assert!(
+                result
+                    .iter()
+                    .any(|(xi, outcome)| *xi == 1.0
+                        && matches!(outcome, CheckOutcome::Skipped { .. }))
+            );
+        }
+    }
+}
+
+#[test]
+fn the_confirmed_zero_shear_cut_checks_both_moments_before_rounding() {
+    let mut model = input::column(0.0, 0.0);
+    model.load_cases[0].member.push(MemberLoad::manual(
+        model.elements[0].id,
+        [1.0, 0.0, 0.0],
+        MemberLoadKind::Distributed {
+            a: 0.0,
+            b: 3000.0,
+            w1: -25.0,
+            w2: -25.0,
+        },
+    ));
+    // 式(5.24)のτ=0で、内法端（187 mm）の曲げ垂直応力度が235 N/mm²となる点。
+    let limit_nmm = 288_595_938.110_516_9;
+    for offset_nmm in [-1.0, 1.0] {
+        let end_nmm = limit_nmm - 28.125e6 + offset_nmm;
+        let forces = MemberForces {
+            at: [
+                (0.0, 37_500.0, end_nmm),
+                (0.5, 0.0, limit_nmm - offset_nmm),
+                (1.0, -37_500.0, end_nmm),
+            ]
+            .map(|(xi, qy, mz)| (xi, [0.0, qy, 0.0, 0.0, 0.0, mz]))
+            .to_vec(),
+        };
+        let result = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+        let at_center: Vec<_> = checked(&result, 0.5).collect();
+        let [row] = at_center.as_slice() else {
+            panic!("{result:?}")
+        };
+        let combined = row
+            .components
+            .iter()
+            .find(|c| c.detail.contains("式(5.24)"))
+            .unwrap();
+        assert!(
+            combined.ratio > 1.0 && combined.ratio < 1.000_000_01,
+            "{row:?}"
+        );
+        assert_eq!(
+            row.detail.contains("保存断面力による照査"),
+            offset_nmm < 0.0
         );
     }
 }
@@ -891,7 +1192,8 @@ fn an_unrelated_nonfinite_component_does_not_erase_verified_strong_web_shear_fai
             )
         })
         .to_vec();
-    for (missing, web_shear_confirmed) in [(4, true), (0, true), (3, false)] {
+    for (missing, web_shear_confirmed) in [(4, true), (0, true), (2, true), (3, false), (1, false)]
+    {
         let mut forces = MemberForces {
             at: vec![
                 (0.0, [0.0; 6]),

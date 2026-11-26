@@ -44,7 +44,7 @@ pub struct FrameStrongBendingPeak {
 pub struct FrameStaticStrongBending {
     /// i/j実材端の強軸曲げ [N·mm]。
     pub end_moments_nmm: [f64; 2],
-    /// 実材軸全長で曲げが非減少または非増加ならtrue。
+    /// 回復値と保存せん断力のいずれでも、曲げの単調方向が実材軸全長で一致する場合にtrue。
     pub monotonic: bool,
     /// 絶対値最大が内部にも存在するならtrue。
     pub interior_maximum: bool,
@@ -64,6 +64,8 @@ pub struct FrameStaticBendingSection {
     pub recovered: FrameStrongBendingPeak,
     /// 回復した切断位置と厳密に一致する保存断面力の左極限 [N, N·mm]。
     pub saved_left: Option<[f64; 6]>,
+    /// 同位置の保存左極限に集中荷重の跳びを加えた右極限 [N, N·mm]。回復値に右極限がある場合のみ。
+    pub saved_right: Result<Option<[f64; 6]>, String>,
     /// 区間内の同じ側を極限までたどると強軸せん断が作用するゼロ点。左・右の順。
     /// `recovered.right` がなければ、共通の切断面に対する判定を左に返す。
     pub zero_shear_limits: [bool; 2],
