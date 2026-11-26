@@ -278,8 +278,14 @@ impl<'a> StepRecorder<'a> {
                 direction: self.dir,
                 sign: self.run.sign,
                 step: self.step_no,
-                members: super::member_response::compute_member_response_with_responses(
-                    model, dofmap, behaviors, total_disp, self.dir, &responses,
+                members: super::member_response::compute_member_response(
+                    model,
+                    dofmap,
+                    behaviors,
+                    total_disp,
+                    self.dir,
+                    &responses,
+                    (&physical.source, force_scale),
                 ),
                 cuts,
                 src_walls,

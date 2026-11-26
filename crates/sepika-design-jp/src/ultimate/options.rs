@@ -68,17 +68,19 @@ pub struct MemberDemand {
     /// 弱軸（幅方向）まわりの設計用曲げモーメント Mmy [N·mm]（符号は内部で abs）。
     pub my: f64,
     /// 部材応答の強軸せん断力 `[N]`。確定総応答モードでは専用内力の有無にかかわらず必須。
-    /// RC終局せん断では `rc_ultimate_shear` を確認できればその強軸の `Q`、確認済みの直接入力ではこの値の絶対値を採用する。
+    /// RC終局せん断では専用内力の強軸 `Q`、確認済みの直接入力ではこの値の絶対値を採用する。
     pub shear: Option<f64>,
     /// 部材応答の弱軸せん断力 `[N]`。確定総応答モードでは専用内力の有無にかかわらず必須。
-    /// RC終局せん断では `rc_ultimate_shear` を確認できればその弱軸の `Q`、確認済みの直接入力ではこの値の絶対値を採用する。
+    /// RC終局せん断では専用内力の弱軸 `Q`、確認済みの直接入力ではこの値の絶対値を採用する。
     pub shear_weak: Option<f64>,
     /// 検討区間で確認した最小軸力 [N]（圧縮正）。未確認は None。
     /// 部材荷重がなく、両フェースを含む区間の確定総応答として曲げとせん断を確認し、最小軸力を得た場合にだけ指定できる。
     pub min_axial_for_shear_n: Option<f64>,
-    /// 終局せん断専用の内力。直接指定する場合も、同一ステップの実フェース間に正の内法が成立し、範囲を確認済みであること。
-    /// 未指定の場合、従来の内法条件と `min_axial_for_shear_n` を確認した直接入力だけで算定する。
+    /// 個別部材の終局せん断用内力。直接指定する場合も、同一ステップの実フェース間に正の内法が成立し、範囲を確認済みであること。
+    /// 一本部材グループの照査には用いない。
     pub rc_ultimate_shear: Option<sepika_core::rc_capacity::RcUltimateShearActions>,
+    /// 実フェース間の梁全体の同一確定ステップの内力または不成立理由。分割梁では各区間で同じ結果が必要。
+    pub rc_beam_ultimate_shear: Option<sepika_core::rc_capacity::RcBeamUltimateShearResponse>,
     /// 大地震時の付着照査の配筋組。非降伏RC梁は `beam_bond` に方向別の入力を指定する。
     pub bond: Option<super::rc_bond::RcUltimateBondDemand>,
     /// 非降伏RC梁の方向別付着照査。確認できない方向は None。梁では `bond` と併用しない。
@@ -104,7 +106,7 @@ impl MemberDemand {
     }
 
     /// 軸力 `[N]`（圧縮正）、軸別の曲げ `[N·mm]` とせん断 `[N]`、部材変形角 Rp `[rad]` を指定して確定総応答の需要を作る。
-    /// 軸別のせん断力と Rp は必須。RC終局せん断の需要には別途確認した `rc_ultimate_shear` の同軸 `Q` が優先される。
+    /// 軸別のせん断力と Rp は必須。RC終局せん断の需要には別途確認した専用内力の同軸 `Q` が優先される。
     /// 専用内力を指定しない直接入力では、検討区間の最小軸力も別途確認して指定する。
     #[allow(clippy::too_many_arguments)]
     pub fn from_pushover(

@@ -3,7 +3,7 @@ mod beam;
 #[path = "fixtures/rc_column_axial_boundary_model.rs"]
 mod column;
 
-use sepika_core::ids::{ElemId, NodeId};
+use sepika_core::ids::{ElemId, NodeId, SectionId};
 use sepika_core::model::{
     default_combinations, default_load_cases, Haunch, MemberDetailAttr, Model,
 };
@@ -260,5 +260,72 @@ fn grouped_beam_never_uses_one_segments_maxima_as_whole_member_actions() {
             .unchecked_reason
             .unwrap()
             .contains("一本部材グループ全体"));
+    }
+}
+
+#[test]
+fn missing_whole_beam_record_is_reported_even_when_the_outer_face_passes_the_first_interval() {
+    use sepika_core::{adjacency::NodeAdjacency, face_distance::girder_column_faces};
+
+    let mut model = model(true);
+    let mut end = model.nodes[1].clone();
+    end.id = NodeId(2);
+    model.nodes[1].coord[0] = 100.0;
+    model.nodes.push(end);
+    let mut right = model.elements[0].clone();
+    right.id = ElemId(1);
+    right.nodes = [NodeId(1), NodeId(2)].into_iter().collect();
+    right.rigid_zone.face_i = Some(0.0);
+    model.elements.push(right);
+
+    let mut support = self::model(false);
+    let mut section = support.sections.remove(0);
+    section.id = SectionId(1);
+    model.sections.push(section);
+    let mut base = support.nodes.remove(0);
+    base.id = NodeId(3);
+    base.coord[2] = -3_000.0;
+    model.nodes.push(base);
+    let mut column = support.elements.remove(0);
+    column.id = ElemId(2);
+    column.section = Some(SectionId(1));
+    column.nodes = [NodeId(3), NodeId(0)].into_iter().collect();
+    column.local_axis.ref_vector = [0.0, 1.0, 0.0];
+    model.elements.push(column);
+
+    let mut whole_beam = model.elements[0].clone();
+    whole_beam.nodes[1] = NodeId(2);
+    let [face_i, _] =
+        girder_column_faces(&model, &whole_beam, &NodeAdjacency::primary_frame(&model)).unwrap();
+    let face_mm = face_i.unwrap().position_mm;
+    assert_eq!(face_mm, 200.0);
+    model.elements[0].rigid_zone.face_i = Some(face_mm);
+    model.elements[0].rigid_zone.face_j = Some(0.0);
+    model.girder_groups = vec![vec![ElemId(0), ElemId(1)]];
+
+    let demands = [ElemId(0), ElemId(1), ElemId(2)].map(|id| {
+        (
+            id,
+            MemberDemand::from_pushover(0.0, 80e6, 0.0, 60e3, 0.0, 0.0),
+        )
+    });
+    let opts = UltimateShearOptions {
+        include_bond: false,
+        ..Default::default()
+    };
+    let checks = collect_rc_ultimate_checks(&model, &demands, &opts).unwrap();
+    for id in [ElemId(0), ElemId(1)] {
+        let check = checks.iter().find(|check| check.elem == id).unwrap();
+        assert!(
+            !check.ok && check.qsu.is_nan() && check.shear_margin.is_nan(),
+            "{check:?}"
+        );
+        let reason = check.unchecked_reason.as_deref().unwrap();
+        assert!(reason.contains("増分解析を再実行してください"), "{reason}");
+        assert_eq!(
+            reason.contains("ultimate_clear_span_invalid"),
+            id == ElemId(0),
+            "{reason}"
+        );
     }
 }

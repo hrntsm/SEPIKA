@@ -521,7 +521,7 @@ impl LoadedFrameSection {
         })
     }
 
-    fn point_load_jump(&self, x_mm: f64) -> [f64; 3] {
+    pub(super) fn point_load_jump(&self, x_mm: f64) -> [f64; 3] {
         let mut jump = [0.0; 3];
         for load in &self.map.loads {
             if matches!(load.kind, MemberLoadKind::Point { a, .. } if a == x_mm) {
@@ -536,7 +536,7 @@ impl LoadedFrameSection {
     }
 }
 
-fn quadratic_roots(a: f64, b: f64, c: f64) -> [Option<f64>; 2] {
+pub(super) fn quadratic_roots(a: f64, b: f64, c: f64) -> [Option<f64>; 2] {
     if a == 0.0 {
         return [(b != 0.0).then(|| -c / b), None];
     }

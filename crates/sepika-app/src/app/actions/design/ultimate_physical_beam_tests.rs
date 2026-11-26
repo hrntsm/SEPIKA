@@ -1,0 +1,577 @@
+use super::*;
+use sepika_core::dof::{Dof, Dof6Mask};
+use sepika_core::model::{ForceRegime, GirderTorsionMode, MemberLoad, MemberLoadKind, Model};
+use sepika_core::rc_capacity::RcBeamUltimateShearIssue as Issue;
+use sepika_core::section_shape::{RebarSize, StandardRebar};
+use sepika_design_jp::ultimate::UltimateCheck;
+use sepika_solver::nonlinear::pushover::{PushoverMemberResponse, PushoverResult};
+
+fn model(splits_mm: &[f64], grouped: bool, distributed: bool) -> Model {
+    let mut model = beam_model(&[4], &[4]);
+    model.girder_torsion = GirderTorsionMode::Keep;
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut model.sections[1].shape else {
+        unreachable!()
+    };
+    rebar.main_dia = RebarSize::Standard(StandardRebar::D22);
+    rebar.stirrup.dia = RebarSize::Standard(StandardRebar::D10);
+    model.nodes[3].coord[0] = 4_000.0;
+    for index in [2, 3] {
+        model.nodes[index].restraint = Dof6Mask::FIXED;
+        model.nodes[index].restraint.set_free(Dof::Ry);
+    }
+    model.nodes[3].restraint.set_free(Dof::Ux);
+
+    let template = model.elements.pop().unwrap();
+    let mut ends = vec![(0.0, NodeId(2))];
+    for &x in splits_mm {
+        let mut node = model.nodes[3].clone();
+        node.id = NodeId(model.nodes.len() as u32);
+        node.coord[0] = x;
+        node.restraint.set_free(Dof::Uz);
+        ends.push((x, node.id));
+        model.nodes.push(node);
+    }
+    ends.push((4_000.0, NodeId(3)));
+    let group: Vec<_> = ends
+        .windows(2)
+        .enumerate()
+        .map(|(part, ends)| {
+            let mut elem = template.clone();
+            let id = ElemId(part as u32 + 1);
+            elem.id = id;
+            elem.nodes = [ends[0].1, ends[1].1].into_iter().collect();
+            elem.force_regime = ForceRegime::AxialBendingInteract;
+            model.elements.push(elem);
+            id
+        })
+        .collect();
+
+    if grouped {
+        model.girder_groups.push(group.clone());
+    }
+    let case = &mut model.load_cases[0];
+    if distributed {
+        for (id, points) in group.into_iter().zip(ends.windows(2)) {
+            case.member.push(MemberLoad::manual(
+                id,
+                [0.0, 0.0, -1.0],
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: points[1].0 - points[0].0,
+                    w1: 1.0,
+                    w2: 1.0,
+                },
+            ));
+        }
+    } else {
+        for x in [1_000.0, 2_000.0, 3_000.0] {
+            if let Some(&(_, node)) = ends.iter().find(|(p, _)| *p == x) {
+                case.nodal.push(NodalLoad::manual(
+                    node,
+                    [0.0, 0.0, -40_000.0, 0.0, 0.0, 0.0],
+                ));
+            } else {
+                let part = ends.partition_point(|(p, _)| *p < x) - 1;
+                case.member.push(MemberLoad::manual(
+                    group[part],
+                    [0.0, 0.0, -1.0],
+                    MemberLoadKind::Point {
+                        a: x - ends[part].0,
+                        p: 40_000.0,
+                    },
+                ));
+            }
+        }
+    }
+    model
+}
+
+fn stored_run(app: &mut App) -> &mut PushoverResult {
+    app.core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .pushover_y
+        .as_mut()
+        .unwrap()
+}
+
+fn adopted_beam_rows(app: &mut App) -> &mut [PushoverMemberResponse] {
+    let run = stored_run(app);
+    let step = run.capacity_evaluation.as_ref().unwrap().step as usize;
+    &mut run.confirmed_history.as_mut().unwrap()[step].members
+}
+
+fn pushed(mut model: Model) -> App {
+    // 梁は、増分載荷方向の変位を独立した柱だけで制御する。
+    model.nodes[1].restraint.set_fixed(Dof::Ux);
+    let mut app = solve_beam_model(model);
+    app.generate_stories_action();
+    app.run_seismic(SeismicDir::Y);
+    app.core.analysis_cfg.push_dir = SeismicDir::Y;
+    app.core.analysis_cfg.push_steps = 3;
+    app.run_pushover();
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    app
+}
+
+fn adopted(model: Model) -> App {
+    let mut app = pushed(model);
+    let run = stored_run(&mut app);
+    assert!(run.steps.len() > 2);
+    run.capacity_evaluation = Some(
+        run.evaluation_point(
+            EvaluationPurpose::HoldingCapacity,
+            SeismicDir::Y,
+            1,
+            "一本部材の終局せん断".into(),
+        )
+        .unwrap(),
+    );
+    app.core.ultimate_use_pushover = true;
+    app.core.ultimate_include_bond = false;
+    app
+}
+
+fn assert_beam(app: &mut App, count: usize, [m, q, capacity, margin]: [f64; 4]) {
+    assert_same_final_proof(stored_run(app));
+    let demands = app.ultimate_demand_by_elem().unwrap();
+    let mut actions = demands
+        .iter()
+        .filter_map(|(id, demand)| (id.0 != 0).then_some(demand.rc_beam_ultimate_shear));
+    let expected = actions.next().unwrap().unwrap().unwrap();
+    assert_eq!(expected.axial_range_n, [0.0; 2]);
+    close(expected.max_mq[0].0, m);
+    close(expected.max_mq[0].1, q);
+    assert!(actions.all(|actions| actions == Some(Ok(expected))));
+    let checks = app.compute_ultimate_checks().unwrap();
+    assert_eq!(checks.len(), 1 + count);
+    for row in checks.iter().filter(|row| row.elem != ElemId(0)) {
+        assert!(row.ok, "{row:?}");
+        close(row.qmu, q);
+        close(row.qsu, capacity);
+        close(row.shear_margin, margin);
+    }
+}
+
+fn assert_same_final_proof(run: &PushoverResult) {
+    let evidence = |members: &[PushoverMemberResponse]| {
+        members
+            .iter()
+            .map(|r| (r.elem, r.rc_beam_ultimate_shear))
+            .collect::<Vec<_>>()
+    };
+    let last = &run
+        .confirmed_history
+        .as_ref()
+        .unwrap()
+        .last()
+        .unwrap()
+        .members;
+    assert!(last.iter().any(|r| r.rc_beam_ultimate_shear.is_some()));
+    assert_eq!(evidence(&run.member_response), evidence(last));
+}
+
+fn reopen(app: &mut App, label: &str) -> App {
+    let path =
+        std::env::temp_dir().join(format!("sepika1889-{label}-{}.ovika", std::process::id()));
+    app.save_project_to(path.clone());
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    std::fs::remove_file(path).unwrap();
+    assert!(
+        loaded.core.scoped.last_error.is_none(),
+        "{:?}",
+        loaded.core.scoped.last_error
+    );
+    loaded.core.ultimate_use_pushover = true;
+    loaded
+}
+
+#[test]
+fn arbitrary_divisions_and_nodal_or_member_point_loads_keep_whole_beam_shear() {
+    // 左右反力60 kN、区間せん断60, 20, -20, -60 kN。最大曲げ80 kN·mは中央。
+    let expected = [80e6, 60e3, 356_976.084_710_482_3, 5.949_601_411_84];
+    for splits in [&[1_100.0, 2_500.0][..], &[1_000.0, 2_000.0, 3_000.0]] {
+        let mut input = model(splits, true, false);
+        let mut section = input.sections[1].clone();
+        section.id = SectionId(2);
+        section.name = "同じ配筋の別符号".into();
+        input.sections.push(section);
+        input.elements[2].section = Some(SectionId(2));
+        let mut app = adopted(input);
+        assert_beam(&mut app, splits.len() + 1, expected);
+        if splits.len() != 3 {
+            continue;
+        }
+        #[cfg(feature = "gui")]
+        {
+            let labels = ultimate_table_labels(&mut app);
+            for value in ["357.0", "5.95"] {
+                assert_eq!(
+                    labels.iter().filter(|v| v.as_str() == value).count(),
+                    4,
+                    "{labels:?}"
+                );
+            }
+        }
+
+        let mut loaded = reopen(&mut app, "whole");
+        assert_beam(&mut loaded, 4, expected);
+    }
+}
+
+#[test]
+fn whole_beam_recovery_finds_the_curve_peak_under_uniform_load() {
+    // 全長4 m、全区間荷重1 N/mm。左右反力2 kN、中央曲げ2 kN·m。
+    for splits in [&[][..], &[1_500.0, 2_750.0]] {
+        let mut app = adopted(model(splits, !splits.is_empty(), true));
+        assert_beam(
+            &mut app,
+            splits.len() + 1,
+            [2e6, 2e3, 417_243.980_291_087_94, 208.621_990_145_54],
+        );
+    }
+}
+
+#[test]
+fn whole_beam_cannot_be_certified_when_recovery_drops_a_nonzero_load_component() {
+    let mut input = model(&[1_500.0, 2_750.0], true, true);
+    input.load_cases[0].member[0].dir[0] = 1e-16;
+    assert_unchecked(&mut adopted(input), Issue::Recovery.reason());
+}
+
+fn axial_cancellation_model(loaded: NodeId) -> Model {
+    use sepika_core::model::RcBeamReference;
+
+    let mut input = model(&[2_000.0], true, false);
+    input.load_cases[0].member.clear();
+    for id in input.girder_groups[0].clone() {
+        input.elements[id.index()].force_regime = ForceRegime::UniaxialBendingShear;
+        input.set_member_rc_beam_reference(
+            id,
+            Some(RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
+        );
+    }
+    // 通常加算でゼロに丸められても、釣合い上の節点荷重は1 N。
+    input.load_cases[0].nodal.extend(
+        [1e16, 1.0, -1e16].map(|n| NodalLoad::manual(loaded, [n, 0.0, 0.0, 0.0, 0.0, 0.0])),
+    );
+    input
+}
+
+fn assert_axial_cancellation_unchecked(input: Model) {
+    let group = input.girder_groups[0].clone();
+    let mut app = adopted(input);
+    let run = stored_run(&mut app);
+    assert_same_final_proof(run);
+    for rows in [
+        &run.member_response,
+        &run.confirmed_history.as_ref().unwrap()[1].members,
+    ] {
+        for member in &group {
+            let row = rows.iter().find(|row| row.elem == *member).unwrap();
+            assert_eq!(row.axial, 0.0);
+            assert_eq!(row.rc_beam_ultimate_shear, Some(Err(Issue::Equilibrium)));
+        }
+    }
+    for rows in [
+        app.compute_ultimate_checks().unwrap(),
+        reference_checks(&mut app),
+    ] {
+        let beams: Vec<_> = rows
+            .into_iter()
+            .filter(|row| group.contains(&row.elem))
+            .collect();
+        assert_eq!(beams.len(), group.len());
+        assert_unchecked_rows(&beams, Issue::Equilibrium.reason());
+    }
+}
+
+#[test]
+fn axial_loads_lost_by_nodal_addition_do_not_certify_a_zero_axial_range() {
+    assert_axial_cancellation_unchecked(axial_cancellation_model(NodeId(3)));
+}
+
+#[test]
+fn a_column_at_the_restrained_outer_end_does_not_hide_the_free_end_axial_cut() {
+    let mut input = axial_cancellation_model(NodeId(3));
+    attach_column_at_beam_i(&mut input);
+    assert_axial_cancellation_unchecked(input);
+}
+
+fn attach_column_at_beam_i(input: &mut Model) {
+    let mut base = input.nodes[0].clone();
+    base.id = NodeId(input.nodes.len() as u32);
+    base.coord = [0.0, 6_000.0, 0.0];
+    let mut column = input.elements[0].clone();
+    column.id = ElemId(input.elements.len() as u32);
+    column.nodes = [base.id, NodeId(2)].into_iter().collect();
+    input.nodes.push(base);
+    input.elements.push(column);
+}
+
+#[test]
+fn an_interior_axial_restraint_does_not_hide_the_free_end_axial_cut() {
+    let mut input = axial_cancellation_model(NodeId(3));
+    input.nodes[4].restraint.set_fixed(Dof::Ux);
+    assert_axial_cancellation_unchecked(input);
+}
+
+#[test]
+fn an_axially_free_interior_joint_cannot_balance_a_lost_load_with_two_zero_cuts() {
+    let mut input = axial_cancellation_model(NodeId(4));
+    input.nodes[3].restraint.set_fixed(Dof::Ux);
+    assert_axial_cancellation_unchecked(input);
+}
+
+#[test]
+fn a_load_on_a_restrained_dof_does_not_enter_the_free_end_axial_cut() {
+    let mut app = adopted(axial_cancellation_model(NodeId(2)));
+    for row in adopted_beam_rows(&mut app)
+        .iter()
+        .filter(|row| row.elem != ElemId(0))
+    {
+        assert_eq!(
+            row.rc_beam_ultimate_shear.unwrap().unwrap().axial_range_n,
+            [0.0; 2]
+        );
+    }
+    let rows = app.compute_ultimate_checks().unwrap();
+    let beams: Vec<_> = rows.iter().filter(|row| row.elem != ElemId(0)).collect();
+    assert_eq!(beams.len(), 2);
+    assert!(beams.iter().all(|row| row.ok && row.qsu.is_finite()));
+}
+
+fn run_axial_member_inputs(
+    mut input: Model,
+    elem: ElemId,
+    dir: [f64; 3],
+    a: f64,
+    forces_n: &[f64],
+) -> PushoverResult {
+    input.nodes[1].restraint.set_fixed(Dof::Ux);
+    input.nodes[3].restraint.set_fixed(Dof::Ux);
+    input.load_cases[0].member = forces_n
+        .iter()
+        .map(|&p| MemberLoad::manual(elem, dir, MemberLoadKind::Point { a, p }))
+        .collect();
+    let settings = sepika_job::AnalysisSettings {
+        push_steps: 3,
+        push_dir: SeismicDir::Y,
+        ..Default::default()
+    };
+    sepika_job::prepare_model_for_analysis(&mut input, &settings, None).unwrap();
+    sepika_job::compute::compute_pushover(input, settings).unwrap()
+}
+
+fn assert_member_axial_input_unchecked(run: &PushoverResult, group: &[ElemId]) {
+    assert_same_final_proof(run);
+    for (step, state) in run.confirmed_history.as_ref().unwrap()[..2]
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(state.step, step as u32);
+        for &id in group {
+            let row = state.members.iter().find(|row| row.elem == id).unwrap();
+            assert_eq!(row.rc_beam_ultimate_shear, Some(Err(Issue::Equilibrium)));
+        }
+    }
+}
+
+#[test]
+fn axial_load_at_or_outside_a_column_face_can_act_in_the_clear_span() {
+    use sepika_core::adjacency::NodeAdjacency;
+    use sepika_core::face_distance::girder_column_faces;
+    use sepika_core::model::ZoneSource;
+
+    let mut input = model(&[1_000.0, 2_750.0], true, true);
+    attach_column_at_beam_i(&mut input);
+    let first = &mut input.elements[1];
+    first.rigid_zone.length_i = 0.0;
+    first.rigid_zone.source_i = ZoneSource::Manual;
+    let [i_face, _] = girder_column_faces(
+        &input,
+        &input.elements[1],
+        &NodeAdjacency::primary_frame(&input),
+    )
+    .unwrap();
+    assert_eq!(i_face.unwrap().position_mm, 300.0);
+    let group = &input.girder_groups[0];
+    let run =
+        |a, forces| run_axial_member_inputs(input.clone(), ElemId(1), [1.0, 0.0, 0.0], a, forces);
+    for a in [290.0, 300.0, 310.0] {
+        assert_member_axial_input_unchecked(&run(a, &[1e32, 1.0, -1e32]), group);
+    }
+    // 1 Nだけなら、両端拘束された4 m梁の内法側軸力の大きさは1 N × 300 mm / 4000 mm。
+    let control = run(300.0, &[1.0]);
+    let proof = control.confirmed_history.unwrap()[1].members[1]
+        .rc_beam_ultimate_shear
+        .unwrap()
+        .unwrap();
+    close(
+        proof.axial_range_n[0]
+            .abs()
+            .max(proof.axial_range_n[1].abs()),
+        0.075,
+    );
+}
+
+#[test]
+fn second_part_member_load_uses_that_parts_own_axis_for_zero_axial_evidence() {
+    let mut input = model(&[1_024.0], true, true);
+    input.nodes[3].coord[0] = 2_048.0;
+    input.nodes[3].coord[2] += 2.0_f64.powi(-38);
+    let group = &input.girder_groups[0];
+    let run =
+        |forces| run_axial_member_inputs(input.clone(), ElemId(2), [0.0, 0.0, 1.0], 512.0, forces);
+    assert_member_axial_input_unchecked(&run(&[1e32, 1.0, -1e32]), group);
+    let control = run(&[1.0]);
+    let proof = control.confirmed_history.unwrap()[1].members[1]
+        .rc_beam_ultimate_shear
+        .unwrap()
+        .unwrap();
+    assert!(proof.axial_range_n.into_iter().any(|n| n != 0.0));
+}
+
+fn assert_unchecked(app: &mut App, reason: &str) {
+    assert_unchecked_rows(&app.compute_ultimate_checks().unwrap(), reason);
+}
+
+fn assert_unchecked_rows(checks: &[UltimateCheck], reason: &str) {
+    for row in checks.iter().filter(|row| row.elem != ElemId(0)) {
+        assert!(
+            !row.ok && row.qsu.is_nan() && row.shear_margin.is_nan(),
+            "{row:?}"
+        );
+        assert!(
+            row.unchecked_reason
+                .as_ref()
+                .is_some_and(|r| r.contains(reason)),
+            "{row:?}"
+        );
+    }
+}
+
+fn reference_checks(app: &mut App) -> Vec<UltimateCheck> {
+    use sepika_design_jp::ultimate::{collect_rc_ultimate_checks, UltimateShearOptions};
+    let members = &stored_run(app).confirmed_history.as_ref().unwrap()[1].members;
+    let demand = sepika_job::member_demand_from_pushover(members, None).unwrap();
+    collect_rc_ultimate_checks(
+        &app.core.model,
+        &demand,
+        &UltimateShearOptions {
+            include_bond: false,
+            ..Default::default()
+        },
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_nonuniform_section_or_mismatched_local_axes_rejects_every_display_row() {
+    let mut input = model(&[2_000.0], true, false);
+    input.elements[2].local_axis.ref_vector = [0.0, 0.0, -1.0];
+    assert_unchecked(&mut adopted(input), Issue::LocalAxis.reason());
+    let mut input = model(&[2_000.0], true, false);
+    let mut section = input.sections[1].clone();
+    section.id = SectionId(2);
+    section.name = "違う配筋".into();
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut section.shape else {
+        unreachable!()
+    };
+    rebar.top = vec![3];
+    rebar.bottom = vec![3];
+    input.sections.push(section);
+    input.elements[2].section = Some(SectionId(2));
+    assert_unchecked(&mut adopted(input), Issue::Section.reason());
+}
+
+#[test]
+fn old_or_inconsistent_group_records_do_not_fall_back_to_section_actions() {
+    let mut app = adopted(model(&[2_000.0], true, false));
+    for row in adopted_beam_rows(&mut app)
+        .iter_mut()
+        .filter(|row| row.elem != ElemId(0))
+    {
+        row.rc_ultimate_shear = row.rc_beam_ultimate_shear.unwrap().ok();
+    }
+    for id in [ElemId(1), ElemId(2)] {
+        let row = adopted_beam_rows(&mut app)
+            .iter_mut()
+            .find(|row| row.elem == id)
+            .unwrap();
+        row.rc_beam_ultimate_shear = None;
+        assert_unchecked(&mut app, "増分解析を再実行してください");
+    }
+    assert_unchecked(
+        &mut reopen(&mut app, "legacy"),
+        "増分解析を再実行してください",
+    );
+
+    let run = stored_run(&mut app);
+    let step = run.capacity_evaluation.as_ref().unwrap().step as usize;
+    run.confirmed_history.as_mut().unwrap()[step]
+        .members
+        .retain(|row| row.elem != ElemId(1));
+    assert!(app
+        .compute_ultimate_checks()
+        .unwrap_err()
+        .contains("ultimate_response_missing:"));
+}
+
+#[test]
+fn supported_internal_node_and_axial_force_prevent_whole_beam_comparison() {
+    let mut input = model(&[2_000.0], true, false);
+    input.nodes[4].restraint.set_fixed(Dof::Uz);
+    assert_unchecked_rows(
+        &reference_checks(&mut pushed(input)),
+        Issue::InteriorSupport.reason(),
+    );
+    let mut input = model(&[2_000.0], true, false);
+    input.load_cases[0].nodal.push(NodalLoad::manual(
+        NodeId(3),
+        [-10_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    ));
+    let mut app = pushed(input);
+    assert!(stored_run(&mut app)
+        .shear_design_unavailable_at(1)
+        .is_some());
+    assert_unchecked_rows(&reference_checks(&mut app), "梁は軸力なし");
+}
+
+#[test]
+fn a_weak_axis_member_load_never_becomes_a_verified_uniaxial_beam() {
+    let mut input = model(&[2_000.0], true, false);
+    input.load_cases[0].member.push(MemberLoad::manual(
+        ElemId(1),
+        [0.0, 1.0, 0.0],
+        MemberLoadKind::Point { a: 500.0, p: 500.0 },
+    ));
+    let mut app = pushed(input);
+    assert!(stored_run(&mut app)
+        .shear_design_unavailable_at(1)
+        .is_some());
+    for row in reference_checks(&mut app)
+        .iter()
+        .filter(|row| row.elem != ElemId(0))
+    {
+        assert!(!row.ok);
+        assert!(
+            row.unchecked_reason
+                .as_ref()
+                .is_some_and(|r| r.contains("RC梁の弱軸曲げ・せん断")),
+            "{row:?}"
+        );
+    }
+}

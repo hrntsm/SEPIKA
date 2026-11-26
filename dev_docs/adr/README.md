@@ -230,6 +230,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0164](0164-rc-beam-qd1-eccentric-material-end.md) | accepted | 偏心で実柱面を取れないRC梁端は実材端で検定する |
 | [0165](0165-rc-column-qd1-girder-bending-axis.md) | accepted | RC柱QD1の片端梁降伏は検討曲げ軸に対応する場合に採用する |
 | [0166](0166-symmetric-column-time-history-lateral-buckling.md) | accepted | 上下対称H形鋼柱の時刻歴横座屈を同時刻・補剛区間で照査する |
+| [0167](0167-rc-physical-beam-ultimate-shear.md) | accepted | RC梁の終局せん断は採用ステップの一本部材全体の内力から求める |
 | [0170](0170-src-concentrated-spring-flexural-backbone-hold.md) | accepted | 矩形SRC梁・柱の材端集中ばねは曲げ復元力の適用条件を確認できるまで使わない |
 
 ## 規約
