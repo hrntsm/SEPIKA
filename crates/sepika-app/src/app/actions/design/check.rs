@@ -61,6 +61,18 @@ impl App {
     /// - 検定器は構造種別（`sepika_core::structure_kind`）で選択する。
     /// - 床板の設計自重が計算不可の場合は理由を通知し、既存の検定結果を消去する。
     pub fn run_design_check(&mut self) {
+        self.run_design_check_with_gravity(|model, lc| {
+            sepika_job::compute::compute_linear_static(model.clone(), lc).ok()
+        });
+    }
+
+    pub(in crate::app) fn run_design_check_with_gravity(
+        &mut self,
+        mut solve_gravity: impl FnMut(
+            &sepika_core::model::Model,
+            sepika_core::ids::LoadCaseId,
+        ) -> Option<sepika_solver::statics::linear::StaticOnce>,
+    ) {
         self.retain_study_view_references();
         if self.core.scoped.staleness.results_stale && self.reject_unsupported_panel_results(false)
         {
@@ -240,18 +252,16 @@ impl App {
         let mut gravity_error = None;
         let gravity_long_owned = if needs_gravity {
             match sepika_job::complete_design_gravity_forces(&gravity_terms, |lc| {
-                sepika_job::compute::compute_linear_static(self.core.model.clone(), lc)
-                    .ok()
-                    .map(|r| {
-                        if capture_qd1_faces || capture_rc_column_faces {
-                            let factor = gravity_terms[gravity_face_responses.len()].1;
-                            let rows = r.member_forces.clone();
-                            gravity_face_responses.push((r, factor));
-                            rows
-                        } else {
-                            r.member_forces
-                        }
-                    })
+                solve_gravity(&self.core.model, lc).map(|r| {
+                    if capture_qd1_faces || capture_rc_column_faces {
+                        let factor = gravity_terms[gravity_face_responses.len()].1;
+                        let rows = r.member_forces.clone();
+                        gravity_face_responses.push((r, factor));
+                        rows
+                    } else {
+                        r.member_forces
+                    }
+                })
             }) {
                 Ok(forces) => Some(forces),
                 Err(reason) => {
@@ -329,6 +339,12 @@ impl App {
         let matches_saved_member_forces = selected_response.is_some_and(|response| {
             same_saved_member_forces(&response.member_forces, &results.member_forces)
         });
+        let rc_column_gravity_error = gravity_error.as_deref().filter(|_| {
+            load_error.is_none()
+                && is_seismic_combo
+                && !damage_control
+                && matches_saved_member_forces
+        });
         if damage_control
             && is_seismic_combo
             && load_error.is_none()
@@ -403,6 +419,7 @@ impl App {
                         .filter(|_| matches_saved_member_forces)
                         .map_or(&[], |response| &response.rc_column_face_forces),
                     rc_column_gravity_face_forces: &rc_column_gravity_faces,
+                    rc_column_gravity_error,
                     rc_damage_control: self.core.analysis_cfg.rc_damage_control,
                     bond_method: self.core.analysis_cfg.bond_method,
                     qd_method: self.core.analysis_cfg.qd_method,
@@ -427,7 +444,23 @@ impl App {
         if let Some(reason) = &load_error {
             report.skip_for_load_state(reason);
         } else if let Some(reason) = &gravity_error {
-            if damage_control && self.core.design_term == sepika_design_jp::LoadTerm::Short {
+            if rc_column_gravity_error.is_some() {
+                let adjacency = sepika_core::adjacency::NodeAdjacency::primary_frame(design_model);
+                let affected: std::collections::HashSet<_> = design_model
+                    .elements
+                    .iter()
+                    .filter(|elem| {
+                        sepika_core::face_distance::rc_column_girder_faces(
+                            design_model,
+                            elem,
+                            &adjacency,
+                        )
+                        .is_some_and(|geometry| geometry.ends.iter().any(Option::is_some))
+                    })
+                    .map(|elem| elem.id)
+                    .collect();
+                report.skip_except_members(reason, |id| affected.contains(&id), true);
+            } else if damage_control && self.core.design_term == sepika_design_jp::LoadTerm::Short {
                 use sepika_core::section_shape::SectionShape;
                 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
                 let rc_members: std::collections::HashSet<_> = design_model
@@ -450,7 +483,7 @@ impl App {
                     })
                     .map(|elem| elem.id)
                     .collect();
-                report.skip_except_members(reason, |elem| rc_members.contains(&elem));
+                report.skip_except_members(reason, |elem| rc_members.contains(&elem), false);
             } else {
                 report.skip_for_load_state(reason);
             }

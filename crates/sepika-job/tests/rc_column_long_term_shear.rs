@@ -352,7 +352,7 @@ fn 短期地震時の実面で同位置の重力せん断を使い別経路の�
         .1
         .at
         .push((0.05, [0.0, -20_000.0, 0.0, 0.0, 0.0, 0.0]));
-    let run = |gravity_faces: &[_]| {
+    let run = |gravity_faces: &[_], gravity_error: Option<&str>| {
         run_member_design_checks(
             &model,
             &response.member_forces,
@@ -360,9 +360,10 @@ fn 短期地震時の実面で同位置の重力せん断を使い別経路の�
             &MemberDesignCheckOptions {
                 term: sepika_design_jp::LoadTerm::Short,
                 qd_method: sepika_design_jp::QdMethod::Qd2,
-                long_member_forces: Some(&gravity.member_forces),
+                long_member_forces: gravity_error.is_none().then_some(&gravity.member_forces),
                 rc_column_face_forces: &response.rc_column_face_forces,
                 rc_column_gravity_face_forces: gravity_faces,
+                rc_column_gravity_error: gravity_error,
                 ..Default::default()
             },
         )
@@ -373,7 +374,7 @@ fn 短期地震時の実面で同位置の重力せん断を使い別経路の�
         .map(|(_, _, outcome)| outcome)
         .collect::<Vec<_>>()
     };
-    let rows = run(&gravity.rc_column_face_forces);
+    let rows = run(&gravity.rc_column_face_forces, None);
     let component = shear(&rows[0]);
     let capacity_n = component
         .detail
@@ -386,7 +387,7 @@ fn 短期地震時の実面で同位置の重力せん断を使い別経路の�
         .parse::<f64>()
         .unwrap();
     assert_close(component.ratio * capacity_n, 152_000.0, 0.2);
-    let rows = run(&[]);
+    let rows = run(&[], None);
     assert!(
         rows.iter()
             .any(|outcome| matches!(outcome, CheckOutcome::Skipped { reason }
@@ -395,6 +396,16 @@ fn 短期地震時の実面で同位置の重力せん断を使い別経路の�
     );
     assert!(rows.iter().any(|outcome| matches!(outcome, CheckOutcome::Checked(result)
         if result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0))));
+    let rows = run(&[], Some("重力再計算が失敗しました"));
+    assert!(
+        rows.iter()
+            .any(|outcome| matches!(outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("重力再計算が失敗しました"))),
+        "{rows:?}"
+    );
+    assert!(rows.iter().any(|outcome| matches!(outcome, CheckOutcome::Checked(result)
+        if result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0)
+        && result.components.iter().all(|part| part.kind != CheckKind::Shear))));
 }
 
 #[test]
@@ -422,6 +433,258 @@ fn 偏心で柱軸を外れても正面積の接触なら実面を定め線接�
             }
         }
     }
+}
+
+#[test]
+fn 回転した平面内で丸めにより正となる線接触を面接触にしない() {
+    for (circle, offset) in [
+        (false, [-148.0, -514.0, 0.0]),
+        (true, [-177.0, -486.0, 0.0]),
+    ] {
+        let mut column = column_input::column_model(circle, 0.0);
+        match column.sections[0].shape.as_mut().unwrap() {
+            SectionShape::RcColumnRect { b, d, .. } => {
+                *b = 200.0;
+                *d = 200.0;
+            }
+            SectionShape::RcColumnCircle { d, .. } => *d = 200.0,
+            _ => unreachable!(),
+        }
+        let shape = SectionShape::RcBeamRect {
+            b: 100.0,
+            d: 600.0,
+            rebar: sepika_core::section_shape::RcBeamRebar {
+                main_dia: RebarSize::DiameterMm(19.0),
+                top: Vec::new(),
+                bottom: Vec::new(),
+                cover: 40.0,
+                stirrup: sepika_core::section_shape::BeamStirrup {
+                    dia: RebarSize::DiameterMm(10.0),
+                    pitch: 100.0,
+                    legs: 2,
+                },
+            },
+        };
+        let girder = Section {
+            frame_use: Some(FrameSectionUse::Girder),
+            material: Some(MaterialId(0)),
+            ..shape.to_section(SectionId(1), "接触判定用の矩形大梁".into())
+        };
+        let mut model = input::model(column, girder, false);
+        model.nodes[2].coord = [300.0, 400.0, 0.0];
+        for (offset, contact) in [
+            (offset, false),
+            ([offset[0] - 0.008, offset[1] + 0.006, 0.0], true),
+        ] {
+            model.elements[1].end_offsets_mm = [offset; 2];
+            let adjacency = sepika_core::adjacency::NodeAdjacency::primary_frame(&model);
+            let faces = sepika_core::face_distance::rc_column_girder_faces(
+                &model,
+                &model.elements[0],
+                &adjacency,
+            )
+            .unwrap();
+            let i = faces.ends[0].as_ref().unwrap();
+            if contact {
+                assert_eq!(i.as_ref().unwrap().position_mm, 300.0);
+            } else {
+                assert!(
+                    matches!(i, Err(reason) if reason.contains("正の面積") && reason.contains("丸め誤差")),
+                    "{i:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn 接合側の大梁ハンチだけが実面の確定に影響する() {
+    for reversed in [false, true] {
+        let mut model = model(false, false);
+        if reversed {
+            model.elements[1].nodes.swap(0, 1);
+        }
+        for (side, increase, supported) in [
+            (usize::from(reversed), 40.0, false),
+            (usize::from(!reversed), 40.0, true),
+            (usize::from(reversed), 0.0, true),
+        ] {
+            let mut detail = MemberDetailAttr::new(ElemId(1));
+            let haunch = Some(sepika_core::model::Haunch {
+                length: 750.0,
+                depth_increase: 0.0,
+                width_increase: increase,
+            });
+            if side == 0 {
+                detail.haunch_i = haunch;
+            } else {
+                detail.haunch_j = haunch;
+            }
+            model.member_detail_attrs = vec![detail];
+            let adjacency = sepika_core::adjacency::NodeAdjacency::primary_frame(&model);
+            let faces = sepika_core::face_distance::rc_column_girder_faces(
+                &model,
+                &model.elements[0],
+                &adjacency,
+            )
+            .unwrap();
+            let i = faces.ends[0].as_ref().unwrap();
+            if supported {
+                assert_eq!(i.as_ref().unwrap().position_mm, 300.0);
+            } else {
+                assert!(
+                    matches!(i, Err(reason) if reason.contains("接合側にハンチ")),
+                    "{i:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn 汎用柱応答の重複で専用実面と構造規定の不適合を消さない() {
+    let mut model = model(false, false);
+    model.elements[1].local_axis.ref_vector = Y;
+    if let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut model.sections[0].shape {
+        rebar.hoop.pitch = 120.0;
+    }
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [36_100.0, 0.0, 8472.9456, 0.0, 0.0, 0.0],
+    )];
+    model.load_cases[0].member.clear();
+    let mut response = analyze(&mut model);
+    let duplicate = response
+        .member_forces
+        .iter()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap()
+        .clone();
+    response.member_forces.push(duplicate);
+    let rows = check_combination(&model, &response);
+    assert!(rows.iter().any(|(xi, outcome)| *xi == 0.05 && matches!(outcome, CheckOutcome::Checked(result)
+        if result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0))), "{rows:?}");
+    assert!(rows.iter().any(|(xi, outcome)| *xi == 0.5
+        && matches!(outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("重複"))));
+    assert_eq!(rows.iter().filter(|(_, outcome)| matches!(outcome, CheckOutcome::Checked(result)
+        if result.components.iter().any(|part| part.kind == CheckKind::Provision && part.ratio > 1.0))).count(), 1);
+    assert!(rows.iter().all(
+        |(_, outcome)| !matches!(outcome, CheckOutcome::Checked(result)
+        if result.components.iter().any(|part| part.kind == CheckKind::Shear))
+    ));
+}
+
+#[test]
+fn 区間外の中央で構造規定が警告のみなら偽の未検定行を作らない() {
+    let mut column = column_input::column_model(false, 0.0);
+    if let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut column.sections[0].shape {
+        rebar.main_dia = RebarSize::DiameterMm(13.0);
+    }
+    let mut model = input::model(
+        column,
+        beam_input::section(300.0, 3200.0, 19.0, &[3], &[3]),
+        false,
+    );
+    model.load_cases[0].member.clear();
+    model.load_cases[0].nodal.clear();
+    let response = analyze(&mut model);
+    let rows = check(&model, &response, RcColumnLongTermShearInput::SingleCase);
+    assert_eq!(
+        rows.iter().map(|(pos, _)| *pos).collect::<Vec<_>>(),
+        [1600.0 / LENGTH_MM, 1.0]
+    );
+    assert!(
+        rows.iter().all(
+            |(_, outcome)| matches!(outcome, CheckOutcome::Checked(result)
+        if !result.components.is_empty() && result.ok())
+        ),
+        "{rows:?}"
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(
+                |(_, outcome)| matches!(outcome, CheckOutcome::Checked(result)
+        if result.detail.contains("主筋比 pg="))
+            )
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn 短期圧縮靱性は実面の軸力で比較し柱のハンチ範囲はその実面から測る() {
+    use sepika_design_jp::RcColumnDuctilityComparison as Comparison;
+    let mut model = model(false, false);
+    model.elements[1].local_axis.ref_vector = Y;
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [0.0, 0.0, -1_900_000.0 + 8472.9456, 0.0, 0.0, 0.0],
+    )];
+    model.load_cases[0].member = vec![MemberLoad::manual(
+        COLUMN,
+        [0.0, 0.0, 1.0],
+        MemberLoadKind::Point {
+            a: 225.0,
+            p: -30_000.0,
+        },
+    )];
+    let run = |model: &Model, response: &StaticOnce, use_faces: bool| {
+        let report = run_member_design_checks(
+            model,
+            &response.member_forces,
+            &response.panel_moments,
+            &MemberDesignCheckOptions {
+                term: sepika_design_jp::LoadTerm::Short,
+                rc_column_face_forces: if use_faces {
+                    &response.rc_column_face_forces
+                } else {
+                    &[]
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        report
+            .rc_column_ductility_advisories
+            .into_iter()
+            .find(|advisory| advisory.elem == COLUMN)
+            .unwrap()
+            .positions
+    };
+    let response = analyze(&mut model);
+    let rows = run(&model, &response, true);
+    assert!(
+        matches!(rows[0], (0.05, Comparison::Compared { exceeds_standard: true, compression_n_per_mm2, .. })
+        if (compression_n_per_mm2 - 1_930_000.0 / 240_000.0).abs() < 1e-10),
+        "{rows:?}"
+    );
+    assert!(rows.iter().all(|(xi, _)| *xi != 0.1));
+    assert_eq!(
+        run(&model, &response, false)[0],
+        (0.05, Comparison::Unavailable)
+    );
+    let mut detail = MemberDetailAttr::new(COLUMN);
+    detail.haunch_i = Some(sepika_core::model::Haunch {
+        length: 1300.0,
+        depth_increase: 70.0,
+        width_increase: 0.0,
+    });
+    model.member_detail_attrs.push(detail);
+    let response = analyze(&mut model);
+    let rows = run(&model, &response, true);
+    assert_eq!(rows[0], (0.05, Comparison::Unavailable));
+    assert!(
+        rows.iter().any(|(xi, outcome)| *xi == 0.5
+            && matches!(
+                outcome,
+                Comparison::Compared {
+                    exceeds_standard: false,
+                    ..
+                }
+            )),
+        "{rows:?}"
+    );
 }
 
 #[test]
@@ -918,9 +1181,13 @@ fn 釣合いを満たす内力系列が重複しても他の柱の長期せん�
         .iter()
         .filter(|(id, _, _)| *id == COLUMN)
         .collect();
+    assert_eq!(target.len(), 3);
     assert!(
-        matches!(target.as_slice(), [(_, _, CheckOutcome::Skipped { reason })]
+        target.iter().all(
+            |(_, _, outcome)| matches!(outcome, CheckOutcome::Skipped { reason }
         if reason.contains("解析内力が重複し、一意の断面力を確認できません"))
+        ),
+        "{target:?}"
     );
     let all_other_columns = |(id, _, _): &&(ElemId, f64, CheckOutcome)| *id == ElemId(2);
     assert_eq!(

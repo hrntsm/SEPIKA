@@ -15,7 +15,7 @@ mod column;
 pub mod column_mechanism;
 pub mod joint;
 mod provisions;
-pub(crate) use provisions::column_member_provisions;
+pub(crate) use provisions::{column_member_provisions, ProvisionCheck};
 pub mod wall;
 /// 鉄筋コンクリート造耐震壁のせん断非線形特性（トリリニア Qc/βu/Qu）。
 pub mod wall_nonlinear;
@@ -64,20 +64,22 @@ pub(crate) use shear_capacity::*;
 pub struct RcDesign;
 
 #[derive(Clone, Copy)]
-pub(crate) enum ColumnGravityMode {
+pub(crate) enum ColumnGravityMode<'a> {
     SingleOutcome,
     Ordinary {
         boundary_shear_issue: Option<&'static str>,
         response_end_axial_issue: Option<&'static str>,
         saved_long_term: bool,
         require_same_position_gravity: bool,
+        gravity_error: Option<&'a str>,
+        separate_provisions: bool,
     },
     TimeHistory {
         strict_gravity: bool,
     },
 }
 
-impl ColumnGravityMode {
+impl ColumnGravityMode<'_> {
     fn requires_exact_gravity(self) -> bool {
         matches!(
             self,

@@ -300,6 +300,13 @@ pub(super) fn column_check(
     let long_term = ctx.term == LoadTerm::Long;
     let strict_gravity = column_gravity.requires_exact_gravity();
     let ordinary = matches!(column_gravity, ColumnGravityMode::Ordinary { .. });
+    let checks_provisions_here = !matches!(
+        column_gravity,
+        ColumnGravityMode::Ordinary {
+            separate_provisions: true,
+            ..
+        }
+    ) && crate::rc::provisions::is_member_level_station(forces.pos);
     let saved_long_term = matches!(
         column_gravity,
         ColumnGravityMode::Ordinary {
@@ -467,9 +474,14 @@ pub(super) fn column_check(
         if let ColumnGravityMode::Ordinary {
             boundary_shear_issue,
             response_end_axial_issue,
+            gravity_error,
             ..
         } = column_gravity
         {
+            if let Some(reason) = gravity_error {
+                *incomplete = combine_incomplete_reasons(incomplete.take(), Some(reason));
+                return false;
+            }
             if let Some(reason) =
                 response_end_axial_issue.or(boundary_shear_issue.filter(|_| boundary_shear_only))
             {
@@ -675,7 +687,7 @@ pub(super) fn column_check(
             });
         }
 
-        if (!boundary_shear_only || short_force_issue) && forces.pos == 0.5 {
+        if (!boundary_shear_only || short_force_issue) && checks_provisions_here {
             let prov = crate::rc::column_member_provisions(shape, mat, ctx)
                 .expect("円形柱の断面諸元と配筋は確認済み");
             if let Some(c) = prov.provision_component() {
@@ -832,7 +844,7 @@ pub(super) fn column_check(
             });
         }
 
-        if (!boundary_shear_only || short_force_issue) && forces.pos == 0.5 {
+        if (!boundary_shear_only || short_force_issue) && checks_provisions_here {
             let prov = crate::rc::column_member_provisions(shape, mat, ctx)
                 .expect("矩形柱の断面諸元と配筋は確認済み");
             if let Some(c) = prov.provision_component() {

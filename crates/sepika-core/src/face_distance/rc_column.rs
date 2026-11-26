@@ -21,6 +21,7 @@ pub struct RcColumnGirderFaces {
 }
 
 /// 柱軸に直交する外面を持つ矩形大梁の実配置と、その面に垂直な局所軸の添字。
+/// `inward` は柱区間へ向く単位ベクトル。
 pub fn aligned_girder(
     model: &Model,
     girder: ElemId,
@@ -117,6 +118,24 @@ pub fn rc_column_girder_faces(
                 let inward = scale(axes[0], if side == 0 { 1.0 } else { -1.0 });
                 check_continuation(model, elem, adjacency, nodes[side], ends[side], inward)?;
                 let (beam, normal) = aligned_girder(model, other.id, inward)?;
+                if model
+                    .member_detail(other.id)
+                    .and_then(|detail| {
+                        if other.nodes.first() == Some(&nodes[side]) {
+                            detail.haunch_i
+                        } else {
+                            detail.haunch_j
+                        }
+                    })
+                    .is_some_and(|haunch| {
+                        haunch.depth_increase != 0.0 || haunch.width_increase != 0.0
+                    })
+                {
+                    return Err(format!(
+                        "大梁 ID {} の接合側にハンチがあり、実外形を確認できません",
+                        other.id.0
+                    ));
+                }
                 let face_mm = contact_distance(shape, &beam, normal, ends[side], *axes, inward)?;
                 if distance_mm.is_some_and(|other| other != face_mm) {
                     return Err("接続大梁によって材端フェースの位置が異なります".into());
@@ -216,44 +235,69 @@ fn contact_distance(
     let half = [beam_half[0], beam_half[transverse]];
     let offset = [dot(delta, axes[0]) + half[0], dot(delta, axes[1])];
     let valid = |x: f64| x.is_finite() && x > 0.0;
-    let overlaps = match *column {
+    let (margin_mm, column_size_mm) = match *column {
         SectionShape::RcColumnCircle { d, .. } => {
-            valid(d)
-                && (offset[0].abs() - half[0])
-                    .max(0.0)
-                    .hypot((offset[1].abs() - half[1]).max(0.0))
-                    < d / 2.0
+            let distance_mm = (offset[0].abs() - half[0])
+                .max(0.0)
+                .hypot((offset[1].abs() - half[1]).max(0.0));
+            (d / 2.0 - distance_mm, d)
         }
         SectionShape::RcColumnRect { b, d, .. } => {
             let cosines = axes.map(|axis| [dot(axis, column_axes[1]), dot(axis, column_axes[2])]);
             let column_half = [d / 2.0, b / 2.0];
-            valid(b)
-                && valid(d)
-                && (0..2).all(|k| {
+            let margins = (0..2)
+                .map(|k| {
                     let [c, s] = cosines[k];
-                    offset[k].abs() < half[k] + c.abs() * column_half[0] + s.abs() * column_half[1]
+                    half[k] + c.abs() * column_half[0] + s.abs() * column_half[1] - offset[k].abs()
                 })
-                && (0..2).all(|k| {
+                .chain((0..2).map(|k| {
                     let [c, s] = [cosines[0][k], cosines[1][k]];
-                    (offset[0] * c + offset[1] * s).abs()
-                        < column_half[k] + c.abs() * half[0] + s.abs() * half[1]
-                })
+                    column_half[k] + c.abs() * half[0] + s.abs() * half[1]
+                        - (offset[0] * c + offset[1] * s).abs()
+                }));
+            (
+                margins.fold(f64::INFINITY, f64::min),
+                if valid(b) && valid(d) {
+                    b.max(d)
+                } else {
+                    f64::NAN
+                },
+            )
         }
         _ => unreachable!(),
     };
+    let SupportMemberId::Primary(id) = beam.member else {
+        unreachable!()
+    };
     if !beam_half.into_iter().all(valid)
+        || !valid(column_size_mm)
+        || !margin_mm.is_finite()
         || !distance_mm.is_finite()
         || distance_mm < 0.0
         || center_normal > beam_half[normal]
-        || !overlaps
     {
-        let SupportMemberId::Primary(id) = beam.member else {
-            unreachable!()
-        };
         return Err(format!(
             "大梁 ID {} の実外形と柱の実材端が正の面積で接触しません",
             id.0
         ));
+    }
+    let scale_mm = beam_half
+        .into_iter()
+        .chain(delta.map(f64::abs))
+        .fold(column_size_mm.max(1.0), f64::max);
+    let roundoff_mm = 32.0 * f64::EPSILON * scale_mm;
+    if margin_mm <= roundoff_mm {
+        return Err(if margin_mm >= -roundoff_mm {
+            format!(
+                "大梁 ID {} と柱の実材端が正の面積で接触することを丸め誤差の範囲で確認できません",
+                id.0
+            )
+        } else {
+            format!(
+                "大梁 ID {} の実外形と柱の実材端が正の面積で接触しません",
+                id.0
+            )
+        });
     }
     Ok(distance_mm)
 }

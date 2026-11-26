@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 
+use sepika_core::face_distance::RcColumnGirderFaces;
 use sepika_core::ids::ElemId;
 use sepika_core::model::{Haunch, Model};
 use sepika_core::section_shape::SectionShape;
 use sepika_element::frame::beam::MemberForces;
+use sepika_solver::statics::linear::RcColumnFaceEnds;
 use serde::{Deserialize, Serialize};
 
-use super::is_rc_column_target;
-use crate::design_position::design_positions;
-use crate::MemberForcesAt;
+use super::{is_rc_column_target, rc_column_faces};
+use crate::design_position::{design_positions, prepared_end_positions};
 
 /// RC柱の短期圧縮靱性推奨に対する設計者の適用判断。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +57,8 @@ pub(super) fn collect(
     model: &Model,
     member_forces: &[(ElemId, MemberForces)],
     applicability: Option<&HashMap<ElemId, RcColumnDuctilityApplicability>>,
+    geometries: &HashMap<ElemId, RcColumnGirderFaces>,
+    face_responses: &HashMap<ElemId, Option<&RcColumnFaceEnds>>,
 ) -> Vec<RcColumnDuctilityAdvisory> {
     let mut by_elem = HashMap::with_capacity(member_forces.len());
     for (id, forces) in member_forces {
@@ -79,19 +82,64 @@ pub(super) fn collect(
                 | RcColumnDuctilityApplicability::ExperimentalException => Vec::new(),
                 _ => {
                     let length_mm = model.member_length(elem);
-                    let positions = design_positions(elem, model, length_mm);
                     let forces = by_elem.get(&elem.id).copied().flatten();
+                    let geometry = geometries.get(&elem.id);
+                    let positions = match geometry {
+                        Some(geometry) => {
+                            rc_column_faces::regular_positions(geometry, elem, model, length_mm)
+                        }
+                        None => design_positions(elem, model, length_mm),
+                    };
+                    let mut demands = positions
+                        .into_iter()
+                        .map(|xi| {
+                            let axial_n = forces.and_then(|forces| {
+                                let mut samples = forces.at.iter().filter(|(pos, _)| *pos == xi);
+                                let (_, local) = samples.next()?;
+                                samples.next().is_none().then_some(-local[0])
+                            });
+                            (xi, axial_n)
+                        })
+                        .collect::<Vec<_>>();
+                    let mut face_distances_mm = [
+                        Some(elem.rigid_zone.face_i_or_zero()),
+                        Some(elem.rigid_zone.face_j_or_zero()),
+                    ];
+                    if let Some(geometry) = geometry {
+                        let prepared = prepared_end_positions(elem, length_mm);
+                        for (side, end) in geometry.ends.iter().enumerate() {
+                            match end {
+                                Some(Ok(face)) => {
+                                    let xi = face.position_mm / face.length_mm;
+                                    let axial_n = rc_column_faces::response(
+                                        face_responses,
+                                        elem.id,
+                                        side,
+                                        *face,
+                                    )
+                                    .ok()
+                                    .map(|forces| -forces[0]);
+                                    face_distances_mm[side] = Some(if side == 0 {
+                                        face.position_mm
+                                    } else {
+                                        face.length_mm - face.position_mm
+                                    });
+                                    demands.push((xi, axial_n));
+                                }
+                                Some(Err(_)) => {
+                                    face_distances_mm[side] = None;
+                                    demands.push((prepared[side], None));
+                                }
+                                None => {}
+                            }
+                        }
+                        demands.sort_by(|(a, _), (b, _)| a.total_cmp(b));
+                    }
                     let haunches = model
                         .member_detail(elem.id)
                         .map_or([None; 2], |detail| [detail.haunch_i, detail.haunch_j]);
-                    let nominal_range = nominal_section_range(
-                        length_mm,
-                        [
-                            elem.rigid_zone.face_i_or_zero(),
-                            elem.rigid_zone.face_j_or_zero(),
-                        ],
-                        haunches,
-                    );
+                    let nominal_range =
+                        nominal_section_range(length_mm, face_distances_mm, haunches);
                     let area_mm2 = model
                         .element_section(elem)
                         .and_then(|section| section.shape.as_ref())
@@ -101,18 +149,9 @@ pub(super) fn collect(
                         .and_then(|mat| mat.fc)
                         .map(|fc| fc / 3.0)
                         .filter(|&standard| positive_finite(standard));
-                    positions
+                    demands
                         .into_iter()
-                        .map(|xi| {
-                            let axial_n = forces.and_then(|forces| {
-                                // 近傍の節点芯で、欠落した材端フェースの内力を補わない。
-                                let mut samples = forces.at.iter().filter(|(pos, _)| *pos == xi);
-                                let (_, local) = samples.next()?;
-                                samples
-                                    .next()
-                                    .is_none()
-                                    .then(|| -MemberForcesAt::from_local(xi, *local).n)
-                            });
+                        .map(|(xi, axial_n)| {
                             let area_mm2 = area_mm2.filter(|_| {
                                 nominal_range
                                     .as_ref()
@@ -138,7 +177,7 @@ fn positive_finite(value: f64) -> bool {
 
 fn nominal_section_range(
     length_mm: f64,
-    face_distances_mm: [f64; 2],
+    face_distances_mm: [Option<f64>; 2],
     haunches: [Option<Haunch>; 2],
 ) -> Option<RangeInclusive<f64>> {
     let haunches = haunches
@@ -150,20 +189,20 @@ fn nominal_section_range(
         return None;
     }
 
-    let mut inner_distances_mm = face_distances_mm;
-    for (inner_mm, haunch) in inner_distances_mm.iter_mut().zip(haunches) {
-        if !inner_mm.is_finite() || *inner_mm < 0.0 {
-            return None;
-        }
+    let mut inner_distances_mm = [0.0; 2];
+    for (side, haunch) in haunches.into_iter().enumerate() {
         if let Some(h) = haunch {
+            let face_mm = face_distances_mm[side]?;
             if !positive_finite(h.length)
+                || !face_mm.is_finite()
+                || face_mm < 0.0
                 || ![h.depth_increase, h.width_increase]
                     .into_iter()
                     .all(|increase| increase.is_finite() && increase >= 0.0)
             {
                 return None;
             }
-            *inner_mm += h.length;
+            inner_distances_mm[side] = face_mm + h.length;
         }
     }
     if inner_distances_mm.iter().sum::<f64>() > length_mm {
@@ -171,13 +210,7 @@ fn nominal_section_range(
     }
 
     // 検定位置のクランプを使うと、中央をまたぐハンチを途中で打ち切ってしまう。
-    let [i, j] = std::array::from_fn(|end| {
-        if haunches[end].is_some() {
-            inner_distances_mm[end] / length_mm
-        } else {
-            0.0
-        }
-    });
+    let [i, j] = inner_distances_mm.map(|distance_mm| distance_mm / length_mm);
     Some(i..=1.0 - j)
 }
 
