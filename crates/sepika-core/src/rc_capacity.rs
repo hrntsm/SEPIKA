@@ -38,7 +38,7 @@ impl RcBeamUltimateShearIssue {
             Self::InteriorSupport => "一本部材の境界に支点・拘束または応力伝達を確認できない接続があります",
             Self::FacePosition => "RC梁の実フェースと正の評価区間を確認できません",
             Self::MissingResponse => "梁全体の同一確定ステップの内力を確認できません（区間応答不足）",
-            Self::Recovery => "部材荷重または評価区間の位置を確認できず、断面力の範囲を回復できません",
+            Self::Recovery => "評価区間・部材荷重の位置または荷重の局所軸成分を確認できず、断面力の範囲を回復できません",
             Self::Equilibrium => "確定総応答が軸力・弱軸の釣合いと一致しません",
             Self::Slab => "スラブ付きRC梁の終局せん断の適用条件を確認できません",
             Self::Cutoff => "カットオフ筋があるため内法区間で一様な配筋を確認できません",

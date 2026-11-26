@@ -933,8 +933,18 @@ fn check_member(
         {
             (None, Some(reason.as_str()))
         }
-        Err(reason) if beam_bond.is_some() => return unchecked_bending(reason),
-        Err(reason) => return unchecked(reason),
+        Err(span_reason) => {
+            let reason = whole_beam_shear
+                .and_then(Result::err)
+                .filter(|_| grouped_beam)
+                .map(|issue| format!("{span_reason}。{}", issue.reason()));
+            let reason = reason.as_deref().unwrap_or(span_reason);
+            return if beam_bond.is_some() {
+                unchecked_bending(reason)
+            } else {
+                unchecked(reason)
+            };
+        }
     };
     if static_beam_rebar.is_some() && p.at <= 0.0 {
         let reason = if tension_is_top {

@@ -225,6 +225,13 @@ fn whole_beam_recovery_finds_the_curve_peak_under_uniform_load() {
     }
 }
 
+#[test]
+fn whole_beam_cannot_be_certified_when_recovery_drops_a_nonzero_load_component() {
+    let mut input = model(&[1_500.0, 2_750.0], true, true);
+    input.load_cases[0].member[0].dir[0] = 1e-16;
+    assert_unchecked(&mut adopted(input), Issue::Recovery.reason());
+}
+
 fn assert_unchecked(app: &mut App, reason: &str) {
     assert_unchecked_rows(&app.compute_ultimate_checks().unwrap(), reason);
 }

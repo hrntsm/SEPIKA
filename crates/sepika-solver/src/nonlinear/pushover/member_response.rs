@@ -667,6 +667,18 @@ mod tests {
         // 実柱面は始端から200 mm。100 mmの第1区間は内法に含まない。
         assert_eq!(q, reference_n);
         assert!((m / q - 1_750.0).abs() < 1e-9, "{result:?}");
+        let outside_load = sepika_core::model::MemberLoad::manual(
+            ElemId(1),
+            [0.0, 1e-16, -1.0],
+            sepika_core::model::MemberLoadKind::Point { a: 50.0, p: 50.0 },
+        );
+        responses[1] = BeamElement::new(&model.elements[1], &model)
+            .frame_load_response(&[0.0; 12], &[outside_load])
+            .unwrap();
+        assert_eq!(
+            beam_actions(&model, &group, &responses, &mut None, None),
+            Err(Issue::Recovery)
+        );
         responses[1] = None;
         assert_eq!(
             beam_actions(&model, &group, &responses, &mut None, None),

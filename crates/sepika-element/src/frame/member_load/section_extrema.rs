@@ -7,6 +7,48 @@ impl LoadedFrameSection {
         self.map.frame()
     }
 
+    /// 全長に作用する非零の部材荷重に対し、回復でゼロに置換された局所成分がないことを確認する。
+    /// 成分が物理的にゼロと確認できなければエラー。
+    pub fn verify_load_projections(&self) -> Result<(), String> {
+        for load in &self.map.loads {
+            let specified = match load.kind {
+                MemberLoadKind::Point { p, .. } => [p, 0.0],
+                MemberLoadKind::Distributed { w1, w2, .. } => [w1, w2],
+            };
+            if specified == [0.0; 2] {
+                continue;
+            }
+            for (axis, comp) in self
+                .frame()
+                .rot
+                .into_iter()
+                .zip(resolve(load, self.frame()))
+            {
+                let recovered = match comp {
+                    Some(Comp::Point { p, .. }) => [p, 0.0],
+                    Some(Comp::Dist { w1, w2, .. }) => [w1, w2],
+                    None => [0.0; 2],
+                };
+                // 省略された成分を、内積の丸めや相殺だけで物理的にゼロとは判定できない。
+                if specified
+                    .into_iter()
+                    .zip(recovered)
+                    .any(|(input, output)| input != 0.0 && output == 0.0)
+                    && load
+                        .dir
+                        .into_iter()
+                        .zip(axis)
+                        .any(|(d, a)| d != 0.0 && a != 0.0)
+                {
+                    return Err(
+                        "部材荷重の局所軸成分が回復時に保持されることを確認できません".into(),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// 実材軸i端からの距離と実材軸長［mm］を指定し、区間内の各断面力の最小・最大を返す。
     /// 成分順は N, Qy, Qz, Mx, My, Mz［N, N·mm］。内点の集中荷重は左右、外端は区間内側を用いる。
     /// 回復座標・荷重境界・断面力を確認できないときはエラー。
@@ -27,6 +69,7 @@ impl LoadedFrameSection {
         if !(lo < hi && hi <= stored_mm) {
             return Err("断面力の評価区間が部材荷重応答の全長区間外です".into());
         }
+        self.verify_load_projections()?;
 
         let mut breaks = vec![lo, hi];
         let mut distributed = [vec![], vec![], vec![]];
@@ -214,5 +257,37 @@ mod tests {
         ]) {
             assert!((actual - expected).abs() < 1e-7, "{actual} != {expected}");
         }
+    }
+
+    #[test]
+    fn force_ranges_do_not_accept_a_discarded_projection_outside_the_evaluation_range() {
+        let frame = LocalFrame::from_nodes([0.0; 3], [1_000.0, 0.0, 0.0], [0.0, 1.0, 0.0]).unwrap();
+        let load = |dir| {
+            MemberLoad::manual(
+                ElemId(0),
+                dir,
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: 300.0,
+                    w1: 1.0,
+                    w2: 1.0,
+                },
+            )
+        };
+        let map = |dir| FrameDeadLoadMap::new(&[load(dir)], &frame, 1_000.0, 0.0, 0.0).unwrap();
+        let perpendicular = map([0.0, 1.0, 0.0]);
+        let near_perpendicular = map([1e-16, 1.0, 0.0]);
+        assert_eq!(perpendicular.flex_load(), near_perpendicular.flex_load());
+        let range = [400.0, 900.0];
+        let regular = LoadedFrameSection::new(perpendicular, [0.0; 12]);
+        assert_eq!(
+            regular.section_force_ranges_mm(range, 1_000.0).unwrap()[0],
+            [0.0; 2]
+        );
+        let uncertain = LoadedFrameSection::new(near_perpendicular, [0.0; 12]);
+        assert!(uncertain
+            .section_force_ranges_mm(range, 1_000.0)
+            .unwrap_err()
+            .contains("局所軸成分"));
     }
 }

@@ -314,7 +314,13 @@ pub(super) fn beam_actions(
     {
         let start_mm = dist(origin, i);
         let end_mm = dist(origin, j);
+        let response = response_of(elem.id).ok_or(Issue::MissingResponse)?;
         if hi <= start_mm || lo >= end_mm {
+            // フェース外の区間の荷重でも、内法の断面力を生じる節点力に伝わりうる。
+            response
+                .section
+                .verify_load_projections()
+                .map_err(|_| Issue::Recovery)?;
             continue;
         }
         let i_mm = if lo <= start_mm { 0.0 } else { lo - start_mm };
@@ -323,7 +329,6 @@ pub(super) fn beam_actions(
         } else {
             hi - start_mm
         };
-        let response = response_of(elem.id).ok_or(Issue::MissingResponse)?;
         let ranges = response
             .section
             .section_force_ranges_mm([i_mm, j_mm], member_mm)
