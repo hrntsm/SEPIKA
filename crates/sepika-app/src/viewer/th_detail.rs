@@ -924,12 +924,27 @@ fn draw_peak_check<'a>(
         .as_ref()
         .map(|adjacency| sepika_design_jp::rc::beam_qd1_geometry(model, adjacency, elem));
     use sepika_design_jp::design_position::{
-        qd1_saved_station_issue, rc_beam_qd1_positions, same_qd1_station,
+        qd1_haunch_station_issue, qd1_saved_station_issue, rc_beam_qd1_positions, same_qd1_station,
     };
     let qd1_positions = rc_beam_qd1_geometry
         .as_ref()
         .and_then(|result| result.as_ref().ok())
         .and_then(|geometry| rc_beam_qd1_positions(model, elem, *geometry));
+    let rc_beam_qd1_haunches = rc_beam_qd1_geometry.as_ref().and_then(|result| {
+        sepika_design_jp::rc::beam_qd1_haunches(model, elem, result.as_ref().ok().copied())
+    });
+    let has_qd1_haunch = rc_beam_qd1_haunches.is_some();
+    let station_issue = |pos, rows: &[_]| {
+        if has_qd1_haunch {
+            qd1_haunch_station_issue(pos, rows)
+        } else {
+            qd1_saved_station_issue(pos, rows)
+        }
+    };
+    if rc_beam_qd1_haunches.is_some() {
+        ui.label("短期QD1は確認済みの材端情報を使います。ハンチ区間・接合部の適合は判定しません。");
+        ui.label("現在の時刻歴保存では実フェース間の曲げ分布を確認できないため、許容せん断力は未算定です。");
+    }
     let rc_beam_qd1 = rc_beam_qd1_geometry
         .map(|result| result.and_then(|geometry| geometry.demand_clear_span_mm()));
     let (q_simple, q0_issue) = if rc_beam_qd1.is_some() {
@@ -945,7 +960,7 @@ fn draw_peak_check<'a>(
     };
     let slab_moments_nmm = rc_beam_adjacency
         .as_ref()
-        .filter(|_| matches!(rc_beam_qd1, Some(Ok(_))))
+        .filter(|_| matches!(rc_beam_qd1, Some(Ok(_))) && rc_beam_qd1_haunches.is_none())
         .and_then(|adjacency| {
             sepika_design_jp::rc::beam_qd1_slab_end_moments(model, adjacency, elem)
         });
@@ -961,7 +976,7 @@ fn draw_peak_check<'a>(
                     .filter(|(pos, _)| {
                         positions.iter().any(|expected| {
                             same_qd1_station(*expected, *pos)
-                                && qd1_saved_station_issue(*expected, &mf.at).is_none()
+                                && station_issue(*expected, &mf.at).is_none()
                         })
                     })
                     .copied()
@@ -1072,8 +1087,10 @@ fn draw_peak_check<'a>(
         rc_beam_qd1_slab_end_moments_nmm: slab_moments_nmm,
         rc_beam_qd1_at_material_end: qd1_positions.is_some(),
         rc_beam_qd1_slab_unverified: slab_moments_nmm.is_none()
-            && matches!(rc_beam_qd1, Some(Ok(_))),
+            && matches!(rc_beam_qd1, Some(Ok(_)))
+            && rc_beam_qd1_haunches.is_none(),
         rc_beam_qd1_issue: q0_issue.or_else(|| rc_beam_qd1.and_then(Result::err)),
+        rc_beam_qd1_haunches,
         rc_grouped_beam_qd1_sum_my_nmm: None,
         seismic_qd,
         ..Default::default()
@@ -1115,6 +1132,9 @@ fn draw_peak_check<'a>(
             };
             ctx.shear_span = shear_span(5, 1);
             ctx.shear_span_y = shear_span(4, 2);
+            if let Some(haunches) = &mut ctx.rc_beam_qd1_haunches {
+                haunches.set_time_history_reference(selected.is_some());
+            }
             ctx.column_sum_my = column_mechanism_topology.as_ref().and_then(|topology| {
                 let end_axial = |at: &[(f64, [f64; 6])]| {
                     [0.0, 1.0].map(|xi| at.iter().find(|(p, _)| *p == xi).map(|(_, f)| f[0]))
@@ -1131,12 +1151,16 @@ fn draw_peak_check<'a>(
             if let Some(positions) = &qd1_positions {
                 if selected.is_none() {
                     for &pos in positions {
-                        if let Some(reason) = qd1_saved_station_issue(pos, &forces.at) {
+                        if let Some(reason) = station_issue(pos, &forces.at) {
                             draw_labeled_outcome_row(
                                 ui,
                                 &format!("ξ={pos:.2}:"),
                                 &CheckOutcome::Skipped {
-                                    reason: reason.into(),
+                                    reason: ctx
+                                        .rc_beam_qd1_haunches
+                                        .as_ref()
+                                        .and_then(|haunches| haunches.section_issue(pos))
+                                        .unwrap_or_else(|| reason.into()),
                                 },
                                 false,
                             );
@@ -1157,11 +1181,12 @@ fn draw_peak_check<'a>(
                     else {
                         continue;
                     };
-                    if qd1_saved_station_issue(expected, &forces.at).is_some() {
+                    if station_issue(expected, &forces.at).is_some() {
                         continue;
                     }
                 }
                 let mfa = MemberForcesAt::from_local(pos, f);
+                let haunch_qd1 = ctx.rc_beam_qd1_haunches.is_some();
                 let mut draw_outcome = |outcome: &CheckOutcome| {
                     let with_reference_reason = match (outcome, gravity_reference_issue) {
                         (CheckOutcome::Skipped { reason }, Some(reference_reason)) => {
@@ -1183,7 +1208,7 @@ fn draw_peak_check<'a>(
                             ui,
                             &format!("{side} t={:.6} s  ξ={pos:.2}:", snapshot.time),
                             outcome,
-                            signed_bending || rc_damage_control,
+                            signed_bending || rc_damage_control || haunch_qd1,
                         );
                     } else {
                         draw_outcome_row(ui, pos, outcome);

@@ -153,16 +153,21 @@ fn bending_component(
 pub struct BeamQd1Geometry {
     pub clear_span_mm: f64,
     pub(crate) axis_length_mm: f64,
+    pub(super) face_distances_mm: [f64; 2],
     /// i/j端それぞれの解析断面位置。
     pub end_positions: [f64; 2],
     /// 偏心による実柱面非交差で実材端を採ったか（i/j順）。
     pub uses_material_end: [bool; 2],
+    missing_bending_support: [Option<Qd1EndSupportIssue>; 2],
     missing_direct_qy_support: [bool; 2],
 }
 
 impl BeamQd1Geometry {
-    /// QD1に使用する内法長さ [mm]。直接支持端で局所Qy方向の並進反力を受けられない場合は理由を返す。
+    /// QD1に使用する内法長さ [mm]。強軸曲げ伝達や直接支持端の局所Qy反力を確認できない場合は理由を返す。
     pub fn demand_clear_span_mm(&self) -> Result<f64, String> {
+        if let Some(reason) = self.bending_support_issue() {
+            return Err(reason);
+        }
         let ends = match self.missing_direct_qy_support {
             [false, false] => return Ok(self.clear_span_mm),
             [true, false] => "i端",
@@ -173,10 +178,17 @@ impl BeamQd1Geometry {
             "QD1用の梁の{ends}で局所Qy方向の反力を受ける並進支持を確認できません"
         ))
     }
+
+    fn bending_support_issue(&self) -> Option<String> {
+        self.missing_bending_support
+            .into_iter()
+            .enumerate()
+            .find_map(|(index, issue)| issue.map(|issue| issue.reason(index)))
+    }
 }
 
-/// 単一のRC矩形梁で両端の曲げ伝達・内法・検定位置を確認する。接続柱の遠端支持は問わない。
-/// QD1需要に使う場合は `BeamQd1Geometry::demand_clear_span_mm` で直接支持端の並進支持も確認する。
+/// 単一のRC矩形梁の内法・検定位置を確認する。ハンチ付き梁では曲げ伝達が不成立でも確定した位置は返す。
+/// 需要に用いる場合は `BeamQd1Geometry::demand_clear_span_mm` で支持条件を確認する。接続柱の遠端支持は問わない。
 /// `adjacency` は同一モデルの `NodeAdjacency::primary_frame` を渡す。
 pub fn beam_qd1_geometry(
     model: &Model,
@@ -192,7 +204,6 @@ pub fn beam_qd1_geometry(
             "単要素のQD1では一本部材グループの全スパンの外端断面・重力反力を確認できません".into(),
         );
     }
-    validate_beam_qd1_section_geometry(model, elem)?;
     let [i, j] = frame_end_positions(model, elem).ok_or("QD1用の梁の材軸を確定できません")?;
     let [_, ey, ez] = local_frame_axes(i, j, elem.local_axis.ref_vector)?;
     let length_mm = dist(i, j);
@@ -202,8 +213,23 @@ pub fn beam_qd1_geometry(
         .then(|| girder_column_face_misses_due_to_offset(model, elem, adjacency))
         .flatten()
         .unwrap_or_default();
-    let i_end = beam_qd1_end_geometry(model, adjacency, elem, 0, ez, None, &displaced[0])?;
-    let j_end = beam_qd1_end_geometry(model, adjacency, elem, 1, ez, None, &displaced[1])?;
+    let keep_positions = super::has_beam_qd1_haunch(model, elem);
+    let end = |index| {
+        beam_qd1_end_geometry(
+            model,
+            adjacency,
+            elem,
+            index,
+            ez,
+            Qd1EndUse {
+                grouped_qy_axis: None,
+                displaced_columns: &displaced[index],
+                keep_positions,
+            },
+        )
+    };
+    let i_end = end(0)?;
+    let j_end = end(1)?;
     let [from_i_mm, from_j_mm] = [i_end.distance_mm, j_end.distance_mm];
     let clear_span_mm = length_mm - from_i_mm - from_j_mm;
     if !clear_span_mm.is_finite() || clear_span_mm <= 0.0 {
@@ -212,8 +238,10 @@ pub fn beam_qd1_geometry(
     Ok(BeamQd1Geometry {
         clear_span_mm,
         axis_length_mm: length_mm,
+        face_distances_mm: [from_i_mm, from_j_mm],
         end_positions: [from_i_mm / length_mm, 1.0 - from_j_mm / length_mm],
         uses_material_end: displaced.map(|cols| !cols.is_empty()),
+        missing_bending_support: [i_end.support_issue, j_end.support_issue],
         missing_direct_qy_support: [i_end, j_end].map(|end| {
             end.direct_support
                 .is_some_and(|node| !restrains_direction(node, ey, [Dof::Ux, Dof::Uy, Dof::Uz]))
@@ -230,21 +258,6 @@ pub fn beam_qd1_clear_span(
     beam_qd1_geometry(model, adjacency, elem)?.demand_clear_span_mm()
 }
 
-pub(super) fn validate_beam_qd1_section_geometry(
-    model: &Model,
-    elem: &ElementData,
-) -> Result<(), String> {
-    if model.member_detail(elem.id).is_some_and(|detail| {
-        [detail.haunch_i, detail.haunch_j]
-            .into_iter()
-            .flatten()
-            .any(|haunch| haunch.depth_increase != 0.0 || haunch.width_increase != 0.0)
-    }) {
-        return Err("QD1用にハンチ付きの梁の端部断面を確定できません".into());
-    }
-    Ok(())
-}
-
 pub(super) fn beam_qd1_face_distance(
     model: &Model,
     adjacency: &NodeAdjacency,
@@ -253,13 +266,49 @@ pub(super) fn beam_qd1_face_distance(
     ez: [f64; 3],
     grouped_qy_axis: Option<[f64; 3]>,
 ) -> Result<f64, String> {
-    beam_qd1_end_geometry(model, adjacency, elem, index, ez, grouped_qy_axis, &[])
-        .map(|end| end.distance_mm)
+    beam_qd1_end_geometry(
+        model,
+        adjacency,
+        elem,
+        index,
+        ez,
+        Qd1EndUse {
+            grouped_qy_axis,
+            displaced_columns: &[],
+            keep_positions: false,
+        },
+    )
+    .map(|end| end.distance_mm)
+}
+
+#[derive(Clone, Copy)]
+enum Qd1EndSupportIssue {
+    Released,
+    BendingSupport,
+    GroupedReaction,
+}
+
+impl Qd1EndSupportIssue {
+    fn reason(self, index: usize) -> String {
+        let end = ["i端", "j端"][index];
+        match self {
+            Self::Released => format!("QD1用の梁の{end}で強軸曲げが解放されているか接合剛性が不正です"),
+            Self::BendingSupport => format!("QD1用の梁の{end}が自由端・回転自由な支点、または強軸曲げの伝達先を確認できない接合です"),
+            Self::GroupedReaction => format!("QD1用の一本部材の外端（{end}）で局所Qy方向の反力を伝達する支持を確認できません"),
+        }
+    }
 }
 
 struct Qd1EndGeometry<'a> {
     distance_mm: f64,
     direct_support: Option<&'a Node>,
+    support_issue: Option<Qd1EndSupportIssue>,
+}
+
+struct Qd1EndUse<'a> {
+    grouped_qy_axis: Option<[f64; 3]>,
+    displaced_columns: &'a [ElemId],
+    keep_positions: bool,
 }
 
 fn beam_qd1_end_geometry<'a>(
@@ -268,8 +317,7 @@ fn beam_qd1_end_geometry<'a>(
     elem: &ElementData,
     index: usize,
     ez: [f64; 3],
-    grouped_qy_axis: Option<[f64; 3]>,
-    displaced_columns: &[ElemId],
+    end_use: Qd1EndUse<'_>,
 ) -> Result<Qd1EndGeometry<'a>, String> {
     if !elem.kind.is_primary_frame_support() {
         return Err("QD1用に両端の強軸曲げを伝達する梁要素を確認できません".into());
@@ -277,10 +325,16 @@ fn beam_qd1_end_geometry<'a>(
     let [i, j] = frame_end_positions(model, elem).ok_or("QD1用の梁の材軸を確定できません")?;
     let length_mm = dist(i, j);
     let end = ["i端", "j端"][index];
+    let mut support_issue = None;
+    let mut hold_support = |issue: Qd1EndSupportIssue| {
+        if !end_use.keep_positions {
+            return Err(issue.reason(index));
+        }
+        support_issue.get_or_insert(issue);
+        Ok(())
+    };
     if !transmits_bending(elem.end_cond[index]) {
-        return Err(format!(
-            "QD1用の梁の{end}で強軸曲げが解放されているか接合剛性が不正です"
-        ));
+        hold_support(Qd1EndSupportIssue::Released)?;
     }
     let node = elem
         .nodes
@@ -298,16 +352,9 @@ fn beam_qd1_end_geometry<'a>(
             .element_section(other)
             .is_some_and(|section| section.frame_use == Some(FrameSectionUse::Column))
     });
-    let unsupported = || {
-        format!(
-            "QD1用の梁の{end}が自由端・回転自由な支点、または強軸曲げの伝達先を確認できない接合です"
-        )
-    };
-    let unrecoverable_reaction = || {
-        format!("QD1用の一本部材の外端（{end}）で局所Qy方向の反力を伝達する支持を確認できません")
-    };
-    let required_qy_axis =
-        grouped_qy_axis.filter(|&ey| !restrains_direction(node, ey, [Dof::Ux, Dof::Uy, Dof::Uz]));
+    let required_qy_axis = end_use
+        .grouped_qy_axis
+        .filter(|&ey| !restrains_direction(node, ey, [Dof::Ux, Dof::Uy, Dof::Uz]));
     let distance_mm = if column_connected {
         let column_faces = girder_column_faces(model, elem, adjacency);
         let physical_face = column_faces
@@ -323,20 +370,20 @@ fn beam_qd1_end_geometry<'a>(
                     length_mm - face.position_mm
                 },
             ),
-            Err(_) if !displaced_columns.is_empty() => (displaced_columns, 0.0),
+            Err(_) if !end_use.displaced_columns.is_empty() => (end_use.displaced_columns, 0.0),
             Err(reason) => return Err(format!("QD1用の内法長さ: {reason}")),
         };
         if !restrained
             && !others().any(|column| {
                 columns.contains(&column.id)
-                    && if grouped_qy_axis.is_some() {
+                    && if end_use.grouped_qy_axis.is_some() {
                         column_transmits_bending(model, column, node, ez)
                     } else {
                         column_axis_at_bending_connection(model, column, node, ez).is_some()
                     }
             })
         {
-            return Err(unsupported());
+            hold_support(Qd1EndSupportIssue::BendingSupport)?;
         }
         if let Some(ey) = required_qy_axis {
             let supported = others().any(|column| {
@@ -344,13 +391,13 @@ fn beam_qd1_end_geometry<'a>(
                     && column_transmits_qy_reaction(model, column, node, ey)
             });
             if !supported {
-                return Err(unrecoverable_reaction());
+                hold_support(Qd1EndSupportIssue::GroupedReaction)?;
             }
         }
         distance_mm
     } else {
         if !restrained {
-            return Err(unsupported());
+            hold_support(Qd1EndSupportIssue::BendingSupport)?;
         }
         if others().next().is_some() {
             return Err(format!(
@@ -358,7 +405,7 @@ fn beam_qd1_end_geometry<'a>(
             ));
         }
         if required_qy_axis.is_some() {
-            return Err(unrecoverable_reaction());
+            hold_support(Qd1EndSupportIssue::GroupedReaction)?;
         }
         [elem.rigid_zone.face_i, elem.rigid_zone.face_j][index]
             .ok_or_else(|| format!("QD1用の内法長さ: {end}のフェース距離が未算定です"))?
@@ -371,6 +418,7 @@ fn beam_qd1_end_geometry<'a>(
     Ok(Qd1EndGeometry {
         distance_mm,
         direct_support: (!column_connected).then_some(node),
+        support_issue,
     })
 }
 
@@ -478,11 +526,20 @@ fn beam_qd1_sum_my(
     ctx: &DesignCtx,
     main_rebar_valid: bool,
 ) -> Result<f64, String> {
-    let [top_nmm, bottom_nmm] =
-        beam_qd1_end_moments(shape, ctx.rebar_material.as_ref(), main_rebar_valid)?;
+    let ends = ctx
+        .rc_beam_qd1_haunches
+        .as_ref()
+        .map_or(Ok([None; 2]), |haunches| haunches.end_moments_nmm())?;
+    let [i, j] = if let [Some(i), Some(j)] = ends {
+        [i, j]
+    } else {
+        let base = beam_qd1_end_moments(shape, ctx.rebar_material.as_ref(), main_rebar_valid)?;
+        ends.map(|end| end.unwrap_or(base))
+    };
+    let [[i_top_nmm, i_bottom_nmm], [j_top_nmm, j_bottom_nmm]] = [i, j];
     let [slab_i_nmm, slab_j_nmm] = ctx.rc_beam_qd1_slab_end_moments_nmm.unwrap_or([0.0; 2]);
-    let i_top_j_bottom_nmm = (top_nmm + slab_i_nmm) + bottom_nmm;
-    let i_bottom_j_top_nmm = bottom_nmm + (top_nmm + slab_j_nmm);
+    let i_top_j_bottom_nmm = (i_top_nmm + slab_i_nmm) + j_bottom_nmm;
+    let i_bottom_j_top_nmm = i_bottom_nmm + (j_top_nmm + slab_j_nmm);
     Ok(i_top_j_bottom_nmm.max(i_bottom_j_top_nmm))
 }
 
@@ -525,6 +582,24 @@ pub(crate) fn beam_check(
     section_issue: &mut Option<String>,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
+    let seismic_qd = ctx
+        .seismic_qd
+        .as_ref()
+        .filter(|_| !long_term && !ctx.rc_damage_control);
+    let uses_qd1 = seismic_qd.is_some_and(|qd| qd.method != QdMethod::Qd2);
+    let qd1_haunches = ctx.rc_beam_qd1_haunches.as_ref().filter(|_| {
+        !long_term
+            && !ctx.rc_damage_control
+            && seismic_qd.is_none_or(|qd| qd.method != QdMethod::Qd2)
+    });
+    if let Some(reason) = qd1_haunches.and_then(|haunches| haunches.section_issue(forces.pos)) {
+        let reason = if let Some(issue) = &ctx.rc_beam_qd1_issue {
+            format!("{reason}。{issue}")
+        } else {
+            reason
+        };
+        return CheckOutcome::Skipped { reason };
+    }
     let round_main_rebar = main_rebar_valid
         && ctx.rebar_material.as_ref().is_some_and(|material| {
             material.category == MaterialCategory::Rebar
@@ -584,19 +659,16 @@ pub(crate) fn beam_check(
     }
 
     let (m_for_alpha, q_for_alpha) = ctx.shear_span.unwrap_or((forces.mz.abs(), forces.qy.abs()));
-    let alpha = shear_alpha(m_for_alpha, q_for_alpha, props.d, 2.0);
     let valid_tension_props = [props.b, props.d, props.j, props.at, fc_raw]
         .into_iter()
         .all(|value| value.is_finite() && value > 0.0);
-    let seismic_qd = ctx
-        .seismic_qd
-        .as_ref()
-        .filter(|_| !long_term && !ctx.rc_damage_control);
-    let uses_qd1 = seismic_qd.is_some_and(|qd| qd.method != QdMethod::Qd2);
-    let q_design = if !shear_reference_valid {
+    let is_min = seismic_qd.is_some_and(|qd| qd.method == QdMethod::Min);
+    let mixed_min = is_min && qd1_haunches.is_some_and(|haunches| haunches.mixes_response_steps());
+    let mut qd1_n = None;
+    let adopted_qd = if !shear_reference_valid {
         None
     } else if let Some(qd) = seismic_qd {
-        match super::beam_design_shear(
+        let (demand, qd1) = super::beam_design_shear(
             qd,
             forces.pos,
             forces.qy,
@@ -606,7 +678,9 @@ pub(crate) fn beam_check(
                 ctx.rc_grouped_beam_qd1_sum_my_nmm
                     .map_or_else(|| beam_qd1_sum_my(shape, ctx, main_rebar_valid), Ok)
             },
-        ) {
+        );
+        qd1_n = qd1;
+        match demand {
             Ok(demand_n) => Some(demand_n),
             Err(reason) => {
                 *section_issue = combine_incomplete_reasons(section_issue.take(), Some(&reason));
@@ -616,7 +690,41 @@ pub(crate) fn beam_check(
     } else {
         Some(forces.qy.abs())
     }
-    .filter(|_| forces.mz.is_finite() && forces.qy.is_finite());
+    .filter(|_| !mixed_min && forces.mz.is_finite());
+    let q_design = adopted_qd.filter(|_| forces.qy.is_finite());
+    let bond_demand =
+        if qd1_haunches.is_some() && seismic_qd.is_some_and(|qd| qd.method == QdMethod::Qd1) {
+            adopted_qd.filter(|_| valid_tension_props)
+        } else {
+            q_design.filter(|_| valid_tension_props)
+        };
+    let alpha = if let Some(haunches) = qd1_haunches.filter(|_| uses_qd1) {
+        match haunches.shear_alpha() {
+            Ok(alpha) => Some(alpha),
+            Err(reason) => {
+                let mut detail = format!("RC 梁の許容せん断力QAは未算定です。{reason}");
+                if let Some(qd1_n) = qd1_n {
+                    detail.push_str(&format!("。確認済みの設計用せん断力QD1={qd1_n:.1} N"));
+                }
+                if mixed_min {
+                    detail.push_str(
+                        "。minの採用QDとそれを用いる付着検定は異時刻の包絡からは確定しません",
+                    );
+                } else if is_min {
+                    if let Some(q_design) = q_design {
+                        detail.push_str(&format!("、採用QD={q_design:.1} N"));
+                    }
+                }
+                *section_issue = combine_incomplete_reasons(section_issue.take(), Some(&detail));
+                None
+            }
+        }
+    } else {
+        [m_for_alpha, q_for_alpha]
+            .into_iter()
+            .all(f64::is_finite)
+            .then(|| shear_alpha(m_for_alpha, q_for_alpha, props.d, 2.0))
+    };
     let shear_input_issue = if !forces.qy.is_finite() {
         Some("RC 梁せん断検定不能: 解析せん断力Qyが非有限です")
     } else if forces.mz == 0.0
@@ -643,25 +751,23 @@ pub(crate) fn beam_check(
             props.pw = 0.0;
         }
     }
-    let qa = (stirrup_effect_available
-        && [m_for_alpha, q_for_alpha, props.pw]
-            .into_iter()
-            .all(f64::is_finite))
-    .then(|| {
-        shear_capacity(
-            &props,
-            &allow,
-            alpha,
-            ctx.term,
-            ctx.rc_damage_control,
-            false,
-        )
-    })
-    .flatten();
+    let qa = alpha
+        .filter(|_| stirrup_effect_available && props.pw.is_finite())
+        .and_then(|alpha| {
+            shear_capacity(
+                &props,
+                &allow,
+                alpha,
+                ctx.term,
+                ctx.rc_damage_control,
+                false,
+            )
+        });
     let q_design = q_design.filter(|_| valid_tension_props);
-    if let Some((q_design, qa)) = q_design
+    if let Some(((q_design, qa), alpha)) = q_design
         .zip(qa)
         .filter(|&(_, qa)| qa.is_finite() && qa > 0.0)
+        .zip(alpha)
     {
         let demand_label = if seismic_qd.is_some() { "QD" } else { "|Q|" };
         components.push(CheckComponent {
@@ -670,7 +776,9 @@ pub(crate) fn beam_check(
             detail: format!(
                 "QA={:.1} N, {demand_label}={:.1} N, α={:.3}, pw={:.5}",
                 qa, q_design, alpha, props.pw,
-            ) + &if uses_qd1 && ctx.rc_beam_qd1_slab_unverified {
+            ) + &if qd1_haunches.is_some() {
+                "。QD1はハンチ付き材端フェースの設計者確認値を使用。ハンチ区間・接合部の適合は未確認".into()
+            } else if uses_qd1 && ctx.rc_beam_qd1_slab_unverified {
                 format!("。警告: {}", crate::RC_BEAM_QD1_SLAB_WARNING)
             } else {
                 String::new()
@@ -684,7 +792,7 @@ pub(crate) fn beam_check(
             Some("RC 梁付着検定未算定: 丸鋼主筋に適用できる方式がなく、端部フックと実際の付着長さを確認できません"),
         );
     }
-    let (ratio_bond, bond_detail) = match (ctx.bond_method, bond_rebar_supported, q_design) {
+    let (ratio_bond, bond_detail) = match (ctx.bond_method, bond_rebar_supported, bond_demand) {
         (BondMethod::Rc1999, true, _)
             if valid_tension_props
                 && (long_term || stirrup_effect_available)

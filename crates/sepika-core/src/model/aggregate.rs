@@ -1277,6 +1277,14 @@ impl Model {
         for slab in &mut model.slabs {
             slab.plate.top_reinforcement = None;
         }
+        for detail in &mut model.member_detail_attrs {
+            for haunch in [&mut detail.haunch_i, &mut detail.haunch_j]
+                .into_iter()
+                .flatten()
+            {
+                haunch.qd1_face = None;
+            }
+        }
         model.quantity_cfg = QuantityCfg::default();
         model.stress_cfg.drift_limit_denom = StressAnalysisCfg::default().drift_limit_denom;
         model.vibration_cases.clear();

@@ -1549,6 +1549,7 @@ fn test_eval_sections_from_face_distance() {
             length: 700.0,
             depth_increase: 200.0,
             width_increase: 0.0,
+            qd1_face: None,
         }),
         haunch_j: None,
         joints: vec![MemberJoint {

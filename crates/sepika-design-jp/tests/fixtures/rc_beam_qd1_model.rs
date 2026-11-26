@@ -67,6 +67,33 @@ pub fn add_columns_at_outer_nodes(model: &mut Model, reference: [f64; 3]) {
     }
 }
 
+pub fn add_confirmed_i_haunch(model: &mut Model) {
+    use sepika_core::model::{Haunch, HaunchQd1Face, HaunchQd1Tension, MemberDetailAttr};
+
+    let mut detail = MemberDetailAttr::new(ElemId(0));
+    detail.haunch_i = Some(Haunch {
+        length: 600.0,
+        depth_increase: 200.0,
+        width_increase: 50.0,
+        qd1_face: Some(HaunchQd1Face {
+            distance_mm: 250.0,
+            width_mm: 400.0,
+            depth_mm: 800.0,
+            top: HaunchQd1Tension {
+                area_mm2: 859.5,
+                yield_strength_n_mm2: 385.0,
+                effective_depth_mm: 750.0,
+            },
+            bottom: HaunchQd1Tension {
+                area_mm2: 1_146.0,
+                yield_strength_n_mm2: 385.0,
+                effective_depth_mm: 730.0,
+            },
+        }),
+    });
+    model.member_detail_attrs.push(detail);
+}
+
 pub fn extend_j_column(model: &mut Model) {
     use sepika_core::ids::NodeId;
 

@@ -103,7 +103,7 @@ pub(super) fn beam_design_shear(
     mechanism_issue: Option<&str>,
     exact_station: bool,
     sum_my_nmm: impl FnOnce() -> Result<f64, String>,
-) -> Result<f64, String> {
+) -> (Result<f64, String>, Option<f64>) {
     let ql_signed = qd
         .long_at
         .iter()
@@ -128,16 +128,18 @@ pub(super) fn beam_design_shear(
     };
     let ql_signed = ql_signed.ok_or(gravity_shear_reason(1));
     if qd.method == QdMethod::Qd2 {
-        return ql_signed.and_then(qd2).map_err(str::to_owned);
+        return (ql_signed.and_then(qd2).map_err(str::to_owned), None);
     }
     let qd1 = beam_qd1(qd, mechanism_issue, sum_my_nmm);
-    match (qd1, ql_signed) {
+    let qd1_n = qd1.as_ref().ok().copied();
+    let design = match (qd1, ql_signed) {
         (Ok(qd1), Ok(_)) if qd.method == QdMethod::Qd1 => Ok(qd1),
-        (Ok(qd1), Ok(ql)) => Ok(qd1.min(qd2(ql)?)),
+        (Ok(qd1), Ok(ql)) => qd2(ql).map(|qd2| qd1.min(qd2)).map_err(str::to_owned),
         (Err(qd1_reason), Err(ql_reason)) => Err(format!("{qd1_reason}。{ql_reason}")),
         (Err(reason), Ok(_)) => Err(reason),
         (Ok(_), Err(reason)) => Err(reason.into()),
-    }
+    };
+    (design, qd1_n)
 }
 
 fn beam_qd1(

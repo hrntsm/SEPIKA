@@ -53,6 +53,10 @@ pub(super) fn has_middle_bracing(ctx: &DesignCtx) -> bool {
 pub(super) struct BeamSpanLoads<'a>(HashMap<ElemId, Vec<(f64, &'a MemberLoad)>>);
 
 impl<'a> BeamSpanLoads<'a> {
+    pub(super) fn for_member(&self, id: ElemId) -> &[(f64, &'a MemberLoad)] {
+        self.0.get(&id).map_or(&[][..], Vec::as_slice)
+    }
+
     pub(super) fn from_terms(
         model: &'a Model,
         terms: Option<&[(LoadCaseId, f64)]>,
@@ -111,7 +115,7 @@ impl<'a> BeamSpanLoads<'a> {
             })
             .ok_or("梁の実材軸が未確認です")?;
         let frame = LocalFrame::from_nodes(i, j, elem.local_axis.ref_vector)?;
-        let loads = self.0.get(&elem.id).map_or(&[][..], Vec::as_slice);
+        let loads = self.for_member(elem.id);
         let [Some(face_i_mm), Some(face_j_mm)] = [elem.rigid_zone.face_i, elem.rigid_zone.face_j]
         else {
             return Err("鋼梁の両端の材端フェース位置が未確認です".into());

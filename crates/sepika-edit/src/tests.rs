@@ -3535,6 +3535,7 @@ fn test_set_member_detail_attr_add_replace_and_remove_roundtrip() {
             length: 700.0,
             depth_increase: 200.0,
             width_increase: 0.0,
+            qd1_face: None,
         }),
         haunch_j: None,
         joints: vec![],
@@ -3560,6 +3561,7 @@ fn test_set_member_detail_attr_add_replace_and_remove_roundtrip() {
             length: 500.0,
             depth_increase: 150.0,
             width_increase: 0.0,
+            qd1_face: None,
         }),
         joints: vec![MemberJoint {
             distance: 1000.0,
@@ -3845,6 +3847,7 @@ fn test_delete_member_shifts_and_restores_side_table_attrs() {
             length: 700.0,
             depth_increase: 200.0,
             width_increase: 0.0,
+            qd1_face: None,
         }),
         haunch_j: None,
         joints: vec![],
@@ -9872,11 +9875,13 @@ fn non_finite_member_details_leave_model_and_both_histories_unchanged() {
             length: 700.25,
             depth_increase: -200.125,
             width_increase: 0.0,
+            qd1_face: None,
         }),
         haunch_j: Some(Haunch {
             length: 500.75,
             depth_increase: 100.625,
             width_increase: 25.875,
+            qd1_face: None,
         }),
         joints: vec![MemberJoint {
             distance: 1000.25,
@@ -9931,6 +9936,100 @@ fn non_finite_member_details_leave_model_and_both_histories_unchanged() {
 }
 
 #[test]
+fn member_details_reject_incomplete_or_invalid_haunch_qd1_input_without_an_edit() {
+    use sepika_core::model::{Haunch, HaunchQd1Face, HaunchQd1Tension, MemberDetailAttr};
+
+    let valid = HaunchQd1Face {
+        distance_mm: 250.0,
+        width_mm: 400.0,
+        depth_mm: 800.0,
+        top: HaunchQd1Tension {
+            area_mm2: 859.5,
+            yield_strength_n_mm2: 385.0,
+            effective_depth_mm: 750.0,
+        },
+        bottom: HaunchQd1Tension {
+            area_mm2: 1_146.0,
+            yield_strength_n_mm2: 385.0,
+            effective_depth_mm: 730.0,
+        },
+    };
+    let mut model = seeded_model(2, 1);
+    let mut stack = UndoStack::new();
+    let baseline = model.clone();
+    let mut attr = MemberDetailAttr::new(ElemId(0));
+    let invalid = [
+        (
+            HaunchQd1Face {
+                distance_mm: -1.0,
+                ..valid
+            },
+            "距離",
+        ),
+        (
+            HaunchQd1Face {
+                width_mm: f64::INFINITY,
+                ..valid
+            },
+            "実幅",
+        ),
+        (
+            HaunchQd1Face {
+                top: HaunchQd1Tension {
+                    yield_strength_n_mm2: f64::NAN,
+                    ..valid.top
+                },
+                ..valid
+            },
+            "上端引張",
+        ),
+        (
+            HaunchQd1Face {
+                bottom: HaunchQd1Tension {
+                    effective_depth_mm: 800.0,
+                    ..valid.bottom
+                },
+                ..valid
+            },
+            "下端引張",
+        ),
+        (
+            HaunchQd1Face {
+                top: HaunchQd1Tension {
+                    effective_depth_mm: 50.0,
+                    ..valid.top
+                },
+                ..valid
+            },
+            "重心",
+        ),
+    ];
+    for (face, expected_reason) in invalid {
+        attr.haunch_i = Some(Haunch {
+            length: 600.0,
+            depth_increase: 200.0,
+            width_increase: 50.0,
+            qd1_face: Some(face),
+        });
+        assert!(!stack.run(
+            &mut model,
+            Box::new(SetMemberDetailAttr { attr: attr.clone() })
+        ));
+        assert!(stack.last_error().unwrap().contains(expected_reason));
+        assert!(model.eq_ignoring_dofmap(&baseline));
+        assert!(!stack.can_undo() && !stack.can_redo());
+    }
+    attr.haunch_i.as_mut().unwrap().qd1_face = Some(valid);
+    assert!(stack.run(
+        &mut model,
+        Box::new(SetMemberDetailAttr { attr: attr.clone() })
+    ));
+    assert_eq!(model.member_detail(ElemId(0)), Some(&attr));
+    stack.undo(&mut model);
+    assert!(model.eq_ignoring_dofmap(&baseline));
+}
+
+#[test]
 fn undo_rejects_non_finite_old_member_detail_without_consuming_history() {
     use sepika_core::model::{Haunch, MemberDetailAttr};
     let mut model = seeded_model(2, 1);
@@ -9940,6 +10039,7 @@ fn undo_rejects_non_finite_old_member_detail_without_consuming_history() {
             length: f64::NAN,
             depth_increase: 0.0,
             width_increase: 0.0,
+            qd1_face: None,
         }),
         haunch_j: None,
         joints: Vec::new(),

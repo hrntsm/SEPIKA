@@ -1284,6 +1284,7 @@ fn test_run_design_check_includes_member_detail_positions() {
             length: 700.0,
             depth_increase: 100.0,
             width_increase: 0.0,
+            qd1_face: None,
         }),
         haunch_j: None,
         joints: vec![MemberJoint {

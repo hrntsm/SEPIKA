@@ -1582,6 +1582,7 @@ fn directional_bond_requires_a_uniform_standalone_section_and_one_beam_element()
                 length: 600.0,
                 depth_increase,
                 width_increase,
+                qd1_face: None,
             }),
             ..MemberDetailAttr::new(ElemId(0))
         });

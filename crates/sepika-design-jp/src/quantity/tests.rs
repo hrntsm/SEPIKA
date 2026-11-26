@@ -801,6 +801,7 @@ fn test_haunch_from_member_detail() {
             length: 1_000.0,
             depth_increase: 200.0,
             width_increase: 200.0,
+            qd1_face: None,
         }),
         haunch_j: None,
         joints: vec![],
@@ -834,6 +835,7 @@ fn test_haunch_from_member_detail() {
         length: 800.0,
         depth_increase: 300.0,
         width_increase: 0.0,
+        qd1_face: None,
     };
     model.member_detail_attrs.push(MemberDetailAttr {
         elem: ElemId(3),
@@ -864,16 +866,19 @@ fn linear_haunch_concrete_matches_geometric_volumes_in_public_takeoff() {
         length: 1000.0,
         depth_increase: 200.0,
         width_increase: 0.0,
+        qd1_face: None,
     };
     let width = Haunch {
         length: 1000.0,
         depth_increase: 0.0,
         width_increase: 200.0,
+        qd1_face: None,
     };
     let both = Haunch {
         length: 1000.0,
         depth_increase: 600.0,
         width_increase: 300.0,
+        qd1_face: None,
     };
     // 両寸法2倍の角錐台は0.42 m³、同区間の基準角柱は0.18 m³。
     let cases = [
@@ -958,6 +963,7 @@ fn invalid_haunch_dimensions_and_overlapping_intervals_make_quantity_unavailable
         length: 1000.0,
         depth_increase: 200.0,
         width_increase: 0.0,
+        qd1_face: None,
     };
     for invalid in [
         Haunch {
@@ -1795,6 +1801,7 @@ fn beam_contact_direct_support_span_secondary_and_vertical_union() {
         length: 1000.0,
         depth_increase: 100.0,
         width_increase: 0.0,
+        qd1_face: None,
     });
     model.member_detail_attrs.push(detail);
     assert!(

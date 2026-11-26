@@ -11,7 +11,9 @@
 
 use crate::app::App;
 use sepika_core::ids::ElemId;
-use sepika_core::model::{ElementKind, Haunch, JointKind, MemberDetailAttr, MemberJoint};
+use sepika_core::model::{
+    ElementKind, Haunch, HaunchQd1Face, HaunchQd1Tension, JointKind, MemberDetailAttr, MemberJoint,
+};
 use sepika_edit::{RemoveMemberDetailAttr, SetMemberDetailAttr};
 
 /// 部材付帯情報フォームのドラフト状態（GUI 専用）。
@@ -39,6 +41,8 @@ pub struct MemberDetailDraft {
     pub haunch_j_depth: String,
     /// j 端ハンチの幅増分 `[mm]` の入力バッファ（空欄可、既定 0）。
     pub haunch_j_width: String,
+    qd1_face_i: HaunchQd1FaceDraft,
+    qd1_face_j: HaunchQd1FaceDraft,
     /// 継手一覧の入力バッファ（1行1件または「,」区切り、`距離` または
     /// `距離/種別`。種別省略時は現場継手）。
     pub joints: String,
@@ -79,6 +83,112 @@ impl MemberDetailDraft {
             })
             .unwrap_or_default();
         self.joints = format_joints(&attr.joints);
+        self.qd1_face_i = HaunchQd1FaceDraft::from_face(attr.haunch_i.and_then(|h| h.qd1_face));
+        self.qd1_face_j = HaunchQd1FaceDraft::from_face(attr.haunch_j.and_then(|h| h.qd1_face));
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct HaunchQd1FaceDraft {
+    confirmed: bool,
+    dimensions: [String; 3],
+    top: [String; 3],
+    bottom: [String; 3],
+}
+
+const FACE_DIMENSIONS: [&str; 3] = ["解析材端からフェースまで [mm]", "実幅 [mm]", "実せい [mm]"];
+const TENSION_VALUES: [&str; 3] = [
+    "有効引張鉄筋面積 [mm²]",
+    "実降伏応力度 [N/mm²]",
+    "圧縮縁からの有効せい [mm]",
+];
+
+impl HaunchQd1FaceDraft {
+    fn from_face(face: Option<HaunchQd1Face>) -> Self {
+        let Some(face) = face else {
+            return Self::default();
+        };
+        let tension = |t: HaunchQd1Tension| {
+            [t.area_mm2, t.yield_strength_n_mm2, t.effective_depth_mm].map(|v| v.to_string())
+        };
+        Self {
+            confirmed: true,
+            dimensions: [face.distance_mm, face.width_mm, face.depth_mm].map(|v| v.to_string()),
+            top: tension(face.top),
+            bottom: tension(face.bottom),
+        }
+    }
+
+    fn apply(&self, haunch: Option<Haunch>) -> Result<Option<Haunch>, String> {
+        let Some(mut haunch) = haunch else {
+            return Ok(None);
+        };
+        if self.confirmed {
+            let [distance_mm, width_mm, depth_mm] =
+                parse_qd1_values(&self.dimensions, FACE_DIMENSIONS)?;
+            let tension = |side, values: &[String; 3]| {
+                let [area_mm2, yield_strength_n_mm2, effective_depth_mm] =
+                    parse_qd1_values(values, TENSION_VALUES)
+                        .map_err(|error| format!("{side}引張: {error}"))?;
+                Ok::<_, String>(HaunchQd1Tension {
+                    area_mm2,
+                    yield_strength_n_mm2,
+                    effective_depth_mm,
+                })
+            };
+            let face = HaunchQd1Face {
+                distance_mm,
+                width_mm,
+                depth_mm,
+                top: tension("上端", &self.top)?,
+                bottom: tension("下端", &self.bottom)?,
+            };
+            if let Some(reason) = face.input_issue() {
+                return Err(reason.into());
+            }
+            haunch.qd1_face = Some(face);
+        }
+        Ok(Some(haunch))
+    }
+
+    fn draw(&mut self, ui: &mut egui::Ui, end: &str) {
+        ui.indent(("haunch-qd1", end), |ui| {
+            ui.checkbox(
+                &mut self.confirmed,
+                format!("{end}の短期QD1用の矩形材端フェース・有効主筋を確認済み"),
+            );
+            if !self.confirmed {
+                return;
+            }
+            egui::Grid::new(("haunch-qd1-face", end)).show(ui, |ui| {
+                draw_qd1_values(ui, FACE_DIMENSIONS, &mut self.dimensions);
+                ui.strong("上端引張");
+                ui.end_row();
+                draw_qd1_values(ui, TENSION_VALUES, &mut self.top);
+                ui.strong("下端引張");
+                ui.end_row();
+                draw_qd1_values(ui, TENSION_VALUES, &mut self.bottom);
+            });
+        });
+    }
+}
+
+fn parse_qd1_values(values: &[String; 3], labels: [&str; 3]) -> Result<[f64; 3], String> {
+    let mut parsed = [0.0; 3];
+    for ((value, label), out) in values.iter().zip(labels).zip(&mut parsed) {
+        *out = value
+            .trim()
+            .parse()
+            .map_err(|_| format!("{label}に数値を入力してください"))?;
+    }
+    Ok(parsed)
+}
+
+fn draw_qd1_values(ui: &mut egui::Ui, labels: [&str; 3], values: &mut [String; 3]) {
+    for (label, value) in labels.into_iter().zip(values) {
+        ui.label(label);
+        ui.add(egui::TextEdit::singleline(value).desired_width(90.0));
+        ui.end_row();
     }
 }
 
@@ -191,6 +301,7 @@ pub fn parse_haunch(
         length,
         depth_increase,
         width_increase,
+        qd1_face: None,
     }))
 }
 
@@ -198,17 +309,33 @@ pub fn parse_haunch(
 fn haunch_desc(h: &Option<Haunch>) -> String {
     match h {
         Some(h) => format!(
-            "長さ{:.0} せい+{:.0} 幅+{:.0}",
-            h.length, h.depth_increase, h.width_increase
+            "長さ{:.0} せい+{:.0} 幅+{:.0}{}",
+            h.length,
+            h.depth_increase,
+            h.width_increase,
+            if h.qd1_face.is_some() {
+                "（QD1入力あり）"
+            } else {
+                ""
+            }
         ),
         None => "なし".to_string(),
+    }
+}
+
+fn apply_member_detail(app: &mut App, attr: MemberDetailAttr) -> bool {
+    if attr.is_empty() {
+        app.apply_model_edit(Box::new(RemoveMemberDetailAttr { elem: attr.elem }))
+    } else {
+        let command = SetMemberDetailAttr { attr }.command_for(&app.core.model);
+        app.apply_model_edit(command)
     }
 }
 
 pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
     ui.label(
         "部材(柱・梁)の付帯情報(ハンチ・継手位置)を設定します。剛性・応力解析には\
-         影響せず、断面算定の検定位置の追加(ハンチ端・継手位置)と数量拾いに用います。",
+         影響せず、検定位置の追加、RC梁の短期QD1用の材端情報、数量拾いに用います。",
     );
     ui.separator();
 
@@ -259,11 +386,7 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
         app.ui.scoped.member_detail_draft.load(&attr);
     }
     if let Some(elem) = pending_remove {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(RemoveMemberDetailAttr { elem }),
-        );
-        app.core.scoped.staleness.mark_edited();
+        app.apply_model_edit(Box::new(RemoveMemberDetailAttr { elem }));
     }
 
     ui.separator();
@@ -311,6 +434,28 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
         }
     }
 
+    let selected_rc_beam = app
+        .ui
+        .scoped
+        .member_detail_draft
+        .elem
+        .and_then(|id| app.core.model.element(id))
+        .and_then(|elem| app.core.model.element_section(elem))
+        .is_some_and(|sec| {
+            matches!(
+                sec.shape,
+                Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
+            )
+        });
+    let draft = &app.ui.scoped.member_detail_draft;
+    if selected_rc_beam || draft.qd1_face_i.confirmed || draft.qd1_face_j.confirmed {
+        ui.label(
+            "短期QD1用の入力は、梁軸に直交する矩形の実フェース、軸力の影響を無視できること、\
+             梁軸に平行な全有効引張主筋の付着・定着を設計者が図面等で確認した場合に限ります。\
+             斜行する有効主筋がある場合、または一つの引張側に異なる降伏点の筋が混在する場合は指定できません。\
+             入力はハンチ区間・接合部の適合を示しません。",
+        );
+    }
     ui.horizontal(|ui| {
         ui.checkbox(
             &mut app.ui.scoped.member_detail_draft.haunch_i_enabled,
@@ -334,6 +479,10 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
             );
         });
     });
+    let draft = &mut app.ui.scoped.member_detail_draft;
+    if draft.haunch_i_enabled && (selected_rc_beam || draft.qd1_face_i.confirmed) {
+        draft.qd1_face_i.draw(ui, "i端");
+    }
     ui.horizontal(|ui| {
         ui.checkbox(
             &mut app.ui.scoped.member_detail_draft.haunch_j_enabled,
@@ -358,6 +507,10 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
         });
     });
 
+    let draft = &mut app.ui.scoped.member_detail_draft;
+    if draft.haunch_j_enabled && (selected_rc_beam || draft.qd1_face_j.confirmed) {
+        draft.qd1_face_j.draw(ui, "j端");
+    }
     ui.label("継手一覧(始端節点芯からの距離[mm]。任意で「/現場」「/工場」を付記):");
     ui.add(
         egui::TextEdit::multiline(&mut app.ui.scoped.member_detail_draft.joints)
@@ -379,13 +532,15 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
         &app.ui.scoped.member_detail_draft.haunch_i_length,
         &app.ui.scoped.member_detail_draft.haunch_i_depth,
         &app.ui.scoped.member_detail_draft.haunch_i_width,
-    );
+    )
+    .and_then(|haunch| app.ui.scoped.member_detail_draft.qd1_face_i.apply(haunch));
     let parsed_haunch_j = parse_haunch(
         app.ui.scoped.member_detail_draft.haunch_j_enabled,
         &app.ui.scoped.member_detail_draft.haunch_j_length,
         &app.ui.scoped.member_detail_draft.haunch_j_depth,
         &app.ui.scoped.member_detail_draft.haunch_j_width,
-    );
+    )
+    .and_then(|haunch| app.ui.scoped.member_detail_draft.qd1_face_j.apply(haunch));
     let parsed_joints = parse_joints(&app.ui.scoped.member_detail_draft.joints);
     for (label, r) in [
         ("i端ハンチ", &parsed_haunch_i),
@@ -417,24 +572,15 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
                 parsed_haunch_j,
                 parsed_joints,
             ) {
-                let attr = MemberDetailAttr {
-                    elem,
-                    haunch_i,
-                    haunch_j,
-                    joints,
-                };
-                if attr.is_empty() {
-                    app.core.scoped.undo.run(
-                        &mut app.core.model,
-                        Box::new(RemoveMemberDetailAttr { elem }),
-                    );
-                } else {
-                    app.core
-                        .scoped
-                        .undo
-                        .run(&mut app.core.model, Box::new(SetMemberDetailAttr { attr }));
-                }
-                app.core.scoped.staleness.mark_edited();
+                apply_member_detail(
+                    app,
+                    MemberDetailAttr {
+                        elem,
+                        haunch_i,
+                        haunch_j,
+                        joints,
+                    },
+                );
             }
         }
         if app.ui.scoped.member_detail_draft.elem.is_some()
@@ -444,11 +590,7 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
                 .clicked()
         {
             if let Some(elem) = app.ui.scoped.member_detail_draft.elem {
-                app.core.scoped.undo.run(
-                    &mut app.core.model,
-                    Box::new(RemoveMemberDetailAttr { elem }),
-                );
-                app.core.scoped.staleness.mark_edited();
+                app.apply_model_edit(Box::new(RemoveMemberDetailAttr { elem }));
             }
         }
     });
@@ -480,10 +622,120 @@ mod tests {
                 length: 700.25,
                 depth_increase: -0.125,
                 width_increase: 0.0625,
+                qd1_face: None,
             })
         );
         assert_eq!(parse_haunch(false, "NaN", "inf", "-inf").unwrap(), None);
         assert_eq!(parse_joints("1.00025e3").unwrap()[0].distance, 1000.25);
+    }
+
+    #[test]
+    fn haunch_qd1_form_requires_both_rebar_groups_and_preserves_entered_values() {
+        let mut draft = HaunchQd1FaceDraft {
+            confirmed: true,
+            dimensions: ["250.25", "400.5", "800.125"].map(String::from),
+            top: ["859.5", "385.25", "750.75"].map(String::from),
+            bottom: ["1146.0", "390.5", ""].map(String::from),
+        };
+        let haunch = parse_haunch(true, "600", "200.125", "50.5").unwrap();
+        assert!(draft.apply(haunch).unwrap_err().contains("下端引張"));
+        draft.bottom[2] = "NaN".into();
+        assert!(draft.apply(haunch).unwrap_err().contains("下端引張"));
+        draft.bottom[2] = "730.0625".into();
+        let value = draft.apply(haunch).unwrap().unwrap();
+        let face = value.qd1_face.unwrap();
+        assert_eq!(face.distance_mm, 250.25);
+        assert_eq!(face.top.yield_strength_n_mm2, 385.25);
+        assert_eq!(face.bottom.effective_depth_mm, 730.0625);
+        let mut detail = MemberDetailAttr::new(ElemId(0));
+        detail.haunch_i = Some(value);
+        let mut loaded = MemberDetailDraft::default();
+        loaded.load(&detail);
+        assert!(loaded.qd1_face_i.confirmed);
+        assert_eq!(loaded.qd1_face_i.apply(haunch).unwrap(), Some(value));
+        assert!(!loaded.qd1_face_j.confirmed);
+        draft.confirmed = false;
+        draft.bottom[2].clear();
+        assert_eq!(draft.apply(haunch).unwrap(), haunch);
+        assert_eq!(draft.apply(None).unwrap(), None);
+    }
+
+    #[test]
+    fn haunch_qd1_confirmation_edit_uses_design_identity_without_expiring_analysis() {
+        use crate::app::{signed_q0_acceptance_tests::fixture, ResultInputKey};
+        use sepika_design_jp::QdMethod;
+
+        let mut model = fixture::model();
+        let mut detail = MemberDetailAttr::new(ElemId(0));
+        let haunch = parse_haunch(true, "600", "200", "50").unwrap();
+        detail.haunch_i = haunch;
+        model.member_detail_attrs.push(detail.clone());
+        let static_key = ResultInputKey::Combo(model.combinations[0].name.clone());
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        app.core.analysis_cfg.rc_damage_control = false;
+        app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+        app.run_combination(0);
+        assert!(app.require_result_input(static_key.clone()).is_ok());
+        assert!(app.current_design_results().is_some());
+        let preparation_stale = app.core.scoped.staleness.preparation_stale;
+
+        let mut draft = HaunchQd1FaceDraft {
+            confirmed: true,
+            dimensions: ["0", "350", "800"].map(String::from),
+            top: ["859.5", "385", "750"].map(String::from),
+            bottom: ["1146", "385", "730"].map(String::from),
+        };
+        detail.haunch_i = draft.apply(haunch).unwrap();
+        assert!(apply_member_detail(&mut app, detail.clone()));
+        assert!(app.require_result_input(static_key.clone()).is_ok());
+        assert!(app.current_design_results().is_none());
+        assert!(!app.core.scoped.staleness.results_stale);
+        assert_eq!(
+            app.core.scoped.staleness.preparation_stale,
+            preparation_stale
+        );
+
+        app.undo_action();
+        assert!(app.require_result_input(static_key.clone()).is_ok());
+        assert!(app.current_design_results().is_some());
+        assert!(!app.core.scoped.staleness.results_stale);
+        assert_eq!(
+            app.core.scoped.staleness.preparation_stale,
+            preparation_stale
+        );
+        app.redo_action();
+        assert!(app.require_result_input(static_key.clone()).is_ok());
+        assert!(app.current_design_results().is_none());
+        assert!(!app.core.scoped.staleness.results_stale);
+        assert_eq!(
+            app.core.scoped.staleness.preparation_stale,
+            preparation_stale
+        );
+
+        detail
+            .haunch_i
+            .as_mut()
+            .unwrap()
+            .qd1_face
+            .as_mut()
+            .unwrap()
+            .top
+            .area_mm2 = f64::NAN;
+        let revision = app.core.scoped.undo.revision();
+        assert!(!apply_member_detail(&mut app, detail.clone()));
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert!(app.require_result_input(static_key.clone()).is_ok());
+        assert!(!app.core.scoped.staleness.results_stale);
+
+        draft.top[0] = "950".into();
+        detail.haunch_i = draft
+            .apply(parse_haunch(true, "650", "200", "50").unwrap())
+            .unwrap();
+        assert!(apply_member_detail(&mut app, detail.clone()));
+        assert_eq!(app.core.model.member_detail(ElemId(0)), Some(&detail));
+        assert!(app.core.scoped.staleness.results_stale);
+        assert!(app.require_result_input(static_key).is_err());
     }
 
     #[test]
@@ -495,11 +747,13 @@ mod tests {
                 length: 700.25,
                 depth_increase: 200.125,
                 width_increase: 50.0625,
+                qd1_face: None,
             }),
             haunch_j: Some(Haunch {
                 length: 600.375,
                 depth_increase: -100.625,
                 width_increase: 25.875,
+                qd1_face: None,
             }),
             joints: Vec::new(),
         };
@@ -650,6 +904,7 @@ mod tests {
                 length: 700.0,
                 depth_increase: 0.0,
                 width_increase: 0.0,
+                qd1_face: None,
             }
         );
     }
@@ -664,6 +919,7 @@ mod tests {
                 length: 700.0,
                 depth_increase: 200.0,
                 width_increase: 50.0,
+                qd1_face: None,
             }
         );
     }
