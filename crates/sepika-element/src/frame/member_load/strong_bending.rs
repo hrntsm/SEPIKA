@@ -1,9 +1,10 @@
 use super::{distributed_intensity, resolve, Comp, FrameDeadLoadMap, LoadedFrameSection};
 use crate::frame::beam::MemberForces;
 use crate::transform::LocalFrame;
-use num_rational::BigRational;
-use num_traits::{Signed, Zero};
 use sepika_core::model::{MemberLoad, MemberLoadKind};
+
+mod exact;
+use exact::ExactSpanError;
 
 /// 補剛区間の符号付き強軸曲げ分布と、指定した需要範囲の断面力。
 pub struct FrameStrongBendingSpan {
@@ -16,6 +17,7 @@ pub struct FrameStrongBendingSpan {
     /// 需要範囲の非零の最大平坦部で軸力と弱軸曲げの一定性を確認できない場合にtrue。
     pub unverified_maximum_plateau: bool,
     /// 需要範囲で絶対値最大に達する断面。複数区間の照査では需要範囲の両端も含む。
+    /// 時刻歴の分布が未確認の場合は照合済みの断面力のみを含むことがある。
     pub demand_peaks: Vec<FrameStrongBendingPeak>,
 }
 
@@ -163,66 +165,6 @@ impl<'a> StrongBendingResponse<'a> {
         }
     }
 
-    fn has_exact_tied_maximum(&self) -> Option<bool> {
-        let rational = BigRational::from_float;
-        let mut lo = 0.0;
-        let mut shear_n = rational(self.response.node_force_local[1])?;
-        let mut moment_nmm = rational(-self.response.node_force_local[5])?;
-        let first_abs = moment_nmm.abs();
-        let mut interior_max = BigRational::zero();
-        let two = BigRational::from_integer(2.into());
-        let breaks = self
-            .breaks
-            .iter()
-            .copied()
-            .filter(|&x| 0.0 < x && x < self.length_mm);
-        for hi in breaks.chain([self.length_mm]) {
-            let lo_mm = rational(lo)?;
-            let width_mm = rational(hi)? - &lo_mm;
-            let mut intensity_n_per_mm = BigRational::zero();
-            let mut intensity_gradient = BigRational::zero();
-            for &load in &self.strong_loads {
-                match load {
-                    Comp::Point { a, p } if a == lo => shear_n += rational(p)?,
-                    Comp::Dist { a, b, w1, w2 } if a <= lo && hi <= b => {
-                        let w1 = rational(w1)?;
-                        let w2 = rational(w2)?;
-                        if w1 != w2 {
-                            let a_mm = rational(a)?;
-                            let gradient = (w2 - &w1) / (rational(b)? - &a_mm);
-                            intensity_n_per_mm += &gradient * (&lo_mm - a_mm);
-                            intensity_gradient += gradient;
-                        }
-                        intensity_n_per_mm += w1;
-                    }
-                    _ => {}
-                }
-            }
-            if !intensity_gradient.is_zero() {
-                return None;
-            }
-            if intensity_n_per_mm.is_zero() {
-                if shear_n.is_zero() {
-                    interior_max = interior_max.max(moment_nmm.abs());
-                }
-            } else {
-                let extremum_mm = -&shear_n / &intensity_n_per_mm;
-                if extremum_mm.is_positive() && extremum_mm < width_mm {
-                    let extremum_nmm = &moment_nmm + &shear_n * extremum_mm / &two;
-                    interior_max = interior_max.max(extremum_nmm.abs());
-                }
-            }
-            let shear_increment_n = intensity_n_per_mm * &width_mm;
-            moment_nmm += (&shear_n + &shear_increment_n / &two) * width_mm;
-            if hi < self.length_mm {
-                interior_max = interior_max.max(moment_nmm.abs());
-            }
-            shear_n += shear_increment_n;
-            lo = hi;
-        }
-        Some(interior_max == first_abs.max(moment_nmm.abs()))
-    }
-
     fn observed_shear_y(&self, x_mm: f64) -> Option<f64> {
         let index = self.stations_mm.partition_point(|(x, _)| *x < x_mm);
         self.stations_mm
@@ -347,7 +289,8 @@ impl<'a> StrongBendingResponse<'a> {
                 has_positive_shear |= q > 0.0;
                 has_negative_shear |= q < 0.0;
                 let magnitude = (a * t * t).abs() + (b * t).abs() + c.abs();
-                let confirmed_zero = t == 1.0
+                let confirmed_zero = !time_history
+                    && t == 1.0
                     && q == 0.0
                     && hi == span_hi
                     && end[1] == 0.0
@@ -418,6 +361,33 @@ impl<'a> StrongBendingResponse<'a> {
                 && unverified_flat_maximum_nmm.is_some_and(|mz| maximum - mz <= tolerance),
             demand_peaks,
         })
+    }
+
+    fn station_demands_without_distribution(&self) -> FrameStrongBendingSpan {
+        let demand_peaks = self
+            .stations_mm
+            .iter()
+            .max_by(|(_, a), (_, b)| a[5].abs().total_cmp(&b[5].abs()))
+            .map(|&(x_mm, left)| FrameStrongBendingPeak {
+                xi: x_mm / self.length_mm,
+                x_mm,
+                left,
+                right: Ok(None),
+                is_i_face: x_mm == 0.0,
+                is_j_face: x_mm == self.length_mm,
+            })
+            .into_iter()
+            .collect();
+        FrameStrongBendingSpan {
+            end_moments_nmm: [
+                self.stations_mm[0].1[5],
+                self.stations_mm[self.stations_mm.len() - 1].1[5],
+            ],
+            monotonic: false,
+            interior_maximum: false,
+            unverified_maximum_plateau: false,
+            demand_peaks,
+        }
     }
 }
 
@@ -524,23 +494,29 @@ impl LoadedFrameSection {
             return Err("解析断面力の評価位置が不正です".into());
         }
         verify_bending_stations(self, &stations)?;
-        let span = [0.0, response_length];
         let response =
             StrongBendingResponse::new(self.map.frame(), response_length, self, &stations);
-        let mut bending = response.span(span, span, BendingSpanMode::TimeHistory)?;
-        if !bending.interior_maximum
-            && bending
-                .demand_peaks
-                .iter()
-                .any(|peak| !peak.is_i_face && !peak.is_j_face && peak.left[5] != 0.0)
-        {
-            // 丸め後の最大候補の一致では、平坦区間も含めて同値を証明できない。
-            bending.interior_maximum = response.has_exact_tied_maximum() == Some(true);
-            if !bending.interior_maximum {
-                bending.monotonic = false;
+        let span = [0.0, response_length];
+        match response.exact_full_span() {
+            Ok(bending) => Ok(bending),
+            Err(ExactSpanError::VaryingStrongLoad) => {
+                let Ok(mut bending) = response.span(span, span, BendingSpanMode::TimeHistory)
+                else {
+                    return Ok(response.station_demands_without_distribution());
+                };
+                if bending.demand_peaks.iter().all(|peak| peak.left[5] == 0.0)
+                    || !bending.interior_maximum
+                        && bending
+                            .demand_peaks
+                            .iter()
+                            .any(|peak| !peak.is_i_face && !peak.is_j_face && peak.left[5] != 0.0)
+                {
+                    bending.monotonic = false;
+                }
+                Ok(bending)
             }
+            Err(ExactSpanError::Unconfirmed) => Ok(response.station_demands_without_distribution()),
         }
-        Ok(bending)
     }
 
     fn constant_plateau_axial_and_weak_bending(
@@ -549,14 +525,17 @@ impl LoadedFrameSection {
         hi_mm: f64,
     ) -> Result<bool, String> {
         let shear_z_n = self.at_mm(lo_mm)?[2] + self.point_load_jump(lo_mm)[2];
-        Ok(shear_z_n == 0.0
-            && !self.map.loads.iter().any(|load| {
-                let [axial, _, weak] = resolve(load, self.map.frame());
-                [axial, weak].into_iter().flatten().any(|component| {
-                    matches!(component, Comp::Dist { a, b, w1, w2 }
-                        if a < hi_mm && lo_mm < b && (w1 != 0.0 || w2 != 0.0))
-                })
-            }))
+        Ok(shear_z_n == 0.0 && !self.has_axial_or_weak_distributed_load(lo_mm, hi_mm))
+    }
+
+    fn has_axial_or_weak_distributed_load(&self, lo_mm: f64, hi_mm: f64) -> bool {
+        self.map.loads.iter().any(|load| {
+            let [axial, _, weak] = resolve(load, self.map.frame());
+            [axial, weak].into_iter().flatten().any(|component| {
+                matches!(component, Comp::Dist { a, b, w1, w2 }
+                    if a < hi_mm && lo_mm < b && (w1 != 0.0 || w2 != 0.0))
+            })
+        })
     }
 
     fn point_load_jump(&self, x_mm: f64) -> [f64; 3] {
@@ -625,13 +604,17 @@ mod tests {
                 .full_span_strong_bending(length_mm, &forces)
                 .unwrap();
             assert!(!actual.monotonic);
-            assert_eq!(actual.interior_maximum, offset_n == 0.0);
-            let interior = actual
-                .demand_peaks
-                .iter()
-                .find(|peak| peak.x_mm == 2000.0)
-                .unwrap();
-            assert_eq!(interior.left[5].total_cmp(&250e6), offset_n.total_cmp(&0.0));
+            assert_eq!(actual.interior_maximum, offset_n >= 0.0);
+            if offset_n >= 0.0 {
+                let interior = actual
+                    .demand_peaks
+                    .iter()
+                    .find(|peak| peak.x_mm == 2000.0)
+                    .unwrap();
+                assert_eq!(interior.left[5].total_cmp(&250e6), offset_n.total_cmp(&0.0));
+            } else {
+                assert!(actual.demand_peaks.iter().all(|peak| peak.is_i_face));
+            }
             let static_span = frame_strong_bending_span(
                 &frame,
                 length_mm,
@@ -710,13 +693,131 @@ mod tests {
     }
 
     #[test]
+    fn time_history_does_not_turn_interior_roots_into_endpoint_maxima() {
+        let length_mm = 3000.0;
+        let frame =
+            LocalFrame::from_nodes([0.0; 3], [length_mm, 0.0, 0.0], [0.0, 1.0, 0.0]).unwrap();
+        let point = |a, p, dir| MemberLoad::manual(ElemId(0), dir, MemberLoadKind::Point { a, p });
+        let distributed = |w| {
+            MemberLoad::manual(
+                ElemId(0),
+                [0.0, 1.0, 0.0],
+                MemberLoadKind::Distributed {
+                    a: 0.0,
+                    b: length_mm,
+                    w1: w,
+                    w2: w,
+                },
+            )
+        };
+        for (initial_mz_nmm, initial_q_n, loads, displayed_x_mm, expected_n_n) in [
+            (
+                70e6,
+                120_000.000_000_000_01,
+                vec![distributed(-40.000_000_000_000_01)],
+                3000.0,
+                0.0,
+            ),
+            (
+                250e6,
+                120_000.0,
+                vec![
+                    point(0.0, -120_000.0, [0.0, 1.0, 0.0]),
+                    point(0.0, 1e-12, [0.0, 1.0, 0.0]),
+                    distributed(-40.0),
+                ],
+                2.5e-14,
+                0.0,
+            ),
+            (
+                205e6,
+                60_000.0,
+                vec![
+                    point(1500.0, 1e-12, [0.0, 1.0, 0.0]),
+                    point(1500.0, -100.0, [1.0, 0.0, 0.0]),
+                    distributed(-40.0),
+                ],
+                1500.0,
+                100.0,
+            ),
+        ] {
+            let map = FrameDeadLoadMap::new(&loads, &frame, length_mm, 0.0, 0.0).unwrap();
+            let mut node_force = [0.0; 12];
+            node_force[1] = initial_q_n;
+            node_force[5] = -initial_mz_nmm;
+            let response = LoadedFrameSection::new(map, node_force);
+            let forces = response.recover(&[0.0, 0.5, 1.0]).unwrap();
+            let bending = response
+                .full_span_strong_bending(length_mm, &forces)
+                .unwrap();
+            assert!(bending.interior_maximum && !bending.monotonic);
+            assert_eq!(bending.demand_peaks.len(), 1);
+            let peak = &bending.demand_peaks[0];
+            assert!(!peak.is_i_face && !peak.is_j_face);
+            assert!((peak.x_mm - displayed_x_mm).abs() < 1e-28);
+            assert_eq!(peak.left[0], expected_n_n);
+            assert_eq!(peak.left[1], 0.0);
+            assert!((peak.left[5] - 250e6).abs() < 1e-6);
+            assert!(matches!(peak.right, Ok(None)));
+        }
+    }
+
+    #[test]
+    fn cancellation_order_cannot_promote_or_hide_an_exact_time_history_maximum() {
+        let length_mm = 3000.0;
+        let frame =
+            LocalFrame::from_nodes([0.0; 3], [length_mm, 0.0, 0.0], [0.0, 1.0, 0.0]).unwrap();
+        let distributed = |a, b, w| {
+            MemberLoad::manual(
+                ElemId(0),
+                [0.0, 1.0, 0.0],
+                MemberLoadKind::Distributed { a, b, w1: w, w2: w },
+            )
+        };
+        let s = 500.062_500_953_674_3;
+        let i = distributed(0.0, s, -400.0);
+        let center = distributed(s, 3.0 * s, 400.0);
+        let j = distributed(3.0 * s, 5.0 * s, -400.0);
+        let plus = distributed(0.0, length_mm, 40_000.0);
+        let minus = distributed(0.0, length_mm, -40_000.0);
+        let j_unequal = distributed(3.0 * s, 5.0 * s, (-400.0_f64).next_down());
+        for (loads, internal) in [
+            ([&minus, &center, &i, &j, &plus], true),
+            ([&j, &i, &plus, &minus, &center], true),
+            ([&j_unequal, &i, &plus, &minus, &center], false),
+        ] {
+            let loads = loads.map(Clone::clone);
+            let map = FrameDeadLoadMap::new(&loads, &frame, length_mm, 0.0, 0.0).unwrap();
+            let mut node_force = [0.0; 12];
+            node_force[5] = -250e6;
+            let response = LoadedFrameSection::new(map, node_force);
+            let forces = response.recover(&[0.0, 1.0]).unwrap();
+            let span = response
+                .full_span_strong_bending(length_mm, &forces)
+                .unwrap();
+            assert!(!span.monotonic);
+            assert_eq!(span.interior_maximum, internal);
+            assert_eq!(span.demand_peaks.len(), if internal { 2 } else { 1 });
+            assert_eq!(span.demand_peaks[0].x_mm, 0.0);
+            assert_eq!(span.demand_peaks[0].left[5], 250e6);
+            if internal {
+                assert_eq!(span.demand_peaks[1].x_mm, 4.0 * s);
+                assert_eq!(span.demand_peaks[1].left[5], 250e6);
+            }
+        }
+    }
+
+    #[test]
     fn rounded_endpoint_ties_do_not_prove_interior_maxima_in_time_history() {
         let length_mm = 3000.0;
         let frame =
             LocalFrame::from_nodes([0.0; 3], [length_mm, 0.0, 0.0], [0.0, 1.0, 0.0]).unwrap();
         let point =
             |a, p| MemberLoad::manual(ElemId(0), [0.0, 1.0, 0.0], MemberLoadKind::Point { a, p });
-        for p in [20_000.0_f64.next_down(), 20_000.0_f64.next_up()] {
+        for (p, internal) in [
+            (20_000.0_f64.next_down(), false),
+            (20_000.0_f64.next_up(), true),
+        ] {
             let loads = [point(500.0, p), point(1000.0, -20e3)];
             let map = FrameDeadLoadMap::new(&loads, &frame, length_mm, 0.0, 0.0).unwrap();
             let mut node_force = [0.0; 12];
@@ -728,11 +829,15 @@ mod tests {
                 .full_span_strong_bending(length_mm, &forces)
                 .unwrap();
             assert_eq!(span.end_moments_nmm[0], 250e6);
-            assert!(span
-                .demand_peaks
-                .iter()
-                .any(|peak| peak.x_mm == 1000.0 && peak.left[5] == 250e6));
-            assert!(!span.monotonic && !span.interior_maximum);
+            assert_eq!(response.at_mm(1000.0).unwrap()[5], 250e6);
+            assert!(!span.monotonic);
+            assert_eq!(span.interior_maximum, internal);
+            assert_eq!(span.demand_peaks.len(), 1);
+            assert_eq!(
+                span.demand_peaks[0].x_mm,
+                if internal { 1000.0 } else { 0.0 }
+            );
+            assert_eq!(span.demand_peaks[0].left[5], 250e6);
         }
     }
 
@@ -775,10 +880,12 @@ mod tests {
                 .full_span_strong_bending(length_mm, &forces)
                 .unwrap();
             assert_eq!(span.interior_maximum, confirmed, "{loads:?}");
-            assert!(span
-                .demand_peaks
-                .iter()
-                .any(|peak| !peak.is_i_face && !peak.is_j_face && peak.left[5] == 250e6));
+            assert_eq!(
+                span.demand_peaks
+                    .iter()
+                    .any(|peak| { !peak.is_i_face && !peak.is_j_face && peak.left[5] == 250e6 }),
+                confirmed
+            );
         }
     }
 

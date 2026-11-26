@@ -133,6 +133,14 @@ pub(crate) fn record(
     let Some(lb_mm) = item.lb_mm else {
         return;
     };
+    if !span.interior_maximum
+        && !span.monotonic
+        && span.demand_peaks.iter().all(|peak| peak.left[5] == 0.0)
+    {
+        item.unavailable
+            .insert("強軸曲げの単調変化または区間内部の絶対値最大を確認できません".into());
+        return;
+    }
     let mut complete = !span.demand_peaks.is_empty();
     if !complete {
         item.unavailable
@@ -585,12 +593,18 @@ mod tests {
         let zero = MemberForces {
             at: vec![(0.0, [0.0; 6]), (1.0, [0.0; 6])],
         };
-        let history = collect(&model, 3, |step, _, lb| match step {
+        let history = collect(&model, 4, |step, _, lb| match step {
             0 => frame_strong_bending_span(&frame, lb, [0.0, lb], &[], &zero),
             1 => frame_strong_bending_span(&frame, lb, [0.0, lb], &[(1.0, &load)], &unclassified),
-            _ => frame_strong_bending_span(&frame, lb, [0.0, lb], &[], &unclassified),
+            2 => frame_strong_bending_span(&frame, lb, [0.0, lb], &[], &unclassified),
+            _ => {
+                let mut stations = frame_strong_bending_span(&frame, lb, [0.0, lb], &[], &zero)?;
+                stations.monotonic = false;
+                stations.interior_maximum = false;
+                Ok(stations)
+            }
         });
-        assert_eq!((history.committed_count, history.evaluated_count), (3, 1));
+        assert_eq!((history.committed_count, history.evaluated_count), (4, 1));
         assert!(history.peak.is_none(), "{history:?}");
         for expected in ["単調変化または区間内部", "釣合いを確認できません"] {
             assert!(
