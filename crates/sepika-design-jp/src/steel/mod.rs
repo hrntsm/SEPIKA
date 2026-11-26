@@ -295,6 +295,8 @@ pub fn frame_node_span_mm(
     }
 }
 
+const WEAK_H_SHEAR_UNAVAILABLE: &str = "H形鋼に作用する弱軸せん断力Qzの照査条件を確定できません";
+
 fn check_same_point_shear(
     result: &mut CheckResult,
     forces: &MemberForcesAt,
@@ -306,7 +308,7 @@ fn check_same_point_shear(
         return None;
     }
     if forces.qz != 0.0 && symmetric_h_web(sec).is_some() {
-        return Some("H形鋼に作用する弱軸せん断力Qzの照査条件を確定できません");
+        return Some(WEAK_H_SHEAR_UNAVAILABLE);
     }
     let Some(shear) = result
         .components
@@ -543,6 +545,13 @@ fn check_compression_slenderness(
 /// 非零または非有限のねじりモーメントでは応力度検定を未算定とし、法定細長比の不適合時も理由を併記する。
 pub struct SteelDesign;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SteelCheckScope {
+    Ordinary,
+    TimeHistory,
+    SecondaryPost,
+}
+
 /// 一般H形鋼梁の補剛区間全体に対して成立する符号付きの強軸曲げ分布。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum SteelBeamMomentDiagram {
@@ -591,7 +600,19 @@ impl SteelDesign {
         mat: &Material,
         ctx: &DesignCtx,
     ) -> impl Iterator<Item = CheckOutcome> {
-        let (outcome, incomplete) = self.check_with_incomplete(forces, sec, mat, ctx);
+        self.check_outcomes_in_scope(forces, sec, mat, ctx, SteelCheckScope::Ordinary)
+    }
+
+    fn check_outcomes_in_scope(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        scope: SteelCheckScope,
+    ) -> impl Iterator<Item = CheckOutcome> {
+        let mut incomplete = None;
+        let outcome = self.check_section(forces, sec, mat, ctx, scope, &mut incomplete);
         crate::member_design_check::strength_outcomes(outcome, incomplete.as_deref())
     }
 
@@ -631,12 +652,14 @@ impl SteelDesign {
         envelope: bool,
     ) -> Vec<CheckOutcome> {
         if forces.mz == 0.0 {
-            return self.check_outcomes(forces, sec, mat, ctx).collect();
+            return self
+                .check_outcomes_in_scope(forces, sec, mat, ctx, SteelCheckScope::TimeHistory)
+                .collect();
         }
         let mut outcomes = Vec::new();
         let mut known_checks = |sample: MemberForcesAt, ctx: &DesignCtx| {
             outcomes.extend(
-                self.check_outcomes(&sample, sec, mat, ctx)
+                self.check_outcomes_in_scope(&sample, sec, mat, ctx, SteelCheckScope::TimeHistory)
                     .filter_map(|outcome| {
                         let CheckOutcome::Checked(mut result) = outcome else {
                             return None;
@@ -713,7 +736,9 @@ impl SteelDesign {
             || partial
             || forces.mz == 0.0
         {
-            return self.check_outcomes(forces, sec, mat, ctx).collect();
+            return self
+                .check_outcomes_in_scope(forces, sec, mat, ctx, SteelCheckScope::TimeHistory)
+                .collect();
         }
         let diagram = std::mem::take(&mut ctx.steel_beam_moment_diagram);
         let mut outcomes = Vec::new();
@@ -754,7 +779,14 @@ impl SteelDesign {
         ctx: &DesignCtx,
     ) -> (CheckOutcome, Option<String>) {
         let mut incomplete = None;
-        let outcome = self.check_section(forces, sec, mat, ctx, false, &mut incomplete);
+        let outcome = self.check_section(
+            forces,
+            sec,
+            mat,
+            ctx,
+            SteelCheckScope::Ordinary,
+            &mut incomplete,
+        );
         (outcome, incomplete)
     }
 
@@ -812,7 +844,14 @@ impl SteelDesign {
         ctx: &DesignCtx,
     ) -> (CheckOutcome, Option<String>) {
         let mut incomplete = None;
-        let outcome = self.check_section(forces, sec, mat, ctx, true, &mut incomplete);
+        let outcome = self.check_section(
+            forces,
+            sec,
+            mat,
+            ctx,
+            SteelCheckScope::SecondaryPost,
+            &mut incomplete,
+        );
         (outcome, incomplete)
     }
 
@@ -822,9 +861,10 @@ impl SteelDesign {
         sec: &Section,
         mat: &Material,
         ctx: &DesignCtx,
-        secondary_post: bool,
+        scope: SteelCheckScope,
         incomplete: &mut Option<String>,
     ) -> CheckOutcome {
+        let secondary_post = scope == SteelCheckScope::SecondaryPost;
         let lateral_buckling = if secondary_post {
             column::ColumnLateralBuckling::OutsideScope
         } else {
@@ -867,14 +907,23 @@ impl SteelDesign {
             .filter(|_| ctx.kind == MemberKind::Column && forces.n <= 0.0 && forces.mz != 0.0);
         let asymmetric_girder =
             asymmetric_built_h.filter(|_| ctx.kind == MemberKind::Girder && forces.mz != 0.0);
+        let check_plate_slenderness = if forces.my == 0.0 {
+            forces.n < 0.0 || forces.mz != 0.0
+        } else {
+            scope == SteelCheckScope::Ordinary
+        };
         let plate_slenderness_reason = (!secondary_post
             && ctx.kind == MemberKind::Column
             && torsion_reason.is_none()
             && symmetric_h_web(sec).is_some()
-            && forces.my == 0.0
-            && (forces.n < 0.0 || forces.mz != 0.0))
+            && check_plate_slenderness)
             .then(|| column::check_symmetric_h_plate_slenderness(forces, sec, mat).err())
             .flatten();
+        let plate_weak_shear_reason = (plate_slenderness_reason.is_some()
+            && forces.my != 0.0
+            && forces.qz != 0.0
+            && h_combined_reason.is_none())
+        .then_some(WEAK_H_SHEAR_UNAVAILABLE);
         let lambda =
             match check_compression_slenderness(forces, sec, ctx, torsion_reason, secondary_post) {
                 Ok(Some(lambda)) if !secondary_post => lambda,
@@ -897,6 +946,7 @@ impl SteelDesign {
                         .filter(|_| forces.n <= 0.0)
                         .into_iter()
                         .chain(built_h_shear_reasons.into_iter().flatten())
+                        .chain(plate_weak_shear_reason)
                         .chain(plate_slenderness_reason.as_deref())
                     {
                         match &mut outcome {
@@ -1013,12 +1063,14 @@ impl SteelDesign {
             Ok(f) => f,
             Err(reason) => {
                 let mut reason = reason;
-                for shear_reason in h_combined_reason
+                for issue in h_combined_reason
                     .into_iter()
                     .chain(built_h_shear_reasons.into_iter().flatten())
+                    .chain(plate_weak_shear_reason)
+                    .chain(plate_slenderness_reason.as_deref())
                 {
                     reason.push('。');
-                    reason.push_str(shear_reason);
+                    reason.push_str(issue);
                 }
                 return CheckOutcome::Skipped { reason };
             }
@@ -1098,7 +1150,7 @@ impl SteelDesign {
         if let Some(reason) = plate_slenderness_reason {
             *incomplete = crate::member_design_check::combine_incomplete_reasons(
                 incomplete.take(),
-                h_combined_reason,
+                h_combined_reason.or(plate_weak_shear_reason),
             );
             let components: Vec<_> = sec
                 .resolved_area()

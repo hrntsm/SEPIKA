@@ -590,6 +590,336 @@ fn issue_1931_keeps_an_independent_material_failure_if_buckling_length_is_unknow
     );
 }
 
+const WEAK_BENDING_ONLY: MemberForcesAt = MemberForcesAt {
+    n: 0.0,
+    qz: 0.0,
+    my: 2e6,
+    mz: 0.0,
+    ..ISSUE_FORCES
+};
+
+fn symmetric_h(width: f64, tw: f64, tf: f64, built: bool) -> Section {
+    let shape = if built {
+        SectionShape::SteelBuiltH {
+            height: 400.0,
+            upper_width: width,
+            upper_thick: tf,
+            lower_width: width,
+            lower_thick: tf,
+            web_thick: tw,
+        }
+    } else {
+        SectionShape::SteelH {
+            height: 400.0,
+            width,
+            flange_thick: tf,
+            web_thick: tw,
+            root_r: Some(0.0),
+        }
+    };
+    shape.to_section(SectionId(0), "上下対称H形鋼".into())
+}
+
+fn weak_bending_check(model: &Model, section: &Section, forces: &MemberForcesAt) -> CheckOutcome {
+    check(model, section, forces, LoadTerm::Short, MemberKind::Column)
+}
+
+#[test]
+fn issue_1943_pure_weak_bending_checks_only_the_compressed_flange_outstands() {
+    let model = issue_model();
+    for built in [false, true] {
+        for (my, compressed, tension) in [(2e6, "−", "＋"), (-2e6, "＋", "−")] {
+            let forces = MemberForcesAt {
+                my,
+                ..WEAK_BENDING_ONLY
+            };
+            let thin = symmetric_h(200.0, 8.0, 4.0, built);
+            let outcome = weak_bending_check(&model, &thin, &forces);
+            assert!(
+                matches!(&outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains(&format!("上フランジ（局所z{compressed}側） b/t=25.0000（上限 15.6538）"))
+                    && reason.contains(&format!("下フランジ（局所z{compressed}側） b/t=25.0000（上限 15.6538）"))
+                    && !reason.contains(&format!("局所z{tension}側"))
+                    && !reason.contains("ウェブ d/t")),
+                "{outcome:?}"
+            );
+
+            let thick_flange = symmetric_h(200.0, 8.0, 7.0, built);
+            let control = weak_bending_check(&model, &thick_flange, &forces);
+            let CheckOutcome::Checked(result) = control else {
+                panic!("{control:?}");
+            };
+            let component = &result.components[0];
+            // Iz=9,349,802.6667 mm⁴、全幅200 mm、My=2 kN·m、短期許容235 N/mm²。
+            assert_eq!(component.kind, CheckKind::AxialBending);
+            assert!((component.ratio - 0.091_024_790_589_580_43).abs() < 1e-12);
+            assert!(result.ok(), "{result:?}");
+        }
+    }
+}
+
+#[test]
+fn issue_1943_batch_check_does_not_report_a_full_section_pass_above_the_flange_limit() {
+    use sepika_element::frame::beam::MemberForces;
+    let mut model = issue_model();
+    let elem = model.elements[0].id;
+    for (tf, within_limit) in [(4.0, false), (7.0, true)] {
+        let mut section = symmetric_h(200.0, 8.0, tf, false);
+        section.material = model.sections[0].material;
+        section.frame_use = model.sections[0].frame_use;
+        model.sections[0] = section;
+        let forces = MemberForces {
+            at: [0.0, 0.5, 1.0]
+                .map(|pos| (pos, [0.0, 0.0, 0.0, 0.0, 2e6, 0.0]))
+                .to_vec(),
+        };
+        let report = sepika_design_jp::run_member_design_checks(
+            &model,
+            &[(elem, forces)],
+            &[],
+            &sepika_design_jp::MemberDesignCheckOptions {
+                term: LoadTerm::Short,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(report.member_checks.len(), 3);
+        for (_, _, outcome) in report.member_checks {
+            if within_limit {
+                assert!(
+                    matches!(&outcome, CheckOutcome::Checked(result)
+                    if result.ok() && (result.ratio() - 0.091_024_790_589_580_43).abs() < 1e-12),
+                    "{outcome:?}"
+                );
+            } else {
+                assert!(
+                    matches!(&outcome, CheckOutcome::Skipped { reason }
+                    if reason.contains("b/t=25.0000") && !reason.contains("ウェブ d/t")),
+                    "{outcome:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn issue_1943_includes_the_flange_width_to_thickness_limit() {
+    let model = issue_model();
+    // tf=8 mm に対して幅250.4602741677215 mmで b/t=15.653767135482594。
+    for (width, within_limit) in [(250.460_274_167_721_5, true), (250.461, false)] {
+        let section = symmetric_h(width, 8.0, 8.0, false);
+        let outcome = weak_bending_check(&model, &section, &WEAK_BENDING_ONLY);
+        if within_limit {
+            assert!(matches!(outcome, CheckOutcome::Checked(result) if result.ok()));
+        } else {
+            assert!(
+                matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("b/t=15.6538"))
+            );
+        }
+    }
+}
+
+#[test]
+fn issue_1943_keeps_the_unknown_weak_shear_reason_when_width_to_thickness_is_exceeded() {
+    let model = issue_model();
+    let section = symmetric_h(200.0, 8.0, 4.0, false);
+    let forces = MemberForcesAt {
+        qz: 1_000.0,
+        ..WEAK_BENDING_ONLY
+    };
+    let outcome = weak_bending_check(&model, &section, &forces);
+    assert!(
+        matches!(&outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("局部座屈") && reason.contains("弱軸せん断力Qzの照査条件を確定できません")),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn issue_1943_biaxial_flange_compression_uses_both_signs_and_the_plate_midplane() {
+    let model = issue_model();
+    let section = symmetric_h(200.0, 12.0, 4.0, false);
+    // A=6304 mm²、Iz=5,389,781.3333 mm⁴、Iy=122,964,821.3333 mm⁴。
+    // N/A=24.875 MPaで、強軸・弱軸がともに圧縮となる側のフランジ中心面自由縁の応力度はゼロ。
+    for (mz, upper_lower) in [
+        (7_685_301.333_333_333, "上"),
+        (-7_685_301.333_333_333, "下"),
+    ] {
+        for (my, side) in [(673_722.666_666_666_6, "−"), (-673_722.666_666_666_6, "＋")] {
+            for (n, compressed) in [(156_024.0, true), (156_812.0, false), (157_600.0, false)] {
+                let forces = MemberForcesAt {
+                    n,
+                    my,
+                    mz,
+                    ..WEAK_BENDING_ONLY
+                };
+                let outcome = weak_bending_check(&model, &section, &forces);
+                if compressed {
+                    let CheckOutcome::Skipped { reason } = outcome else {
+                        panic!("{outcome:?}");
+                    };
+                    assert!(
+                        reason.contains(&format!(
+                            "{upper_lower}フランジ（局所z{side}側） b/t=25.0000"
+                        )),
+                        "{reason}"
+                    );
+                    assert_eq!(reason.matches(" b/t=").count(), 1, "{reason}");
+                    assert!(!reason.contains("ウェブ d/t"), "{reason}");
+                } else {
+                    assert!(
+                        matches!(&outcome, CheckOutcome::Checked(result) if result.ok()),
+                        "{outcome:?}"
+                    );
+                }
+            }
+        }
+    }
+    // 強軸曲げで圧縮となる上フランジは支持側が圧縮なので、片方の自由縁が引張でも両突出部が対象。
+    let forces = MemberForcesAt {
+        my: 673_722.666_666_666_6,
+        mz: 7_685_301.333_333_333,
+        ..WEAK_BENDING_ONLY
+    };
+    let outcome = weak_bending_check(&model, &section, &forces);
+    assert!(
+        matches!(&outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("上フランジ（局所z＋側） b/t=25.0000")
+            && reason.contains("上フランジ（局所z−側） b/t=25.0000")
+            && reason.contains("下フランジ（局所z−側） b/t=25.0000")
+            && !reason.contains("下フランジ（局所z＋側）")),
+        "{outcome:?}"
+    );
+}
+
+#[test]
+fn issue_1943_web_limit_depends_on_in_plane_axial_force_and_strong_bending() {
+    let model = issue_model();
+    for built in [false, true] {
+        let section = symmetric_h(200.0, 8.0, 7.0, built);
+        // A=5888 mm²、平板端 y=193 mm。Mz/Iy=1/16 N/mm³ では N=71.024 kN でウェブ端が応力度ゼロ。
+        for (n, mz, compressed) in [
+            (1_000.0, 0.0, false),
+            (-1_000.0, 0.0, true),
+            (0.0, 9_154_210.666_666_666, true),
+            (70_656.0, 9_154_210.666_666_666, true),
+            (71_024.0, -9_154_210.666_666_666, false),
+        ] {
+            let forces = MemberForcesAt {
+                n,
+                mz,
+                ..WEAK_BENDING_ONLY
+            };
+            let outcome = weak_bending_check(&model, &section, &forces);
+            if compressed {
+                assert!(
+                    matches!(&outcome, CheckOutcome::Skipped { reason }
+                        if reason.contains("ウェブ d/t=48.2500（上限 47.2567）")
+                        && !reason.contains("フランジ")),
+                    "{outcome:?}"
+                );
+            } else {
+                assert!(
+                    matches!(&outcome, CheckOutcome::Checked(result) if result.ok()),
+                    "{outcome:?}"
+                );
+            }
+        }
+        let thicker_web = symmetric_h(200.0, 9.0, 7.0, built);
+        let forces = MemberForcesAt {
+            mz: 9_154_210.666_666_666,
+            ..WEAK_BENDING_ONLY
+        };
+        let outcome = weak_bending_check(&model, &thicker_web, &forces);
+        assert!(
+            matches!(&outcome, CheckOutcome::Checked(result) if result.ok()),
+            "{outcome:?}"
+        );
+    }
+}
+
+#[test]
+fn issue_1943_unconfirmed_compression_cannot_use_full_section_bending() {
+    let model = issue_model();
+    let section = symmetric_h(200.0, 8.0, 7.0, false);
+    for (section, my, reason_text) in [
+        (
+            Section {
+                iz: section.iz * 2.0,
+                ..section.clone()
+            },
+            2e6,
+            "弱軸断面二次モーメントの記録値",
+        ),
+        (
+            Section {
+                width: 150.0,
+                ..section.clone()
+            },
+            2e6,
+            "全断面性能を確定できません",
+        ),
+        (
+            section,
+            f64::NAN,
+            "フランジの合成面内応力度を有限値で算定できません",
+        ),
+    ] {
+        let forces = MemberForcesAt {
+            my,
+            ..WEAK_BENDING_ONLY
+        };
+        let outcome = weak_bending_check(&model, &section, &forces);
+        assert!(
+            matches!(&outcome, CheckOutcome::Skipped { reason } if reason.contains(reason_text)),
+            "{outcome:?}"
+        );
+    }
+}
+
+#[test]
+fn issue_1943_unchecked_axial_bending_retains_independent_failures() {
+    let model = issue_model();
+    let section = symmetric_h(200.0, 8.0, 4.0, false);
+    let mut ctx = column_context(&model, LoadTerm::Short);
+    ctx.column_lateral_buckling_length = Some(Err("実材端支持が未確認です"));
+    for (n, lk_z, expected) in [
+        (-2e6, 3000.0, CheckKind::Axial),
+        (2e6, 3000.0, CheckKind::Axial),
+        (-1000.0, 20_000.0, CheckKind::Provision),
+    ] {
+        ctx.lk_z = Some(lk_z);
+        let forces = MemberForcesAt {
+            n,
+            my: 45e6,
+            mz: 1e6,
+            qy: 500_000.0,
+            ..WEAK_BENDING_ONLY
+        };
+        let outcomes: Vec<_> = SteelDesign
+            .check_outcomes(&forces, &section, &model.materials[0], &ctx)
+            .collect();
+        let [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }] = outcomes.as_slice()
+        else {
+            panic!("{outcomes:?}");
+        };
+        assert_eq!(
+            result
+                .components
+                .iter()
+                .map(|component| component.kind)
+                .collect::<Vec<_>>(),
+            [expected, CheckKind::Shear]
+        );
+        assert!(result.components[0].ratio > 1.0);
+        assert!((result.components[1].ratio - 1.175_132_169_703_157_1).abs() < 1e-12);
+        assert!(
+            reason.contains("局部座屈") && reason.contains("実材端支持が未確認です"),
+            "{reason}"
+        );
+    }
+}
+
 fn issue_model() -> Model {
     input::cantilever(ISSUE_FORCES.n, ISSUE_FORCES.mz, ISSUE_FORCES.qz)
 }
