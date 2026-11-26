@@ -9,8 +9,8 @@ use sepika_element::frame::member_load::{
 use super::steel_beam_span::BeamSpanLoads;
 use super::{combine_incomplete_reasons, strength_outcomes};
 use crate::steel::{
-    check_symmetric_h_plate_slenderness, column_span_parameters, h_web_shear_failure,
-    StaticColumnSectionCheck, SAME_POINT_SHEAR_FORMULA,
+    check_symmetric_h_plate_slenderness, column_span_parameters, StaticColumnSectionCheck,
+    SAME_POINT_SHEAR_FORMULA,
 };
 use crate::{
     CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, MemberForcesAt, SteelDesign,
@@ -76,7 +76,7 @@ pub(super) fn check(
             let interval = format!("実材軸の補剛区間 [0, {length_mm:.3}] mm");
             let verified = support_interval(model, elem, ctx, *axes, length_mm).and_then(|()| {
                 column_span_parameters(span.interior_maximum, span.monotonic, span.end_moments_nmm)
-                    .ok_or("符号付き強軸曲げの単調変化または区間内部の絶対値最大を確認できません")
+                    .ok_or("保存断面力と回復断面力の両方で、符号付き強軸曲げの単調変化または区間内部の絶対値最大を確認できません")
             });
             span_description = Some(match verified {
                 Ok((c, p_lambda_b)) => {
@@ -139,10 +139,12 @@ pub(super) fn check(
                          x_mm: f64,
                          force: [f64; 6],
                          cut_side: &str,
-                         local_issue: Option<&str>,
-                         zero_shear_limit,
-                         weak_shear_disagreement|
+                         applicability: (Option<&str>, bool, bool)|
      -> Vec<CheckOutcome> {
+        let (local_issue, zero_shear_limit, weak_shear_disagreement) = applicability;
+        let independent_stress_available = recovered.is_ok() && local_issue.is_none();
+        let local_issue = local_issue.or(partial_recovery
+            .then_some("保存断面力に非有限な成分があるため、照合できた成分だけで独立に照査します"));
         let section_issue = section_issue.or(local_issue).or_else(|| {
             force
                 .iter()
@@ -165,6 +167,7 @@ pub(super) fn check(
                     parameters,
                     zero_shear_limit,
                     weak_shear_disagreement,
+                    independent_stress_available,
                 },
                 section_issue,
             )
@@ -235,33 +238,47 @@ pub(super) fn check(
         strength_outcomes(outcome, incomplete.as_deref()).collect()
     };
     let check_same_cut =
-        |xi, x_mm, recovered: [f64; 6], saved: Option<[f64; 6]>, side, zero_shear_limit| {
+        |xi, x_mm, mut recovered: [f64; 6], saved: Option<[f64; 6]>, side, zero_shear_limit| {
+            if partial_recovery {
+                if let Some(saved) = saved {
+                    // 同じ断面で保存値が欠けていれば、回復値だけでその成分の適用を確定しない。
+                    for (value, observed) in recovered.iter_mut().zip(saved) {
+                        if !observed.is_finite() {
+                            *value = f64::NAN;
+                        }
+                    }
+                }
+            }
             let disagreement = if section_issue.is_none() {
                 saved.and_then(|saved| section_applicability_difference(sec, mat, saved, recovered))
             } else {
                 None
             };
             let issue = disagreement.as_deref();
-            let weak_shear_disagreement =
-                saved.is_some_and(|saved| (saved[2] == 0.0) != (recovered[2] == 0.0));
+            let weak_shear_disagreement = saved.is_some_and(|saved| {
+                saved[2].is_finite()
+                    && recovered[2].is_finite()
+                    && (saved[2] == 0.0) != (recovered[2] == 0.0)
+            });
             let mut checked = check_section(
                 xi,
                 x_mm,
                 recovered,
                 side,
-                issue,
-                zero_shear_limit,
-                weak_shear_disagreement,
+                (issue, zero_shear_limit, weak_shear_disagreement),
             );
-            if let Some(saved) = saved.filter(|saved| *saved != recovered) {
+            if let Some(saved) = saved.filter(|saved| {
+                saved
+                    .iter()
+                    .zip(recovered)
+                    .any(|(s, r)| *s != r && (s.is_finite() || r.is_finite()))
+            }) {
                 for outcome in check_section(
                     xi,
                     x_mm,
                     saved,
                     side,
-                    issue,
-                    zero_shear_limit,
-                    weak_shear_disagreement,
+                    (issue, zero_shear_limit, weak_shear_disagreement),
                 ) {
                     add_saved_check(&mut checked, outcome, recovered[1], saved[1]);
                 }
@@ -295,15 +312,14 @@ pub(super) fn check(
             || !(0.0..=1.0).contains(&xi)
             || forces.at.iter().filter(|&&(pos, _)| xi == pos).count() != 1
             || xi == 0.0 && load_at_i_end
-            || !partial_recovery
-                && sections.iter().any(|section| {
-                    section.recovered.x_mm == xi * ctx.length && section.saved_left == Some(force)
-                })
+            || sections.iter().any(|section| {
+                section.recovered.x_mm == xi * ctx.length && section.saved_left.is_some()
+            })
         {
             continue;
         }
         outcomes.extend(
-            check_section(xi, xi * ctx.length, force, "", None, false, false)
+            check_section(xi, xi * ctx.length, force, "", (None, false, false))
                 .into_iter()
                 .map(|outcome| (elem.id, xi, outcome)),
         );
@@ -312,36 +328,6 @@ pub(super) fn check(
         let [left_zero_limit, right_zero_limit] = section.zero_shear_limits;
         let cut = &section.recovered;
         let right = cut.right.as_ref().ok().and_then(Option::as_ref);
-        if partial_recovery {
-            let left = (!cut.is_i_face || right.is_none())
-                .then_some(&cut.left)
-                .filter(|left| {
-                    section
-                        .saved_left
-                        .is_none_or(|saved| saved[1].abs() < left[1].abs())
-                });
-            let left_side = if right.is_some() {
-                "（集中荷重の左側）"
-            } else {
-                ""
-            };
-            for (force, side) in left
-                .into_iter()
-                .map(|f| (f, left_side))
-                .chain(right.into_iter().map(|f| (f, "（集中荷重の右側）")))
-            {
-                if let Some(component) =
-                    h_web_shear_failure(&MemberForcesAt::from_local(cut.xi, *force), sec, mat, ctx)
-                {
-                    outcomes.push((elem.id, cut.xi, CheckOutcome::Checked(CheckResult {
-                        basis: "強軸ウェブせん断が許容値を超えるため不適合".into(),
-                        detail: format!("実材軸i端から x={:.6} mm{side}。照合済みの強軸せん断力 Qy={:.6} kN", cut.x_mm, force[1] / 1e3),
-                        components: vec![component],
-                    })));
-                }
-            }
-            continue;
-        }
         if !cut.is_i_face || right.is_none() {
             let side = if right.is_some() {
                 "（集中荷重の左側）"

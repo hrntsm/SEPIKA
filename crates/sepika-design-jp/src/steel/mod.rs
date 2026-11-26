@@ -250,7 +250,7 @@ fn independent_h_web_shear_failure(
         .flatten()
 }
 
-pub(crate) fn h_web_shear_failure(
+fn h_web_shear_failure(
     forces: &MemberForcesAt,
     sec: &Section,
     mat: &Material,
@@ -321,6 +321,7 @@ fn check_same_point_shear(
     ctx: &DesignCtx,
     f: f64,
     zero_shear_limit: bool,
+    static_column: bool,
 ) -> Option<&'static str> {
     if ctx.kind == MemberKind::Brace || (!zero_shear_limit && forces.qy == 0.0 && forces.qz == 0.0)
     {
@@ -345,6 +346,8 @@ fn check_same_point_shear(
                 forces.qy.hypot(forces.qz) / (sec.area / 2.0),
             )
         })
+    } else if static_column {
+        static_column_web_stresses(forces, sec, ctx)
     } else if let Some((_, web_depth_mm, tw)) = symmetric_h_web(sec) {
         (!has_section_loss(ctx)
             && [web_depth_mm, tw, sec.area, sec.iy, sec.iz]
@@ -376,6 +379,105 @@ fn check_same_point_shear(
         }
     }
     Some("式(5.24)の同一点の垂直応力度とせん断応力度を確定できません")
+}
+
+fn static_column_web_stresses(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    ctx: &DesignCtx,
+) -> Option<(f64, f64)> {
+    if has_section_loss(ctx) || forces.mx != 0.0 || forces.qz != 0.0 {
+        return None;
+    }
+    let (_, web_depth_mm, tw) = symmetric_h_web(sec)?;
+    let area_mm2 = sec.resolved_area().ok().filter(|a| *a > 0.0)?;
+    let [area, iy, iz] = [area_mm2, sec.iy, sec.iz];
+    let normal = |force: f64, property: f64, source| {
+        if force == 0.0 {
+            Some(0.0)
+        } else if force.is_finite()
+            && property.is_finite()
+            && property > 0.0
+            && source != PropertyBasis::PendingShape
+        {
+            Some(force.abs() / property)
+        } else {
+            None
+        }
+    };
+    let basis = sec.property_basis;
+    let sigma = normal(forces.n, area, basis.area)?
+        + normal(forces.mz, iy, basis.iy)? * (web_depth_mm / 2.0)
+        + normal(forces.my, iz, basis.iz)? * (tw / 2.0);
+    Some((sigma, forces.qy.abs() / (web_depth_mm * tw)))
+}
+
+fn static_column_same_point_failure(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    mat: &Material,
+    ctx: &DesignCtx,
+    scope: StaticColumnSectionCheck,
+) -> Option<CheckComponent> {
+    if scope.weak_shear_disagreement
+        || forces.mx != 0.0
+        || forces.qz != 0.0
+        || symmetric_h_web(sec).is_none()
+        || (forces.qy == 0.0 && !scope.zero_shear_limit)
+        || (forces.n == 0.0 && forces.my == 0.0 && forces.mz == 0.0)
+    {
+        return None;
+    }
+    if forces.n < 0.0 || forces.my != 0.0 || forces.mz != 0.0 {
+        check_symmetric_h_plate_slenderness(forces, sec, mat).ok()?;
+    }
+    let f = crate::material_strength::section_steel_f(sec, Some(mat)).ok()?;
+    let mut shear = shear_component(forces, sec, ctx, steel_fs(f, ctx.term))?;
+    check_same_point_shear(
+        Some(&mut shear),
+        forces,
+        sec,
+        ctx,
+        f,
+        scope.zero_shear_limit,
+        true,
+    )
+    .is_none()
+    .then_some(shear)
+    .filter(|c| c.ratio > 1.0)
+}
+
+fn static_column_tension_edge_failure(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    mat: &Material,
+    ctx: &DesignCtx,
+) -> Option<CheckComponent> {
+    if !strong_axis_h_tension(forces, sec)
+        || forces.mx != 0.0
+        || !forces.mz.is_finite()
+        || forces.mz == 0.0
+        || has_section_loss(ctx)
+        || [sec.property_basis.iy, sec.property_basis.depth].contains(&PropertyBasis::PendingShape)
+    {
+        return None;
+    }
+    check_symmetric_h_plate_slenderness(forces, sec, mat).ok()?;
+    let area_mm2 = sec.resolved_area().ok().filter(|a| *a > 0.0)?;
+    let z_mm3 = section_modulus(sec.iy, sec.depth / 2.0);
+    if !z_mm3.is_finite() || z_mm3 <= 0.0 {
+        return None;
+    }
+    let sigma_t_mpa = forces.n / area_mm2;
+    let sigma_b_mpa = forces.mz.abs() / z_mm3;
+    let f = crate::material_strength::section_steel_f(sec, Some(mat)).ok()?;
+    let ft_mpa = crate::material_strength::steel_ft(f, ctx.term);
+    let ratio = strong_axis_tension_edge_ratio(sigma_t_mpa, sigma_b_mpa, ft_mpa);
+    (ratio.is_finite() && ratio > 1.0).then(|| CheckComponent {
+        kind: CheckKind::AxialBending,
+        ratio,
+        detail: format!("式(6.3) 引張側={ratio:.4}。σt={sigma_t_mpa:.4} N/mm², σbt={sigma_b_mpa:.4} N/mm², ft={ft_mpa:.4} N/mm²"),
+    })
 }
 
 /// 分母が極小の場合に安全側デフォルトへ逃がすヘルパー。
@@ -614,6 +716,7 @@ pub(crate) struct StaticColumnSectionCheck {
     pub(crate) parameters: Option<(f64, f64)>,
     pub(crate) zero_shear_limit: bool,
     pub(crate) weak_shear_disagreement: bool,
+    pub(crate) independent_stress_available: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -983,6 +1086,12 @@ impl SteelDesign {
                 }
             }
             components.extend(h_web_shear_failure(forces, sec, mat, ctx));
+            if scope.independent_stress_available {
+                components.extend(static_column_same_point_failure(
+                    forces, sec, mat, ctx, scope,
+                ));
+                components.extend(static_column_tension_edge_failure(forces, sec, mat, ctx));
+            }
             if !components.is_empty() {
                 return (
                     CheckOutcome::Checked(CheckResult {
@@ -1500,7 +1609,15 @@ impl SteelDesign {
                 let shear_reason = if weak_shear_disagreement {
                     None
                 } else {
-                    check_same_point_shear(shear, forces, sec, ctx, f, zero_shear_limit)
+                    check_same_point_shear(
+                        shear,
+                        forces,
+                        sec,
+                        ctx,
+                        f,
+                        zero_shear_limit,
+                        static_column.is_some(),
+                    )
                 };
                 if let Some(reason) = h_combined_reason.or(shear_reason) {
                     result
@@ -1523,42 +1640,18 @@ impl SteelDesign {
                     .into_iter()
                     .collect();
                 let mut basis = "強軸ウェブせん断が許容値を超えるため不適合";
-                if static_column.is_some()
-                    && forces.mz != 0.0
-                    && h_combined_reason.is_none()
-                    && !weak_shear_disagreement
+                if let Some(scope) =
+                    static_column.filter(|scope| scope.independent_stress_available)
                 {
-                    if let Some(mut shear) = shear_component(forces, sec, ctx, steel_fs(f, term)) {
-                        if check_same_point_shear(
-                            Some(&mut shear),
-                            forces,
-                            sec,
-                            ctx,
-                            f,
-                            zero_shear_limit,
-                        )
-                        .is_none()
-                            && shear.ratio > 1.0
-                        {
-                            basis = "式(5.24)の同一点組合せ応力度が許容値を超えるため不適合";
-                            components.push(shear);
-                        }
+                    if let Some(shear) =
+                        static_column_same_point_failure(forces, sec, mat, ctx, scope)
+                    {
+                        basis = "式(5.24)の同一点組合せ応力度が許容値を超えるため不適合";
+                        components.push(shear);
                     }
-                }
-                if static_column.is_some() && strong_axis_h_tension(forces, sec) {
-                    let area_mm2 = sec.area;
-                    let z_mm3 = section_modulus(sec.iy, sec.depth / 2.0);
-                    let sigma_t_mpa = forces.n / area_mm2;
-                    let sigma_b_mpa = forces.mz.abs() / z_mm3;
-                    let ft_mpa = crate::material_strength::steel_ft(f, term);
-                    let ratio = strong_axis_tension_edge_ratio(sigma_t_mpa, sigma_b_mpa, ft_mpa);
-                    if z_mm3.is_finite() && z_mm3 > 0.0 && ratio.is_finite() && ratio > 1.0 {
+                    if let Some(edge) = static_column_tension_edge_failure(forces, sec, mat, ctx) {
                         basis = "鋼構造許容応力度設計規準 H形鋼柱の独立照査";
-                        components.push(CheckComponent {
-                            kind: CheckKind::AxialBending,
-                            ratio,
-                            detail: format!("式(6.3) 引張側={ratio:.4}。σt={sigma_t_mpa:.4} N/mm², σbt={sigma_b_mpa:.4} N/mm², ft={ft_mpa:.4} N/mm²"),
-                        });
+                        components.push(edge);
                     }
                 }
                 if components.is_empty() {

@@ -1131,6 +1131,281 @@ fn identical_duplicate_i_end_forces_can_verify_the_unique_j_end_ng() {
 }
 
 #[test]
+fn an_interior_maximum_tied_with_an_end_needs_agreement_with_saved_cuts() {
+    let mut model = input::column(0.0, 0.0);
+    for (a, p) in [(1000.0, 200_000.0), (2000.0, -200_000.0)] {
+        model.load_cases[0].member.push(MemberLoad::manual(
+            model.elements[0].id,
+            [1.0, 0.0, 0.0],
+            MemberLoadKind::Point { a, p },
+        ));
+    }
+    for sampled_peak in [false, true] {
+        for delta_n in [-0.00025, 0.0, 0.00025] {
+            let mut cuts = vec![
+                (0.0, -100_000.0, 100e6),
+                (1500.0, 100_000.0, 50e6),
+                (3000.0, -100_000.0, 0.0),
+            ];
+            if sampled_peak {
+                cuts.insert(2, (2000.0, 100_000.0, 100e6));
+            }
+            let forces = MemberForces {
+                at: cuts
+                    .into_iter()
+                    .map(|(x, qy, mz)| {
+                        let offset = if x == 0.0 { 0.0 } else { delta_n };
+                        (
+                            x / 3000.0,
+                            [0.0, qy + offset, 0.0, 0.0, 0.0, mz + x * offset],
+                        )
+                    })
+                    .collect(),
+            };
+            let result = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+            assert!(!result.is_empty());
+            if delta_n < 0.0 {
+                assert!(
+                    result
+                        .iter()
+                        .all(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+                    if reason.contains("区間内部の絶対値最大"))),
+                    "{result:?}"
+                );
+            } else {
+                assert!(
+                    result
+                        .iter()
+                        .all(|(_, row)| matches!(row, CheckOutcome::Checked(c)
+                    if c.ok() && c.detail.contains("C=1.0000"))),
+                    "{result:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_partial_response_evaluates_only_local_formulas_with_confirmed_inputs() {
+    let mut model = input::column(0.0, 0.0);
+    for (peak_qy_n, initial_mz_nmm, missing_at, expected_kind, expected_ratio) in [
+        (
+            500_000.0,
+            0.0,
+            0,
+            Some("ウェブ面内せん断"),
+            1.231_689_332_950_902_7,
+        ),
+        (320_000.0, 185e6, 1, Some("式(5.24)"), 1.089_387_618_008_001),
+        (320_000.0, 185e6, 0, None, 0.0),
+    ] {
+        model.load_cases[0].member = [(1000.0, peak_qy_n), (1100.0, -peak_qy_n)]
+            .map(|(a, p)| {
+                MemberLoad::manual(
+                    model.elements[0].id,
+                    [1.0, 0.0, 0.0],
+                    MemberLoadKind::Point { a, p },
+                )
+            })
+            .to_vec();
+        let mut forces = support_column::moments(initial_mz_nmm);
+        for (_, f) in &mut forces.at[1..] {
+            f[5] += 100.0 * peak_qy_n;
+        }
+        forces.at[missing_at].1[4] = f64::NAN;
+        let result = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+        let left = checked(&result, 1100.0 / 3000.0).find(|r| r.detail.contains("集中荷重の左側"));
+        assert_eq!(left.is_some(), expected_kind.is_some(), "{result:?}");
+        if let (Some(row), Some(basis)) = (left, expected_kind) {
+            let [component] = row.components.as_slice() else {
+                panic!("{row:?}")
+            };
+            assert!(component.detail.contains(basis));
+            close(component.ratio, expected_ratio);
+            if missing_at == 0 {
+                assert!(!component.detail.contains("式(5.24)"));
+            }
+        }
+        assert!(
+            result
+                .iter()
+                .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+            if reason.contains("保存断面力に非有限な成分"))),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn partial_station_verification_cancels_the_load_before_rounding_moments() {
+    let mut model = input::column(0.0, 0.0);
+    let q_i_n = 1.000_000_000_000_002_5e22;
+    model.load_cases[0].member.push(MemberLoad::manual(
+        model.elements[0].id,
+        [1.0, 0.0, 0.0],
+        MemberLoadKind::Point { a: 0.0, p: -q_i_n },
+    ));
+    for compatible in [false, true] {
+        let mut forces = support_column::moments(200e6);
+        forces.at[0].1[1] = q_i_n;
+        forces.at[2].1[4] = f64::NAN;
+        if !compatible {
+            forces.at[1].1[5] = 2_147_483_648.0;
+            forces.at[2].1[5] = 0.0;
+        }
+        let result = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+        assert!(!result.is_empty());
+        assert!(result.iter().all(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+            if reason.contains(if compatible { "保存断面力に非有限な成分" } else { "釣合いを確認できません" }))), "{result:?}");
+    }
+}
+
+#[test]
+fn weak_shear_elsewhere_does_not_hide_the_local_zero_shear_limit_ng() {
+    let mut model = input::column(0.0, 0.0);
+    let elem = model.elements[0].id;
+    for a in [2000.0, 1500.0] {
+        model.load_cases[0].member = [([1.0, 0.0, 0.0], 0.0, -25.0), ([0.0, 1.0, 0.0], a, 25.0)]
+            .map(|(dir, a, w)| {
+                MemberLoad::manual(
+                    elem,
+                    dir,
+                    MemberLoadKind::Distributed {
+                        a,
+                        b: 3000.0,
+                        w1: w,
+                        w2: w,
+                    },
+                )
+            })
+            .to_vec();
+        let length_mm = 3000.0 - a;
+        let forces = MemberForces {
+            at: vec![
+                (0.0, [0.0, 37_500.0, 0.0, 0.0, 0.0, 271.875e6]),
+                (0.5, [0.0, 0.0, 0.0, 0.0, 0.0, 300e6]),
+                (
+                    1.0,
+                    [
+                        0.0,
+                        -37_500.0,
+                        25.0 * length_mm,
+                        0.0,
+                        -25.0 * length_mm * length_mm / 2.0,
+                        271.875e6,
+                    ],
+                ),
+            ],
+        };
+        let result = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+        let at_peak = checked(&result, 0.5)
+            .flat_map(|r| &r.components)
+            .find(|c| c.detail.contains("式(5.24)"));
+        close(
+            at_peak.unwrap_or_else(|| panic!("{result:?}")).ratio,
+            1.039_515_670_123_936,
+        );
+        assert!(
+            result
+                .iter()
+                .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+            if reason.contains("弱軸せん断"))),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn a_missing_weak_inertia_does_not_block_formulas_that_do_not_use_it() {
+    let mut model = input::column(0.0, 0.0);
+    model.sections[0].iz = f64::NAN;
+    for (n, qy, my, expected) in [
+        (
+            0.0,
+            300_000.0,
+            0.0,
+            Some(("式(5.24)", 1.013_116_271_683_298)),
+        ),
+        (
+            650_000.0,
+            0.0,
+            0.0,
+            Some(("式(6.3)", 1.078_828_933_475_746)),
+        ),
+        (0.0, 300_000.0, 1e6, None),
+        (650_000.0, 0.0, 1e6, None),
+    ] {
+        let forces = MemberForces {
+            at: [0.0, 0.5, 1.0]
+                .map(|xi| (xi, [n, qy, 0.0, 0.0, my, 200e6 - qy * 3000.0 * (1.0 - xi)]))
+                .to_vec(),
+        };
+        let result = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+        let formulas: Vec<_> = checked(&result, 1.0)
+            .flat_map(|r| &r.components)
+            .filter(|c| c.detail.contains("式(5.24)") || c.detail.contains("式(6.3)"))
+            .collect();
+        if let Some((name, ratio)) = expected {
+            let [f] = formulas.as_slice() else {
+                panic!("{result:?}")
+            };
+            assert!(f.detail.contains(name));
+            close(f.ratio, ratio);
+        } else {
+            assert!(formulas.is_empty(), "{result:?}");
+        }
+        assert!(
+            result.iter().any(|(xi, row)| *xi == 1.0
+                && matches!(row, CheckOutcome::Skipped { reason }
+            if reason.contains("Iz") || reason.contains("弱軸断面二次モーメント"))),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn a_saved_cut_outside_recovery_candidates_checks_weak_shear_applicability() {
+    let model = input::column(0.0, 0.0);
+    for qz in [1e-9, 0.0] {
+        let forces = MemberForces {
+            at: [0.0, 0.5, 1.0]
+                .map(|xi| {
+                    (
+                        xi,
+                        [
+                            0.0,
+                            320_000.0,
+                            if xi == 0.5 { 0.0 } else { qz },
+                            0.0,
+                            -qz * 3000.0 * xi,
+                            196e6 + 320_000.0 * 3000.0 * (xi - 0.5),
+                        ],
+                    )
+                })
+                .to_vec(),
+        };
+        let result = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+        let at_saved = checked(&result, 0.5)
+            .flat_map(|r| &r.components)
+            .find(|c| c.detail.contains("式(5.24)"));
+        if qz == 0.0 {
+            close(
+                at_saved.unwrap_or_else(|| panic!("{result:?}")).ratio,
+                1.040_496_157_306_278,
+            );
+        } else {
+            assert!(at_saved.is_none(), "{result:?}");
+            assert!(
+                result.iter().any(|(xi, row)| *xi == 0.5
+                    && matches!(row, CheckOutcome::Skipped { reason }
+                 if reason.contains("弱軸せん断の有無"))),
+                "{result:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn the_same_point_shear_check_includes_the_continuous_zero_shear_peak() {
     let mut model = input::column(0.0, 0.0);
     let element = model.elements[0].id;
@@ -1811,14 +2086,18 @@ fn unavailable_weak_inertia_does_not_hide_a_verified_strong_material_failure() {
     let failure = checked(&results, 1.0 / 3.0)
         .next()
         .unwrap_or_else(|| panic!("{results:?}"));
-    let [component] = failure.components.as_slice() else {
+    let [bending, combined] = failure.components.as_slice() else {
         panic!("{failure:?}")
     };
-    assert_eq!(component.kind, CheckKind::Bending);
+    assert_eq!(bending.kind, CheckKind::Bending);
     assert!(
-        component.detail.contains("材料許容上限=235.0000"),
-        "{component:?}"
+        bending.detail.contains("材料許容上限=235.0000"),
+        "{bending:?}"
     );
+    close(bending.ratio, 1.111_781_465_373_194);
+    assert_eq!(combined.kind, CheckKind::Shear);
+    assert!(combined.detail.contains("式(5.24)"));
+    close(combined.ratio, 1.039_935_889_463_504);
     assert!(failure.detail.contains("Mz=300.000000 kN·m"), "{failure:?}");
     assert!(
         results.iter().any(

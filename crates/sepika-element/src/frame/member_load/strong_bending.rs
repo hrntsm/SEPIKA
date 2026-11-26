@@ -60,7 +60,7 @@ pub struct FrameStaticStrongBending {
 
 /// 静的照査位置の回復値と、同じ位置の保存断面力。
 pub struct FrameStaticBendingSection {
-    /// 回復した照査位置と切断側の断面力。
+    /// 回復した照査位置と切断側の断面力。部分回復で確認できない成分は NaN。
     pub recovered: FrameStrongBendingPeak,
     /// 回復した切断位置と厳密に一致する保存断面力の左極限 [N, N·mm]。
     pub saved_left: Option<[f64; 6]>,
@@ -81,7 +81,7 @@ pub enum FrameStaticBendingError {
 
 /// 線形静的応答と同じ部材荷重・係数および両端を含む保存断面力から実材軸全長の強軸曲げを確認する。
 /// 区間座標は実材軸i端を起点とする [mm]。断面力の不整合、荷重の投影・曲げ分布を確認できない場合はエラー。
-/// 非有限な保存成分で全体の組合せが未確認の場合は、照合済みのウェブせん断用に回復位置を返すことがある。
+/// 非有限な保存成分で全体の組合せが未確認でも、独立に照合できた成分の回復値を返すことがある。
 pub fn frame_static_strong_bending(
     [i, j]: [[f64; 3]; 2],
     reference: [f64; 3],
@@ -151,11 +151,13 @@ pub fn frame_static_strong_bending(
             Err(_) => false,
         };
         let load_response = LoadedFrameSection::new(response.map, [0.0; 12]);
-        verify_partial_bending_stations(&load_response, &stations).map_err(Stations)?;
+        load_response
+            .verify_partial_bending_stations(&stations)
+            .map_err(Stations)?;
         let reason = "保存断面力に非有限な成分があるため、区間全体の組合せを確定できません";
         if !duplicate
             && projections_confirmed
-            && stations[0].1.iter().all(|value| value.is_finite())
+            && stations[0].1[5].is_finite()
             && stations
                 .iter()
                 .all(|(_, force)| force[1].is_finite() && force[3] == 0.0)
@@ -163,7 +165,7 @@ pub fn frame_static_strong_bending(
             let response = LoadedFrameSection::new(load_response.map, response.node_force_local);
             if let Ok(mut span) =
                 StrongBendingResponse::new(&frame, length_mm, &response, &stations)
-                    .exact_static_sections()
+                    .exact_static_sections(true)
             {
                 span.combination_issue = Some(reason);
                 return Ok(span);
@@ -183,7 +185,7 @@ pub fn frame_static_strong_bending(
         return Err(Distribution(duplicate_reason.into()));
     }
     StrongBendingResponse::new(&frame, length_mm, &response, &stations)
-        .exact_static_sections()
+        .exact_static_sections(false)
         .map_err(|error| {
             Distribution(match error {
                 ExactSpanError::VaryingStrongLoad => {
@@ -637,65 +639,6 @@ fn verify_bending_stations_with(
         }
     }
     Ok(())
-}
-
-fn verify_partial_bending_stations(
-    load_response: &LoadedFrameSection,
-    stations_mm: &[(f64, [f64; 6])],
-) -> Result<(), String> {
-    let applied = stations_mm
-        .iter()
-        .map(|(x, _)| load_response.exact_static_cut_mm(*x))
-        .collect::<Result<Vec<_>, _>>()?;
-    let finite_cuts = |index: usize| {
-        stations_mm
-            .iter()
-            .zip(&applied)
-            .filter_map(move |(&(x, force), load)| {
-                force[index]
-                    .is_finite()
-                    .then_some((x, force[index], load[index]))
-            })
-    };
-    let verify = |index, slope: Option<f64>| {
-        let mut cuts = finite_cuts(index);
-        let Some((x0, f0, load0)) = cuts.next() else {
-            return Ok(());
-        };
-        let origin = f0 - load0;
-        if !origin.is_finite() {
-            return Err("解析断面力と部材荷重の釣合いを確認できません".into());
-        }
-        let Some(slope) = slope.or_else(|| {
-            cuts.clone()
-                .next_back()
-                .map(|(x, f, load)| (f - load - origin) / (x - x0))
-        }) else {
-            return Ok(());
-        };
-        let scale = finite_cuts(index)
-            .map(|(_, f, _)| f.abs())
-            .fold(1.0, f64::max);
-        if !slope.is_finite()
-            || cuts.any(|(x, f, load)| {
-                let recovered = slope.mul_add(x - x0, origin) + load;
-                !recovered.is_finite() || (recovered - f).abs() > 1e-8 * scale.max(recovered.abs())
-            })
-        {
-            return Err("解析断面力と部材荷重の釣合いを確認できません".into());
-        }
-        Ok::<(), String>(())
-    };
-    for index in 0..4 {
-        verify(index, Some(0.0))?;
-    }
-    let origin_shear = |index| {
-        finite_cuts(index)
-            .next()
-            .map(|(_, shear, load)| shear - load)
-    };
-    verify(4, origin_shear(2).map(|qz| -qz))?;
-    verify(5, origin_shear(1))
 }
 
 impl LoadedFrameSection {
