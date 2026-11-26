@@ -15,6 +15,7 @@ pub use crate::material_strength::{
 mod beam;
 mod brace;
 mod column;
+pub(crate) use column::check_symmetric_h_plate_slenderness;
 pub(crate) use column::column_allowables;
 pub mod lateral_bracing;
 mod lip_channel;
@@ -25,6 +26,7 @@ mod shear_contract_tests;
 #[cfg(test)]
 mod torsion_contract_tests;
 
+pub(crate) use section::column_span_parameters;
 pub use section::{resolve_lb, steel_fb_h_asd2019, steel_h_z_with_loss};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -595,9 +597,10 @@ fn compression_slenderness_failure(
 /// 非零または非有限のねじりモーメントでは応力度検定を未算定とし、法定細長比の不適合時も理由を併記する。
 pub struct SteelDesign;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum SteelCheckScope {
     Ordinary,
+    StaticColumn(Option<(f64, f64)>),
     TimeHistory,
     SecondaryPost,
 }
@@ -735,7 +738,9 @@ impl SteelDesign {
                 isolated[component] = value;
                 known_checks(MemberForcesAt::from_local(forces.pos, isolated), ctx);
             }
-            if let Some(failure) = column::strong_bending_material_failure(forces, sec, mat, ctx) {
+            if let Some(failure) =
+                column::strong_bending_material_failure(forces, sec, mat, ctx, None)
+            {
                 outcomes.push(failure);
             }
         } else {
@@ -840,6 +845,123 @@ impl SteelDesign {
         (outcome, incomplete)
     }
 
+    pub(crate) fn check_static_column_section(
+        &self,
+        forces: &MemberForcesAt,
+        sec: &Section,
+        mat: &Material,
+        ctx: &DesignCtx,
+        parameters: Option<(f64, f64)>,
+        section_issue: Option<&str>,
+    ) -> (CheckOutcome, Option<String>) {
+        let section_issue = section_issue.or_else(|| {
+            if has_section_loss(ctx) {
+                Some("断面欠損の位置と断面性能を確定できないため、上下対称H形鋼柱の強軸曲げ・横座屈は未算定です")
+            } else if [sec.area, sec.iy, sec.iz, sec.depth, sec.width]
+                .into_iter()
+                .any(|value| !value.is_finite() || value <= 0.0)
+            {
+                Some("軸曲げ検定に必要な断面性能を有限な正値で確定できません")
+            } else {
+                None
+            }
+        });
+        let mut incomplete = None;
+        let outcome = match section_issue {
+            Some(reason) => CheckOutcome::Skipped {
+                reason: reason.into(),
+            },
+            None => self.check_section(
+                forces,
+                sec,
+                mat,
+                ctx,
+                SteelCheckScope::StaticColumn(parameters),
+                &mut incomplete,
+            ),
+        };
+        if let CheckOutcome::Skipped { reason } = &outcome {
+            let mut components = Vec::new();
+            let shape_confirmed = symmetric_h_web(sec).is_some();
+            if !has_section_loss(ctx) && forces.n.is_finite() && forces.n < 0.0 {
+                let verified = column::HColumnCompressionSlenderness::resolve(sec, ctx);
+                if let Some(lambda) = verified.lower_bound().filter(|lambda| *lambda > 200.0) {
+                    if let CheckOutcome::Checked(slenderness) = compression_slenderness_failure(
+                        lambda,
+                        200.0,
+                        verified.reason().is_some(),
+                        steel_torsion_reason(forces, sec),
+                    ) {
+                        components.extend(slenderness.components);
+                    }
+                }
+                if shape_confirmed {
+                    components.extend(
+                        sec.resolved_area()
+                            .ok()
+                            .zip(crate::material_strength::section_steel_f(sec, Some(mat)).ok())
+                            .filter(|(_, f)| {
+                                verified
+                                    .allowable_compression_limit(*f, mat.young, ctx.term)
+                                    .is_some()
+                            })
+                            .and_then(|(area, f)| {
+                                independent_h_column_compression_failure(
+                                    forces.n, area, mat, ctx.term, f, &verified,
+                                )
+                            }),
+                    );
+                }
+            }
+            if shape_confirmed {
+                let (_, flange_thick_mm, web_thick_mm) = shape_of(sec);
+                let plate_f = |thick_mm| {
+                    sepika_core::material_grade::resolve_steel_f(Some(mat), Some(thick_mm)).ok()
+                };
+                if let Some(f_cap_mpa) = plate_f(flange_thick_mm)
+                    .zip(plate_f(web_thick_mm))
+                    .map(|(flange, web)| flange.max(web))
+                {
+                    if sec.property_basis.area == PropertyBasis::Shape
+                        && !components
+                            .iter()
+                            .any(|component| component.kind == CheckKind::Axial)
+                    {
+                        components.extend(sec.resolved_area().ok().and_then(|area| {
+                            axial_material_limit_failure(forces.n, area, ctx.term, f_cap_mpa)
+                        }));
+                    }
+                    if let Some(CheckOutcome::Checked(bending)) =
+                        column::strong_bending_material_failure(
+                            forces,
+                            sec,
+                            mat,
+                            ctx,
+                            Some(f_cap_mpa),
+                        )
+                    {
+                        components.extend(bending.components);
+                    }
+                }
+            }
+            components.extend(independent_h_web_shear_failure(forces, sec, mat, ctx));
+            if !components.is_empty() {
+                return (
+                    CheckOutcome::Checked(CheckResult {
+                        basis: "鋼構造許容応力度設計規準 H形鋼柱の独立照査".into(),
+                        detail: String::new(),
+                        components,
+                    }),
+                    crate::member_design_check::combine_incomplete_reasons(
+                        incomplete,
+                        Some(reason),
+                    ),
+                );
+            }
+        }
+        (outcome, incomplete)
+    }
+
     /// 上下非対称組立H形鋼柱の圧縮・強軸曲げに対し、上下縁の支配比と併記する未算定理由を返す。
     /// 検定比は座屈等の未算定時には下限となり、1以下でも適合を確定できない。
     pub fn asymmetric_column_section_check(
@@ -914,9 +1036,11 @@ impl SteelDesign {
         scope: SteelCheckScope,
         incomplete: &mut Option<String>,
     ) -> CheckOutcome {
-        let secondary_post = scope == SteelCheckScope::SecondaryPost;
+        let secondary_post = matches!(scope, SteelCheckScope::SecondaryPost);
         let lateral_buckling = if secondary_post {
             column::ColumnLateralBuckling::OutsideScope
+        } else if matches!(scope, SteelCheckScope::StaticColumn(None)) && forces.mz != 0.0 {
+            column::ColumnLateralBuckling::Unconfirmed("単一補剛区間の強軸曲げ・横座屈は未算定です")
         } else {
             column::ColumnLateralBuckling::resolve(ctx, sec, forces)
         };
@@ -958,8 +1082,12 @@ impl SteelDesign {
         let asymmetric_girder =
             asymmetric_built_h.filter(|_| ctx.kind == MemberKind::Girder && forces.mz != 0.0);
         let symmetric_h_column = ctx.kind == MemberKind::Column && symmetric_h_web(sec).is_some();
-        let ordinary_weak_h_column =
-            symmetric_h_column && scope == SteelCheckScope::Ordinary && forces.my != 0.0;
+        let ordinary_weak_h_column = symmetric_h_column
+            && matches!(
+                scope,
+                SteelCheckScope::Ordinary | SteelCheckScope::StaticColumn(_)
+            )
+            && forces.my != 0.0;
         let check_plate_slenderness = if forces.my == 0.0 {
             forces.n < 0.0 || forces.mz != 0.0
         } else {
@@ -1296,7 +1424,13 @@ impl SteelDesign {
                 ctx,
                 f,
                 Some(lambda),
-                lateral_buckling.length_mm(ctx.length),
+                lateral_buckling.length_mm(ctx.length).map(|length_mm| {
+                    let parameters = match scope {
+                        SteelCheckScope::StaticColumn(parameters) => parameters,
+                        _ => None,
+                    };
+                    (length_mm, parameters)
+                }),
             )
             .map(|allowables| {
                 column::check_column(forces, sec, ctx, allowables, lambda, &lateral_buckling)

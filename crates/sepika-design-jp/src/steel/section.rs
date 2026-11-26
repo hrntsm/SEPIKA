@@ -46,6 +46,20 @@ pub(super) fn monotonic_bending_parameters([i, j]: [f64; 2]) -> Option<(f64, f64
     Some((moment_ratio_c(ratio), 0.6 + 0.3 * ratio))
 }
 
+pub(crate) fn column_span_parameters(
+    interior_maximum: bool,
+    monotonic: bool,
+    end_moments_nmm: [f64; 2],
+) -> Option<(f64, f64)> {
+    if interior_maximum {
+        Some((1.0, 0.3))
+    } else if monotonic {
+        monotonic_bending_parameters(end_moments_nmm)
+    } else {
+        None
+    }
+}
+
 pub(super) fn steel_beam_lateral_parameters(ctx: &DesignCtx) -> Option<(f64, f64)> {
     use super::SteelBeamMomentDiagram;
     let (c, p_lambda_b) = match ctx.steel_beam_moment_diagram {

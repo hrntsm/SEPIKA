@@ -347,6 +347,20 @@ fn h_column_combination_reason_reaches_design_table_report_and_saved_project() {
     check_h_column_combination_report(-77_000.0, 50e6, 2_000.0, "1483");
 }
 
+fn member_check_csv_rows(csv: &str) -> Vec<[&str; 5]> {
+    let mut lines = csv.lines().skip_while(|line| *line != "[部材検定]").skip(1);
+    assert_eq!(lines.next(), Some("部材,位置,検定比,判定,根拠"));
+    lines
+        .take_while(|line| !line.is_empty())
+        .map(|line| {
+            line.split(',')
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap_or_else(|_| panic!("{line}"))
+        })
+        .collect()
+}
+
 fn check_h_column_combination_report(
     axial_n: f64,
     strong_moment_nmm: f64,
@@ -378,7 +392,13 @@ fn check_h_column_combination_report(
         assert_eq!(member.elem, ElemId(0));
         assert_eq!(member.positions.len(), 3);
         let csv = crate::summary::build_report_csv(app);
-        for position in &member.positions {
+        let rows = member_check_csv_rows(&csv);
+        assert_eq!(rows.len(), 3, "{rows:?}");
+        for ((xi, x_mm), position) in [(0.0, 0.0), (0.5, 1500.0), (1.0, 3000.0)]
+            .into_iter()
+            .zip(&member.positions)
+        {
+            assert_eq!(position.xi, xi);
             let CheckOutcome::Skipped { reason } = &position.outcome else {
                 panic!("{:?}", position.outcome);
             };
@@ -386,13 +406,19 @@ fn check_h_column_combination_report(
                 reason.contains("フランジ内の設計用公称応力度の分布を規準から確定できず"),
                 "{reason}"
             );
+            assert!(reason.contains(&format!("x={x_mm:.6} mm")), "{reason}");
+            assert!(reason.contains("補剛区間 [0, 3000.000] mm"), "{reason}");
             assert!(
-                csv.lines()
-                    .any(|line| line == format!("0,{:.3},-,検定不能,{reason}", position.xi)),
-                "{csv}"
+                rows.contains(&[
+                    "0",
+                    &format!("{xi:.3}"),
+                    "-",
+                    "検定不能",
+                    &reason.replace(',', ";"),
+                ]),
+                "{rows:?}"
             );
         }
-        assert!(!csv.contains(",OK,"), "{csv}");
         rmp_serde::to_vec_named(&results.member_checks).unwrap()
     };
     let expected = assert_unchecked(&app);
@@ -459,6 +485,9 @@ fn check_h_column_combination_report(
 
 #[test]
 fn h_column_combination_report_keeps_confirmed_axial_bending_ng_and_reason() {
+    use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
+    use sepika_design_jp::CheckKind;
+
     let mut app = App::default();
     let mut model = h_column_input::cantilever(-77_000.0, 500e6, 365_000.0);
     model
@@ -477,35 +506,114 @@ fn h_column_combination_report_keeps_confirmed_axial_bending_ng_and_reason() {
         });
     assert!(app.load_model(model));
     app.run_linear_static(LoadCaseId(0));
-    let results = app.current_design_results().unwrap();
-    let csv = crate::summary::build_report_csv(&app);
-    let positions = &results.member_checks[0].positions;
-    assert_eq!(positions.len(), 6);
-    let (pairs, _) = positions.as_chunks::<2>();
-    for [checked, skipped] in pairs {
-        let CheckOutcome::Checked(result) = &checked.outcome else {
-            panic!("{:?}", checked.outcome);
-        };
-        assert_eq!(checked.xi, skipped.xi);
-        assert!(matches!(&skipped.outcome, CheckOutcome::Skipped { reason }
-            if reason.contains("同一点の組合せ応力度は未算定")));
-        assert!(!result.ok(), "{result:?}");
-        assert_eq!(result.components.len(), 1);
+    const UNAVAILABLE: &str = "同一点の組合せ応力度は未算定";
+    let assert_ng_and_unavailable = |app: &App| {
+        let results = app.current_design_results().unwrap();
         assert_eq!(
-            result.components[0].kind,
-            sepika_design_jp::CheckKind::AxialBending
+            results.design_contract_version,
+            Some(DESIGN_CONTRACT_VERSION)
         );
-        let prefix = format!("0,{:.3},", checked.xi);
-        assert!(
-            csv.lines()
-                .any(|line| line.starts_with(&prefix) && line.contains(",NG,")),
-            "{csv}"
-        );
-        assert!(
-            csv.lines().any(|line| line.starts_with(&prefix)
-                && line.contains(",検定不能,")
-                && line.contains("同一点の組合せ応力度は未算定")),
-            "{csv}"
-        );
+        let [member] = results.member_checks.as_slice() else {
+            panic!("{:?}", results.member_checks);
+        };
+        assert_eq!(member.elem, ElemId(0));
+        let csv = crate::summary::build_report_csv(app);
+        let rows = member_check_csv_rows(&csv);
+        assert_eq!(member.positions.len(), 6, "{:?}", member.positions);
+        assert_eq!(rows.len(), 6, "{rows:?}");
+        for (xi, x_mm, expected_ratio) in [
+            (0.0, 0.0, 43.7583),
+            (0.5, 1500.0, 23.6152),
+            (1.0, 3000.0, 3.4721),
+        ] {
+            let at: Vec<_> = member
+                .positions
+                .iter()
+                .filter(|position| position.xi == xi)
+                .map(|position| &position.outcome)
+                .collect();
+            let (result, reason) = match at.as_slice() {
+                [CheckOutcome::Checked(result), CheckOutcome::Skipped { reason }]
+                | [CheckOutcome::Skipped { reason }, CheckOutcome::Checked(result)] => {
+                    (result, reason)
+                }
+                _ => panic!("x={x_mm}: {at:?}"),
+            };
+            let [axial_bending] = result.components.as_slice() else {
+                panic!("{result:?}");
+            };
+            assert_eq!(axial_bending.kind, CheckKind::AxialBending);
+            assert!(!result.ok(), "{result:?}");
+            assert!(
+                (axial_bending.ratio - expected_ratio).abs() < 0.0001,
+                "{result:?}"
+            );
+            let location = format!("x={x_mm:.6} mm。N=-77.000000 kN, Mz=500.000000 kN·m");
+            assert!(result.detail.contains(&location), "{result:?}");
+            assert!(reason.contains(UNAVAILABLE), "{reason}");
+            assert!(reason.contains(&location), "{reason}");
+            assert!(reason.contains("補剛区間 [0, 3000.000] mm"), "{reason}");
+            let xi = format!("{xi:.3}");
+            assert!(
+                rows.contains(&[
+                    "0",
+                    &xi,
+                    &format!("{expected_ratio:.4}"),
+                    "NG",
+                    &result.basis.replace(',', ";"),
+                ]),
+                "{rows:?}"
+            );
+            assert!(
+                rows.contains(&["0", &xi, "-", "検定不能", &reason.replace(',', ";")]),
+                "{rows:?}"
+            );
+        }
+        rmp_serde::to_vec_named(&results.member_checks).unwrap()
+    };
+    let expected = assert_ng_and_unavailable(&app);
+    let path = std::env::temp_dir().join(format!(
+        "sepika-h-column-combination-axial-bending-ng-{}.ovika",
+        std::process::id()
+    ));
+    app.save_project_to(path.clone());
+    assert!(app.core.scoped.last_error.is_none());
+    let mut reopened = App::default();
+    reopened.open_project_from(path.clone());
+    assert!(reopened.core.scoped.last_error.is_none());
+    std::fs::remove_file(path).unwrap();
+    assert_eq!(assert_ng_and_unavailable(&reopened), expected);
+
+    #[cfg(feature = "gui")]
+    {
+        let context = egui::Context::default();
+        let rendered = context.run_ui(Default::default(), |ui| {
+            crate::design_view::design_table(ui, &mut reopened)
+        });
+        for needle in ["検定済み 3 件、検定不能 3 件、NG 3 件", UNAVAILABLE] {
+            assert!(
+                rendered
+                    .shapes
+                    .iter()
+                    .any(|shape| design_table_contains(&shape.shape, needle)),
+                "{needle}"
+            );
+        }
     }
+
+    let (mut old, path) = super::result_contract_tests::restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(131),
+        "h-column-combination-axial-bending-ng-old",
+    );
+    std::fs::remove_file(path).unwrap();
+    assert!(old.current_design_results().is_none());
+    assert_eq!(
+        old.current_static().unwrap().member_forces,
+        app.current_static().unwrap().member_forces
+    );
+    assert!(!crate::summary::build_report_csv(&old).contains("[部材検定]"));
+    old.run_design_check();
+    assert_eq!(assert_ng_and_unavailable(&old), expected);
 }

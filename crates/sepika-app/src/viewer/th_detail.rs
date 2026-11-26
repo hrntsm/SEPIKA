@@ -1603,8 +1603,7 @@ mod signed_q0_acceptance_tests;
 mod steel_time_history_c_tests;
 
 #[cfg(test)]
-#[path = "../../../sepika-design-jp/tests/fixtures/steel_column_lateral_buckling_model.rs"]
-mod steel_column_lateral_buckling_input;
+use crate::app::steel_column_span_tests::support_column as steel_column_lateral_buckling_input;
 
 #[cfg(test)]
 #[path = "../../../sepika-design-jp/tests/fixtures/rc_column_mechanism_model.rs"]
