@@ -1959,20 +1959,65 @@ fn 梁軸が直交でも断面を微小回転させると実面を確定しな�
 }
 
 #[test]
-fn 傾斜柱でも梁の宣言法線が微小斜交する場合は面を確定しない() {
+fn 傾斜柱の直交と微小斜交は柱と梁に共通する偏心で変わらない() {
     let reason = "断面の外面が柱軸に直交しない";
-    for (reference, expected) in [
-        ([0.0, 3.0, 4.0], Ok(300.0)),
-        ([0.0, 3.0, 4.00000000000001], Err(reason)),
-        ([0.0, 3.0000000000000004, 4.000000000000001], Err(reason)),
-    ] {
-        let mut model = model(false, false);
-        model.nodes[1].coord = [0.0, 3000.0, 4000.0];
-        model.stories[1].elevation = Some(4000.0);
-        model.elements[1].local_axis.ref_vector = reference;
-        let response = analyze(&mut model);
-        assert_ordinary_foot(&model, &response, expected);
+    for common_x_offset_mm in [0.0, 100.0] {
+        for (reference, expected) in [
+            ([0.0, 3.0, 4.0], Ok(300.0)),
+            ([0.0, 3.0, 4.00000000000001], Err(reason)),
+            ([0.0, 3.0000000000000004, 4.000000000000001], Err(reason)),
+        ] {
+            let mut model = model(false, false);
+            model.nodes[1].coord = [0.0, 3000.0, 4000.0];
+            model.stories[1].elevation = Some(4000.0);
+            for element in &mut model.elements {
+                element.end_offsets_mm = [[common_x_offset_mm, 0.0, 0.0]; 2];
+            }
+            model.elements[1].local_axis.ref_vector = reference;
+            model.load_cases[0].member = vec![MemberLoad::manual(
+                COLUMN,
+                [0.0, 0.6, 0.8],
+                MemberLoadKind::Point {
+                    a: 300.0,
+                    p: -30_000.0,
+                },
+            )];
+            let response = analyze(&mut model);
+            assert_ordinary_foot(&model, &response, expected);
+            if expected.is_ok() {
+                let face = saved_column_face(&response, 0).as_ref().unwrap();
+                assert!(face.face.position_exact);
+                assert!(face.forces.as_ref().unwrap()[0].is_ok());
+            }
+        }
     }
+}
+
+#[test]
+fn 傾斜柱の材軸方向を確認できない端では表示座標が同じでも軸力を保留する() {
+    let mut model = model(false, false);
+    model.nodes[1].coord = [0.0, 3000.0, 4000.0];
+    model.stories[1].elevation = Some(4000.0);
+    model.elements[0].end_offsets_mm[1][1] = 1e-14;
+    model.elements[1].local_axis.ref_vector = [0.0, 3.0, 4.0];
+    model.load_cases[0].member = vec![MemberLoad::manual(
+        COLUMN,
+        [0.0, 0.6, 0.8],
+        MemberLoadKind::Point {
+            a: 300.0,
+            p: -30_000.0,
+        },
+    )];
+    let response = analyze(&mut model);
+    let face = saved_column_face(&response, 0).as_ref().unwrap();
+    assert_eq!(face.face.position_mm, 300.0);
+    let forces = face.forces.as_ref().unwrap();
+    assert!(matches!(&forces[0], Err(reason) if reason.contains("丸め誤差")));
+    assert!(forces[1..].iter().all(Result::is_ok));
+    let rows = check(&model, &response, RcColumnLongTermShearInput::SingleCase);
+    assert!(rows.iter().any(|(xi, outcome)| *xi == 0.06 && matches!(
+        outcome, CheckOutcome::Skipped { reason } if reason.contains("軸力N") && reason.contains("丸め誤差")
+    )), "{rows:?}");
 }
 
 #[test]

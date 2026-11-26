@@ -96,7 +96,7 @@ pub fn rc_column_girder_faces(
             .primary_frame_axis_ends(elem)?
             .unwrap_or(reference_ends);
         let length_mm = dist(a, b);
-        let span_mm = axis_span_mm(reference_ends, elem.end_offsets_mm);
+        let (span_mm, span_exact) = axis_span_mm(reference_ends, elem.end_offsets_mm);
         if norm(sub(span_mm, sub(b, a))) > 32.0 * f64::EPSILON * length_mm.max(1.0) {
             return Err("実配置で求めた柱の材軸と解析材軸の一致を確認できません".into());
         }
@@ -108,11 +108,7 @@ pub fn rc_column_girder_faces(
                 .filter(|&k| k != axis)
                 .all(|k| zero_normal_components[k])
         });
-        let exact_unoffset_span = (elem.end_offsets_mm == [[0.0; 3]; 2]
-            && (0..3)
-                .all(|k| sum_with_residual(reference_ends[1][k], -reference_ends[0][k]).1 == 0.0))
-        .then_some(span_mm);
-        let declared_direction = exact_unoffset_span.or_else(|| {
+        let declared_direction = span_exact.then_some(span_mm).or_else(|| {
             exact_axis.map(|axis| std::array::from_fn(|k| if k == axis { 1.0 } else { 0.0 }))
         });
         let length_exact = exact_axis.is_some_and(|axis| {
@@ -122,8 +118,7 @@ pub fn rc_column_girder_faces(
             let (far, far_error) = sum_with_residual(far, offset_j);
             let (_, difference_error) = sum_with_residual(far, -origin);
             far_error == origin_error && difference_error == 0.0
-        }) || exact_unoffset_span
-            .is_some_and(|span| exact_span_length(span, length_mm));
+        }) || span_exact && exact_span_length(span_mm, length_mm);
         Ok::<_, String>((
             axes,
             length_mm,
@@ -176,7 +171,7 @@ pub fn rc_column_girder_faces(
                         other.id.0
                     ));
                 }
-                let beam_span_mm = axis_span_mm(beam.reference_ends, beam.end_offsets_mm);
+                let (beam_span_mm, _) = axis_span_mm(beam.reference_ends, beam.end_offsets_mm);
                 let (mut beam_axes, fallback_reference) = local_frame_axes_and_fallback_reference(
                     [0.0; 3],
                     beam_span_mm,
@@ -208,13 +203,22 @@ pub fn rc_column_girder_faces(
                         .filter(|&k| k != axis)
                         .all(|k| same_axis_coordinate(beam.reference_ends, beam.end_offsets_mm, k))
                 });
-                let oblique = match (beam_axis, declared_direction) {
+                let normal_is_parallel = match (beam_axis, declared_direction) {
                     (Some(axis), Some(direction)) => {
-                        declared_normal_is_oblique(axis, normal, reference, *direction)
+                        declared_normal_parallel(axis, normal, reference, *direction)
                     }
-                    _ => column_axis.is_some_and(|axis| normal == 2 && reference[axis] != 0.0),
+                    _ => column_axis.and_then(|axis| {
+                        if normal == 2 {
+                            Some(reference[axis] == 0.0)
+                        } else {
+                            (0..3)
+                                .filter(|&k| k != axis)
+                                .all(|k| reference[k] == 0.0)
+                                .then_some(true)
+                        }
+                    }),
                 };
-                if oblique {
+                if normal_is_parallel == Some(false) {
                     return Err(format!(
                         "大梁 ID {} の断面の外面が柱軸に直交しないため接合境界を一つの断面位置で表せません",
                         other.id.0
@@ -237,6 +241,7 @@ pub fn rc_column_girder_faces(
                         normal,
                         offset_mm: beam.end_offsets_mm[beam_side],
                         exact_axis,
+                        normal_verified: normal_is_parallel == Some(true),
                         zero_normal_components: *zero_normal_components,
                         normal_input: beam_axis.map(|axis| NormalInput {
                             beam_axis: axis,
@@ -310,7 +315,7 @@ fn check_continuation(
         let reference_ends =
             [a, b].map(|id| model.node(id).map_or([f64::NAN; 3], |node| node.coord));
         let side = usize::from(a != node);
-        let span_mm = axis_span_mm(reference_ends, other.end_offsets_mm);
+        let (span_mm, _) = axis_span_mm(reference_ends, other.end_offsets_mm);
         let direction = unit(scale(span_mm, if side == 0 { 1.0 } else { -1.0 }));
         if other.end_offsets_mm[side] != offset_mm
             || direction.is_none_or(|dir| {
@@ -330,6 +335,7 @@ struct JointGirder<'a> {
     normal: usize,
     offset_mm: [f64; 3],
     exact_axis: Option<usize>,
+    normal_verified: bool,
     zero_normal_components: [bool; 3],
     normal_input: Option<NormalInput>,
 }
@@ -504,7 +510,7 @@ fn contact_distance(
     }
     Ok(FaceAtJoint {
         distance_mm,
-        distance_exact,
+        distance_exact: girder.normal_verified && distance_exact,
         exact_plane_mm,
         projected_input: girder.normal_input.map(|normal| ProjectedPlaneInput {
             normal,
@@ -529,21 +535,27 @@ fn plane_offset_mm((plane_mm, residual_mm): (f64, f64), end_mm: f64) -> (f64, bo
     (rounded, correction_error == 0.0 && remaining_error == 0.0)
 }
 
-fn axis_span_mm(reference_mm: [[f64; 3]; 2], offset_mm: [[f64; 3]; 2]) -> [f64; 3] {
-    std::array::from_fn(|k| {
+fn axis_span_mm(reference_mm: [[f64; 3]; 2], offset_mm: [[f64; 3]; 2]) -> ([f64; 3], bool) {
+    let mut exact = true;
+    let span_mm = std::array::from_fn(|k| {
         let (reference, ref_residual) = sum_with_residual(reference_mm[1][k], -reference_mm[0][k]);
         let (offset, offset_residual) = sum_with_residual(offset_mm[1][k], -offset_mm[0][k]);
         let (span, span_residual) = sum_with_residual(reference, offset);
+        exact &= ref_residual == 0.0 && offset_residual == 0.0 && span_residual == 0.0;
         span + (span_residual + (ref_residual + offset_residual))
-    })
+    });
+    (span_mm, exact)
 }
 
-fn declared_normal_is_oblique(
+fn declared_normal_parallel(
     beam_axis: usize,
     normal: usize,
     reference: [f64; 3],
     column: [f64; 3],
-) -> bool {
+) -> Option<bool> {
+    if column[beam_axis] != 0.0 {
+        return Some(false);
+    }
     let u = (beam_axis + 1) % 3;
     let v = (beam_axis + 2) % 3;
     let [n_u, n_v] = if normal == 1 {
@@ -554,10 +566,8 @@ fn declared_normal_is_oblique(
     // 正規化後の照合だけでは、入力から分かる斜交まで許容差に隠れる。
     let p = column[u] * n_v;
     let q = column[v] * n_u;
-    column[beam_axis] != 0.0
-        || p.is_finite()
-            && q.is_finite()
-            && (p != q || column[u].mul_add(n_v, -p) != column[v].mul_add(n_u, -q))
+    (p.is_finite() && q.is_finite())
+        .then(|| p == q && column[u].mul_add(n_v, -p) == column[v].mul_add(n_u, -q))
 }
 
 fn exact_span_length(span: [f64; 3], length_mm: f64) -> bool {
