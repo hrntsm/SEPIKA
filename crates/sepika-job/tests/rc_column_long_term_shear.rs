@@ -931,6 +931,7 @@ fn 接合側の大梁ハンチだけが実面の確定に影響する() {
                 length: 750.0,
                 depth_increase: 0.0,
                 width_increase: increase,
+                qd1_face: None,
             });
             if side == 0 {
                 detail.haunch_i = haunch;
@@ -1086,6 +1087,7 @@ fn 短期圧縮靱性は実面の軸力で比較し柱のハンチ範囲はそ�
         length: 1300.0,
         depth_increase: 70.0,
         width_increase: 0.0,
+        qd1_face: None,
     });
     model.member_detail_attrs.push(detail);
     let response = analyze(&mut model);
@@ -1950,6 +1952,23 @@ fn 梁軸が直交でも断面を微小回転させると実面を確定しな�
         ([0.0, 1.0, 1e-15], Err("断面の外面が柱軸に直交しない")),
     ] {
         let mut model = model(false, false);
+        model.elements[1].local_axis.ref_vector = reference;
+        let response = analyze(&mut model);
+        assert_ordinary_foot(&model, &response, expected);
+    }
+}
+
+#[test]
+fn 傾斜柱でも梁の宣言法線が微小斜交する場合は面を確定しない() {
+    let reason = "断面の外面が柱軸に直交しない";
+    for (reference, expected) in [
+        ([0.0, 3.0, 4.0], Ok(300.0)),
+        ([0.0, 3.0, 4.00000000000001], Err(reason)),
+        ([0.0, 3.0000000000000004, 4.000000000000001], Err(reason)),
+    ] {
+        let mut model = model(false, false);
+        model.nodes[1].coord = [0.0, 3000.0, 4000.0];
+        model.stories[1].elevation = Some(4000.0);
         model.elements[1].local_axis.ref_vector = reference;
         let response = analyze(&mut model);
         assert_ordinary_foot(&model, &response, expected);

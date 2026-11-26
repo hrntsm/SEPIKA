@@ -108,6 +108,13 @@ pub fn rc_column_girder_faces(
                 .filter(|&k| k != axis)
                 .all(|k| zero_normal_components[k])
         });
+        let exact_unoffset_span = (elem.end_offsets_mm == [[0.0; 3]; 2]
+            && (0..3)
+                .all(|k| sum_with_residual(reference_ends[1][k], -reference_ends[0][k]).1 == 0.0))
+        .then_some(span_mm);
+        let declared_direction = exact_unoffset_span.or_else(|| {
+            exact_axis.map(|axis| std::array::from_fn(|k| if k == axis { 1.0 } else { 0.0 }))
+        });
         let length_exact = exact_axis.is_some_and(|axis| {
             let [origin, far] = reference_ends.map(|p| p[axis]);
             let [offset_i, offset_j] = elem.end_offsets_mm.map(|p| p[axis]);
@@ -115,14 +122,15 @@ pub fn rc_column_girder_faces(
             let (far, far_error) = sum_with_residual(far, offset_j);
             let (_, difference_error) = sum_with_residual(far, -origin);
             far_error == origin_error && difference_error == 0.0
-        }) || elem.end_offsets_mm == [[0.0; 3]; 2]
-            && exact_unoffset_length(reference_ends, length_mm);
+        }) || exact_unoffset_span
+            .is_some_and(|span| exact_span_length(span, length_mm));
         Ok::<_, String>((
             axes,
             length_mm,
             exact_axis,
             length_exact,
             zero_normal_components,
+            declared_direction,
         ))
     })();
     let nodes = [i, j];
@@ -136,7 +144,7 @@ pub fn rc_column_girder_faces(
         let mut face_at_joint: Option<FaceAtJoint> = None;
         for other in joint {
             let resolve = || {
-                let (axes, _, column_axis, _, zero_normal_components) =
+                let (axes, _, column_axis, _, zero_normal_components, declared_direction) =
                     axes_at_ends.as_ref().map_err(Clone::clone)?;
                 if model
                     .element_section(other)
@@ -200,13 +208,13 @@ pub fn rc_column_girder_faces(
                         .filter(|&k| k != axis)
                         .all(|k| same_axis_coordinate(beam.reference_ends, beam.end_offsets_mm, k))
                 });
-                if column_axis.is_some_and(|axis| match normal {
-                    1 => beam_axis.is_some_and(|beam_axis| {
-                        (0..3).any(|k| k != beam_axis && k != axis && reference[k] != 0.0)
-                    }),
-                    2 => reference[axis] != 0.0,
-                    _ => unreachable!(),
-                }) {
+                let oblique = match (beam_axis, declared_direction) {
+                    (Some(axis), Some(direction)) => {
+                        declared_normal_is_oblique(axis, normal, reference, *direction)
+                    }
+                    _ => column_axis.is_some_and(|axis| normal == 2 && reference[axis] != 0.0),
+                };
+                if oblique {
                     return Err(format!(
                         "大梁 ID {} の断面の外面が柱軸に直交しないため接合境界を一つの断面位置で表せません",
                         other.id.0
@@ -248,7 +256,7 @@ pub fn rc_column_girder_faces(
             }
         }
         face_at_joint.map(|face| {
-            let (_, length_mm, _, length_exact, _) =
+            let (_, length_mm, _, length_exact, _, _) =
                 *axes_at_ends.as_ref().expect("確認済みの柱材軸");
             let (position_mm, position_error) = if side == 0 {
                 (face.distance_mm, 0.0)
@@ -530,13 +538,34 @@ fn axis_span_mm(reference_mm: [[f64; 3]; 2], offset_mm: [[f64; 3]; 2]) -> [f64; 
     })
 }
 
-fn exact_unoffset_length([a, b]: [[f64; 3]; 2], length_mm: f64) -> bool {
+fn declared_normal_is_oblique(
+    beam_axis: usize,
+    normal: usize,
+    reference: [f64; 3],
+    column: [f64; 3],
+) -> bool {
+    let u = (beam_axis + 1) % 3;
+    let v = (beam_axis + 2) % 3;
+    let [n_u, n_v] = if normal == 1 {
+        [reference[u], reference[v]]
+    } else {
+        [-reference[v], reference[u]]
+    };
+    // 正規化後の照合だけでは、入力から分かる斜交まで許容差に隠れる。
+    let p = column[u] * n_v;
+    let q = column[v] * n_u;
+    column[beam_axis] != 0.0
+        || p.is_finite()
+            && q.is_finite()
+            && (p != q || column[u].mul_add(n_v, -p) != column[v].mul_add(n_u, -q))
+}
+
+fn exact_span_length(span: [f64; 3], length_mm: f64) -> bool {
     let mut squares = 0.0;
-    for k in 0..3 {
-        let (span_mm, span_error) = sum_with_residual(b[k], -a[k]);
+    for span_mm in span {
         let square = span_mm * span_mm;
         let (sum, sum_error) = sum_with_residual(squares, square);
-        if span_error != 0.0 || span_mm.mul_add(span_mm, -square) != 0.0 || sum_error != 0.0 {
+        if span_mm.mul_add(span_mm, -square) != 0.0 || sum_error != 0.0 {
             return false;
         }
         squares = sum;
