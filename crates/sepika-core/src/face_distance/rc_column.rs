@@ -234,8 +234,7 @@ pub fn rc_column_girder_faces(
                         other.id.0
                     ));
                 }
-                let exact_axis =
-                    column_axis.filter(|&axis| cardinal_axis(beam_axes[normal]) == Some(axis));
+                let exact_axis = column_axis.filter(|_| normal_is_parallel == Some(true));
                 if beam_side == 1 {
                     beam_axes[0] = scale(beam_axes[0], -1.0);
                 }

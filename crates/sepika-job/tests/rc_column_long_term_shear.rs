@@ -2051,6 +2051,57 @@ fn 平面内で斜めの梁でも参照の材軸方向成分は面上の荷重�
 }
 
 #[test]
+fn 投影後の局所基底が丸めでずれても証明済みの共通面を採用する() {
+    for reference in [[0.0, 0.0, 1.0], [1.0, 1.0, 1.0]] {
+        let mut model = model(false, false);
+        model.nodes[2].coord = [1000.0, 1000.0, 0.0];
+        let mut end = model.nodes[2].clone();
+        end.id = NodeId(3);
+        end.coord = [-1000.0, -1000.0, 0.0];
+        model.nodes.push(end);
+        let mut beam = model.elements[1].clone();
+        beam.id = ElemId(2);
+        beam.nodes = [NodeId(0), NodeId(3)].into_iter().collect();
+        beam.local_axis.ref_vector = reference;
+        model.elements.push(beam);
+        let response = analyze(&mut model);
+        assert_ordinary_foot(&model, &response, Ok(300.0));
+    }
+}
+
+#[test]
+fn 高さに偏心がある梁でも証明済みの310mm面と一致する集中荷重を採用する() {
+    for (reference, expected) in [
+        ([0.0, 0.0, 1.0], Ok(310.0)),
+        ([1.0, 1.0, 1.0], Ok(310.0)),
+        (
+            [1.0, 1.0000000000000002, 1.0],
+            Err("断面の外面が柱軸に直交しない"),
+        ),
+    ] {
+        let mut model = model(false, false);
+        model.nodes[2].coord = [1000.0, 1000.0, 0.0];
+        model.elements[1].local_axis.ref_vector = reference;
+        model.elements[1].end_offsets_mm = [[0.0, 0.0, 10.0]; 2];
+        model.load_cases[0].member = vec![MemberLoad::manual(
+            COLUMN,
+            [0.0, 0.0, 1.0],
+            MemberLoadKind::Point {
+                a: 310.0,
+                p: -30_000.0,
+            },
+        )];
+        let response = analyze(&mut model);
+        assert_ordinary_foot(&model, &response, expected);
+        if expected.is_ok() {
+            let face = saved_column_face(&response, 0).as_ref().unwrap();
+            let axial_n = *face.forces.as_ref().unwrap()[0].as_ref().unwrap();
+            assert_close(axial_n, -8_472.946, 0.2);
+        }
+    }
+}
+
+#[test]
 fn 梁遠端だけが柱軸方向に微小偏心する場合は直交面とみなさない() {
     for z_shift_mm in [0.0, 1000.0] {
         for offset_mm in [0.0, 1e-12] {
