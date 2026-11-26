@@ -240,10 +240,6 @@ pub(crate) fn valid_prefix(
 }
 
 #[cfg(test)]
-#[path = "../../../sepika-design-jp/tests/fixtures/steel_h_column_combined_model.rs"]
-mod combined_column;
-
-#[cfg(test)]
 mod tests {
     use super::*;
     use crate::time_history_check::collect_time_history_checks;
@@ -252,7 +248,7 @@ mod tests {
     use sepika_element::frame::member_load::frame_strong_bending_span;
     use sepika_element::transform::LocalFrame;
 
-    use super::combined_column;
+    use crate::time_history_check::asymmetric_column_model::steel_column as combined_column;
 
     fn model() -> Model {
         let mut model = combined_column::cantilever(0.0, 0.0, 0.0);
@@ -451,7 +447,7 @@ mod tests {
             let failure = history.material_failure.unwrap();
             assert!((failure.x_mm - 1000.0).abs() < 1e-9, "{failure:?}");
             assert!((failure.mz_nmm - 280e6).abs() < 1e-6, "{failure:?}");
-            assert!((failure.ratio - 1.03767).abs() < 1e-5, "{failure:?}");
+            assert!((failure.ratio - 1.03766).abs() < 5e-6, "{failure:?}");
             model.steel_design_attrs[0].column_lateral_buckling_end_supports = None;
         }
     }

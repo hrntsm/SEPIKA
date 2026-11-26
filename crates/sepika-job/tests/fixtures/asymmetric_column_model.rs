@@ -1,7 +1,7 @@
 use sepika_core::{model::Model, section_shape::SectionShape};
 
 #[path = "../../../sepika-design-jp/tests/fixtures/steel_h_column_combined_model.rs"]
-mod steel_column;
+pub(super) mod steel_column;
 
 pub fn column_model() -> Model {
     let mut model = steel_column::cantilever(0.0, 0.0, 0.0);

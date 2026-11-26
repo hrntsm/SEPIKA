@@ -243,7 +243,7 @@ fn material_only_failure_is_shown_alongside_the_unavailable_lateral_check() {
                     time_s: 0.01,
                     x_mm: 1000.0,
                     mz_nmm: 280e6,
-                    ratio: 1.03767,
+                    ratio: 1.03766,
                 }),
                 unavailable: [
                     "弱軸曲げと強軸曲げが同時に作用するため、強軸曲げの横座屈は未算定です".into(),
