@@ -273,7 +273,7 @@ impl StrongBendingResponse<'_> {
         })
     }
 
-    fn saved_shear_confirms_monotonicity(
+    fn saved_cuts_confirm_monotonicity(
         &self,
         bending: &ExactBending,
     ) -> Result<bool, ExactSpanError> {
@@ -281,6 +281,14 @@ impl StrongBendingResponse<'_> {
             return Ok(false);
         }
         let [i, j] = &bending.end_moments_nmm;
+        let direction = j.cmp(i);
+        if self.stations_mm.windows(2).any(|pair| {
+            pair[1].1[5]
+                .partial_cmp(&pair[0].1[5])
+                .is_none_or(|order| order != Ordering::Equal && order != direction)
+        }) {
+            return Ok(false);
+        }
         let [min, max] = &bending.shear_extrema_n;
         let mut min_offset_n = BigRational::zero();
         let mut max_offset_n = BigRational::zero();
@@ -294,7 +302,7 @@ impl StrongBendingResponse<'_> {
             }
         }
         // 保存測点だけを見ると、同じ荷重を積算した未保存の切断面で符号が反転し得る。
-        Ok(match j.cmp(i) {
+        Ok(match direction {
             Ordering::Greater => !(min + min_offset_n).is_negative(),
             Ordering::Less => !(max + max_offset_n).is_positive(),
             Ordering::Equal => (min + min_offset_n).is_zero() && (max + max_offset_n).is_zero(),
@@ -305,7 +313,7 @@ impl StrongBendingResponse<'_> {
         let bending = self.exact_bending()?;
         let maximum = bending.absolute_maximum();
         let end_moments_nmm = bending.end_moments()?;
-        let monotonic = self.saved_shear_confirms_monotonicity(&bending)?;
+        let monotonic = self.saved_cuts_confirm_monotonicity(&bending)?;
         let mut interior_maximum = false;
         let mut sections: Vec<FrameStaticBendingSection> =
             Vec::with_capacity(bending.candidates.len());
@@ -331,14 +339,20 @@ impl StrongBendingResponse<'_> {
                 .filter(|_| section.right.as_ref().is_ok_and(Option::is_some))
                 .map(|left| self.response.saved_right_cut(x_mm, left))
                 .transpose();
+            let zero_shear = |recovered: [f64; 6], saved: Option<[f64; 6]>| {
+                recovered[1] == 0.0 || saved.is_some_and(|force| force[1] == 0.0)
+            };
             let [left, right] = adjacent_shear;
             let zero_shear_limits = if let Ok(Some(right_force)) = &section.right {
                 [
-                    left && section.left[1] == 0.0,
-                    right && right_force[1] == 0.0,
+                    left && zero_shear(section.left, saved_left),
+                    right && zero_shear(*right_force, saved_right.as_ref().ok().copied().flatten()),
                 ]
             } else {
-                [(left || right) && section.left[1] == 0.0, false]
+                [
+                    (left || right) && zero_shear(section.left, saved_left),
+                    false,
+                ]
             };
             if let Some(previous) = sections.last().map(|section| &section.recovered) {
                 let after_point = previous.right.as_ref().ok().and_then(Option::as_ref);
@@ -360,7 +374,12 @@ impl StrongBendingResponse<'_> {
                 zero_shear_limits,
             });
         }
-        let issue = self.static_combination_issue(&sections)?;
+        let (issue, weak_shear) = self.static_combination_issue(&sections)?;
+        if weak_shear {
+            for cut in &mut sections {
+                cut.zero_shear_limits = [false; 2];
+            }
+        }
         Ok(FrameStaticStrongBending {
             end_moments_nmm,
             monotonic,
@@ -375,7 +394,7 @@ impl StrongBendingResponse<'_> {
     fn static_combination_issue(
         &self,
         sections: &[FrameStaticBendingSection],
-    ) -> Result<Option<&'static str>, ExactSpanError> {
+    ) -> Result<(Option<&'static str>, bool), ExactSpanError> {
         let response = self.response;
         let start = response.exact_cut(&BigRational::zero(), true)?;
         let mut weak_shear = !start[2].is_zero();
@@ -392,7 +411,7 @@ impl StrongBendingResponse<'_> {
             let weak = ExactLoadProfile::new(&weak_loads, lo, hi)?;
             weak_shear |= weak.has_distributed_load() || lo > 0.0 && !weak.point_n.is_zero();
         }
-        Ok(if axial_varying {
+        let issue = if axial_varying {
             Some("軸方向の分布荷重があるため、全区間の軸力・曲げ等の組合せの最大を確定できません")
         } else if weak_shear {
             Some("弱軸せん断があり弱軸曲げが一定とは限らないため、全区間の組合せの最大を確定できません")
@@ -409,7 +428,8 @@ impl StrongBendingResponse<'_> {
             Some("引張軸力と二軸曲げが同時に作用するため、全区間の組合せの最大を確定できません")
         } else {
             None
-        })
+        };
+        Ok((issue, weak_shear))
     }
 }
 

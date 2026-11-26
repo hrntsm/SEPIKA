@@ -44,7 +44,7 @@ pub struct FrameStrongBendingPeak {
 pub struct FrameStaticStrongBending {
     /// i/j実材端の強軸曲げ [N·mm]。
     pub end_moments_nmm: [f64; 2],
-    /// 回復値と保存せん断力のいずれでも、曲げの単調方向が実材軸全長で一致する場合にtrue。
+    /// 回復値、保存せん断力、保存曲げの単調方向が実材軸全長で一致する場合にtrue。
     pub monotonic: bool,
     /// 絶対値最大が内部にも存在するならtrue。
     pub interior_maximum: bool,
@@ -66,7 +66,7 @@ pub struct FrameStaticBendingSection {
     pub saved_left: Option<[f64; 6]>,
     /// 同位置の保存左極限に集中荷重の跳びを加えた右極限 [N, N·mm]。回復値に右極限がある場合のみ。
     pub saved_right: Result<Option<[f64; 6]>, String>,
-    /// 区間内の同じ側を極限までたどると強軸せん断が作用するゼロ点。左・右の順。
+    /// 保存値または回復値のせん断がゼロで、隣接域の強軸せん断の連続極限を照査できる切断側。左・右の順。
     /// `recovered.right` がなければ、共通の切断面に対する判定を左に返す。
     pub zero_shear_limits: [bool; 2],
 }
@@ -81,6 +81,7 @@ pub enum FrameStaticBendingError {
 
 /// 線形静的応答と同じ部材荷重・係数および両端を含む保存断面力から実材軸全長の強軸曲げを確認する。
 /// 区間座標は実材軸i端を起点とする [mm]。断面力の不整合、荷重の投影・曲げ分布を確認できない場合はエラー。
+/// 非有限な保存成分で全体の組合せが未確認の場合は、照合済みのウェブせん断用に回復位置を返すことがある。
 pub fn frame_static_strong_bending(
     [i, j]: [[f64; 3]; 2],
     reference: [f64; 3],
@@ -100,7 +101,14 @@ pub fn frame_static_strong_bending(
     let stations = bending_stations_mm(length_mm, forces).map_err(recover_error)?;
     let mut positions = Vec::new();
     let response_stations = if duplicate {
-        if forces.at[1].0 == 0.0 || stations[0].1.iter().any(|value| !value.is_finite()) {
+        let i_force = stations[0].1;
+        if i_force.iter().any(|value| !value.is_finite())
+            || forces
+                .at
+                .iter()
+                .take_while(|(xi, _)| *xi == 0.0)
+                .any(|(_, force)| *force != i_force)
+        {
             return Err(Stations(
                 "保存断面力の評価位置が重複し、回復の基準となるi端の断面力を確定できません".into(),
             ));
@@ -137,15 +145,30 @@ pub fn frame_static_strong_bending(
         .iter()
         .any(|(_, row)| row.iter().any(|value| !value.is_finite()))
     {
-        if duplicate {
-            verify_projections()?;
-        }
-        verify_partial_bending_stations(
-            &LoadedFrameSection::new(response.map, [0.0; 12]),
-            &stations,
-        )
-        .map_err(Stations)?;
+        let projections_confirmed = match verify_projections() {
+            Ok(()) => true,
+            Err(reason) if duplicate => return Err(reason),
+            Err(_) => false,
+        };
+        let load_response = LoadedFrameSection::new(response.map, [0.0; 12]);
+        verify_partial_bending_stations(&load_response, &stations).map_err(Stations)?;
         let reason = "保存断面力に非有限な成分があるため、区間全体の組合せを確定できません";
+        if !duplicate
+            && projections_confirmed
+            && stations[0].1.iter().all(|value| value.is_finite())
+            && stations
+                .iter()
+                .all(|(_, force)| force[1].is_finite() && force[3] == 0.0)
+        {
+            let response = LoadedFrameSection::new(load_response.map, response.node_force_local);
+            if let Ok(mut span) =
+                StrongBendingResponse::new(&frame, length_mm, &response, &stations)
+                    .exact_static_sections()
+            {
+                span.combination_issue = Some(reason);
+                return Ok(span);
+            }
+        }
         return Err(Distribution(if duplicate {
             format!("{duplicate_reason}。{reason}")
         } else {

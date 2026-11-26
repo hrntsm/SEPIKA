@@ -9,8 +9,8 @@ use sepika_element::frame::member_load::{
 use super::steel_beam_span::BeamSpanLoads;
 use super::{combine_incomplete_reasons, strength_outcomes};
 use crate::steel::{
-    check_symmetric_h_plate_slenderness, column_span_parameters, StaticColumnSectionCheck,
-    SAME_POINT_SHEAR_FORMULA,
+    check_symmetric_h_plate_slenderness, column_span_parameters, h_web_shear_failure,
+    StaticColumnSectionCheck, SAME_POINT_SHEAR_FORMULA,
 };
 use crate::{
     CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, MemberForcesAt, SteelDesign,
@@ -50,9 +50,15 @@ pub(super) fn check(
             .then_some("上下対称H形鋼の実断面形状を確認できないため、強軸曲げ・横座屈は未算定です")
     });
     let recovered = recover(model, elem, loads, forces);
-    if recovered
-        .as_ref()
-        .is_ok_and(|(span, _)| !span.has_strong_bending)
+    let partial_recovery = recovered.is_ok()
+        && forces
+            .at
+            .iter()
+            .any(|(_, cut)| cut.iter().any(|value| !value.is_finite()));
+    if !partial_recovery
+        && recovered
+            .as_ref()
+            .is_ok_and(|(span, _)| !span.has_strong_bending)
         && forces.at.iter().all(|(_, force)| force[5] == 0.0)
     {
         return false;
@@ -61,6 +67,10 @@ pub(super) fn check(
     let mut span_description = None;
     let mut saved_parameters = None;
     let parameters = match &recovered {
+        Ok((span, _)) if partial_recovery => {
+            span_reason = span.combination_issue.map(str::to_owned);
+            None
+        }
         Ok((span, axes)) => {
             let length_mm = dist(axes[0], axes[1]);
             let interval = format!("実材軸の補剛区間 [0, {length_mm:.3}] mm");
@@ -130,7 +140,8 @@ pub(super) fn check(
                          force: [f64; 6],
                          cut_side: &str,
                          local_issue: Option<&str>,
-                         zero_shear_limit|
+                         zero_shear_limit,
+                         weak_shear_disagreement|
      -> Vec<CheckOutcome> {
         let section_issue = section_issue.or(local_issue).or_else(|| {
             force
@@ -153,6 +164,7 @@ pub(super) fn check(
                 StaticColumnSectionCheck {
                     parameters,
                     zero_shear_limit,
+                    weak_shear_disagreement,
                 },
                 section_issue,
             )
@@ -230,21 +242,37 @@ pub(super) fn check(
                 None
             };
             let issue = disagreement.as_deref();
-            let mut checked = check_section(xi, x_mm, recovered, side, issue, zero_shear_limit);
+            let weak_shear_disagreement =
+                saved.is_some_and(|saved| (saved[2] == 0.0) != (recovered[2] == 0.0));
+            let mut checked = check_section(
+                xi,
+                x_mm,
+                recovered,
+                side,
+                issue,
+                zero_shear_limit,
+                weak_shear_disagreement,
+            );
             if let Some(saved) = saved.filter(|saved| *saved != recovered) {
-                for outcome in check_section(xi, x_mm, saved, side, issue, zero_shear_limit) {
+                for outcome in check_section(
+                    xi,
+                    x_mm,
+                    saved,
+                    side,
+                    issue,
+                    zero_shear_limit,
+                    weak_shear_disagreement,
+                ) {
                     add_saved_check(&mut checked, outcome, recovered[1], saved[1]);
                 }
             }
             checked
         };
 
-    let (sections, combination_confirmed) = recovered
+    let sections = recovered
         .as_ref()
         .ok()
-        .map_or((&[][..], false), |(span, _)| {
-            (span.sections.as_slice(), span.combination_issue.is_none())
-        });
+        .map_or(&[][..], |(span, _)| span.sections.as_slice());
     let at_i_end =
         |kind: &MemberLoadKind| matches!(kind, MemberLoadKind::Point { a: 0.0, p } if *p != 0.0);
     let load_at_i_end = loads.map_or_else(
@@ -267,24 +295,53 @@ pub(super) fn check(
             || !(0.0..=1.0).contains(&xi)
             || forces.at.iter().filter(|&&(pos, _)| xi == pos).count() != 1
             || xi == 0.0 && load_at_i_end
-            || sections.iter().any(|section| {
-                section.recovered.x_mm == xi * ctx.length && section.saved_left == Some(force)
-            })
+            || !partial_recovery
+                && sections.iter().any(|section| {
+                    section.recovered.x_mm == xi * ctx.length && section.saved_left == Some(force)
+                })
         {
             continue;
         }
         outcomes.extend(
-            check_section(xi, xi * ctx.length, force, "", None, false)
+            check_section(xi, xi * ctx.length, force, "", None, false, false)
                 .into_iter()
                 .map(|outcome| (elem.id, xi, outcome)),
         );
     }
     for section in sections {
-        let [left_zero_limit, right_zero_limit] = section
-            .zero_shear_limits
-            .map(|limit| limit && combination_confirmed);
+        let [left_zero_limit, right_zero_limit] = section.zero_shear_limits;
         let cut = &section.recovered;
         let right = cut.right.as_ref().ok().and_then(Option::as_ref);
+        if partial_recovery {
+            let left = (!cut.is_i_face || right.is_none())
+                .then_some(&cut.left)
+                .filter(|left| {
+                    section
+                        .saved_left
+                        .is_none_or(|saved| saved[1].abs() < left[1].abs())
+                });
+            let left_side = if right.is_some() {
+                "（集中荷重の左側）"
+            } else {
+                ""
+            };
+            for (force, side) in left
+                .into_iter()
+                .map(|f| (f, left_side))
+                .chain(right.into_iter().map(|f| (f, "（集中荷重の右側）")))
+            {
+                if let Some(component) =
+                    h_web_shear_failure(&MemberForcesAt::from_local(cut.xi, *force), sec, mat, ctx)
+                {
+                    outcomes.push((elem.id, cut.xi, CheckOutcome::Checked(CheckResult {
+                        basis: "強軸ウェブせん断が許容値を超えるため不適合".into(),
+                        detail: format!("実材軸i端から x={:.6} mm{side}。照合済みの強軸せん断力 Qy={:.6} kN", cut.x_mm, force[1] / 1e3),
+                        components: vec![component],
+                    })));
+                }
+            }
+            continue;
+        }
         if !cut.is_i_face || right.is_none() {
             let side = if right.is_some() {
                 "（集中荷重の左側）"
@@ -470,10 +527,6 @@ fn section_applicability_difference(
         (
             (saved[3] == 0.0) != (recovered[3] == 0.0),
             "材軸ねじりの有無",
-        ),
-        (
-            (saved[2] == 0.0) != (recovered[2] == 0.0),
-            "弱軸せん断の有無",
         ),
         ((saved[0] < 0.0) != (recovered[0] < 0.0), "圧縮軸力の有無"),
         (

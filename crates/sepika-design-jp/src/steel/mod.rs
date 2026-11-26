@@ -156,9 +156,13 @@ fn strong_axis_tension_bending_ratios(
     fb_mpa: f64,
 ) -> StrongAxisTensionBendingRatios {
     StrongAxisTensionBendingRatios {
-        tension: (sigma_t_mpa + sigma_b_mpa) / safe_denom(ft_mpa),
+        tension: strong_axis_tension_edge_ratio(sigma_t_mpa, sigma_b_mpa, ft_mpa),
         compression: (sigma_b_mpa - sigma_t_mpa) / safe_denom(fb_mpa),
     }
+}
+
+fn strong_axis_tension_edge_ratio(sigma_t_mpa: f64, sigma_b_mpa: f64, ft_mpa: f64) -> f64 {
+    (sigma_t_mpa + sigma_b_mpa) / safe_denom(ft_mpa)
 }
 
 pub(crate) const INVALID_NODE_SPAN_FOR_LATERAL_BUCKLING: &str =
@@ -246,7 +250,7 @@ fn independent_h_web_shear_failure(
         .flatten()
 }
 
-fn h_web_shear_failure(
+pub(crate) fn h_web_shear_failure(
     forces: &MemberForcesAt,
     sec: &Section,
     mat: &Material,
@@ -609,6 +613,7 @@ pub struct SteelDesign;
 pub(crate) struct StaticColumnSectionCheck {
     pub(crate) parameters: Option<(f64, f64)>,
     pub(crate) zero_shear_limit: bool,
+    pub(crate) weak_shear_disagreement: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -894,6 +899,12 @@ impl SteelDesign {
                 &mut incomplete,
             ),
         };
+        if scope.weak_shear_disagreement {
+            incomplete = crate::member_design_check::combine_incomplete_reasons(
+                incomplete,
+                Some("保存断面力と回復断面力で弱軸せん断の有無が一致しません"),
+            );
+        }
         let material_cap = || {
             symmetric_h_web(sec)?;
             let (_, flange_thick_mm, web_thick_mm) = shape_of(sec);
@@ -1473,21 +1484,24 @@ impl SteelDesign {
                 forces, sec, mat, ctx, f, term, lambda,
             ))),
         };
-        let zero_shear_limit = matches!(
-            scope,
-            SteelCheckScope::StaticColumn(StaticColumnSectionCheck {
-                zero_shear_limit: true,
-                ..
-            })
-        );
+        let static_column = match scope {
+            SteelCheckScope::StaticColumn(scope) => Some(scope),
+            _ => None,
+        };
+        let zero_shear_limit = static_column.is_some_and(|scope| scope.zero_shear_limit);
+        let weak_shear_disagreement =
+            static_column.is_some_and(|scope| scope.weak_shear_disagreement);
         match cr {
             Ok(CheckOutcome::Checked(mut result)) => {
                 let shear = result
                     .components
                     .iter_mut()
                     .find(|c| c.kind == CheckKind::Shear);
-                let shear_reason =
-                    check_same_point_shear(shear, forces, sec, ctx, f, zero_shear_limit);
+                let shear_reason = if weak_shear_disagreement {
+                    None
+                } else {
+                    check_same_point_shear(shear, forces, sec, ctx, f, zero_shear_limit)
+                };
                 if let Some(reason) = h_combined_reason.or(shear_reason) {
                     result
                         .components
@@ -1509,9 +1523,10 @@ impl SteelDesign {
                     .into_iter()
                     .collect();
                 let mut basis = "強軸ウェブせん断が許容値を超えるため不適合";
-                if matches!(scope, SteelCheckScope::StaticColumn(_))
+                if static_column.is_some()
                     && forces.mz != 0.0
                     && h_combined_reason.is_none()
+                    && !weak_shear_disagreement
                 {
                     if let Some(mut shear) = shear_component(forces, sec, ctx, steel_fs(f, term)) {
                         if check_same_point_shear(
@@ -1528,6 +1543,22 @@ impl SteelDesign {
                             basis = "式(5.24)の同一点組合せ応力度が許容値を超えるため不適合";
                             components.push(shear);
                         }
+                    }
+                }
+                if static_column.is_some() && strong_axis_h_tension(forces, sec) {
+                    let area_mm2 = sec.area;
+                    let z_mm3 = section_modulus(sec.iy, sec.depth / 2.0);
+                    let sigma_t_mpa = forces.n / area_mm2;
+                    let sigma_b_mpa = forces.mz.abs() / z_mm3;
+                    let ft_mpa = crate::material_strength::steel_ft(f, term);
+                    let ratio = strong_axis_tension_edge_ratio(sigma_t_mpa, sigma_b_mpa, ft_mpa);
+                    if z_mm3.is_finite() && z_mm3 > 0.0 && ratio.is_finite() && ratio > 1.0 {
+                        basis = "鋼構造許容応力度設計規準 H形鋼柱の独立照査";
+                        components.push(CheckComponent {
+                            kind: CheckKind::AxialBending,
+                            ratio,
+                            detail: format!("式(6.3) 引張側={ratio:.4}。σt={sigma_t_mpa:.4} N/mm², σbt={sigma_b_mpa:.4} N/mm², ft={ft_mpa:.4} N/mm²"),
+                        });
                     }
                 }
                 if components.is_empty() {
