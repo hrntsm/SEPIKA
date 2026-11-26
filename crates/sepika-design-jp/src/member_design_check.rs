@@ -140,6 +140,7 @@ pub struct MemberDesignCheckOptions<'a> {
     pub src_column_route21_shear: Option<&'a HashMap<ElemId, SrcColumnRoute21Shear>>,
     /// 地震時短期QD用の長期（DL+LL等）内力。NoneならQDを用いない。
     /// `Some(&[])` は汎用の参照がない短期地震QDを指定し、RC柱実材端のQD2単独では専用参照を用いる。
+    /// RC柱実材端のQD1・minは一意な柱行と節点芯i/jの軸力を要する。
     pub long_member_forces: Option<&'a [(ElemId, MemberForces)]>,
     /// RC 梁 QD1 用の単純梁せん断 Q0 `[N]`（部材 ID → 絶対値）。RC梁のQD1で不足すれば未検定。
     pub q_simple_by_elem: Option<&'a HashMap<ElemId, f64>>,
@@ -396,11 +397,16 @@ pub fn run_member_design_checks(
     model.validate_local_frames()?;
     validate_model_steel_inputs(model)?;
 
+    let mut duplicate_long_ids = HashSet::new();
     let long_mf_by_id: Option<HashMap<ElemId, &MemberForces>> =
         options.long_member_forces.map(|list| {
             let mut m = HashMap::with_capacity(list.len());
             for (id, mf) in list {
-                m.entry(*id).or_insert(mf);
+                m.entry(*id)
+                    .and_modify(|_| {
+                        duplicate_long_ids.insert(*id);
+                    })
+                    .or_insert(mf);
             }
             m
         });
@@ -954,6 +960,20 @@ pub fn run_member_design_checks(
         } else {
             (None, None, None)
         };
+        let face_column_axial_issue = || {
+            let repeated_end = |mf: &MemberForces| {
+                [0.0, 1.0]
+                    .into_iter()
+                    .any(|end| mf.at.iter().filter(|(pos, _)| *pos == end).nth(1).is_some())
+            };
+            if duplicate_long_ids.contains(elem_id) || mf_long.is_some_and(repeated_end) {
+                Some("設計用せん断力に必要な柱端の重力参照軸力が重複し、一意ではありません")
+            } else if duplicate_generic_forces || repeated_end(mf) {
+                Some("設計用せん断力に必要な柱端の応答軸力が重複し、一意ではありません")
+            } else {
+                column_end_axial_issue
+            }
+        };
 
         let slab_moments_nmm = (matches!(rc_beam_qd1, Some(Ok(_)))
             && !grouped_girders.contains(elem_id))
@@ -1379,7 +1399,7 @@ pub fn run_member_design_checks(
                     && options.long_member_forces.is_some()
                     && options.qd_method != QdMethod::Qd2
                 {
-                    column_end_axial_issue
+                    face_column_axial_issue()
                 } else {
                     None
                 };

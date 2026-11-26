@@ -74,16 +74,16 @@ pub fn rc_column_girder_faces(
         return unknown("柱の両実材端節点がありません");
     };
     let axes_at_ends = (|| {
-        let [a, b] = match model.primary_frame_axis_ends(elem)? {
-            Some(ends) => ends,
-            None => [
-                model.node(i).ok_or("柱のi端節点がありません")?.coord,
-                model.node(j).ok_or("柱のj端節点がありません")?.coord,
-            ],
-        };
+        let reference_ends = [
+            model.node(i).ok_or("柱のi端節点がありません")?.coord,
+            model.node(j).ok_or("柱のj端節点がありません")?.coord,
+        ];
+        let [a, b] = model
+            .primary_frame_axis_ends(elem)?
+            .unwrap_or(reference_ends);
         let length_mm = dist(a, b);
         let axes = local_frame_axes(a, b, elem.local_axis.ref_vector)?;
-        Ok::<_, String>(([a, b], axes, length_mm))
+        Ok::<_, String>(([a, b], axes, length_mm, reference_ends))
     })();
     let nodes = [i, j];
     let mut faces = std::array::from_fn(|side| {
@@ -96,7 +96,8 @@ pub fn rc_column_girder_faces(
         let mut distance_mm: Option<f64> = None;
         for other in joint {
             let resolve = || {
-                let (ends, axes, _) = axes_at_ends.as_ref().map_err(Clone::clone)?;
+                let (ends, axes, _, reference_ends) =
+                    axes_at_ends.as_ref().map_err(Clone::clone)?;
                 if model
                     .element_section(other)
                     .and_then(|section| section.frame_use)
@@ -118,10 +119,11 @@ pub fn rc_column_girder_faces(
                 let inward = scale(axes[0], if side == 0 { 1.0 } else { -1.0 });
                 check_continuation(model, elem, adjacency, nodes[side], ends[side], inward)?;
                 let (beam, normal) = aligned_girder(model, other.id, inward)?;
+                let beam_side = usize::from(other.nodes.first() != Some(&nodes[side]));
                 if model
                     .member_detail(other.id)
                     .and_then(|detail| {
-                        if other.nodes.first() == Some(&nodes[side]) {
+                        if beam_side == 0 {
                             detail.haunch_i
                         } else {
                             detail.haunch_j
@@ -136,7 +138,26 @@ pub fn rc_column_girder_faces(
                         other.id.0
                     ));
                 }
-                let face_mm = contact_distance(shape, &beam, normal, ends[side], *axes, inward)?;
+                let exact_axis = cardinal_axis(inward).filter(|&axis| {
+                    cardinal_axis(beam.axes[normal]) == Some(axis)
+                        && same_axis_coordinate(beam.reference_ends, beam.end_offsets_mm, axis)
+                        && (0..3)
+                            .filter(|&k| k != axis)
+                            .all(|k| same_axis_coordinate(*reference_ends, elem.end_offsets_mm, k))
+                });
+                let face_mm = contact_distance(
+                    shape,
+                    &beam,
+                    normal,
+                    ends[side],
+                    *axes,
+                    inward,
+                    JointOffsets {
+                        beam_mm: beam.end_offsets_mm[beam_side],
+                        column_mm: elem.end_offsets_mm[side],
+                        exact_axis,
+                    },
+                )?;
                 if distance_mm.is_some_and(|other| other != face_mm) {
                     return Err("接続大梁によって材端フェースの位置が異なります".into());
                 }
@@ -210,6 +231,12 @@ fn check_continuation(
     Ok(())
 }
 
+struct JointOffsets {
+    beam_mm: [f64; 3],
+    column_mm: [f64; 3],
+    exact_axis: Option<usize>,
+}
+
 fn contact_distance(
     column: &SectionShape,
     beam: &BeamPlacement,
@@ -217,6 +244,7 @@ fn contact_distance(
     column_end: [f64; 3],
     column_axes: [[f64; 3]; 3],
     inward: [f64; 3],
+    joint: JointOffsets,
 ) -> Result<f64, String> {
     let (b, d) = match beam.section_shape {
         SectionShape::RcBeamRect { b, d, .. } | SectionShape::SrcBeamRect { b, d, .. } => (b, d),
@@ -279,18 +307,17 @@ fn contact_distance(
         .fold(column_size_mm.max(1.0), f64::max);
     let roundoff_mm = 32.0 * f64::EPSILON * scale_mm;
     let axial_half_mm = beam_half[normal];
-    let cardinal =
-        cardinal_axis(inward).filter(|axis| cardinal_axis(beam.axes[normal]) == Some(*axis));
-    let [entry_mm, distance_mm] = if let Some(axis) = cardinal {
-        let center_mm = beam.actual_ends[0][axis] * inward[axis];
-        let end_mm = column_end[axis] * inward[axis];
+    // 接続節点を消去して比較しないと、節点座標より小さな偏心が先の加算で失われる。
+    let [entry_mm, distance_mm] = if let Some(axis) = joint.exact_axis {
+        let center_mm = joint.beam_mm[axis] * inward[axis];
+        let end_mm = joint.column_mm[axis] * inward[axis];
         [-axial_half_mm, axial_half_mm]
             .map(|offset_mm| plane_offset_mm(center_mm, offset_mm, end_mm))
     } else {
-        let center_mm = dot(delta, inward);
+        let center_mm = dot(sub(joint.beam_mm, joint.column_mm), inward);
         [center_mm - axial_half_mm, center_mm + axial_half_mm]
     };
-    if cardinal.is_none() && entry_mm.abs().min(distance_mm.abs()) <= roundoff_mm {
+    if joint.exact_axis.is_none() && entry_mm.abs().min(distance_mm.abs()) <= roundoff_mm {
         return Err(format!(
             "大梁 ID {} と柱の実材端が柱軸方向で接触することを丸め誤差の範囲で確認できません",
             id.0
@@ -326,9 +353,21 @@ fn cardinal_axis(vector: [f64; 3]) -> Option<usize> {
 
 fn plane_offset_mm(center_mm: f64, half_offset_mm: f64, end_mm: f64) -> f64 {
     // 柱端を先に引くと、梁の面が柱端に近いときに離隔が丸めで消える。
-    let plane_mm = center_mm + half_offset_mm;
-    let offset_in_sum_mm = plane_mm - center_mm;
-    let residual_mm =
-        (center_mm - (plane_mm - offset_in_sum_mm)) + (half_offset_mm - offset_in_sum_mm);
+    let (plane_mm, residual_mm) = sum_with_residual(center_mm, half_offset_mm);
     (plane_mm - end_mm) + residual_mm
+}
+
+fn same_axis_coordinate(
+    reference_mm: [[f64; 3]; 2],
+    offset_mm: [[f64; 3]; 2],
+    axis: usize,
+) -> bool {
+    let [a, b] = [0, 1].map(|end| sum_with_residual(reference_mm[end][axis], offset_mm[end][axis]));
+    a == b
+}
+
+fn sum_with_residual(a: f64, b: f64) -> (f64, f64) {
+    let sum = a + b;
+    let b_in_sum = sum - a;
+    (sum, (a - (sum - b_in_sum)) + (b - b_in_sum))
 }
