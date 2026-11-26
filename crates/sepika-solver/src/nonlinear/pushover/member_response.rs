@@ -670,6 +670,157 @@ mod tests {
         );
     }
 
+    fn split_rc_beam_for_axial_cuts(coords: [[f64; 3]; 3]) -> Model {
+        use sepika_core::dof::Dof;
+        use sepika_core::model::ForceRegime;
+        let (mut model, _, b, d) =
+            super::super::tests::rc_column_model_with_rigid_zone(RigidZone {
+                face_i: Some(0.0),
+                face_j: Some(0.0),
+                ..Default::default()
+            });
+        let shape = SectionShape::RcBeamRect {
+            b,
+            d,
+            rebar: RcBeamRebar {
+                main_dia: RebarSize::DiameterMm(25.0),
+                top: vec![4],
+                bottom: vec![4],
+                cover: 40.0,
+                stirrup: BeamStirrup {
+                    dia: RebarSize::DiameterMm(10.0),
+                    pitch: 100.0,
+                    legs: 2,
+                },
+            },
+        };
+        let template = &model.sections[0];
+        let mut section = shape.to_section(template.id, "RC梁".into());
+        section.frame_use = Some(FrameSectionUse::Girder);
+        section.material = template.material;
+        section.rebar_material = template.rebar_material;
+        section.shear_rebar_material = template.shear_rebar_material;
+        model.sections[0] = section;
+        model.nodes.push(model.nodes[1].clone());
+        for (index, (node, coord)) in model.nodes.iter_mut().zip(coords).enumerate() {
+            node.id = NodeId(index as u32);
+            node.coord = coord;
+            node.restraint = Dof6Mask::FREE;
+            if index != 1 {
+                node.restraint.set_fixed(Dof::Ux);
+            }
+        }
+        let first = &mut model.elements[0];
+        first.kind = ElementKind::Beam;
+        first.force_regime = ForceRegime::AxialBendingInteract;
+        first.local_axis.ref_vector = [0.0, 0.0, 1.0];
+        let mut last = first.clone();
+        last.id = ElemId(1);
+        last.nodes = [NodeId(1), NodeId(2)].into_iter().collect();
+        model.elements.push(last);
+        model
+    }
+
+    fn check_axial_cut_with_zero_recovery(
+        model: &Model,
+        case: &LoadCase,
+    ) -> sepika_core::rc_capacity::RcBeamUltimateShearResponse {
+        use super::super::rc_beam_shear::{beam_actions, BeamShearStep};
+        let responses: Vec<_> = model
+            .elements
+            .iter()
+            .map(|elem| {
+                let member: Vec<_> = case
+                    .member
+                    .iter()
+                    .filter(|load| load.elem == elem.id)
+                    .cloned()
+                    .collect();
+                BeamElement::new(elem, model)
+                    .frame_load_response(&[0.0; 12], &member)
+                    .unwrap()
+            })
+            .collect();
+        let group = [ElemId(0), ElemId(1)];
+        let actions = beam_actions(model, &group, &responses, &mut None, None).unwrap();
+        assert_eq!(actions.axial_range_n, [0.0; 2]);
+        let applied = BeamShearStep::new(case, 1.0);
+        beam_actions(model, &group, &responses, &mut None, Some(&applied))
+    }
+
+    #[test]
+    fn lost_axial_action_is_rejected_at_member_interiors_and_free_joints() {
+        use sepika_core::model::{MemberLoad, MemberLoadKind, NodalLoad};
+        use sepika_core::rc_capacity::RcBeamUltimateShearIssue as Issue;
+
+        let model =
+            split_rc_beam_for_axial_cuts([[0.0; 3], [2_000.0, 0.0, 0.0], [4_000.0, 0.0, 0.0]]);
+        let mut case = super::super::loads::PhysicalPushoverLoads::empty().reference;
+        // 3つの入力の合力は1 N。通常加算後のゼロから、釣合いは確認できない。
+        let loads_n = [1e16, 1.0, -1e16];
+        case.nodal = loads_n
+            .map(|n| NodalLoad::manual(NodeId(1), [n, 0.0, 0.0, 0.0, 0.0, 0.0]))
+            .into();
+        assert_eq!(
+            check_axial_cut_with_zero_recovery(&model, &case),
+            Err(Issue::Equilibrium)
+        );
+        case.nodal.clear();
+        for (elem, a) in [(ElemId(0), 2_000.0), (ElemId(1), 0.0), (ElemId(1), 1_000.0)] {
+            case.member = loads_n
+                .map(|p| MemberLoad::manual(elem, [1.0, 0.0, 0.0], MemberLoadKind::Point { a, p }))
+                .into();
+            assert_eq!(
+                check_axial_cut_with_zero_recovery(&model, &case),
+                Err(Issue::Equilibrium),
+                "{elem:?} at {a} mm"
+            );
+        }
+    }
+
+    #[test]
+    fn member_point_loads_at_two_axial_restraints_do_not_act_between_them() {
+        use sepika_core::dof::Dof;
+        use sepika_core::model::{MemberLoad, MemberLoadKind};
+        let mut model =
+            split_rc_beam_for_axial_cuts([[0.0; 3], [2_000.0, 0.0, 0.0], [4_000.0, 0.0, 0.0]]);
+        model.nodes[1].restraint.set_fixed(Dof::Ux);
+        let mut case = super::super::loads::PhysicalPushoverLoads::empty().reference;
+        case.member = [0.0, 2_000.0]
+            .map(|a| {
+                MemberLoad::manual(
+                    ElemId(1),
+                    [1.0, 0.0, 0.0],
+                    MemberLoadKind::Point { a, p: 1_000.0 },
+                )
+            })
+            .into();
+        let result = check_axial_cut_with_zero_recovery(&model, &case).unwrap();
+        assert_eq!(result.axial_range_n, [0.0; 2]);
+    }
+
+    #[test]
+    fn collinear_beam_with_unequal_part_lengths_still_checks_axial_equilibrium() {
+        use sepika_core::model::NodalLoad;
+        use sepika_core::rc_capacity::RcBeamUltimateShearIssue as Issue;
+
+        let model = split_rc_beam_for_axial_cuts([
+            [0.0; 3],
+            [1_003.0, 2_006.0, 0.0],
+            [4_000.0, 8_000.0, 0.0],
+        ]);
+        let mut case = super::super::loads::PhysicalPushoverLoads::empty().reference;
+        // 2区間は同一直線上でも、正規化した局所軸は浮動小数点上で一致しない。
+        assert!(check_axial_cut_with_zero_recovery(&model, &case).is_ok());
+        case.nodal = [1e16, 1.0, -1e16]
+            .map(|n| NodalLoad::manual(NodeId(1), [n, 0.0, 0.0, 0.0, 0.0, 0.0]))
+            .into();
+        assert_eq!(
+            check_axial_cut_with_zero_recovery(&model, &case),
+            Err(Issue::Equilibrium)
+        );
+    }
+
     #[test]
     fn history_conversion_preserves_finite_rounding_at_both_f32_limits() {
         let max = f64::from(f32::MAX);

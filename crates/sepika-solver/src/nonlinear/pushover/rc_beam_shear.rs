@@ -24,8 +24,13 @@ struct BeamPart<'a> {
 
 pub(super) struct BeamShearStep {
     nodal: HashMap<NodeId, [bool; 3]>,
-    member: HashMap<ElemId, [Option<[f64; 2]>; 3]>,
+    member: HashMap<ElemId, Vec<MemberForceLocation>>,
     tolerance_n: f64,
+}
+
+struct MemberForceLocation {
+    interval_mm: [f64; 2],
+    components: [bool; 3],
 }
 
 impl BeamShearStep {
@@ -34,19 +39,20 @@ impl BeamShearStep {
         for load in &case.nodal {
             mark_components(nodal.entry(load.node).or_default(), &load.values[..3]);
         }
-        let mut member = HashMap::new();
+        let mut member = HashMap::<_, Vec<_>>::new();
         for load in &case.member {
-            let bounds = match load.kind {
+            let interval_mm = match load.kind {
                 MemberLoadKind::Point { p, a } if p != 0.0 => [a, a],
                 MemberLoadKind::Distributed { w1, w2, a, b } if w1 != 0.0 || w2 != 0.0 => [a, b],
                 _ => continue,
             };
-            let by_axis: &mut [Option<[f64; 2]>; 3] = member.entry(load.elem).or_default();
-            for (extent, component) in by_axis.iter_mut().zip(load.dir) {
-                if component != 0.0 {
-                    *extent = Some(extent.map_or(bounds, |old| enclosing_bounds(old, bounds)));
-                }
-            }
+            member
+                .entry(load.elem)
+                .or_default()
+                .push(MemberForceLocation {
+                    interval_mm,
+                    components: load.dir.map(|c| c != 0.0),
+                });
         }
         Self {
             nodal,
@@ -55,14 +61,17 @@ impl BeamShearStep {
         }
     }
 
-    fn member_load_bounds(&self, elem: ElemId, axis: [f64; 3]) -> Option<[f64; 2]> {
+    fn member_load_intervals(
+        &self,
+        elem: ElemId,
+        axis: [f64; 3],
+    ) -> impl Iterator<Item = [f64; 2]> + '_ {
         self.member
-            .get(&elem)?
-            .iter()
-            .zip(axis)
-            .filter(|(_, projection)| *projection != 0.0)
-            .filter_map(|(&bounds, _)| bounds)
-            .reduce(enclosing_bounds)
+            .get(&elem)
+            .into_iter()
+            .flatten()
+            .filter(move |load| has_axis_component(Some(&load.components), axis))
+            .map(|load| load.interval_mm)
     }
 
     fn verify_zero_axial_cuts(
@@ -77,6 +86,23 @@ impl BeamShearStep {
         let last = parts.last().ok_or(Issue::GroupTopology)?;
         let [i, j] = [first.ends[0], last.ends[1]];
         let length_mm = dist(i, j);
+        for part in parts {
+            let start_mm = dist(i, part.ends[0]);
+            let lo = (lo_mm - start_mm).max(0.0);
+            let hi = (hi_mm - start_mm).min(part.length_mm);
+            if self
+                .member_load_intervals(part.elem.id, axis)
+                .any(|[a, b]| {
+                    if a == b {
+                        lo < a && a < hi
+                    } else {
+                        lo.max(a) < hi.min(b)
+                    }
+                })
+            {
+                return Err(Issue::Equilibrium);
+            }
+        }
         let no_reaction = |part: &BeamPart<'_>, side, neighbor| {
             let node_id = part.elem.nodes[side];
             model.node(node_id).is_some_and(|node| {
@@ -98,7 +124,13 @@ impl BeamShearStep {
                 && x_mm < hi_mm
                 && !has_end_eccentricity(left.elem, 1)
                 && no_reaction(right, 0, Some(left.elem.id))
-                && has_axis_component(self.nodal.get(&right.elem.nodes[0]), axis)
+                && (has_axis_component(self.nodal.get(&right.elem.nodes[0]), axis)
+                    || [(left.elem.id, left.length_mm), (right.elem.id, 0.0)]
+                        .into_iter()
+                        .any(|(elem, x_mm)| {
+                            self.member_load_intervals(elem, axis)
+                                .any(|interval| interval == [x_mm; 2])
+                        }))
             {
                 return Err(Issue::Equilibrium);
             }
@@ -125,13 +157,10 @@ impl BeamShearStep {
                     break;
                 }
                 has_axial_load |= has_axis_component(self.nodal.get(&part.elem.nodes[side]), axis);
-                let first_load_mm = self.member_load_bounds(part.elem.id, axis).map(|[a, b]| {
-                    if side == 0 {
-                        a
-                    } else {
-                        part.length_mm - b
-                    }
-                });
+                let first_load_mm = self
+                    .member_load_intervals(part.elem.id, axis)
+                    .map(|[a, b]| if side == 0 { a } else { part.length_mm - b })
+                    .reduce(f64::min);
                 if lo_mm < end_mm
                     && (has_axial_load
                         || first_load_mm.is_some_and(|x| x < part.length_mm.min(hi_mm - start_mm)))
@@ -181,9 +210,11 @@ impl BeamShearStep {
         }
         let [ex, ey, ez] = axes;
         let no_member_component = |axis| {
-            parts
-                .iter()
-                .all(|part| self.member_load_bounds(part.elem.id, axis).is_none())
+            parts.iter().all(|part| {
+                self.member_load_intervals(part.elem.id, axis)
+                    .next()
+                    .is_none()
+            })
         };
         let no_axial_load_on_free_side = no_member_component(ex)
             && [&nodes[1..], &nodes[..nodes.len() - 1]]
@@ -234,10 +265,6 @@ impl BeamShearStep {
 
 const TRANSLATION: [Dof; 3] = [Dof::Ux, Dof::Uy, Dof::Uz];
 const ROTATION: [Dof; 3] = [Dof::Rx, Dof::Ry, Dof::Rz];
-
-fn enclosing_bounds([a, b]: [f64; 2], [c, d]: [f64; 2]) -> [f64; 2] {
-    [a.min(c), b.max(d)]
-}
 
 fn axial_direction_free(node: &Node, axis: [f64; 3]) -> bool {
     TRANSLATION.into_iter().zip(axis).all(|(dof, component)| {
@@ -453,19 +480,21 @@ pub(super) fn beam_actions(
     if !combined.axial_range_n.into_iter().all(f64::is_finite) {
         return Err(Issue::Recovery);
     }
-    if let Some(applied) = applied.filter(|_| exact_axes) {
+    if let Some(applied) = applied {
         let axes = first_axes.ok_or(Issue::GroupTopology)?;
         if combined.axial_range_n == [0.0; 2] {
             applied.verify_zero_axial_cuts(model, geometry, &parts, axes[0], [lo, hi])?;
         }
-        applied.confirm_zero_components(
-            model,
-            geometry,
-            &parts,
-            axes,
-            torsion_nmm,
-            &mut combined,
-        )?;
+        if exact_axes {
+            applied.confirm_zero_components(
+                model,
+                geometry,
+                &parts,
+                axes,
+                torsion_nmm,
+                &mut combined,
+            )?;
+        }
     }
     Ok(combined)
 }
