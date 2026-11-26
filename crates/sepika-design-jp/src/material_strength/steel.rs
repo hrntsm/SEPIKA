@@ -240,6 +240,8 @@ pub fn big_lambda(f: f64, e: f64) -> f64 {
     (std::f64::consts::PI.powi(2) * e / (0.6 * f)).sqrt()
 }
 
+pub(crate) const STEEL_FC_ELASTIC_COEFFICIENT: f64 = 0.277;
+
 /// 長期・短期許容圧縮応力度 fc [N/mm²]（座屈考慮、鋼構造許容応力度設計規準）。
 /// `λ = lk/i`、`Λ = √(π²E/(0.6F))` で 2 分岐（`λ ≤ Λ` と `λ > Λ`）。短期は長期の 1.5 倍。
 /// `e` は材料のヤング係数 [N/mm²]。
@@ -250,7 +252,7 @@ pub fn steel_fc(f: f64, e: f64, lambda: f64, term: LoadTerm) -> f64 {
         let nu = 1.5 + (2.0 / 3.0) * r * r;
         f * (1.0 - 0.4 * r * r) / nu
     } else {
-        0.277 * f / (r * r)
+        STEEL_FC_ELASTIC_COEFFICIENT * f / (r * r)
     };
     match term {
         LoadTerm::Long => fc_long,

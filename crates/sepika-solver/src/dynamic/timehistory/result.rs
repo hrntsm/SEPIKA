@@ -105,6 +105,46 @@ pub struct ThRecording {
     /// 旧結果や照査を行わない呼び出しでは空。
     #[serde(default)]
     pub asymmetric_column_sections: BTreeMap<usize, AsymmetricColumnSectionHistory>,
+    /// 上下対称H形鋼柱の確認済み補剛区間の短期強軸曲げ照査（要素添字順）。
+    /// 旧結果や照査を行わない呼び出しでは空。
+    #[serde(default)]
+    pub symmetric_column_bending: BTreeMap<usize, SymmetricColumnBendingHistory>,
+}
+
+/// 全確定時刻の強軸曲げ照査。長さ [mm] は両実材端支持を確認した場合に限る。
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SymmetricColumnBendingHistory {
+    pub committed_count: usize,
+    pub evaluated_count: usize,
+    pub lb_mm: Option<f64>,
+    pub peak: Option<ColumnBendingPeak>,
+    pub material_failure: Option<ColumnBendingMaterialFailure>,
+    pub unavailable: BTreeSet<String>,
+}
+
+/// 全長の強軸曲げが短期材料許容上限を超えた独立の不適合。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ColumnBendingMaterialFailure {
+    pub step: u64,
+    pub time_s: f64,
+    pub x_mm: f64,
+    pub mz_nmm: f64,
+    pub ratio: f64,
+}
+
+/// 同一確定時刻・補剛区間の強軸曲げ需要と、規準の短期許容値による支配比。
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ColumnBendingPeak {
+    pub step: u64,
+    pub time_s: f64,
+    pub max_x_mm: f64,
+    pub max_mz_nmm: f64,
+    pub end_moments_nmm: [f64; 2],
+    pub monotonic: bool,
+    pub c: f64,
+    pub p_lambda_b: f64,
+    pub fb_mpa: f64,
+    pub ratio: f64,
 }
 
 /// 1 本の柱の短期断面単独照査。観測した全確定時刻のうち、位置ごとの支配値と未算定理由を保持する。

@@ -6,6 +6,7 @@ use crate::transform::LocalFrame;
 use sepika_core::geom::vec3;
 use sepika_core::model::{MemberLoad, MemberLoadKind};
 
+mod section_extrema;
 mod shear_envelope;
 mod shear_span;
 mod strong_bending;

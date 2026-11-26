@@ -847,8 +847,8 @@ mod tests {
 
     #[test]
     fn src552_ovika_edit_reload_and_display_share_material_regions() {
-        use sepika_core::ids::{MaterialId, SectionId};
-        use sepika_core::model::{AnalysisKind, MaterialCategory};
+        use sepika_core::ids::{ElemId, MaterialId, SectionId};
+        use sepika_core::model::{AnalysisKind, ForceRegime, MaterialCategory};
         use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SrcHManufacture};
         use sepika_edit::{EditCommand, EditSectionShape};
         let shape = SectionShape::SrcColumnRect {
@@ -929,6 +929,8 @@ mod tests {
             frame_use: Some(sepika_core::model::FrameSectionUse::Girder),
             ..model.sections[0].clone()
         };
+        let girder_id = ElemId(2);
+        model.elements[girder_id.index()].force_regime = ForceRegime::AxialBendingInteract;
         let path = std::env::temp_dir().join(format!("sepika-src552-{}.ovika", std::process::id()));
         sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
         let mut model = sepika_io::ovika::load_ovika(&path).unwrap().model;
@@ -952,6 +954,10 @@ mod tests {
         .apply(&mut model);
         sepika_io::ovika::save_ovika(&path, &model, Default::default()).unwrap();
         let mut model = sepika_io::ovika::load_ovika(&path).unwrap().model;
+        assert_eq!(
+            model.element(girder_id).unwrap().force_regime,
+            ForceRegime::AxialBendingInteract
+        );
         sepika_job::prepare::prepare_model_for_analysis(&mut model, &Default::default(), None)
             .unwrap();
         sepika_solver::statics::analysis::Analysis::prepare(&model).unwrap();

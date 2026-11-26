@@ -157,9 +157,26 @@ pub struct BeamQd1Geometry {
     pub end_positions: [f64; 2],
     /// 偏心による実柱面非交差で実材端を採ったか（i/j順）。
     pub uses_material_end: [bool; 2],
+    missing_direct_qy_support: [bool; 2],
 }
 
-/// 単一のRC矩形梁で両端の接合と内法長さ [mm] を確認する。接続柱の遠端支持は問わない。
+impl BeamQd1Geometry {
+    /// QD1に使用する内法長さ [mm]。直接支持端で局所Qy方向の並進反力を受けられない場合は理由を返す。
+    pub fn demand_clear_span_mm(&self) -> Result<f64, String> {
+        let ends = match self.missing_direct_qy_support {
+            [false, false] => return Ok(self.clear_span_mm),
+            [true, false] => "i端",
+            [false, true] => "j端",
+            [true, true] => "i端・j端",
+        };
+        Err(format!(
+            "QD1用の梁の{ends}で局所Qy方向の反力を受ける並進支持を確認できません"
+        ))
+    }
+}
+
+/// 単一のRC矩形梁で両端の曲げ伝達・内法・検定位置を確認する。接続柱の遠端支持は問わない。
+/// QD1需要に使う場合は `BeamQd1Geometry::demand_clear_span_mm` で直接支持端の並進支持も確認する。
 /// `adjacency` は同一モデルの `NodeAdjacency::primary_frame` を渡す。
 pub fn beam_qd1_geometry(
     model: &Model,
@@ -177,7 +194,7 @@ pub fn beam_qd1_geometry(
     }
     validate_beam_qd1_section_geometry(model, elem)?;
     let [i, j] = frame_end_positions(model, elem).ok_or("QD1用の梁の材軸を確定できません")?;
-    let [_, _, ez] = local_frame_axes(i, j, elem.local_axis.ref_vector)?;
+    let [_, ey, ez] = local_frame_axes(i, j, elem.local_axis.ref_vector)?;
     let length_mm = dist(i, j);
     let displaced = model
         .element_section(elem)
@@ -185,8 +202,9 @@ pub fn beam_qd1_geometry(
         .then(|| girder_column_face_misses_due_to_offset(model, elem, adjacency))
         .flatten()
         .unwrap_or_default();
-    let from_i_mm = beam_qd1_end_distance(model, adjacency, elem, 0, ez, None, &displaced[0])?;
-    let from_j_mm = beam_qd1_end_distance(model, adjacency, elem, 1, ez, None, &displaced[1])?;
+    let i_end = beam_qd1_end_geometry(model, adjacency, elem, 0, ez, None, &displaced[0])?;
+    let j_end = beam_qd1_end_geometry(model, adjacency, elem, 1, ez, None, &displaced[1])?;
+    let [from_i_mm, from_j_mm] = [i_end.distance_mm, j_end.distance_mm];
     let clear_span_mm = length_mm - from_i_mm - from_j_mm;
     if !clear_span_mm.is_finite() || clear_span_mm <= 0.0 {
         return Err("QD1に必要な有限で正の内法長さが成立しません".into());
@@ -196,16 +214,20 @@ pub fn beam_qd1_geometry(
         axis_length_mm: length_mm,
         end_positions: [from_i_mm / length_mm, 1.0 - from_j_mm / length_mm],
         uses_material_end: displaced.map(|cols| !cols.is_empty()),
+        missing_direct_qy_support: [i_end, j_end].map(|end| {
+            end.direct_support
+                .is_some_and(|node| !restrains_direction(node, ey, [Dof::Ux, Dof::Uy, Dof::Uz]))
+        }),
     })
 }
 
-/// 単一のRC矩形梁で両端の接合と内法長さ [mm] を確認する。
+/// 単一のRC矩形梁でQD1需要に使用する内法長さ [mm] を返す。曲げ伝達・内法・直接支持端の並進支持に不備があれば理由を返す。
 pub fn beam_qd1_clear_span(
     model: &Model,
     adjacency: &NodeAdjacency,
     elem: &ElementData,
 ) -> Result<f64, String> {
-    beam_qd1_geometry(model, adjacency, elem).map(|geometry| geometry.clear_span_mm)
+    beam_qd1_geometry(model, adjacency, elem)?.demand_clear_span_mm()
 }
 
 pub(super) fn validate_beam_qd1_section_geometry(
@@ -231,18 +253,24 @@ pub(super) fn beam_qd1_face_distance(
     ez: [f64; 3],
     grouped_qy_axis: Option<[f64; 3]>,
 ) -> Result<f64, String> {
-    beam_qd1_end_distance(model, adjacency, elem, index, ez, grouped_qy_axis, &[])
+    beam_qd1_end_geometry(model, adjacency, elem, index, ez, grouped_qy_axis, &[])
+        .map(|end| end.distance_mm)
 }
 
-fn beam_qd1_end_distance(
-    model: &Model,
+struct Qd1EndGeometry<'a> {
+    distance_mm: f64,
+    direct_support: Option<&'a Node>,
+}
+
+fn beam_qd1_end_geometry<'a>(
+    model: &'a Model,
     adjacency: &NodeAdjacency,
     elem: &ElementData,
     index: usize,
     ez: [f64; 3],
     grouped_qy_axis: Option<[f64; 3]>,
     displaced_columns: &[ElemId],
-) -> Result<f64, String> {
+) -> Result<Qd1EndGeometry<'a>, String> {
     if !elem.kind.is_primary_frame_support() {
         return Err("QD1用に両端の強軸曲げを伝達する梁要素を確認できません".into());
     }
@@ -340,7 +368,10 @@ fn beam_qd1_end_distance(
             "QD1用の内法長さ: {end}のフェース距離が有限な非負値ではありません"
         ));
     }
-    Ok(distance_mm)
+    Ok(Qd1EndGeometry {
+        distance_mm,
+        direct_support: (!column_connected).then_some(node),
+    })
 }
 
 /// 部材の一部でも、実際に割り当てられた床板を支持する場合に true。

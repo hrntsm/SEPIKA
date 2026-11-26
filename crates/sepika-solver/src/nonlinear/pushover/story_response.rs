@@ -1031,6 +1031,7 @@ mod tests {
             horizontal_force: 0.0,
             wall_shear_signed: None,
             rc_ultimate_shear: None,
+            rc_beam_ultimate_shear: None,
         };
         let mut invalid = member(17);
         invalid.axial = f64::NAN;

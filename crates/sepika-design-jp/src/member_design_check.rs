@@ -780,12 +780,14 @@ pub fn run_member_design_checks(
                 let adjacency = rc_beam_adjacency.get_or_insert_with(|| {
                     sepika_core::adjacency::NodeAdjacency::primary_frame(model)
                 });
-                crate::rc::beam_qd1_geometry(model, adjacency, elem).map(|geometry| {
+                crate::rc::beam_qd1_geometry(model, adjacency, elem).and_then(|geometry| {
                     single_qd1_geometry = Some(geometry);
                     let q0_n = options
                         .q_simple_by_elem
                         .and_then(|m| m.get(elem_id).copied());
-                    (geometry.clear_span_mm, None, q0_n)
+                    geometry
+                        .demand_clear_span_mm()
+                        .map(|span_mm| (span_mm, None, q0_n))
                 })
             });
         let qd1_positions = single_qd1_geometry.and_then(|geometry| {

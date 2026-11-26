@@ -19,7 +19,9 @@ use sepika_core::material_grade::{rebar_f_value, MAIN_REBAR_GRADES};
 use sepika_core::model::{
     Constraint, ElementData, ElementKind, EndCondition, Material, Model, Section,
 };
-use sepika_core::rc_capacity::{rc_mu_simple, RcCapacityInput};
+use sepika_core::rc_capacity::{
+    rc_mu_simple, RcBeamUltimateShearIssue, RcBeamUltimateShearResponse, RcCapacityInput,
+};
 use sepika_core::section_shape::{RebarSize, SectionShape};
 
 use super::options::{
@@ -491,12 +493,16 @@ fn check_member(
         format!("{code}: {error}")
     });
     let is_beam = matches!(shape, SectionShape::RcBeamRect { .. });
+    let whole_beam_shear = (is_beam && demand.mode == UltimateDemandMode::ConfirmedTotal)
+        .then_some(demand.rc_beam_ultimate_shear)
+        .flatten();
     let in_girder_group = |min_elements| {
         model
             .girder_groups
             .iter()
             .any(|group| group.len() >= min_elements && group.contains(&elem.id))
     };
+    let grouped_beam = is_beam && in_girder_group(1);
     let supports_slab = || beam_supports_slab(model, elem);
     let has_section_haunch = || has_haunch(model, elem.id);
     let check_bond_input = |input: RcUltimateBondInput,
@@ -922,12 +928,23 @@ fn check_member(
         Ok(span) => (Some(*span), None),
         Err(reason)
             if demand.mode == UltimateDemandMode::ConfirmedTotal
-                && demand.rc_ultimate_shear.is_some() =>
+                && (demand.rc_ultimate_shear.is_some()
+                    || matches!(whole_beam_shear, Some(Ok(_)))) =>
         {
             (None, Some(reason.as_str()))
         }
-        Err(reason) if beam_bond.is_some() => return unchecked_bending(reason),
-        Err(reason) => return unchecked(reason),
+        Err(span_reason) => {
+            let reason = whole_beam_shear
+                .and_then(Result::err)
+                .filter(|_| grouped_beam)
+                .map(|issue| format!("{span_reason}。{}", issue.reason()));
+            let reason = reason.as_deref().unwrap_or(span_reason);
+            return if beam_bond.is_some() {
+                unchecked_bending(reason)
+            } else {
+                unchecked(reason)
+            };
+        }
     };
     if static_beam_rebar.is_some() && p.at <= 0.0 {
         let reason = if tension_is_top {
@@ -986,12 +1003,15 @@ fn check_member(
         .shear
         .zip(demand.shear_weak)
         .map(|(qz, qy)| [(demand.mz.abs(), qz.abs()), (demand.my.abs(), qy.abs())]);
-    let shear_actions = demand.rc_ultimate_shear.or_else(|| {
-        Some(sepika_core::rc_capacity::RcUltimateShearActions {
-            axial_range_n: [demand.min_axial_for_shear_n?, n_axial],
-            max_mq: direct_mq?,
-        })
-    });
+    let shear_actions = match whole_beam_shear {
+        Some(result) => result.ok(),
+        None => demand.rc_ultimate_shear.or_else(|| {
+            Some(sepika_core::rc_capacity::RcUltimateShearActions {
+                axial_range_n: [demand.min_axial_for_shear_n?, n_axial],
+                max_mq: direct_mq?,
+            })
+        }),
+    };
     let valid_shear_actions = shear_actions.filter(|actions| {
         actions
             .max_mq
@@ -1000,7 +1020,7 @@ fn check_member(
     });
     let [(mz, qz), (my, qy)] = valid_shear_actions
         .map(|actions| actions.max_mq)
-        .or(direct_mq)
+        .or(if grouped_beam { None } else { direct_mq })
         .unwrap_or_default();
     let strong_action = mz != 0.0 || qz != 0.0;
     let weak_action = my != 0.0 || qy != 0.0;
@@ -1016,8 +1036,8 @@ fn check_member(
         Err("せん断スパン比の算定には確定総応答のMとQが必要です")
     } else if matches!(shape, SectionShape::RcColumnCircle { .. }) {
         Err("荒川mean式の終局検定は矩形断面に限ります")
-    } else if kind == MemberKind::Girder && in_girder_group(1) {
-        Err("一本部材グループ全体の曲げ・せん断の最大値を確認できません")
+    } else if let Some(Err(reason)) = whole_beam_shear {
+        Err(reason.reason())
     } else if kind == MemberKind::Girder && supports_slab() {
         Err("スラブ付きRC梁の終局せん断の適用条件を確認できません")
     } else if has_section_haunch() {
@@ -1101,6 +1121,7 @@ fn check_member(
     }
 
     let qmu = match (demand.shear, legacy_span_mm) {
+        (Some(_), _) if grouped_beam && valid_shear_actions.is_none() => Ok(f64::NAN),
         (Some(_), _) => Ok(qz.abs()),
         (None, Some(span_mm)) if sigma_y.is_some() => {
             static_hinge_shear(mu, opts.upper_strength_factor, span_mm, "強軸")
@@ -1184,6 +1205,9 @@ fn check_member(
         }
         UltimateDemandMode::StaticHinge => {
             format!("{demand_symbol}={qmu:.0} N, QL={ql:.0} N（強軸）")
+        }
+        UltimateDemandMode::ConfirmedTotal if qmu.is_nan() => {
+            format!("{demand_symbol}=未算定（初期重力込み）")
         }
         UltimateDemandMode::ConfirmedTotal => {
             format!("{demand_symbol}={qmu:.0} N（初期重力込み）")
@@ -1357,6 +1381,7 @@ pub fn collect_rc_ultimate_checks(
 ) -> Result<Vec<UltimateCheck>, String> {
     let connection_counts = node_connection_counts(model);
     let hinge_adjacency = OnceCell::new();
+    let grouped_shear = grouped_beam_shear_actions(model, demand_by_elem);
     let mut out = Vec::new();
     for elem in &model.elements {
         let Some(sec) = elem.section.and_then(|sid| model.sections.get(sid.index())) else {
@@ -1383,7 +1408,7 @@ pub fn collect_rc_ultimate_checks(
         sepika_core::load_combo::ultimate_gravity_terms(model)
             .map_err(|reason| diagnose(format!("RC部材 ID {}: {reason}", elem.id.0)))?;
         let mut demands = demand_by_elem.iter().filter(|(id, _)| *id == elem.id);
-        let demand = demands.next().map(|(_, d)| *d).ok_or_else(|| {
+        let mut demand = demands.next().map(|(_, d)| *d).ok_or_else(|| {
             diagnose(format!(
                 "ultimate_demand_missing: RC部材 ID {} の長期架構用需要が不足しています",
                 elem.id.0
@@ -1394,6 +1419,11 @@ pub fn collect_rc_ultimate_checks(
                 "ultimate_demand_duplicate: RC部材 ID {} の需要が重複しています",
                 elem.id.0
             )));
+        }
+        if demand.mode == UltimateDemandMode::ConfirmedTotal {
+            if let Some(&actions) = grouped_shear.get(&elem.id) {
+                demand.rc_beam_ultimate_shear = Some(actions);
+            }
         }
         if [demand.n_axial, demand.mz, demand.my]
             .iter()
@@ -1464,4 +1494,66 @@ pub fn collect_rc_ultimate_checks(
         }
     }
     Ok(out)
+}
+
+fn grouped_beam_shear_actions(
+    model: &Model,
+    demands: &[(ElemId, MemberDemand)],
+) -> HashMap<ElemId, RcBeamUltimateShearResponse> {
+    use RcBeamUltimateShearIssue as Issue;
+
+    if model.girder_groups.is_empty() {
+        return HashMap::new();
+    }
+    let demands: HashMap<_, _> = demands.iter().copied().collect();
+    let mut grouped = HashMap::new();
+    for group in &model.girder_groups {
+        let actions = (|| {
+            let mut expected = None;
+            let mut slab = false;
+            let mut cutoff = false;
+            for id in group {
+                let elem = model.element(*id).ok_or(Issue::GroupTopology)?;
+                if !model.element_section(elem).is_some_and(|section| {
+                    section.frame_use == Some(sepika_core::model::FrameSectionUse::Girder)
+                        && matches!(section.shape, Some(SectionShape::RcBeamRect { .. }))
+                }) {
+                    return Err(Issue::Section);
+                }
+                let demand = demands
+                    .get(id)
+                    .filter(|d| d.mode == UltimateDemandMode::ConfirmedTotal)
+                    .ok_or(Issue::MissingGroupRecord)?;
+                let actions = demand
+                    .rc_beam_ultimate_shear
+                    .ok_or(Issue::MissingGroupRecord)?;
+                if *expected.get_or_insert(actions) != actions {
+                    return Err(Issue::MissingGroupRecord);
+                }
+                slab |= beam_supports_slab(model, elem);
+                cutoff |= demand.bond.is_some_and(RcUltimateBondDemand::has_cutoff)
+                    || demand.beam_bond.is_some_and(|bond| {
+                        [bond.positive, bond.negative]
+                            .into_iter()
+                            .flatten()
+                            .any(|input| input.bars.has_cutoff())
+                    });
+            }
+            let actions = expected.ok_or(Issue::MissingGroupRecord)??;
+            if slab {
+                Err(Issue::Slab)
+            } else if cutoff {
+                Err(Issue::Cutoff)
+            } else {
+                Ok(actions)
+            }
+        })();
+        for &id in group {
+            grouped
+                .entry(id)
+                .and_modify(|previous| *previous = Err(Issue::GroupTopology))
+                .or_insert(actions);
+        }
+    }
+    grouped
 }

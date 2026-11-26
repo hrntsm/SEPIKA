@@ -235,6 +235,7 @@ impl StrengthBasis {
 /// 時刻歴応答解析は [`StrengthBasis::Nominal`]、
 /// 保有水平耐力計算は [`StrengthBasis::MaterialStrength`] を渡す。
 /// RC矩形梁の集中ばね入力が不正・不足なら診断文付きでpanicする。
+/// 矩形SRC梁・柱の材端集中ばねは適用条件を確認できないため診断文付きでpanicする。
 /// RC耐震壁の `wall_capacity` には事前解決した局所正負の順のQu `[N]` の有限正値を渡す。
 /// RC耐震壁で値が欠落・不正の場合や要素の入力が適用外の場合は、診断文付きでpanicする。
 /// `model` は `Model::validate_local_frames` 済みを前提とする。
@@ -253,6 +254,9 @@ pub fn build_nonlinear_behavior(
             panic!("{issue}");
         }
         return build_behavior(data, model);
+    }
+    if let Some(issue) = input_check::src_concentrated_spring_issue(data, model) {
+        panic!("{issue}");
     }
     if let Some(issue) = springs::rc_reference_target_issue(data, model) {
         panic!("部材 ID {} のRC梁基準接続: {issue}", data.id.0);
