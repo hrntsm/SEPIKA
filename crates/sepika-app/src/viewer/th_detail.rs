@@ -197,6 +197,20 @@ fn design_member_kind(elem: &ElementData, model: &Model) -> Option<MemberKind> {
     }
 }
 
+fn is_symmetric_h_column(model: &Model, elem: &ElementData) -> bool {
+    matches!(
+        elem.kind,
+        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
+    ) && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
+        && model.element_section(elem).is_some_and(|sec| {
+            sepika_design_jp::steel::is_symmetric_h_section(sec)
+                && sepika_core::structure_kind::structure_kind_of(
+                    Some(sec),
+                    model.element_material(elem).map(|mat| mat.category),
+                ) == StructureKind::S
+        })
+}
+
 /// 時刻歴詳細ウィンドウ（`app.ui.scoped.th_detail_elem` があれば表示）。
 pub(crate) fn show_th_detail_window_at(ui: &egui::Ui, app: &mut App, view: &super::ViewportState) {
     let Some(elem_id) = app.ui.scoped.th_detail_elem else {
@@ -245,6 +259,31 @@ fn draw_th_detail_content_at(
         ui.colored_label(theme::GRAY_600, "時刻歴の詳細記録がありません。");
         return;
     };
+    let case_id = view.spatial_case_id(app);
+    let is_target = |model: &Model| {
+        model
+            .element(elem_id)
+            .is_some_and(|elem| is_symmetric_h_column(model, elem))
+    };
+    let selected_input_matches = || {
+        case_id.is_some_and(|id| {
+            app.require_result_input(crate::app::ResultInputKey::TimeHistory(id))
+                .is_ok()
+        })
+    };
+    if (is_target(&app.core.model)
+        || case_id
+            .and_then(|id| app.recorded_time_history_model(id))
+            .as_ref()
+            .is_some_and(is_target))
+        && !selected_input_matches()
+    {
+        ui.colored_label(
+            theme::WARN_TEXT,
+            "未算定：選択中の時刻歴結果の生成入力と現在のモデルの一致を確認できません。解析を再実行してください。",
+        );
+        return;
+    }
     let Some(recording) = th_result.recording.as_ref() else {
         ui.colored_label(
             theme::GRAY_600,
@@ -347,20 +386,11 @@ fn draw_th_detail_content_at(
         elem_idx,
         recording,
         th_result.time.len(),
-        || {
-            view.spatial_case_id(app).is_some_and(|id| {
-                app.require_result_input(crate::app::ResultInputKey::TimeHistory(id))
-                    .is_ok()
-            })
-        },
         th_nonlinear,
         th_applied_long_term,
         || damage_control_gravity_issue(app, view, &display, th_result),
         || {
-            if !view.spatial_case_id(app).is_some_and(|id| {
-                app.require_result_input(crate::app::ResultInputKey::TimeHistory(id))
-                    .is_ok()
-            }) {
+            if !selected_input_matches() {
                 return Err("時刻歴結果の生成入力を確認できないため、初期載荷を照合できません");
             }
             matching_gravity_member_forces(&display, app, |name| {
@@ -723,7 +753,6 @@ fn draw_peak_check<'a>(
     elem_idx: usize,
     rec: &ThRecording,
     expected_count: usize,
-    bending_input_current: impl FnOnce() -> bool,
     th_nonlinear: bool,
     th_applied_long_term: bool,
     damage_control_gravity_issue: impl FnOnce() -> Option<&'static str>,
@@ -737,9 +766,7 @@ fn draw_peak_check<'a>(
         sec,
         model.element_material(elem).map(|mat| mat.category),
     );
-    let symmetric_h_column = structure == StructureKind::S
-        && design_member_kind(elem, model) == Some(MemberKind::Column)
-        && sec.is_some_and(sepika_design_jp::steel::is_symmetric_h_section);
+    let symmetric_h_column = is_symmetric_h_column(model, elem);
     ui.strong(if signed_bending || symmetric_h_column {
         "時刻歴の簡易検定（短期）"
     } else {
@@ -760,17 +787,14 @@ fn draw_peak_check<'a>(
         draw_asymmetric_column_section_history(ui, rec, elem_idx);
     }
     let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
-    if symmetric_h_column
-        && !draw_symmetric_column_bending(
+    if symmetric_h_column {
+        draw_symmetric_column_bending(
             ui,
             rec,
             elem_idx,
             expected_count,
             attr.and_then(|a| a.c_direct).is_some(),
-            bending_input_current,
-        )
-    {
-        return;
+        );
     }
     let Some(peak) = rec
         .peak_member_forces
@@ -1271,8 +1295,7 @@ fn draw_symmetric_column_bending(
     elem_idx: usize,
     expected_count: usize,
     has_direct_c: bool,
-    input_current: impl FnOnce() -> bool,
-) -> bool {
+) {
     ui.strong("全確定時刻の強軸曲げ・横座屈照査（短期）");
     ui.label("軸力・弱軸曲げ・弱軸せん断・ねじりを含む部材全体の適否を示すものではありません。");
     if has_direct_c {
@@ -1283,15 +1306,8 @@ fn draw_symmetric_column_bending(
             theme::WARN_TEXT,
             "未算定：確定時刻ごとの補剛区間の照査記録がありません。先頭から解析を再実行してください。",
         );
-        return true;
+        return;
     };
-    if !input_current() {
-        ui.colored_label(
-            theme::WARN_TEXT,
-            "未算定：選択中の時刻歴結果の生成入力と現在のモデルの一致を確認できません。解析を再実行してください。",
-        );
-        return false;
-    }
     let complete = expected_count > 0
         && history.committed_count == expected_count
         && history.evaluated_count == expected_count
@@ -1364,7 +1380,6 @@ fn draw_symmetric_column_bending(
             ),
         );
     }
-    true
 }
 
 fn draw_asymmetric_column_section_history(ui: &mut egui::Ui, rec: &ThRecording, elem_idx: usize) {
@@ -1655,7 +1670,6 @@ mod tests {
                     index,
                     rec,
                     rec.frame_time.len(),
-                    || true,
                     with_gravity,
                     with_gravity,
                     || (!with_gravity).then_some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),
@@ -2920,7 +2934,6 @@ mod tests {
                     0,
                     &rec,
                     rec.frame_time.len(),
-                    || true,
                     false,
                     false,
                     || Some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),

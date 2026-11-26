@@ -304,37 +304,54 @@ mod tests {
         let model = model();
         let frame = frame();
         let samples = [[259e6, 0.0], [0.0, -259e6], [260e6, -260e6]];
-        let history = collect(&model, 4, |step, _, lb| {
-            let Some(&[i, j]) = samples.get(step) else {
+        let build_span = |sample: usize, lb: f64| {
+            let Some(&[i, j]) = samples.get(sample) else {
                 return Err("同じ確定時刻の荷重込み部材応答がありません".into());
             };
-            let q = -86_333.333_333_333_33;
-            let q = if step == 2 {
+            let q = if sample == 2 {
                 -173_333.333_333_333_34
             } else {
-                q
+                -86_333.333_333_333_33
             };
             let forces = MemberForces {
                 at: vec![(0.0, m_and_q(i, q)), (1.0, m_and_q(j, q))],
             };
             frame_strong_bending_span(&frame, lb, [0.0, lb], &[], &forces)
-        });
-        let peak = history.peak.unwrap();
-        assert_eq!(history.lb_mm, Some(3000.0));
-        assert_eq!((history.committed_count, history.evaluated_count), (4, 3));
-        assert!(history
+        };
+        let max_position = [(0.0, 259e6), (3000.0, -259e6)];
+        let assert_failure = |peak: &ColumnBendingPeak, sample: usize| {
+            assert!(peak.ratio > 1.0 && peak.monotonic, "{peak:?}");
+            assert_eq!(peak.end_moments_nmm, samples[sample]);
+            assert_eq!((peak.max_x_mm, peak.max_mz_nmm), max_position[sample]);
+            assert!((peak.c - 1.75).abs() < 1e-10, "{peak:?}");
+            assert!((peak.p_lambda_b - 0.6).abs() < 1e-10, "{peak:?}");
+            assert!((peak.fb_mpa - 223.833_12).abs() < 1e-5, "{peak:?}");
+            assert!((peak.ratio - 1.007_72).abs() < 1e-5, "{peak:?}");
+        };
+        for sample in 0..2 {
+            let single = collect(&model, 1, |_, _, lb| build_span(sample, lb));
+            assert_eq!(single.lb_mm, Some(3000.0));
+            assert_eq!((single.committed_count, single.evaluated_count), (1, 1));
+            assert!(single.unavailable.is_empty(), "{single:?}");
+            assert_failure(single.peak.as_ref().unwrap(), sample);
+        }
+
+        let a_then_b = collect(&model, 2, |step, _, lb| build_span(step, lb));
+        assert_eq!((a_then_b.committed_count, a_then_b.evaluated_count), (2, 2));
+        assert!(a_then_b.unavailable.is_empty(), "{a_then_b:?}");
+        let peak = a_then_b.peak.as_ref().unwrap();
+        assert_failure(peak, usize::try_from(peak.step).unwrap());
+
+        let with_missing = collect(&model, 4, |step, _, lb| build_span(step, lb));
+        assert_eq!(
+            (with_missing.committed_count, with_missing.evaluated_count),
+            (4, 3)
+        );
+        assert!(with_missing
             .unavailable
             .iter()
             .any(|reason| reason.contains("部材応答がありません")));
-        assert!((peak.c - 1.75).abs() < 1e-10, "{peak:?}");
-        assert!((peak.p_lambda_b - 0.6).abs() < 1e-10, "{peak:?}");
-        assert!((peak.fb_mpa - 223.833_12).abs() < 1e-5, "{peak:?}");
-        assert!((peak.ratio - 1.007_72).abs() < 1e-5, "{peak:?}");
-        assert!(
-            peak.step < 2 && peak.ratio > 1.0 && peak.monotonic,
-            "{peak:?}"
-        );
-        assert_eq!(peak.end_moments_nmm, samples[peak.step as usize]);
+        assert_eq!(with_missing.peak, a_then_b.peak);
     }
 
     #[test]

@@ -226,6 +226,94 @@ fn past_case_does_not_approve_the_current_columns_changed_bracing() {
 }
 
 #[test]
+fn past_case_without_bending_record_is_only_checked_against_its_matching_model() {
+    use sepika_core::section_shape::SectionShape;
+
+    for changed_to_box in [false, true] {
+        let (model, cfg, mut wave) = linear_column(300e6);
+        let id = model.elements[0].id;
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        app.generate_stories_action();
+        app.core.analysis_cfg = cfg;
+        app.run_time_history(wave.clone());
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let first = app.core.scoped.view_vibration_case.unwrap();
+        let saved = app.core.scoped.results.as_mut().unwrap();
+        let mut old = saved.time_history_for(first).unwrap().clone();
+        old.recording
+            .as_mut()
+            .unwrap()
+            .symmetric_column_bending
+            .clear();
+        saved.upsert_time_history(first, old);
+        if changed_to_box {
+            let key = crate::app::ResultInputKey::TimeHistory(first);
+            saved.reference_sources.retain(|(stored, _)| *stored != key);
+            assert!(app.recorded_calculation_input(&key).is_err());
+        }
+        let matching = detail_labels(&mut app, id);
+        assert!(
+            matching.contains("確定時刻ごとの補剛区間の照査記録がありません"),
+            "{matching}"
+        );
+        assert!(matching.contains("(NG)"), "{matching}");
+        assert!(!matching.contains("強軸曲げ検定比"), "{matching}");
+
+        if changed_to_box {
+            let sec = &mut app.core.model.sections[0];
+            let mut box_section = SectionShape::SteelBox {
+                height: 400.0,
+                width: 200.0,
+                thick: 12.0,
+                horizontal_thick: 12.0,
+                corner_r: Some(0.0),
+            }
+            .to_section(sec.id, "BOX-400x200x12".into());
+            box_section.material = sec.material;
+            box_section.frame_use = sec.frame_use;
+            *sec = box_section;
+            app.core.model.steel_design_attrs.clear();
+        } else {
+            let attr = &mut app.core.model.steel_design_attrs[0];
+            attr.column_lateral_buckling_end_supports = None;
+            attr.lateral_brace_count = Some(1);
+        }
+        wave.accel_x[2] += 10.0;
+        app.run_time_history(wave);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert_ne!(app.core.scoped.view_vibration_case, Some(first));
+        assert!(app
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .unwrap()
+            .time_history_for(first)
+            .is_some());
+        app.core.scoped.view_vibration_case = Some(first);
+
+        let stale = detail_labels(&mut app, id);
+        assert!(
+            stale.contains("選択中の時刻歴結果の生成入力と現在のモデルの一致を確認できません"),
+            "{stale}"
+        );
+        assert!(
+            !stale.contains("検定比") && !stale.contains("内力包絡"),
+            "{stale}"
+        );
+    }
+}
+
+#[test]
 fn material_only_failure_is_shown_alongside_the_unavailable_lateral_check() {
     use sepika_solver::dynamic::timehistory::{
         ColumnBendingMaterialFailure, SymmetricColumnBendingHistory, ThRecording,
@@ -264,7 +352,7 @@ fn material_only_failure_is_shown_alongside_the_unavailable_lateral_check() {
         original.symmetric_column_bending
     );
     let output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
-        super::draw_symmetric_column_bending(ui, &restored, 0, 3, false, || true);
+        super::draw_symmetric_column_bending(ui, &restored, 0, 3, false);
     });
     let labels: Vec<_> = output
         .shapes

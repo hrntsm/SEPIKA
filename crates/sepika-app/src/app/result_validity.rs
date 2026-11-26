@@ -958,6 +958,22 @@ impl App {
         .expect("時刻歴生成入力の直列化")
     }
 
+    /// 選択したケースの保存計算モデルを返す。参照元情報のない旧結果でも生成入力自体は復号する。
+    pub(crate) fn recorded_time_history_model(
+        &self,
+        id: VibrationCaseId,
+    ) -> Option<sepika_core::model::Model> {
+        let key = ResultInputKey::TimeHistory(id);
+        let bundle = self.core.scoped.results.as_ref()?;
+        let (_, input) = bundle
+            .input_records
+            .iter()
+            .find(|(saved, _)| *saved == key)?;
+        decode_recorded_input(&key, input, None)
+            .ok()
+            .map(|recorded| recorded.model)
+    }
+
     fn vibration_result_input_is_valid(&self, key: &ResultInputKey, current_model: bool) -> bool {
         let identity = match key {
             ResultInputKey::TimeHistory(id) => self
