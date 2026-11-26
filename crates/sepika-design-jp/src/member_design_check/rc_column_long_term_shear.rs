@@ -1,16 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
 use sepika_core::adjacency::NodeAdjacency;
+use sepika_core::face_distance::aligned_girder;
 use sepika_core::geom::vec3::{cross, dist, dot, norm, sub, unit};
 use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::load_combo::{
     combination_design_state, effective_combination_terms, LoadDuration,
 };
 use sepika_core::model::{
-    ElementData, ElementKind, FrameSectionUse, MemberLoad, Model, SupportMemberId,
-    WallSideColumnIndex,
+    ElementData, ElementKind, FrameSectionUse, MemberLoad, Model, WallSideColumnIndex,
 };
-use sepika_core::section_shape::SectionShape;
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::frame::member_load::{frame_shear_envelope, FrameShearEnvelope};
 use sepika_element::transform::LocalFrame;
@@ -250,18 +249,7 @@ fn column_face_distance(
                 }
             }
             Some(FrameSectionUse::Girder) => {
-                let placement =
-                    model.calculation_beam_placement(SupportMemberId::Primary(other.id))?;
-                if !matches!(
-                    placement.section_shape,
-                    SectionShape::RcBeamRect { .. } | SectionShape::SrcBeamRect { .. }
-                ) || !placement.axes[1..].iter().copied().any(parallel)
-                {
-                    return Err(format!(
-                        "大梁 ID {} と柱の接合境界を一つの断面位置で表せません",
-                        other.id.0
-                    ));
-                }
+                let (placement, _) = aligned_girder(model, other.id, inward)?;
                 let face_mm = placement
                     .connection_face_at_contact_mm(origin_mm, inward)?
                     .filter(|face| face.is_finite())

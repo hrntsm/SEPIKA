@@ -1784,6 +1784,7 @@ mod tests {
                     column_end_axial_forces: Vec::new(),
                     panel_moments: Vec::new(),
                     girder_column_face_forces: Vec::new(),
+                    rc_column_face_forces: Vec::new(),
                     steel_panel_column_face_forces: Vec::new(),
                 },
             )],

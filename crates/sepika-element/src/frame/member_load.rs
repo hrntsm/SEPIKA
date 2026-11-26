@@ -414,13 +414,65 @@ impl LoadedFrameSection {
         self.at_mm(position_mm)
     }
 
+    /// 実材軸i端からの距離・全長 [mm] を指定して `[N,Qy,Qz,Mx,My,Mz]` を返す。
+    /// i側はj側極限、j側はi側極限。座標の一致を確認できない面では `position_exact` をfalseとし、切断側が不明な荷重の影響成分を保留する。
+    /// 材軸長が不一致または位置が範囲外なら全体が失敗。
+    pub fn at_inward_face_mm(
+        &self,
+        position_mm: f64,
+        length_mm: f64,
+        position_exact: bool,
+        i_face: bool,
+    ) -> Result<[Result<f64, String>; 6], String> {
+        if length_mm != self.map.length_mm {
+            return Err("実材軸長が部材荷重応答の全長と一致しません".into());
+        }
+        if !position_mm.is_finite() || !(0.0..=length_mm).contains(&position_mm) {
+            return Err("実材端面が部材荷重応答の範囲外です".into());
+        }
+        let tol_mm = 32.0 * f64::EPSILON * length_mm.max(1.0);
+        let mut uncertain = [false; 3];
+        for load in &self.map.loads {
+            if matches!(load.kind, MemberLoadKind::Point { a, p }
+                if p != 0.0 && (!position_exact || a != position_mm)
+                    && (a - position_mm).abs() <= tol_mm)
+            {
+                for (affected, component) in
+                    uncertain.iter_mut().zip(resolve(load, &self.map.frame))
+                {
+                    *affected |= matches!(component, Some(Comp::Point { p, .. }) if p != 0.0);
+                }
+            }
+        }
+        let [x, y, z] = uncertain;
+        let affected = [x, y, z, false, z, y];
+        let forces = self.forces_at_mm(position_mm, i_face);
+        Ok(std::array::from_fn(|i| {
+            if affected[i] {
+                Err("集中部材荷重と実材端面の位置関係を丸め誤差の範囲で確定できません".into())
+            } else if !forces[i].is_finite() {
+                Err("荷重込み断面力が非有限です".into())
+            } else {
+                Ok(forces[i])
+            }
+        }))
+    }
+
     fn at_mm(&self, x: f64) -> Result<[f64; 6], String> {
+        let result = self.forces_at_mm(x, false);
+        if result.iter().any(|v| !v.is_finite()) {
+            return Err("荷重込み断面力が非有限です".into());
+        }
+        Ok(result)
+    }
+
+    fn forces_at_mm(&self, x: f64, right: bool) -> [f64; 6] {
         let mut force = [0.0; 3];
         let mut moment = [0.0; 3];
         for load in &self.map.loads {
             for (axis, comp) in resolve(load, &self.map.frame).into_iter().enumerate() {
                 match comp {
-                    Some(Comp::Point { a, p }) if a < x => {
+                    Some(Comp::Point { a, p }) if a < x || right && a == x => {
                         force[axis] += p;
                         moment[axis] += p * (x - a);
                     }
@@ -433,18 +485,14 @@ impl LoadedFrameSection {
             }
         }
         let g = &self.node_force_local;
-        let result = [
+        [
             -g[0] - force[0],
             g[1] + force[1],
             g[2] + force[2],
             -g[3],
             -g[4] - g[2] * x - moment[2],
             -g[5] + g[1] * x + moment[1],
-        ];
-        if result.iter().any(|v| !v.is_finite()) {
-            return Err("荷重込み断面力が非有限です".into());
-        }
-        Ok(result)
+        ]
     }
 
     /// 指定された全長比の順で荷重込み断面力を返す。

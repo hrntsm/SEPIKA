@@ -1232,13 +1232,31 @@ fn assert_analyzed_column_qd1(mut model: Model, expected_qd1_n: f64, expected_pa
             qd_method: QdMethod::Qd1,
             long_member_forces: Some(&gravity.member_forces),
             girder_column_face_forces: &short.girder_column_face_forces,
+            rc_column_face_forces: &short.rc_column_face_forces,
+            rc_column_gravity_face_forces: &gravity.rc_column_face_forces,
             ..Default::default()
         },
     )
     .unwrap();
-    assert_eq!(report.member_checks.len(), 3);
-    for (id, _, row) in &report.member_checks {
-        assert_eq!(*id, COLUMN);
+    let column_checks = report
+        .member_checks
+        .iter()
+        .filter(|(id, _, _)| *id == COLUMN)
+        .collect::<Vec<_>>();
+    assert_eq!(column_checks.len(), 3);
+    let unclassified = model.elements.iter().any(|element| {
+        model
+            .element_section(element)
+            .is_some_and(|section| section.frame_use.is_none())
+    });
+    for (_, pos, row) in column_checks {
+        if unclassified && *pos > 0.5 {
+            assert!(
+                matches!(row, CheckOutcome::Skipped { reason } if reason.contains("断面・用途が未確認です")),
+                "{row:?}"
+            );
+            continue;
+        }
         let CheckOutcome::Checked(result) = row else {
             panic!("{row:?}");
         };
@@ -1384,6 +1402,8 @@ fn qd1_short_column_with_pinned_girder_fails_while_rigid_connection_passes() {
                     term: LoadTerm::Short,
                     qd_method: QdMethod::Qd1,
                     long_member_forces: Some(&solved.member_forces),
+                    rc_column_face_forces: &solved.rc_column_face_forces,
+                    rc_column_gravity_face_forces: &solved.rc_column_face_forces,
                     ..Default::default()
                 },
             )

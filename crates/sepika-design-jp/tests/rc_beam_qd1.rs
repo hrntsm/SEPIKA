@@ -62,6 +62,9 @@ fn check_with_load_evidence(
     )
     .unwrap()
     .member_checks
+    .into_iter()
+    .filter(|(id, _, _)| *id == response[0].0)
+    .collect()
 }
 
 fn assert_shear_n(outcome: &CheckOutcome, expected_n: f64) {
@@ -1198,6 +1201,9 @@ fn check_split(
     )
     .unwrap()
     .member_checks
+    .into_iter()
+    .filter(|(id, _, _)| response.iter().any(|(beam, _)| beam == id))
+    .collect()
 }
 
 #[test]
