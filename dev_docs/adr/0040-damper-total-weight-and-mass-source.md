@@ -1,6 +1,6 @@
 # ダンパーはモデル化範囲の総重量を直接入力し、断面由来質量を置き換える
 
-Status: accepted
+Status: partially superseded by [ADR 0176](0176-remove-explicit-multi-spring.md)（マルチスプリングへの適用のみ失効）
 
 ## 判断と理由
 

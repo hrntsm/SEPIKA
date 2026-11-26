@@ -1,6 +1,6 @@
 # Beam・Fiber・MultiSpring の両質量形式は共通の断面質量特性から算定する
 
-Status: accepted
+Status: partially superseded by [ADR 0176](0176-remove-explicit-multi-spring.md)（マルチスプリングへの適用のみ失効）
 
 ## 決定
 

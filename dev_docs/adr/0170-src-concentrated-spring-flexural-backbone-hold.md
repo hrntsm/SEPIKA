@@ -1,6 +1,6 @@
 # 矩形SRC梁・柱の材端集中ばねは曲げ復元力の適用条件を確認できるまで使わない
 
-Status: accepted
+Status: partially superseded by [ADR 0176](0176-remove-explicit-multi-spring.md)（マルチスプリングへの適用のみ失効）
 
 Related: [Issue #1987](https://github.com/hrntsm/SEPIKA/issues/1987)、[ADR 0156](0156-src-h-manufacture-plate-strength.md)
 
