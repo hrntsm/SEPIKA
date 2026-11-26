@@ -42,7 +42,7 @@ pub struct FrameStrongBendingPeak {
 
 /// 線形静的応答の実材軸全長で確認した符号付き強軸曲げと、同一切断面の断面力。
 pub struct FrameStaticStrongBending {
-    /// i/j実材端の強軸曲げ [N·mm]。
+    /// i/j実材端の強軸曲げ [N·mm]。不明なら NaN。
     pub end_moments_nmm: [f64; 2],
     /// 回復値、保存せん断力、保存曲げの単調方向が実材軸全長で一致する場合にtrue。
     pub monotonic: bool,
@@ -157,7 +157,6 @@ pub fn frame_static_strong_bending(
         let reason = "保存断面力に非有限な成分があるため、区間全体の組合せを確定できません";
         if !duplicate
             && projections_confirmed
-            && stations[0].1[5].is_finite()
             && stations
                 .iter()
                 .all(|(_, force)| force[1].is_finite() && force[3] == 0.0)

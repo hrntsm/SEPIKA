@@ -67,10 +67,6 @@ pub(super) fn check(
     let mut span_description = None;
     let mut saved_parameters = None;
     let parameters = match &recovered {
-        Ok((span, _)) if partial_recovery => {
-            span_reason = span.combination_issue.map(str::to_owned);
-            None
-        }
         Ok((span, axes)) => {
             let length_mm = dist(axes[0], axes[1]);
             let interval = format!("実材軸の補剛区間 [0, {length_mm:.3}] mm");
@@ -134,17 +130,21 @@ pub(super) fn check(
         }
     };
 
+    let section_scope = StaticColumnSectionCheck {
+        parameters,
+        zero_shear_limit: false,
+        weak_shear_disagreement: false,
+        independent_stress_available: recovered.is_ok(),
+        other_cut_on_disagreement: None,
+    };
     let first = outcomes.len();
     let check_section = |xi,
                          x_mm: f64,
                          force: [f64; 6],
                          cut_side: &str,
-                         applicability: (Option<&str>, bool, bool)|
+                         scope: StaticColumnSectionCheck,
+                         local_issue: Option<&str>|
      -> Vec<CheckOutcome> {
-        let (local_issue, zero_shear_limit, weak_shear_disagreement) = applicability;
-        let independent_stress_available = recovered.is_ok() && local_issue.is_none();
-        let local_issue = local_issue.or(partial_recovery
-            .then_some("保存断面力に非有限な成分があるため、照合できた成分だけで独立に照査します"));
         let section_issue = section_issue.or(local_issue).or_else(|| {
             force
                 .iter()
@@ -155,7 +155,7 @@ pub(super) fn check(
         let parameters = if f.n > 0.0 && f.my != 0.0 {
             None
         } else {
-            parameters
+            scope.parameters
         };
         let evaluate = |parameters| {
             SteelDesign.check_static_column_section(
@@ -165,9 +165,7 @@ pub(super) fn check(
                 ctx,
                 StaticColumnSectionCheck {
                     parameters,
-                    zero_shear_limit,
-                    weak_shear_disagreement,
-                    independent_stress_available,
+                    ..scope
                 },
                 section_issue,
             )
@@ -260,12 +258,21 @@ pub(super) fn check(
                     && recovered[2].is_finite()
                     && (saved[2] == 0.0) != (recovered[2] == 0.0)
             });
+            let scope = StaticColumnSectionCheck {
+                zero_shear_limit,
+                weak_shear_disagreement,
+                ..section_scope
+            };
             let mut checked = check_section(
                 xi,
                 x_mm,
                 recovered,
                 side,
-                (issue, zero_shear_limit, weak_shear_disagreement),
+                StaticColumnSectionCheck {
+                    other_cut_on_disagreement: saved.filter(|_| issue.is_some()),
+                    ..scope
+                },
+                issue,
             );
             if let Some(saved) = saved.filter(|saved| {
                 saved
@@ -278,7 +285,11 @@ pub(super) fn check(
                     x_mm,
                     saved,
                     side,
-                    (issue, zero_shear_limit, weak_shear_disagreement),
+                    StaticColumnSectionCheck {
+                        other_cut_on_disagreement: issue.map(|_| recovered),
+                        ..scope
+                    },
+                    issue,
                 ) {
                     add_saved_check(&mut checked, outcome, recovered[1], saved[1]);
                 }
@@ -319,7 +330,7 @@ pub(super) fn check(
             continue;
         }
         outcomes.extend(
-            check_section(xi, xi * ctx.length, force, "", (None, false, false))
+            check_section(xi, xi * ctx.length, force, "", section_scope, None)
                 .into_iter()
                 .map(|outcome| (elem.id, xi, outcome)),
         );
