@@ -13,7 +13,9 @@ use sepika_element::frame::beam::MemberForces;
 mod asymmetric;
 #[path = "fixtures/rc_beam_qd1_model.rs"]
 mod input;
-use input::{add_columns_at_outer_nodes, extend_j_column, model};
+use input::{
+    add_columns_at_outer_nodes, beam_with_recorded_continuous_slab_rebar, extend_j_column, model,
+};
 
 fn check(
     model: &Model,
@@ -260,7 +262,7 @@ fn oblique_girder_does_not_establish_qd1_support_or_a_physical_face() {
 }
 
 #[test]
-fn a_slab_assigned_to_part_of_the_beam_blocks_qd1_and_rectangular_ultimate_shear() {
+fn a_slab_assigned_to_part_of_the_beam_warns_for_qd1_and_blocks_rectangular_ultimate_shear() {
     use sepika_core::ids::{NodeId, SectionId, SlabId};
     use sepika_core::model::{PlateAssignment, Slab, SlabPlate, SlabShape, SupportMemberId};
     use sepika_design_jp::ultimate::{
@@ -346,15 +348,29 @@ fn a_slab_assigned_to_part_of_the_beam_blocks_qd1_and_rectangular_ultimate_shear
         tip_loads: Vec::new(),
     });
     model.floor_assignment_regions.regions[0].assignment = PlateAssignment::Plate(slab_id);
-    for method in [QdMethod::Qd1, QdMethod::Min] {
-        let outcomes = check(&model, method, Some(0.0), &rows, -10_000.0);
-        assert!(
-            matches!(&outcomes[0].2, CheckOutcome::Skipped { reason } if reason.contains("スラブ筋")),
-            "{outcomes:?}"
+    for (method, q0, expected_n) in [
+        (QdMethod::Qd1, Some(0.0), 73_390.556_25),
+        (QdMethod::Qd1, Some(1_000_000.0), 1_073_390.556_25),
+        (QdMethod::Min, Some(0.0), 70_000.0),
+        (QdMethod::Qd2, None, 70_000.0),
+    ] {
+        let outcomes = check(&model, method, q0, &rows, -10_000.0);
+        assert_shear_n(&outcomes[0].2, expected_n);
+        let CheckOutcome::Checked(result) = &outcomes[0].2 else {
+            unreachable!();
+        };
+        let shear = result
+            .components
+            .iter()
+            .find(|c| c.kind == CheckKind::Shear)
+            .unwrap();
+        assert_eq!(shear.ratio <= 1.0, q0 != Some(1_000_000.0));
+        assert_eq!(
+            shear.detail.contains("スラブ筋の寄与を確認できず"),
+            method != QdMethod::Qd2
         );
+        assert_eq!(shear.detail.contains("過小評価"), method != QdMethod::Qd2);
     }
-    let qd2 = check(&model, QdMethod::Qd2, None, &rows, -10_000.0);
-    assert_shear_n(&qd2[0].2, 70_000.0);
     let result = ultimate(&model);
     assert!(
         !result.ok && result.qsu.is_nan() && result.shear_margin.is_nan(),
@@ -598,6 +614,368 @@ fn grouped_rc_qd1_requires_transverse_reaction_support_at_each_outer_end() {
                     }
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn recorded_slab_reinforcement_raises_mechanism_demand_in_both_bending_directions() {
+    let model = beam_with_recorded_continuous_slab_rebar();
+    let base_n = 48_927.037_5;
+    // 協力幅573.69 mmに入るのはy=300 mmの筋だけ。D13・d=570 mmで
+    // 上端引張時のMyは22.424 kN·m増える。
+    for mz in [-10e6, 10e6] {
+        let rows = [(0.5, [0., 60_000., 0., 0., 0., mz])];
+        let qd1 = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
+        assert_shear_n(&qd1[0].2, base_n + 3_737.333_25);
+        let qd2 = check(&model, QdMethod::Qd2, None, &rows, -10_000.0);
+        assert_shear_n(&qd2[0].2, 115_000.0);
+    }
+}
+
+#[test]
+fn only_confirmed_empty_layout_avoids_a_slab_qd1_fallback_warning() {
+    use sepika_core::model::PlateAssignment;
+    use sepika_core::section_shape::StandardRebar;
+
+    let model = beam_with_recorded_continuous_slab_rebar();
+    let rows = [(0.5, [0., 60_000., 0., 0., 0., 10e6])];
+    let owner = model
+        .slabs
+        .iter()
+        .position(|slab| {
+            !slab
+                .plate
+                .top_reinforcement
+                .as_ref()
+                .unwrap()
+                .straight_bars
+                .is_empty()
+        })
+        .unwrap();
+    let anchor_j = model
+        .slabs
+        .iter()
+        .position(|slab| {
+            model
+                .resolved_slab_placement(slab.id)
+                .unwrap()
+                .top_boundary
+                .iter()
+                .any(|p| p[0] == 10_500.0)
+        })
+        .unwrap();
+    let farther_i = model
+        .slabs
+        .iter()
+        .position(|slab| {
+            model
+                .resolved_slab_placement(slab.id)
+                .unwrap()
+                .top_boundary
+                .iter()
+                .any(|p| p[0] == -8_000.0)
+        })
+        .unwrap();
+    for case in 0..20 {
+        let mut case_model = model.clone();
+        let layout = case_model.slabs[owner]
+            .plate
+            .top_reinforcement
+            .as_mut()
+            .unwrap();
+        match case {
+            0 => layout.straight_bars.clear(),
+            1 => case_model.slabs[owner].plate.top_reinforcement = None,
+            2 => {
+                case_model.slabs[anchor_j]
+                    .plate
+                    .top_reinforcement
+                    .as_mut()
+                    .unwrap()
+                    .monolithic_pour = "2F-B".into()
+            }
+            3 => layout.straight_bars[0].ends_mm[1][0] = 6_700.0,
+            4 => layout.straight_bars[0].yield_strength_n_mm2 = 390.0,
+            5 => layout.straight_bars[0].size = StandardRebar::D41,
+            6 => {
+                case_model.floor_assignment_regions.regions[anchor_j].assignment =
+                    PlateAssignment::NoPlate
+            }
+            7 => layout.straight_bars.push(layout.straight_bars[0].clone()),
+            8 => {
+                let mut outside = std::mem::take(&mut layout.straight_bars);
+                outside
+                    .iter_mut()
+                    .for_each(|bar| bar.ends_mm[0][0] = -6_400.0);
+                case_model.slabs[farther_i]
+                    .plate
+                    .top_reinforcement
+                    .as_mut()
+                    .unwrap()
+                    .straight_bars = outside;
+            }
+            9 => {
+                layout.straight_bars[1].ends_mm[0][0] = 1_000.0;
+                layout.straight_bars[1].ends_mm[1][0] = 3_000.0;
+            }
+            10 | 13 => {
+                let mut concrete = case_model.materials[0].clone();
+                concrete.id = sepika_core::ids::MaterialId(case_model.materials.len() as u32);
+                concrete.fc = Some(if case == 10 { 61.0 } else { 17.0 });
+                case_model.sections.last_mut().unwrap().material = Some(concrete.id);
+                case_model.materials.push(concrete);
+            }
+            11 => {
+                for end in &mut layout.straight_bars[0].ends_mm {
+                    end[2] = 293.0;
+                }
+            }
+            12 => {
+                let mut upper = layout.straight_bars[0].clone();
+                upper.size = StandardRebar::D10;
+                upper.ends_mm = [[-1_000.0, 100.0, 285.0], [-1_000.0, 1_800.0, 285.0]];
+                layout.straight_bars.push(upper);
+            }
+            14 => layout.straight_bars[0].bond_yield_strength_n_mm2 = None,
+            15 => {
+                for end in &mut layout.straight_bars[1].ends_mm {
+                    end[2] = 260.0;
+                }
+            }
+            16 => layout.straight_bars[0].bond_yield_strength_n_mm2 = Some(330.0),
+            17 => layout.straight_bars[0].bond_yield_strength_n_mm2 = Some(345.0),
+            18 | 19 => {
+                let name = if case == 18 { "任意材種" } else { "SR295" };
+                layout.straight_bars[0].grade = name.into();
+                let mut shear = case_model.materials[1].clone();
+                shear.id = sepika_core::ids::MaterialId(case_model.materials.len() as u32);
+                case_model.sections[0].shear_rebar_material = Some(shear.id);
+                case_model.materials.push(shear);
+                case_model.materials[1].name = name.into();
+            }
+            _ => unreachable!(),
+        }
+        let result = check(&case_model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
+        if case == 19 {
+            assert_eq!(
+                sepika_design_jp::rc::beam_qd1_slab_end_moments(
+                    &case_model,
+                    &sepika_core::adjacency::NodeAdjacency::primary_frame(&case_model),
+                    &case_model.elements[0],
+                ),
+                None,
+            );
+            assert!(
+                matches!(&result[0].2, CheckOutcome::Skipped { reason } if reason.contains("丸鋼材種"))
+            );
+            continue;
+        }
+        assert_shear_n(&result[0].2, 48_927.037_5);
+        let CheckOutcome::Checked(result) = &result[0].2 else {
+            unreachable!()
+        };
+        let shear = result
+            .components
+            .iter()
+            .find(|c| c.kind == CheckKind::Shear)
+            .unwrap();
+        assert_eq!(
+            shear.detail.contains("過小評価"),
+            case != 0,
+            "case {case}: {shear:?}"
+        );
+    }
+}
+
+#[test]
+fn attached_slab_sharing_a_support_line_warns_even_without_a_full_member_edge() {
+    use sepika_core::model::{LoadTransfer, PlateAssignment, RegionAnchor, SlabShape};
+
+    let mut model = beam_with_recorded_continuous_slab_rebar();
+    let mut slab = model.slabs.remove(0);
+    model.slabs.clear();
+    for region in &mut model.floor_assignment_regions.regions {
+        region.assignment = PlateAssignment::NoPlate;
+    }
+    let left = model
+        .nodes
+        .iter()
+        .find(|node| node.coord == [-4_000.0, 0.0, 0.0])
+        .unwrap()
+        .id;
+    slab.shape = SlabShape::Attached {
+        anchor: RegionAnchor::Line {
+            nodes: [left, model.elements[0].nodes[1]],
+            span: [0.0, 0.75],
+            transfer: LoadTransfer::Anchor,
+        },
+        extent: [700.0; 2],
+    };
+    slab.plate.top_reinforcement = None;
+    assert!(model
+        .attached_slab_supports(&slab)
+        .unwrap()
+        .iter()
+        .any(|part| part.elem == ElemId(0)));
+    model.slabs.push(slab);
+    assert!(!model.beam_has_attached_slab(&model.elements[0]));
+    let forces = [(0.5, [0., 60_000., 0., 0., 0., 10e6])];
+    let checks = check(&model, QdMethod::Qd1, Some(0.0), &forces, -10_000.0);
+    assert_shear_n(&checks[0].2, 48_927.037_5);
+    let CheckOutcome::Checked(result) = &checks[0].2 else {
+        unreachable!()
+    };
+    assert!(result
+        .components
+        .iter()
+        .any(|part| part.rc_beam_qd1_slab_warning().is_some()));
+}
+
+#[test]
+fn unequal_opposing_girders_do_not_select_a_flange_width_from_boundary_order() {
+    use sepika_core::ids::{NodeId, SectionId};
+    use sepika_core::model::{SupportBoundary, SupportMemberId};
+
+    let mut model = beam_with_recorded_continuous_slab_rebar();
+    let id_at = |coord| {
+        model
+            .nodes
+            .iter()
+            .find(|node| node.coord == coord)
+            .unwrap()
+            .id
+    };
+    let i = id_at([0.0, 2_000.0, 0.0]);
+    let j = id_at([6_500.0, 2_000.0, 0.0]);
+    let e = model
+        .elements
+        .iter()
+        .position(|e| e.nodes.as_slice() == [i, j])
+        .unwrap();
+    let old_id = model.elements[e].id;
+    let mut middle = model.nodes[i.index()].clone();
+    middle.id = NodeId(model.nodes.len() as u32);
+    middle.coord = [3_250.0, 2_000.0, 0.0];
+    let m = middle.id;
+    model.nodes.push(middle);
+    let mut second = model.elements[e].clone();
+    second.id = ElemId(model.elements.len() as u32);
+    second.nodes[0] = m;
+    let mut wide = model.sections[0].clone();
+    wide.id = SectionId(model.sections.len() as u32);
+    wide.width = 600.0;
+    if let Some(SectionShape::RcBeamRect { b, .. }) = &mut wide.shape {
+        *b = 600.0;
+    }
+    second.section = Some(wide.id);
+    model.sections.push(wide);
+    model.elements[e].nodes[1] = m;
+    let second_id = second.id;
+    model.elements.push(second);
+    let region = model
+        .floor_assignment_regions
+        .regions
+        .iter_mut()
+        .find(|r| {
+            r.boundary
+                .iter()
+                .any(|edge| edge.support == SupportMemberId::Primary(old_id))
+        })
+        .unwrap();
+    let pos = region
+        .boundary
+        .iter()
+        .position(|edge| edge.support == SupportMemberId::Primary(old_id))
+        .unwrap();
+    let original = region.boundary[pos];
+    let new = SupportBoundary {
+        support: SupportMemberId::Primary(second_id),
+        span: original.span,
+    };
+    let pair = if original.span == [0.0, 1.0] {
+        [original, new]
+    } else {
+        [new, original]
+    };
+    region.boundary.splice(pos..=pos, pair);
+    let forces = [(0.5, [0., 60_000., 0., 0., 0., 10e6])];
+    let region_index = model
+        .floor_assignment_regions
+        .regions
+        .iter()
+        .position(|r| {
+            r.boundary
+                .iter()
+                .any(|edge| edge.support == SupportMemberId::Primary(old_id))
+        })
+        .unwrap();
+    for rotate in [0, 3] {
+        model.floor_assignment_regions.regions[region_index]
+            .boundary
+            .rotate_left(rotate);
+        let check = check(&model, QdMethod::Qd1, Some(0.0), &forces, -10_000.0);
+        assert_shear_n(&check[0].2, 48_927.037_5);
+        let CheckOutcome::Checked(result) = &check[0].2 else {
+            unreachable!()
+        };
+        assert!(result
+            .components
+            .iter()
+            .any(|part| part.rc_beam_qd1_slab_warning().is_some()));
+    }
+}
+
+#[test]
+fn supports_outside_the_actual_floor_boundary_cannot_confirm_flange_or_anchorage() {
+    let model = beam_with_recorded_continuous_slab_rebar();
+    let support_ids = [
+        [[0.0, 2_000.0, 0.0], [6_500.0, 2_000.0, 0.0]],
+        [[0.0, 0.0, 0.0], [0.0, 2_000.0, 0.0]],
+        [[6_500.0, 0.0, 0.0], [6_500.0, 2_000.0, 0.0]],
+    ]
+    .map(|coords| {
+        model
+            .elements
+            .iter()
+            .find(|e| {
+                e.nodes
+                    .iter()
+                    .map(|&n| model.node(n).unwrap().coord)
+                    .eq(coords)
+            })
+            .unwrap()
+            .id
+    });
+    let forces = [(0.5, [0., 60_000., 0., 0., 0., 10e6])];
+    for id in support_ids {
+        for kind in 0..6 {
+            let mut changed = model.clone();
+            let elem = &mut changed.elements[id.index()];
+            match kind {
+                0 => elem.end_offsets_mm = [[0.0, 0.0, -1_000.0]; 2],
+                1 => elem.end_offsets_mm[1][2] = 300.0,
+                2 => {
+                    elem.local_axis.ref_vector = if id == support_ids[0] {
+                        [0.0, 1.0, 0.0]
+                    } else {
+                        [1.0, 0.0, 0.0]
+                    }
+                }
+                3 => elem.end_offsets_mm = [[200.0, 0.0, 0.0]; 2],
+                4 => elem.end_offsets_mm[1][0] = 200.0,
+                5 => elem.end_offsets_mm = [[0.0, 200.0, 0.0]; 2],
+                _ => unreachable!(),
+            }
+            let check = check(&changed, QdMethod::Qd1, Some(0.0), &forces, -10_000.0);
+            assert_shear_n(&check[0].2, 48_927.037_5);
+            let CheckOutcome::Checked(result) = &check[0].2 else {
+                unreachable!()
+            };
+            assert!(result
+                .components
+                .iter()
+                .any(|part| part.rc_beam_qd1_slab_warning().is_some()));
         }
     }
 }

@@ -1217,3 +1217,126 @@ fn grouped_rc_qd1_time_history_stays_unchecked_instead_of_using_segment_reaction
         assert!(text.contains("検定比"), "{text}");
     }
 }
+
+#[test]
+fn time_history_qd1_shows_slab_warning_and_uses_recorded_reinforcement_when_confirmed() {
+    let model = rc_beam_qd1_model::beam_with_recorded_continuous_slab_rebar();
+    let mut app = App::default();
+    let rec = gravity_test_record(
+        [0.0, 60_000.0, 0.0, 0.0, 0.0, 10e6],
+        [0.0, 60_000.0, 0.0, 0.0, 0.0, 10e6],
+    );
+    let mut ratios = Vec::new();
+    for confirmed in [false, true] {
+        let mut input = model.clone();
+        if !confirmed {
+            for slab in &mut input.slabs {
+                slab.plate.top_reinforcement = None;
+            }
+        }
+        assert!(app.load_model(input));
+        app.core.analysis_cfg.rc_damage_control = false;
+        app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+        set_gravity_forces(
+            &mut app,
+            Some(
+                [0.0, 0.5, 0.75, 1.0]
+                    .map(|x| (x, [0.0, -10_000.0, 0.0, 0.0, 0.0, 0.0]))
+                    .to_vec(),
+            ),
+        );
+        let text = labels(&app, &rec, true);
+        assert_eq!(text.contains("QD1に算入していません"), !confirmed, "{text}");
+        assert_eq!(
+            text.contains("設計用せん断力を過小評価"),
+            !confirmed,
+            "{text}"
+        );
+        let shear = text
+            .lines()
+            .find_map(|line| line.strip_prefix("せん断 "))
+            .and_then(|value| value.split_whitespace().next())
+            .and_then(|value| value.parse::<f64>().ok())
+            .unwrap_or_else(|| panic!("{text}"));
+        ratios.push(shear);
+    }
+    assert!(ratios[0] > 0.0 && ratios[0] < ratios[1], "{ratios:?}");
+}
+
+#[test]
+fn slab_qd1_inputs_and_checked_warning_round_trip_in_ovika_without_changing_analysis_identity() {
+    use sepika_core::ids::ElemId;
+    use sepika_design_jp::{CheckKind, CheckOutcome, LoadTerm, MemberDesignCheckOptions, QdMethod};
+    use sepika_element::frame::beam::MemberForces;
+    use sepika_io::ovika::{load_ovika, save_ovika, OvikaExtras};
+
+    let mut model = rc_beam_qd1_model::beam_with_recorded_continuous_slab_rebar();
+    let original_analysis_identity = model.calculation_model();
+    let slab = model
+        .slabs
+        .iter_mut()
+        .find(|slab| {
+            slab.plate
+                .top_reinforcement
+                .as_ref()
+                .is_some_and(|layout| !layout.straight_bars.is_empty())
+        })
+        .unwrap();
+    slab.plate.top_reinforcement.as_mut().unwrap().straight_bars[0].ends_mm[1][0] = 6501.0;
+    assert!(original_analysis_identity.eq_ignoring_dofmap(&model.calculation_model()));
+
+    let response = [(
+        ElemId(0),
+        MemberForces {
+            at: vec![(0.5, [0.0, 60_000.0, 0.0, 0.0, 0.0, 10e6])],
+        },
+    )];
+    let gravity = [(
+        ElemId(0),
+        MemberForces {
+            at: vec![(0.5, [0.0, -10_000.0, 0.0, 0.0, 0.0, 0.0])],
+        },
+    )];
+    let q0_by_elem = std::collections::HashMap::from([(ElemId(0), 0.0)]);
+    let options = MemberDesignCheckOptions {
+        term: LoadTerm::Short,
+        qd_method: QdMethod::Qd1,
+        long_member_forces: Some(&gravity),
+        q_simple_by_elem: Some(&q0_by_elem),
+        ..Default::default()
+    };
+    let checks = sepika_design_jp::run_member_design_checks(&model, &response, &[], &options)
+        .unwrap()
+        .member_checks;
+    let path = std::env::temp_dir().join(format!("sepika-qd1-slab-{}.ovika", uuid::Uuid::new_v4()));
+    let results = rmp_serde::to_vec_named(&checks).unwrap();
+    save_ovika(
+        &path,
+        &model,
+        OvikaExtras {
+            results: Some(&results),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let restored = load_ovika(&path);
+    std::fs::remove_file(path).unwrap();
+    let restored = restored.unwrap();
+    assert_eq!(model.slabs, restored.model.slabs);
+    let restored_checks: Vec<(ElemId, f64, CheckOutcome)> =
+        rmp_serde::from_slice(&restored.results.unwrap()).unwrap();
+    assert_eq!(checks, restored_checks);
+    let CheckOutcome::Checked(checked) = &restored_checks[0].2 else {
+        panic!("{restored_checks:?}");
+    };
+    let shear = checked
+        .components
+        .iter()
+        .find(|c| c.kind == CheckKind::Shear)
+        .unwrap();
+    assert!(shear.ratio > 0.0 && shear.ratio <= 1.0);
+    assert!(shear
+        .rc_beam_qd1_slab_warning()
+        .unwrap()
+        .contains("過小評価"));
+}

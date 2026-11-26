@@ -3873,6 +3873,7 @@ pub(super) fn make_square_slab_test_model() -> sepika_core::model::Model {
     let slab_id = model.add_enclosed_slab_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         SlabPlate {
+            top_reinforcement: None,
             section: None,
             loads: vec![AreaLoad {
                 kind: "DL".into(),
@@ -5571,6 +5572,7 @@ fn test_slab_design_span_respects_one_way() {
         m.add_enclosed_slab_from_nodes(
             &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
             SlabPlate {
+                top_reinforcement: None,
                 section: Some(sepika_core::ids::SectionId(0)),
                 loads: vec![AreaLoad {
                     kind: "DL".into(),
@@ -5664,6 +5666,7 @@ fn test_slab_design_span_respects_one_way() {
 fn rc_slab_plate(section: sepika_core::ids::SectionId) -> SlabPlate {
     use sepika_core::model::{AreaLoad, DistributionMethod};
     SlabPlate {
+        top_reinforcement: None,
         section: Some(section),
         loads: vec![AreaLoad {
             kind: "DL".into(),
@@ -8035,6 +8038,7 @@ fn test_secondary_beam_subdivided_slab_dl_cmq_and_solve() {
         mk_beam(7, 7, 4),
     ];
     let plate = SlabPlate {
+        top_reinforcement: None,
         section: Some(SectionId(1)),
         loads: vec![AreaLoad {
             kind: "DL".into(),
@@ -9312,6 +9316,7 @@ fn test_prep_sections_count_slab_reference() {
             .to_section(slab_sec, "S15".into()),
     );
     model.slabs[0].plate = SlabPlate {
+        top_reinforcement: None,
         section: Some(slab_sec),
         loads: Vec::new(),
         usage: None,

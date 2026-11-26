@@ -1012,6 +1012,7 @@ mod tests {
             mk_beam(3, 3, 0),
         ];
         let plate = SlabPlate {
+            top_reinforcement: None,
             section: None,
             loads: vec![AreaLoad {
                 kind: "DL".into(),

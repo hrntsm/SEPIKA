@@ -187,9 +187,6 @@ pub(super) fn validate_beam_qd1_section_geometry(
     }) {
         return Err("QD1用にハンチ付きの梁の端部断面を確定できません".into());
     }
-    if beam_supports_slab(model, elem) {
-        return Err("QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません".into());
-    }
     Ok(())
 }
 
@@ -398,12 +395,12 @@ fn beam_qd1_sum_my(
     ctx: &DesignCtx,
     main_rebar_valid: bool,
 ) -> Result<f64, String> {
-    if ctx.beam_has_slab {
-        return Err("QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません".into());
-    }
     let [top_nmm, bottom_nmm] =
         beam_qd1_end_moments(shape, ctx.rebar_material.as_ref(), main_rebar_valid)?;
-    Ok(top_nmm + bottom_nmm)
+    let [slab_i_nmm, slab_j_nmm] = ctx.rc_beam_qd1_slab_end_moments_nmm.unwrap_or([0.0; 2]);
+    let i_top_j_bottom_nmm = (top_nmm + slab_i_nmm) + bottom_nmm;
+    let i_bottom_j_top_nmm = bottom_nmm + (top_nmm + slab_j_nmm);
+    Ok(i_top_j_bottom_nmm.max(i_bottom_j_top_nmm))
 }
 
 pub(super) fn beam_qd1_end_moments(
@@ -589,7 +586,11 @@ pub(crate) fn beam_check(
             detail: format!(
                 "QA={:.1} N, {demand_label}={:.1} N, α={:.3}, pw={:.5}",
                 qa, q_design, alpha, props.pw,
-            ),
+            ) + &if uses_qd1 && ctx.rc_beam_qd1_slab_unverified {
+                format!("。警告: {}", crate::RC_BEAM_QD1_SLAB_WARNING)
+            } else {
+                String::new()
+            },
         });
     }
 

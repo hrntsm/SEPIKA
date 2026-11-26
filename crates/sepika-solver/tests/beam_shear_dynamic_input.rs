@@ -109,6 +109,7 @@ fn nodal_mass_assembly_preserves_mass_with_a_concrete_slab_on_steel_girders() {
     model.add_enclosed_slab_from_nodes(
         &[NodeId(0), NodeId(1), NodeId(2), NodeId(3)],
         SlabPlate {
+            top_reinforcement: None,
             section: Some(SectionId(1)),
             loads: Vec::new(),
             usage: None,

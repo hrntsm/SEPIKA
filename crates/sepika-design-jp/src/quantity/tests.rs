@@ -477,6 +477,7 @@ fn test_girder_formwork_slab_deduction() {
         model.add_enclosed_slab_from_nodes(
             &[NodeId(2), NodeId(3), NodeId(a), NodeId(b)],
             SlabPlate {
+                top_reinforcement: None,
                 section: Some(SectionId(2)),
                 loads: vec![],
                 usage: None,
@@ -603,6 +604,7 @@ fn test_slab_quantity() {
     model.add_enclosed_slab_from_nodes(
         &[NodeId(2), NodeId(3), NodeId(5), NodeId(4)],
         SlabPlate {
+            top_reinforcement: None,
             section: Some(slab_sec),
             loads: vec![],
             usage: None,

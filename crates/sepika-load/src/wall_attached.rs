@@ -562,6 +562,7 @@ mod tests {
             let sid = m.add_enclosed_slab_from_nodes(
                 &boundary,
                 SlabPlate {
+                    top_reinforcement: None,
                     section: None,
                     loads: Vec::new(),
                     usage: None,
@@ -772,6 +773,7 @@ mod tests {
         let sid = m.add_enclosed_slab_from_nodes(
             &boundary,
             SlabPlate {
+                top_reinforcement: None,
                 section: None,
                 loads: Vec::new(),
                 usage: None,

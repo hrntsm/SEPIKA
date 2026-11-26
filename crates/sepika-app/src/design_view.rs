@@ -528,6 +528,10 @@ pub fn design_table(ui: &mut egui::Ui, app: &mut App) {
                                 format!("{} {:.2} {state}", c.kind.label(), c.ratio),
                             )
                             .on_hover_text(&c.detail);
+                            if let Some(warning) = c.rc_beam_qd1_slab_warning() {
+                                ui.colored_label(crate::theme::WARN_TEXT, "床板筋未確認")
+                                    .on_hover_text(warning);
+                            }
                         }
                     });
                 }

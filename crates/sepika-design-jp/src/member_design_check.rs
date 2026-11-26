@@ -819,6 +819,10 @@ pub fn run_member_design_checks(
             (None, None, None)
         };
 
+        let slab_moments_nmm = (matches!(rc_beam_qd1, Some(Ok(_)))
+            && !grouped_girders.contains(elem_id))
+        .then(|| crate::rc::beam_qd1_slab_end_moments(model, rc_beam_adjacency.as_ref()?, elem))
+        .flatten();
         let mut ctx = DesignCtx {
             rebar_material: rebar_material.cloned(),
             shear_rebar_material: shear_rebar_material.cloned(),
@@ -861,6 +865,10 @@ pub fn run_member_design_checks(
                 .as_ref()
                 .and_then(|value| value.as_ref().ok())
                 .and_then(|(_, sum_my, _)| *sum_my),
+            rc_beam_qd1_slab_end_moments_nmm: slab_moments_nmm,
+            rc_beam_qd1_slab_unverified: slab_moments_nmm.is_none()
+                && matches!(rc_beam_qd1, Some(Ok(_)))
+                && !grouped_girders.contains(elem_id),
             rc_beam_qd1_issue: rc_beam_qd1.and_then(Result::err),
             steel_attr,
         };

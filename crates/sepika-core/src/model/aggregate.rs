@@ -1274,6 +1274,9 @@ impl Model {
         }
         model.axes.clear();
         model.src_joint_hoops.clear();
+        for slab in &mut model.slabs {
+            slab.plate.top_reinforcement = None;
+        }
         model.quantity_cfg = QuantityCfg::default();
         model.stress_cfg.drift_limit_denom = StressAnalysisCfg::default().drift_limit_denom;
         model.vibration_cases.clear();

@@ -86,6 +86,7 @@ impl SlabDraft {
         };
         let kind = self.load_kind.trim();
         Ok(sepika_core::model::SlabPlate {
+            top_reinforcement: None,
             section: self.section,
             loads: vec![AreaLoad {
                 kind: if kind.is_empty() { "DL" } else { kind }.into(),
@@ -245,6 +246,7 @@ fn one_way_label(o: Option<OneWayDir>) -> &'static str {
 
 pub fn slabs_table(ui: &mut egui::Ui, app: &mut App) {
     slab_placements(ui, app);
+    slab_top_reinforcement(ui, app);
     if let Some(reason) = app.core.scoped.undo.last_error() {
         ui.colored_label(crate::theme::ERROR_RED, reason);
     }
@@ -1357,6 +1359,115 @@ fn queue_attached_extent(
 ) {
     if candidate != previous {
         pending.push((id, candidate));
+    }
+}
+
+fn slab_top_reinforcement(ui: &mut egui::Ui, app: &mut App) {
+    use sepika_core::model::{SlabStraightBar, SlabTopReinforcement};
+    use sepika_core::section_shape::StandardRebar;
+    let mut pending = Vec::new();
+    egui::CollapsingHeader::new("床板の上端実配筋（RC梁QD1）").show(ui, |ui| {
+        ui.label("梁と一体打ちの床板には同じ打設区分を入力します。継手のない直線筋を、始点の床板に1本ずつ全長で登録します。");
+        ui.label("配筋・開口・定着が未確認の場合や未対応の配筋詳細がある場合は、この入力を確定しないでください。");
+        for slab in &app.core.model.slabs {
+            if !matches!(slab.shape, SlabShape::Enclosed) {
+                continue;
+            }
+            egui::CollapsingHeader::new(format!("床板 ID {}", slab.id.0))
+                .id_salt(("slab_top_reinforcement", slab.id))
+                .show(ui, |ui| {
+                    let id = ui.id().with("draft");
+                    let source = &slab.plate.top_reinforcement;
+                    let mut layout = ui
+                        .data(|d| d.get_temp::<(Option<SlabTopReinforcement>, SlabTopReinforcement)>(id))
+                        .filter(|(current, _)| current == source)
+                        .map(|(_, draft)| draft)
+                        .or_else(|| source.clone())
+                        .unwrap_or_else(|| SlabTopReinforcement {
+                            monolithic_pour: String::new(),
+                            straight_bars: Vec::new(),
+                        });
+                    ui.label(if source.is_some() { "登録済み" } else { "未確認" });
+                    ui.horizontal(|ui| {
+                        ui.label("一体打ちの打設区分");
+                        ui.text_edit_singleline(&mut layout.monolithic_pour);
+                    });
+                    let mut remove = None;
+                    for (index, bar) in layout.straight_bars.iter_mut().enumerate() {
+                        ui.push_id(index, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(format!("実筋 {}", index + 1));
+                                egui::ComboBox::from_id_salt("size")
+                                    .selected_text(bar.size.to_string())
+                                    .show_ui(ui, |ui| {
+                                        for size in StandardRebar::ALL {
+                                            ui.selectable_value(&mut bar.size, size, size.to_string());
+                                        }
+                                    });
+                                ui.label("材種");
+                                ui.text_edit_singleline(&mut bar.grade);
+                                ui.label("曲げ用降伏点 [N/mm²]");
+                                ui.add(egui::DragValue::new(&mut bar.yield_strength_n_mm2));
+                                if ui.button("行削除").clicked() {
+                                    remove = Some(index);
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                ui.label("付着照査用の確認済み応力度 [N/mm²]");
+                                let mut confirmed = bar.bond_yield_strength_n_mm2.is_some();
+                                if ui.checkbox(&mut confirmed, "確認済み").changed() {
+                                    bar.bond_yield_strength_n_mm2 = confirmed.then_some(0.0);
+                                }
+                                if let Some(value) = &mut bar.bond_yield_strength_n_mm2 {
+                                    ui.add(egui::DragValue::new(value));
+                                }
+                            });
+                            for (label, xyz_mm) in ["始点", "終点"].into_iter().zip(&mut bar.ends_mm) {
+                                ui.horizontal(|ui| {
+                                    ui.label(format!("{label} [mm]"));
+                                    for (axis, coord) in ["X ", "Y ", "Z "].into_iter().zip(xyz_mm) {
+                                        ui.add(egui::DragValue::new(coord).prefix(axis));
+                                    }
+                                });
+                            }
+                        });
+                    }
+                    if let Some(index) = remove {
+                        layout.straight_bars.remove(index);
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("実筋を追加").clicked() {
+                            layout.straight_bars.push(SlabStraightBar {
+                                ends_mm: [[0.0; 3]; 2],
+                                size: StandardRebar::D13,
+                                grade: String::new(),
+                                yield_strength_n_mm2: 0.0,
+                                bond_yield_strength_n_mm2: None,
+                            });
+                        }
+                        if ui.button("配筋一覧を確定").clicked() {
+                            pending.push(sepika_edit::SetSlabTopReinforcement {
+                                id: slab.id,
+                                layout: Some(layout.clone()),
+                            });
+                        }
+                        if ui.button("未確認に戻す").clicked() {
+                            pending.push(sepika_edit::SetSlabTopReinforcement {
+                                id: slab.id,
+                                layout: None,
+                            });
+                        }
+                    });
+                    ui.data_mut(|d| d.insert_temp(id, (source.clone(), layout)));
+                });
+        }
+    });
+    for command in pending {
+        if !app.apply_model_edit(Box::new(command)) {
+            if let Some(reason) = app.core.scoped.undo.last_error() {
+                ui.colored_label(crate::theme::ERROR_RED, reason);
+            }
+        }
     }
 }
 

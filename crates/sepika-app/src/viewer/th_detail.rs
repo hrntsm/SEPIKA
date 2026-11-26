@@ -888,6 +888,15 @@ fn draw_peak_check<'a>(
         } else {
             (None, None)
         };
+    let slab_moments_nmm = if matches!(rc_beam_qd1, Some(Ok(_))) {
+        sepika_design_jp::rc::beam_qd1_slab_end_moments(
+            model,
+            &sepika_core::adjacency::NodeAdjacency::primary_frame(model),
+            elem,
+        )
+    } else {
+        None
+    };
     let long_at = long_mf.and_then(|list| list.iter().find(|(id, _)| *id == elem.id));
     let missing_gravity = wire_qd && long_at.is_none();
     let seismic_qd = (long_at.is_some()
@@ -997,6 +1006,9 @@ fn draw_peak_check<'a>(
             }),
         beam_has_slab: kind == MemberKind::Girder
             && sepika_design_jp::beam_has_attached_slab(&app.core.model, elem),
+        rc_beam_qd1_slab_end_moments_nmm: slab_moments_nmm,
+        rc_beam_qd1_slab_unverified: slab_moments_nmm.is_none()
+            && matches!(rc_beam_qd1, Some(Ok(_))),
         rc_beam_qd1_issue: rc_beam_qd1.and_then(Result::err),
         rc_grouped_beam_qd1_sum_my_nmm: None,
         seismic_qd,
@@ -1362,6 +1374,9 @@ fn draw_labeled_outcome_row(
                         },
                     )
                     .on_hover_text(&c.detail);
+                    if let Some(warning) = c.rc_beam_qd1_slab_warning() {
+                        ui.colored_label(theme::WARN_TEXT, warning);
+                    }
                 }
             }
             CheckOutcome::Skipped { reason } => {

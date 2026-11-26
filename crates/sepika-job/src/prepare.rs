@@ -911,6 +911,7 @@ mod tests {
             });
         model.rebuild_floor_assignment_regions();
         let plate = SlabPlate {
+            top_reinforcement: None,
             section: Some(sid),
             loads: Vec::new(),
             usage: None,

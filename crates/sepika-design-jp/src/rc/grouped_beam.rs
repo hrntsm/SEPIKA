@@ -65,6 +65,11 @@ pub fn grouped_beam_qd1_axis<'a>(
             ));
         }
         validate_beam_qd1_section_geometry(model, elem)?;
+        if super::beam_supports_slab(model, elem) {
+            return Err(
+                "QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません".into(),
+            );
+        }
         let [i, j] = model
             .primary_frame_axis_end_positions(elem)?
             .ok_or_else(|| format!("QD1用の一本部材の区間 {} の実材軸が不明です", id.0))?;
