@@ -1,6 +1,6 @@
 //! 鉄骨造柱の許容応力度検定。
 
-use crate::material_strength::{steel_fc, steel_fs, steel_ft};
+use crate::material_strength::{steel_fc, steel_fs, steel_ft, STEEL_FC_ELASTIC_COEFFICIENT};
 use crate::{
     CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, LoadTerm, MemberForcesAt,
 };
@@ -305,21 +305,40 @@ pub(super) fn check_symmetric_h_plate_slenderness(
         return Err("局部座屈の幅厚比照査に必要なH形断面の寸法・全断面性能を確定できません".into());
     }
 
-    let (compressed_flange, compressed_web) = if forces.n > 0.0 {
-        tension_compressed_plates(forces, sec, shape, height_mm, web_flat_mm)?
+    let (compressed_flanges, compressed_web) = if forces.my != 0.0 {
+        weak_axis_compressed_plates(
+            forces,
+            sec,
+            shape,
+            flange_width_mm,
+            flange_thick_mm,
+            web_flat_mm,
+        )?
     } else {
-        (true, true)
-    };
-
-    let flange = if forces.n < 0.0 {
-        "上下フランジ b/t"
-    } else if forces.mz > 0.0 {
-        "上フランジ b/t"
-    } else {
-        "下フランジ b/t"
+        let (compressed_flange, compressed_web) = if forces.n > 0.0 {
+            tension_compressed_plates(forces, sec, shape, height_mm, web_flat_mm)?
+        } else {
+            (true, true)
+        };
+        let flange_label = if forces.n < 0.0 {
+            "上下フランジ b/t"
+        } else if forces.mz > 0.0 {
+            "上フランジ b/t"
+        } else {
+            "下フランジ b/t"
+        };
+        (
+            compressed_flange
+                .then_some(flange_label)
+                .into_iter()
+                .collect(),
+            compressed_web,
+        )
     };
     let web_limit_coefficient = |f_mpa: f64| {
-        Ok(if forces.n == 0.0 {
+        Ok(if forces.my != 0.0 {
+            1.6
+        } else if forces.n == 0.0 {
             2.4
         } else if forces.n < 0.0 && forces.mz != 0.0 && root_r_mm.is_some() {
             let web_area_mm2 = web_flat_mm * web_thick_mm;
@@ -333,25 +352,11 @@ pub(super) fn check_symmetric_h_plate_slenderness(
         })
     };
     let mut reasons = Vec::new();
-    for (label, width_mm, thick_mm, is_flange, compressed) in [
-        (
-            flange,
-            flange_width_mm / 2.0,
-            flange_thick_mm,
-            true,
-            compressed_flange,
-        ),
-        (
-            "ウェブ d/t",
-            web_flat_mm,
-            web_thick_mm,
-            false,
-            compressed_web,
-        ),
-    ] {
-        if !compressed {
-            continue;
-        }
+    let compressed_plates = compressed_flanges
+        .into_iter()
+        .map(|label| (label, flange_width_mm / 2.0, flange_thick_mm, true))
+        .chain(compressed_web.then_some(("ウェブ d/t", web_flat_mm, web_thick_mm, false)));
+    for (label, width_mm, thick_mm, is_flange) in compressed_plates {
         let f_mpa = resolve_steel_f(Some(mat), Some(thick_mm))
             .map_err(|reason| format!("{label} の幅厚比の限界値を算定できません。{reason}"))?;
         let coefficient = if is_flange {
@@ -380,6 +385,232 @@ pub(super) fn check_symmetric_h_plate_slenderness(
     }
 }
 
+fn weak_axis_compressed_plates(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    shape: &SectionShape,
+    flange_width_mm: f64,
+    flange_thick_mm: f64,
+    web_flat_mm: f64,
+) -> Result<(Vec<&'static str>, bool), String> {
+    let unresolved = "局部座屈の幅厚比照査に必要なH形断面の全断面性能を確定できません";
+    if sec.width != flange_width_mm
+        || [sec.property_basis.depth, sec.property_basis.width]
+            .contains(&PropertyBasis::PendingShape)
+    {
+        return Err(unresolved.into());
+    }
+    let area_mm2 = sec
+        .resolved_area()
+        .map_err(|reason| format!("{unresolved}。{reason}"))?;
+    if area_mm2 <= 0.0 {
+        return Err(unresolved.into());
+    }
+    let iz_mm4 = plate_inertia(
+        sec.property_basis.iz,
+        sec.iz,
+        "弱軸",
+        || shape.try_calc_iz(),
+        unresolved,
+    )?;
+    let strong_gradient_mpa_per_mm = if forces.mz == 0.0 {
+        0.0
+    } else {
+        let iy_mm4 = plate_inertia(
+            sec.property_basis.iy,
+            sec.iy,
+            "強軸",
+            || shape.try_calc_iy(),
+            unresolved,
+        )?;
+        forces.mz / iy_mm4
+    };
+    let weak_gradient_mpa_per_mm = forces.my / iz_mm4;
+    let axial_mpa = forces.n / area_mm2;
+    let flange_y_mm = (sec.depth - flange_thick_mm) / 2.0;
+    let flange_z_mm = flange_width_mm / 2.0;
+    let mut flanges = Vec::new();
+    for (label, y_mm, z_mm) in [
+        ("上フランジ（局所z−側） b/t", flange_y_mm, -flange_z_mm),
+        ("上フランジ（局所z＋側） b/t", flange_y_mm, flange_z_mm),
+        ("下フランジ（局所z−側） b/t", -flange_y_mm, -flange_z_mm),
+        ("下フランジ（局所z＋側） b/t", -flange_y_mm, flange_z_mm),
+    ] {
+        let supported_edge_mpa = axial_mpa - strong_gradient_mpa_per_mm * y_mm;
+        let free_edge_mpa = supported_edge_mpa + weak_gradient_mpa_per_mm * z_mm;
+        if !supported_edge_mpa.is_finite() || !free_edge_mpa.is_finite() {
+            return Err(
+                "局部座屈の幅厚比照査に必要なフランジの合成面内応力度を有限値で算定できません"
+                    .into(),
+            );
+        }
+        if supported_edge_mpa.min(free_edge_mpa) < 0.0 {
+            flanges.push(label);
+        }
+    }
+    // ウェブ表面のMyによる応力度は、板厚方向で相殺するため面内圧縮の判定には用いない。
+    let min_web_mpa = axial_mpa - strong_gradient_mpa_per_mm.abs() * (web_flat_mm / 2.0);
+    if !min_web_mpa.is_finite() {
+        return Err(
+            "局部座屈の幅厚比照査に必要なウェブの合成面内応力度を有限値で算定できません".into(),
+        );
+    }
+    Ok((flanges, min_web_mpa < 0.0))
+}
+
+fn plate_inertia(
+    basis: PropertyBasis,
+    stored_mm4: f64,
+    axis: &str,
+    calculate: impl FnOnce() -> Result<f64, String>,
+    unresolved: &str,
+) -> Result<f64, String> {
+    if basis == PropertyBasis::PendingShape || !stored_mm4.is_finite() || stored_mm4 <= 0.0 {
+        return Err(format!(
+            "{unresolved}。{axis}断面二次モーメントが未算定または不正です"
+        ));
+    }
+    if basis == PropertyBasis::Shape {
+        let calculated_mm4 = calculate().map_err(|reason| format!("{unresolved}。{reason}"))?;
+        let tolerance_mm4 = 8.0 * f64::EPSILON * stored_mm4.max(calculated_mm4);
+        if !calculated_mm4.is_finite()
+            || calculated_mm4 <= 0.0
+            || (stored_mm4 - calculated_mm4).abs() > tolerance_mm4
+        {
+            return Err(format!(
+                "{unresolved}。{axis}断面二次モーメントの記録値が現在の断面形状と一致しません"
+            ));
+        }
+    }
+    Ok(stored_mm4)
+}
+
+pub(super) enum HColumnCompressionSlenderness {
+    Confirmed(f64),
+    Partial {
+        lower_bound: Option<f64>,
+        reason: String,
+    },
+}
+
+impl HColumnCompressionSlenderness {
+    pub(super) fn resolve(sec: &Section, ctx: &DesignCtx) -> Self {
+        let unresolved = "有効細長比と許容圧縮応力度に必要なH形断面性能を確定できません";
+        let shape = sec.shape.as_ref().expect("上下対称H形鋼の形状が必要");
+        let area_mm2 = match sec.resolved_area() {
+            Ok(area_mm2) if area_mm2 > 0.0 => area_mm2,
+            result => {
+                let reason = result
+                    .err()
+                    .unwrap_or_else(|| "有限な正値が必要です".into());
+                return Self::Partial {
+                    lower_bound: None,
+                    reason: format!("{unresolved}。全断面積を確認してください。{reason}"),
+                };
+            }
+        };
+        let lengths_mm = super::compression_buckling_lengths_mm(ctx, false);
+        let axes = [
+            (
+                "強軸",
+                plate_inertia(
+                    sec.property_basis.iy,
+                    sec.iy,
+                    "強軸",
+                    || shape.try_calc_iy(),
+                    unresolved,
+                ),
+            ),
+            (
+                "弱軸",
+                plate_inertia(
+                    sec.property_basis.iz,
+                    sec.iz,
+                    "弱軸",
+                    || shape.try_calc_iz(),
+                    unresolved,
+                ),
+            ),
+        ];
+        let mut lower_bound = None::<f64>;
+        let mut reasons = Vec::new();
+        for ((axis, inertia), length_mm) in axes.into_iter().zip(lengths_mm) {
+            let lambda = inertia.and_then(|inertia_mm4| {
+                if !length_mm.is_finite()
+                    || length_mm < 0.0
+                    || (length_mm == 0.0 && ctx.length != 0.0)
+                {
+                    return Err(format!(
+                        "有効細長比と許容圧縮応力度に必要な{axis}の座屈長さを確定できません"
+                    ));
+                }
+                let radius_mm = (inertia_mm4 / area_mm2).sqrt();
+                let lambda = length_mm / radius_mm;
+                if !radius_mm.is_finite() || radius_mm <= 0.0 || !lambda.is_finite() {
+                    return Err(format!("{axis}の有効細長比を有限値で算定できません"));
+                }
+                Ok(lambda)
+            });
+            match lambda {
+                Ok(lambda) => {
+                    lower_bound = Some(lower_bound.map_or(lambda, |bound| bound.max(lambda)))
+                }
+                Err(reason) => reasons.push(reason),
+            }
+        }
+        if reasons.is_empty() {
+            Self::Confirmed(lower_bound.expect("両軸の有効細長比を確認済み"))
+        } else {
+            Self::Partial {
+                lower_bound,
+                reason: reasons.join("。"),
+            }
+        }
+    }
+
+    pub(super) fn lower_bound(&self) -> Option<f64> {
+        match self {
+            Self::Confirmed(lambda) => Some(*lambda),
+            Self::Partial { lower_bound, .. } => *lower_bound,
+        }
+    }
+
+    pub(super) fn reason(&self) -> Option<&str> {
+        match self {
+            Self::Confirmed(_) => None,
+            Self::Partial { reason, .. } => Some(reason),
+        }
+    }
+
+    pub(super) fn allowable_compression_limit(
+        &self,
+        f_mpa: f64,
+        young_mpa: f64,
+        term: LoadTerm,
+    ) -> Option<(f64, &'static str)> {
+        let lambda = self.lower_bound()?;
+        let transition = super::big_lambda(f_mpa, young_mpa);
+        if !transition.is_finite() || transition <= 1e-9 {
+            return None;
+        }
+        let mut fc_mpa = steel_fc(f_mpa, young_mpa, lambda, term);
+        let label = if self.reason().is_some() {
+            if lambda <= transition {
+                // 境界直後の許容値は丸められた係数により境界値より大きくなり得る。
+                let elastic_supremum_mpa = STEEL_FC_ELASTIC_COEFFICIENT * f_mpa;
+                fc_mpa = fc_mpa.max(match term {
+                    LoadTerm::Long => elastic_supremum_mpa,
+                    LoadTerm::Short => 1.5 * elastic_supremum_mpa,
+                });
+            }
+            "fc上限"
+        } else {
+            "fc"
+        };
+        (fc_mpa.is_finite() && fc_mpa > 0.0).then_some((fc_mpa, label))
+    }
+}
+
 fn tension_compressed_plates(
     forces: &MemberForcesAt,
     sec: &Section,
@@ -391,31 +622,19 @@ fn tension_compressed_plates(
     let area_mm2 = sec
         .resolved_area()
         .map_err(|reason| format!("{unresolved}。{reason}"))?;
-    if [sec.property_basis.iy, sec.property_basis.depth].contains(&PropertyBasis::PendingShape)
-        || [area_mm2, sec.iy]
-            .iter()
-            .any(|&v| !v.is_finite() || v <= 0.0)
-    {
+    if sec.property_basis.depth == PropertyBasis::PendingShape || area_mm2 <= 0.0 {
         return Err(unresolved.into());
     }
-
-    if sec.property_basis.iy == PropertyBasis::Shape {
-        let calculated_iy_mm4 = shape
-            .try_calc_iy()
-            .map_err(|reason| format!("{unresolved}。{reason}"))?;
-        let tolerance_mm4 = 8.0 * f64::EPSILON * sec.iy.max(calculated_iy_mm4);
-        if !calculated_iy_mm4.is_finite()
-            || calculated_iy_mm4 <= 0.0
-            || (sec.iy - calculated_iy_mm4).abs() > tolerance_mm4
-        {
-            return Err(format!(
-                "{unresolved}。強軸断面二次モーメントの記録値が現在の断面形状と一致しません"
-            ));
-        }
-    }
+    let iy_mm4 = plate_inertia(
+        sec.property_basis.iy,
+        sec.iy,
+        "強軸",
+        || shape.try_calc_iy(),
+        unresolved,
+    )?;
 
     let tension_mpa = forces.n / area_mm2;
-    let gradient_mpa_per_mm = forces.mz.abs() / sec.iy;
+    let gradient_mpa_per_mm = forces.mz.abs() / iy_mm4;
     let flange_bending_mpa = gradient_mpa_per_mm * (height_mm / 2.0);
     let web_bending_mpa = gradient_mpa_per_mm * (web_flat_mm / 2.0);
     if [tension_mpa, flange_bending_mpa, web_bending_mpa]
