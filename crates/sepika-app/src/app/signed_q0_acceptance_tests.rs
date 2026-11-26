@@ -113,6 +113,9 @@ fn signed_q0_gui_invalid_direction_repaired_invalid_never_revives_saved_success(
 #[test]
 fn damage_control_uses_the_saved_seismic_combination_without_a_separate_gravity_result() {
     let mut app = app();
+    app.core.model.nodes[1]
+        .restraint
+        .set_free(sepika_core::dof::Dof::Uz);
     app.core.analysis_cfg.rc_damage_control = true;
     app.core.model.combinations.truncate(1);
     app.run_combination(0);
@@ -177,6 +180,52 @@ pub(crate) fn grouped_rc_qd1_model(split: bool) -> sepika_core::model::Model {
             .into();
     }
     model
+}
+
+#[test]
+fn qd1_does_not_use_simple_span_q0_at_a_rotation_only_end_of_a_loaded_beam() {
+    use sepika_core::dof::Dof;
+    use sepika_design_jp::{CheckOutcome, QdMethod};
+    use sepika_solver::statics::linear::linear_static_once;
+
+    let mut app = app();
+    for (supported, end_reactions_n) in [(true, [20_000.0, 20_000.0]), (false, [40_000.0, 0.0])] {
+        let mut model = grouped_rc_qd1_model(false);
+        model.nodes[1].restraint.set(Dof::Uz, supported);
+        let solved = linear_static_once(&model, model.load_cases[0].id).unwrap();
+        let forces = &solved.member_forces[0].1.at;
+        let [(i, i_force), (j, j_force)] = [forces[0], *forces.last().unwrap()];
+        assert_eq!([i, j], [0.0, 1.0]);
+        // 上向きを正とし、節点内力と端断面力の符号をそろえる。
+        for (actual_n, expected_n) in [i_force[1], -j_force[1]].into_iter().zip(end_reactions_n) {
+            assert!(
+                (actual_n - expected_n).abs() < 1e-6,
+                "{actual_n} != {expected_n}"
+            );
+        }
+        assert_eq!(
+            sepika_job::design_q0::rc_beam_q0_for_gravity_cases(&model, &model.elements[0]),
+            Ok(Some(20_000.0))
+        );
+
+        app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+        assert!(app.load_model(model));
+        app.run_combination(0);
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        if supported {
+            assert!(shear_demand(&app) > 20_000.0);
+        } else {
+            let positions = &app.current_design_results().unwrap().member_checks[0].positions;
+            assert!(!positions.is_empty());
+            assert!(positions.iter().all(|position| matches!(&position.outcome,
+                CheckOutcome::Skipped { reason } if reason.contains("j端") && reason.contains("局所Qy方向の反力")
+            )), "{positions:?}");
+        }
+    }
 }
 
 #[test]
