@@ -154,39 +154,6 @@ impl RcDesign {
         strength_outcomes(outcome, reason.as_deref())
     }
 
-    /// 旧評価位置の保存断面力から、QDせん断に依存しないRC梁の不適合だけを返す。
-    pub fn independent_old_qd1_station_failure(
-        &self,
-        forces: &MemberForcesAt,
-        sec: &Section,
-        mat: &Material,
-        ctx: &DesignCtx,
-    ) -> Option<CheckOutcome> {
-        let (outcome, _) = self.check_with_gravity_mode(
-            forces,
-            sec,
-            mat,
-            ctx,
-            Some("旧評価位置では実材端を用いるQD1せん断を検定しません"),
-            ColumnGravityMode::TimeHistory {
-                strict_gravity: false,
-            },
-        );
-        let CheckOutcome::Checked(mut result) = outcome else {
-            return None;
-        };
-        result.components.retain(|component| {
-            component.kind != crate::CheckKind::Shear
-                && component.ratio.is_finite()
-                && component.ratio > 1.0
-        });
-        if result.components.is_empty() {
-            return None;
-        }
-        result.basis.push_str("（旧評価位置の独立不適合）");
-        Some(CheckOutcome::Checked(result))
-    }
-
     pub(crate) fn check_ordinary_with_incomplete(
         &self,
         forces: &MemberForcesAt,

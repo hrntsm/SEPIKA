@@ -1142,28 +1142,52 @@ fn rounding_tolerance_does_not_substitute_a_material_end_for_an_internal_face() 
 }
 
 #[test]
-fn old_face_keeps_independent_bending_failure_without_a_qd1_shear_check() {
+fn material_end_replaces_the_automatic_face_but_keeps_an_explicit_joint_check() {
+    use sepika_core::model::{MemberDetailAttr, MemberJoint};
     let mut model = model();
     add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
-    model.elements[0].end_offsets_mm = [[0.0, 0.0, 1000.0]; 2];
     let old = 250.0 / 4500.0;
-    let rows = [(0.0, 10e6), (old, 1e10), (0.5, 10e6), (1.0, 10e6)]
-        .map(|(xi, mz)| (xi, [0.0, 60_000.0, 0.0, 0.0, 0.0, mz]));
-    let result = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
-    let old = &result.iter().find(|(_, xi, _)| *xi == old).unwrap().2;
-    let CheckOutcome::Checked(old) = old else {
-        panic!("{old:?}")
+    let other_face = 1.0 - old;
+    let rows = [
+        (0.0, 10e6),
+        (old, 1e10),
+        (0.5, 10e6),
+        (other_face, 10e6),
+        (1.0, 10e6),
+    ]
+    .map(|(xi, mz)| (xi, [0.0, 60_000.0, 0.0, 0.0, 0.0, mz]));
+    let bending_fails = |outcome: &CheckOutcome| {
+        matches!(outcome,
+        CheckOutcome::Checked(check) if check.components.iter().any(|c| c.kind == CheckKind::Bending && c.ratio > 1.0))
     };
-    assert!(old.basis.contains("旧評価位置"));
-    assert!(old
+    let baseline = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
+    assert!(baseline
+        .iter()
+        .any(|(_, xi, result)| *xi == old && bending_fails(result)));
+
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, 1000.0]; 2];
+    let replaced = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
+    assert!(replaced
+        .iter()
+        .all(|(_, xi, result)| *xi != old && !bending_fails(result)));
+    let end = &replaced.iter().find(|(_, xi, _)| *xi == 0.0).unwrap().2;
+    assert_shear_n(end, 293_562_225.0 / 4500.0);
+    let CheckOutcome::Checked(end) = end else {
+        panic!("{end:?}");
+    };
+    assert!(end
         .components
         .iter()
-        .any(|c| c.kind == CheckKind::Bending && c.ratio > 1.0));
-    assert!(old.components.iter().all(|c| c.kind != CheckKind::Shear));
-    for (i, xi, current) in result {
-        if xi == 0.0 || xi == 1.0 {
-            assert_eq!(i, ElemId(0));
-            assert_shear_n(&current, 293_562_225.0 / 4500.0);
-        }
-    }
+        .any(|c| c.kind == CheckKind::Shear && c.detail.contains("α=1.000")));
+
+    let mut detail = MemberDetailAttr::new(ElemId(0));
+    detail.joints.push(MemberJoint {
+        distance: 250.0,
+        kind: Default::default(),
+    });
+    model.member_detail_attrs.push(detail);
+    let with_joint = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
+    assert!(with_joint
+        .iter()
+        .any(|(_, xi, result)| *xi == old && bending_fails(result)));
 }

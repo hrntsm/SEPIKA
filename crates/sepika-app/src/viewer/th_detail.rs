@@ -1101,31 +1101,18 @@ fn draw_peak_check<'a>(
                 {
                     continue;
                 }
-                let mfa = MemberForcesAt::from_local(pos, f);
                 if let Some(positions) = &qd1_positions {
-                    match positions
+                    let Some(&expected) = positions
                         .iter()
                         .find(|expected| same_qd1_station(**expected, pos))
-                    {
-                        Some(expected)
-                            if qd1_saved_station_issue(*expected, &forces.at).is_none() => {}
-                        Some(_) => continue,
-                        None => {
-                            if let Some(ng) = sepika_design_jp::RcDesign
-                                .independent_old_qd1_station_failure(&mfa, sec, mat, &ctx)
-                            {
-                                let label = selected.map_or_else(
-                                    || format!("旧評価位置 ξ={pos:.6}:"),
-                                    |(snapshot, _)| {
-                                        format!("旧評価位置 t={:.6} s  ξ={pos:.6}:", snapshot.time)
-                                    },
-                                );
-                                draw_labeled_outcome_row(ui, &label, &ng, false);
-                            }
-                            continue;
-                        }
+                    else {
+                        continue;
+                    };
+                    if qd1_saved_station_issue(expected, &forces.at).is_some() {
+                        continue;
                     }
                 }
+                let mfa = MemberForcesAt::from_local(pos, f);
                 let mut draw_outcome = |outcome: &CheckOutcome| {
                     let with_reference_reason = match (outcome, gravity_reference_issue) {
                         (CheckOutcome::Skipped { reason }, Some(reference_reason)) => {

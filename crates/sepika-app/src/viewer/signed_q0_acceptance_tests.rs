@@ -1342,7 +1342,7 @@ fn slab_qd1_inputs_and_checked_warning_round_trip_in_ovika_without_changing_anal
 }
 
 #[test]
-fn time_history_eccentric_beam_separates_real_end_force_from_old_face_failure() {
+fn time_history_eccentric_beam_replaces_only_the_automatic_face() {
     use sepika_core::ids::ElemId;
     use sepika_core::model::{MemberLoad, MemberLoadKind};
     let mut model = rc_beam_qd1_model::model();
@@ -1387,10 +1387,15 @@ fn time_history_eccentric_beam_separates_real_end_force_from_old_face_failure() 
         !text.contains("ξ=0.05:") && !text.contains("実柱面:") && text.contains("せん断 "),
         "{text}"
     );
-    assert!(
-        text.contains("旧評価位置 ξ=0.050000:") && text.contains("(NG)"),
-        "{text}"
-    );
+    assert!(!text.contains("(NG)"), "{text}");
+    let mut detail = sepika_core::model::MemberDetailAttr::new(ElemId(0));
+    detail.joints.push(sepika_core::model::MemberJoint {
+        distance: 250.0,
+        kind: Default::default(),
+    });
+    app.core.model.member_detail_attrs.push(detail);
+    let text = labels(&app, &record, true);
+    assert!(text.contains("ξ=0.05:") && text.contains("(NG)"), "{text}");
     let forces = record.peak_member_forces[0].as_mut().unwrap();
     forces.at[0].0 = 1e-8;
     let text = labels(&app, &record, true);

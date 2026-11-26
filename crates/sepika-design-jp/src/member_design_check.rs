@@ -1056,24 +1056,6 @@ pub fn run_member_design_checks(
                 }
             }
         }
-        if let Some(new_positions) = &qd1_positions {
-            let old_positions = design_positions(elem, model, position_length);
-            for &(pos, forces) in &mf.at {
-                if new_positions
-                    .iter()
-                    .any(|expected| crate::design_position::same_qd1_station(*expected, pos))
-                    || !is_near_design_position(pos, &old_positions)
-                {
-                    continue;
-                }
-                let forces = MemberForcesAt::from_local(pos, forces);
-                if let Some(known_ng) =
-                    crate::RcDesign.independent_old_qd1_station_failure(&forces, sec, mat, &ctx)
-                {
-                    member_checks.push((*elem_id, pos, known_ng));
-                }
-            }
-        }
         let route21_matches = ctx.src_column_route21_shear.as_ref().map(|_| {
             let mut counts = vec![0; positions.len()];
             let stations: Vec<_> = mf
