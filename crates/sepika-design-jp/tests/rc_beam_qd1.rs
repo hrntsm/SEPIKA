@@ -14,7 +14,8 @@ mod asymmetric;
 #[path = "fixtures/rc_beam_qd1_model.rs"]
 mod input;
 use input::{
-    add_columns_at_outer_nodes, beam_with_recorded_continuous_slab_rebar, extend_j_column, model,
+    add_columns_at_outer_nodes, add_confirmed_i_haunch, beam_with_recorded_continuous_slab_rebar,
+    extend_j_column, model,
 };
 
 fn check(
@@ -103,6 +104,167 @@ fn opposite_end_moment_strengths_govern_qd1_independent_of_response_sign_and_sta
 }
 
 #[test]
+fn haunch_qd1_uses_confirmed_face_rebar_and_only_checks_the_general_section() {
+    use sepika_core::model::{JointKind, MemberJoint};
+
+    let mut model = model();
+    add_confirmed_i_haunch(&mut model);
+    model.member_detail_attrs[0].joints = [450.0, 4_400.0]
+        .map(|distance| MemberJoint {
+            distance,
+            kind: JointKind::Site,
+        })
+        .to_vec();
+    let positions = [
+        250.0 / 4500.0,
+        0.1,
+        850.0 / 4500.0,
+        0.5,
+        1.0 - 250.0 / 4500.0,
+        4400.0 / 4500.0,
+    ];
+    // （223.3625625 + 195.708150）kN·mの組合せが支配。逆方向は385.929045 kN·m。
+    let qd1_n = 112_767.678_125;
+    for (method, qy, expected_n) in [
+        (QdMethod::Qd1, 60_000.0, qd1_n),
+        (QdMethod::Min, 60_000.0, qd1_n),
+        (QdMethod::Min, 30_000.0, 70_000.0),
+        (QdMethod::Qd2, 30_000.0, 70_000.0),
+    ] {
+        for mz in [10e6, -10e6] {
+            let rows = positions.map(|pos| (pos, [0.0, qy, 0.0, 0.0, 0.0, mz]));
+            let outcomes = check(&model, method, Some(8_000.0), &rows, -10_000.0);
+            assert_eq!(outcomes.len(), positions.len(), "{outcomes:?}");
+            for (index, expected_pos) in positions.into_iter().enumerate() {
+                let (_, _, outcome) = outcomes
+                    .iter()
+                    .find(|(_, pos, _)| *pos == expected_pos)
+                    .unwrap();
+                if method != QdMethod::Qd2 && [0, 1, 5].contains(&index) {
+                    assert!(
+                        matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("ハンチ区間や実フェース外")),
+                        "{outcome:?}"
+                    );
+                } else {
+                    assert_shear_n(outcome, expected_n);
+                }
+            }
+        }
+    }
+    let rows = [(0.5, [0.0, 60_000.0, 0.0, 0.0, 0.0, 1e9])];
+    let outcomes = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
+    assert!(outcomes.iter().any(|(_, pos, outcome)| *pos == positions[0]
+        && matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("ハンチ区間"))));
+    assert!(outcomes.iter().any(|(_, pos, outcome)| *pos == 0.5
+        && matches!(outcome, CheckOutcome::Checked(result)
+            if result.components.iter().any(|component| component.kind == CheckKind::Bending && component.ratio > 1.0))));
+}
+
+#[test]
+fn haunch_qd1_j_side_uses_the_own_face_and_preserves_the_general_section_boundary() {
+    let mut model = model();
+    add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    add_confirmed_i_haunch(&mut model);
+    let detail = &mut model.member_detail_attrs[0];
+    detail.haunch_j = detail.haunch_i.take();
+    let j = 1.0 - 250.0 / 4500.0;
+    let boundary = 1.0 - 850.0 / 4500.0;
+    let rows =
+        [250.0 / 4500.0, 0.5, boundary, j].map(|pos| (pos, [0.0, 60_000.0, 0.0, 0.0, 0.0, 10e6]));
+    let outcomes = check(&model, QdMethod::Qd1, Some(0.0), &rows, -10_000.0);
+    assert_eq!(outcomes.len(), 4, "{outcomes:?}");
+    for (_, pos, outcome) in outcomes {
+        if pos == j {
+            assert!(
+                matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("ハンチ区間"))
+            );
+        } else {
+            assert_shear_n(&outcome, 104_767.678_125);
+        }
+    }
+}
+
+#[test]
+fn haunch_qd1_does_not_infer_missing_or_inconsistent_face_inputs() {
+    use sepika_core::model::Haunch;
+    type Change = (&'static str, fn(&mut Haunch));
+    let variants: [Change; 7] = [
+        ("未入力", |h| h.qd1_face = None),
+        ("実フェース距離と一致", |h| {
+            h.qd1_face.as_mut().unwrap().distance_mm = 0.0
+        }),
+        ("実幅・実せい", |h| {
+            h.qd1_face.as_mut().unwrap().width_mm = 350.0
+        }),
+        ("下端引張筋", |h| {
+            h.qd1_face.as_mut().unwrap().bottom.area_mm2 = 0.0
+        }),
+        ("上端引張筋", |h| {
+            h.qd1_face.as_mut().unwrap().top.effective_depth_mm = 800.0
+        }),
+        ("幅・せい増分", |h| h.width_increase = -50.0),
+        ("ハンチ区間が重なるか", |h| h.length = 4_000.0),
+    ];
+    for (expected_reason, change) in variants {
+        let mut model = model();
+        add_confirmed_i_haunch(&mut model);
+        change(model.member_detail_attrs[0].haunch_i.as_mut().unwrap());
+        let rows = [(0.5, [0.0, 30_000.0, 0.0, 0.0, 0.0, 1e9])];
+        for method in [QdMethod::Qd1, QdMethod::Min] {
+            let outcomes = check(&model, method, Some(0.0), &rows, -10_000.0);
+            assert!(outcomes.iter().any(|(_, p, outcome)| *p == 0.5 &&
+                matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(expected_reason))), "{outcomes:?}");
+            assert!(!outcomes.iter().any(|(_, _, outcome)|
+                matches!(outcome, CheckOutcome::Checked(r) if r.components.iter().any(|c| c.kind == CheckKind::Shear))), "{outcomes:?}");
+        }
+    }
+}
+
+#[test]
+fn haunch_qd1_holds_for_a_beam_supporting_slab_even_with_confirmed_face_rebar() {
+    let mut model = beam_with_recorded_continuous_slab_rebar();
+    add_confirmed_i_haunch(&mut model);
+    let rows = [(0.5, [0.0, 30_000.0, 0.0, 0.0, 0.0, 1e9])];
+    for method in [QdMethod::Qd1, QdMethod::Min] {
+        let outcomes = check(&model, method, Some(0.0), &rows, -10_000.0);
+        assert!(outcomes.iter().any(|(_, pos, outcome)| *pos == 0.5 &&
+            matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("支持する床板の寄与"))), "{outcomes:?}");
+        assert!(outcomes.iter().all(|(_, _, outcome)|
+            !matches!(outcome, CheckOutcome::Checked(r) if r.components.iter().any(|c| c.kind == CheckKind::Shear))));
+    }
+}
+
+#[test]
+fn haunch_qd1_requires_the_recorded_start_to_match_the_actual_column_face() {
+    for (offset, column_reference, expected_reason) in [
+        (
+            1_000.0,
+            [0.0, 1.0, 0.0],
+            "ハンチ付き梁のi端が偏心により実柱面と非交差",
+        ),
+        (
+            0.0,
+            [1.0, 1.0, 0.0],
+            "ハンチ長の起点と実フェースが一致しません",
+        ),
+    ] {
+        let mut model = model();
+        add_columns_at_outer_nodes(&mut model, column_reference);
+        add_confirmed_i_haunch(&mut model);
+        model.elements[0].end_offsets_mm = [[0.0, 0.0, offset]; 2];
+        let rows = [(0.5, [0.0, 30_000.0, 0.0, 0.0, 0.0, 10e6])];
+        for method in [QdMethod::Qd1, QdMethod::Min] {
+            let outcomes = check(&model, method, Some(0.0), &rows, -10_000.0);
+            assert!(outcomes.iter().any(|(_, pos, outcome)| *pos == 0.5 &&
+                matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(expected_reason))), "{outcomes:?}");
+            assert!(outcomes
+                .iter()
+                .all(|(_, _, outcome)| matches!(outcome, CheckOutcome::Skipped { .. })));
+        }
+    }
+}
+
+#[test]
 fn unavailable_qd1_preserves_independent_bending_failure_and_never_switches_to_qd2() {
     type InvalidQd1 = (&'static str, fn(&mut Model));
     let variants: [InvalidQd1; 9] = [
@@ -130,6 +292,7 @@ fn unavailable_qd1_preserves_independent_bending_failure_and_never_switches_to_q
                 length: 600.0,
                 depth_increase: 200.0,
                 width_increase: 0.0,
+                qd1_face: None,
             });
             m.member_detail_attrs.push(detail);
         }),
@@ -145,7 +308,10 @@ fn unavailable_qd1_preserves_independent_bending_failure_and_never_switches_to_q
         let mut model = model();
         change(&mut model);
         for method in [QdMethod::Qd1, QdMethod::Min] {
-            let outcomes = check(&model, method, Some(0.0), &rows, -10_000.0);
+            let outcomes: Vec<_> = check(&model, method, Some(0.0), &rows, -10_000.0)
+                .into_iter()
+                .filter(|(_, pos, _)| *pos == 0.5)
+                .collect();
             let [(_, _, CheckOutcome::Checked(ng)), (_, _, CheckOutcome::Skipped { reason })] =
                 outcomes.as_slice()
             else {
@@ -584,6 +750,21 @@ fn splitting_rc_beam_preserves_qd1_and_checks_both_outer_faces() {
     }
     assert_eq!(split[0].1, 250.0 / 2250.0);
     assert_eq!(split[5].1, 1.0 - 250.0 / 2250.0);
+}
+
+#[test]
+fn grouped_beam_haunch_qd1_remains_unavailable_with_confirmed_face_and_group_reaction() {
+    let mut model = split_beam();
+    add_confirmed_i_haunch(&mut model);
+    for method in [QdMethod::Qd1, QdMethod::Min] {
+        let outcomes = check_split(&model, method, Some(Ok(20_000.0)));
+        assert!(outcomes.iter().any(|(elem, _, outcome)| *elem == ElemId(0) &&
+            matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("分割したハンチ付き梁"))), "{outcomes:?}");
+        assert!(outcomes.iter().all(
+            |(_, _, outcome)| !matches!(outcome, CheckOutcome::Checked(r)
+            if r.components.iter().any(|c| c.kind == CheckKind::Shear))
+        ));
+    }
 }
 
 #[test]

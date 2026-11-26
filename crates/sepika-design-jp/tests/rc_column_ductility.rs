@@ -295,6 +295,7 @@ fn haunch_keeps_comparison_at_the_inner_boundary_center_and_opposite_end() {
             length: 750.0,
             depth_increase: 100.0,
             width_increase: 0.0,
+            qd1_face: None,
         });
         if i_end {
             detail.haunch_i = haunch;
@@ -332,6 +333,7 @@ fn a_clamped_station_does_not_shorten_the_haunch() {
         length: 1800.0,
         depth_increase: 100.0,
         width_increase: 0.0,
+        qd1_face: None,
     });
     model.member_detail_attrs.push(detail);
     let rows = [(0.5, 3_000_000.0), (1.0, 3_000_000.0)];

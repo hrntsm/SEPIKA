@@ -890,7 +890,11 @@ pub fn run_member_design_checks(
             (None, None, None)
         };
 
+        let rc_beam_qd1_haunches = rc_beam_qd1
+            .as_ref()
+            .and_then(|_| crate::rc::beam_qd1_haunches(model, elem, single_qd1_geometry));
         let slab_moments_nmm = (matches!(rc_beam_qd1, Some(Ok(_)))
+            && rc_beam_qd1_haunches.is_none()
             && !grouped_girders.contains(elem_id))
         .then(|| crate::rc::beam_qd1_slab_end_moments(model, rc_beam_adjacency.as_ref()?, elem))
         .flatten();
@@ -940,8 +944,10 @@ pub fn run_member_design_checks(
             rc_beam_qd1_at_material_end: qd1_positions.is_some(),
             rc_beam_qd1_slab_unverified: slab_moments_nmm.is_none()
                 && matches!(rc_beam_qd1, Some(Ok(_)))
+                && rc_beam_qd1_haunches.is_none()
                 && !grouped_girders.contains(elem_id),
             rc_beam_qd1_issue: rc_beam_qd1.and_then(Result::err),
+            rc_beam_qd1_haunches,
             steel_attr,
         };
 
@@ -1056,7 +1062,11 @@ pub fn run_member_design_checks(
                         *elem_id,
                         pos,
                         CheckOutcome::Skipped {
-                            reason: reason.into(),
+                            reason: ctx
+                                .rc_beam_qd1_haunches
+                                .as_ref()
+                                .and_then(|haunches| haunches.section_issue(pos))
+                                .unwrap_or_else(|| reason.into()),
                         },
                     ));
                 }

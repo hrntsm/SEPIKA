@@ -29,7 +29,7 @@ pub fn design_positions(elem: &ElementData, model: &Model, geom_len: f64) -> Vec
     xs
 }
 
-/// 実材端を使用するQD1の検定位置。保存断面の選択には `same_qd1_station` を使う。
+/// 実材端またはハンチのある梁で実フェースを使用するQD1の検定位置。断面選択には `same_qd1_station` を使う。
 pub fn rc_beam_qd1_positions(
     model: &Model,
     elem: &ElementData,
@@ -39,6 +39,7 @@ pub fn rc_beam_qd1_positions(
         .uses_material_end
         .into_iter()
         .any(|uses_end| uses_end)
+        && !crate::rc::has_beam_qd1_haunch(model, elem)
     {
         return None;
     }

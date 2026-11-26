@@ -4,7 +4,7 @@ use super::*;
 use sepika_core::ids::*;
 
 /// 部材の付帯情報を追加・更新する。寸法・継手位置の単位は mm。
-/// 対象部材が存在しない、またはハンチ寸法・継手位置に非有限値があれば、理由付きで拒否する。
+/// 対象部材が存在しない、ハンチ寸法・継手位置が非有限、またはQD1用の入力値に矛盾があれば拒否する。
 pub struct SetMemberDetailAttr {
     pub attr: sepika_core::model::MemberDetailAttr,
 }
@@ -26,6 +26,11 @@ impl EditCommand for SetMemberDetailAttr {
                             "{end}{label}は有限の値で入力してください"
                         )));
                     }
+                }
+                if let Some(reason) = haunch.qd1_face.and_then(|face| face.input_issue()) {
+                    return Box::new(RejectedEdit(format!(
+                        "{end}ハンチのQD1用フェース: {reason}"
+                    )));
                 }
             }
         }

@@ -12,6 +12,7 @@ fn detail(id: u32, joint_mm: f64, haunch_mm: f64) -> MemberDetailAttr {
             length: haunch_mm,
             depth_increase: 150.0,
             width_increase: 25.0,
+            qd1_face: None,
         }),
         haunch_j: None,
         joints: vec![MemberJoint {

@@ -153,6 +153,7 @@ fn bending_component(
 pub struct BeamQd1Geometry {
     pub clear_span_mm: f64,
     pub(crate) axis_length_mm: f64,
+    pub(super) face_distances_mm: [f64; 2],
     /// i/j端それぞれの解析断面位置。
     pub end_positions: [f64; 2],
     /// 偏心による実柱面非交差で実材端を採ったか（i/j順）。
@@ -192,7 +193,6 @@ pub fn beam_qd1_geometry(
             "単要素のQD1では一本部材グループの全スパンの外端断面・重力反力を確認できません".into(),
         );
     }
-    validate_beam_qd1_section_geometry(model, elem)?;
     let [i, j] = frame_end_positions(model, elem).ok_or("QD1用の梁の材軸を確定できません")?;
     let [_, ey, ez] = local_frame_axes(i, j, elem.local_axis.ref_vector)?;
     let length_mm = dist(i, j);
@@ -212,6 +212,7 @@ pub fn beam_qd1_geometry(
     Ok(BeamQd1Geometry {
         clear_span_mm,
         axis_length_mm: length_mm,
+        face_distances_mm: [from_i_mm, from_j_mm],
         end_positions: [from_i_mm / length_mm, 1.0 - from_j_mm / length_mm],
         uses_material_end: displaced.map(|cols| !cols.is_empty()),
         missing_direct_qy_support: [i_end, j_end].map(|end| {
@@ -228,21 +229,6 @@ pub fn beam_qd1_clear_span(
     elem: &ElementData,
 ) -> Result<f64, String> {
     beam_qd1_geometry(model, adjacency, elem)?.demand_clear_span_mm()
-}
-
-pub(super) fn validate_beam_qd1_section_geometry(
-    model: &Model,
-    elem: &ElementData,
-) -> Result<(), String> {
-    if model.member_detail(elem.id).is_some_and(|detail| {
-        [detail.haunch_i, detail.haunch_j]
-            .into_iter()
-            .flatten()
-            .any(|haunch| haunch.depth_increase != 0.0 || haunch.width_increase != 0.0)
-    }) {
-        return Err("QD1用にハンチ付きの梁の端部断面を確定できません".into());
-    }
-    Ok(())
 }
 
 pub(super) fn beam_qd1_face_distance(
@@ -478,11 +464,20 @@ fn beam_qd1_sum_my(
     ctx: &DesignCtx,
     main_rebar_valid: bool,
 ) -> Result<f64, String> {
-    let [top_nmm, bottom_nmm] =
-        beam_qd1_end_moments(shape, ctx.rebar_material.as_ref(), main_rebar_valid)?;
+    let ends = ctx
+        .rc_beam_qd1_haunches
+        .as_ref()
+        .map_or(Ok([None; 2]), |haunches| haunches.end_moments_nmm())?;
+    let [i, j] = if let [Some(i), Some(j)] = ends {
+        [i, j]
+    } else {
+        let base = beam_qd1_end_moments(shape, ctx.rebar_material.as_ref(), main_rebar_valid)?;
+        ends.map(|end| end.unwrap_or(base))
+    };
+    let [[i_top_nmm, i_bottom_nmm], [j_top_nmm, j_bottom_nmm]] = [i, j];
     let [slab_i_nmm, slab_j_nmm] = ctx.rc_beam_qd1_slab_end_moments_nmm.unwrap_or([0.0; 2]);
-    let i_top_j_bottom_nmm = (top_nmm + slab_i_nmm) + bottom_nmm;
-    let i_bottom_j_top_nmm = bottom_nmm + (top_nmm + slab_j_nmm);
+    let i_top_j_bottom_nmm = (i_top_nmm + slab_i_nmm) + j_bottom_nmm;
+    let i_bottom_j_top_nmm = i_bottom_nmm + (j_top_nmm + slab_j_nmm);
     Ok(i_top_j_bottom_nmm.max(i_bottom_j_top_nmm))
 }
 
@@ -525,6 +520,24 @@ pub(crate) fn beam_check(
     section_issue: &mut Option<String>,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
+    let seismic_qd = ctx
+        .seismic_qd
+        .as_ref()
+        .filter(|_| !long_term && !ctx.rc_damage_control);
+    let uses_qd1 = seismic_qd.is_some_and(|qd| qd.method != QdMethod::Qd2);
+    let qd1_haunches = ctx.rc_beam_qd1_haunches.as_ref().filter(|_| {
+        !long_term
+            && !ctx.rc_damage_control
+            && seismic_qd.is_none_or(|qd| qd.method != QdMethod::Qd2)
+    });
+    if let Some(reason) = qd1_haunches.and_then(|haunches| haunches.section_issue(forces.pos)) {
+        let reason = if let Some(issue) = &ctx.rc_beam_qd1_issue {
+            format!("{reason}。{issue}")
+        } else {
+            reason
+        };
+        return CheckOutcome::Skipped { reason };
+    }
     let round_main_rebar = main_rebar_valid
         && ctx.rebar_material.as_ref().is_some_and(|material| {
             material.category == MaterialCategory::Rebar
@@ -588,11 +601,6 @@ pub(crate) fn beam_check(
     let valid_tension_props = [props.b, props.d, props.j, props.at, fc_raw]
         .into_iter()
         .all(|value| value.is_finite() && value > 0.0);
-    let seismic_qd = ctx
-        .seismic_qd
-        .as_ref()
-        .filter(|_| !long_term && !ctx.rc_damage_control);
-    let uses_qd1 = seismic_qd.is_some_and(|qd| qd.method != QdMethod::Qd2);
     let q_design = if !shear_reference_valid {
         None
     } else if let Some(qd) = seismic_qd {
@@ -670,7 +678,9 @@ pub(crate) fn beam_check(
             detail: format!(
                 "QA={:.1} N, {demand_label}={:.1} N, α={:.3}, pw={:.5}",
                 qa, q_design, alpha, props.pw,
-            ) + &if uses_qd1 && ctx.rc_beam_qd1_slab_unverified {
+            ) + &if qd1_haunches.is_some() {
+                "。QD1はハンチ付き材端フェースの設計者確認値を使用。ハンチ区間・接合部の適合は未確認".into()
+            } else if uses_qd1 && ctx.rc_beam_qd1_slab_unverified {
                 format!("。警告: {}", crate::RC_BEAM_QD1_SLAB_WARNING)
             } else {
                 String::new()

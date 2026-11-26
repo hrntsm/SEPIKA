@@ -1027,6 +1027,123 @@ fn time_history_rc_beam_qd1_does_not_require_a_support_beyond_the_connection() {
 }
 
 #[test]
+fn time_history_haunch_qd1_uses_the_same_confirmed_demand_and_holds_unchecked_sections() {
+    use sepika_core::ids::ElemId;
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+    use sepika_design_jp::{CheckKind, CheckOutcome, LoadTerm, MemberDesignCheckOptions, QdMethod};
+    let mut model = rc_beam_qd1_model::model();
+    rc_beam_qd1_model::add_confirmed_i_haunch(&mut model);
+    model.load_cases[0].member = vec![MemberLoad::manual(
+        ElemId(0),
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Point {
+            a: 2_250.0,
+            p: 16_000.0,
+        },
+    )];
+    let q0_n = sepika_job::design_q0::rc_beam_q0_for_gravity_cases(&model, &model.elements[0])
+        .unwrap()
+        .unwrap();
+    assert_eq!(q0_n, 8_000.0);
+    let mut unconfirmed = model.clone();
+    unconfirmed.member_detail_attrs[0]
+        .haunch_i
+        .as_mut()
+        .unwrap()
+        .qd1_face = None;
+    assert_eq!(
+        bincode::serialize(&model.calculation_model()).unwrap(),
+        bincode::serialize(&unconfirmed.calculation_model()).unwrap(),
+    );
+
+    let positions = [250.0 / 4500.0, 850.0 / 4500.0, 0.5, 1.0 - 250.0 / 4500.0];
+    let gravity_rows = positions
+        .map(|xi| (xi, [0.0, -10_000.0, 0.0, 0.0, 0.0, 0.0]))
+        .to_vec();
+    let response = [0.0, 60_000.0, 0.0, 0.0, 0.0, 10e6];
+    let response_rows = positions.map(|xi| (xi, response)).to_vec();
+    let checks = sepika_design_jp::run_member_design_checks(
+        &model,
+        &[(
+            ElemId(0),
+            MemberForces {
+                at: response_rows.clone(),
+            },
+        )],
+        &[],
+        &MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            qd_method: QdMethod::Qd1,
+            long_member_forces: Some(&[(
+                ElemId(0),
+                MemberForces {
+                    at: gravity_rows.clone(),
+                },
+            )]),
+            q_simple_by_elem: Some(&std::collections::HashMap::from([(ElemId(0), q0_n)])),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let qa_n: f64 = checks
+        .member_checks
+        .iter()
+        .find_map(|(_, pos, outcome)| {
+            let CheckOutcome::Checked(result) = outcome else {
+                return None;
+            };
+            if *pos != 0.5 {
+                return None;
+            }
+            result
+                .components
+                .iter()
+                .find(|c| c.kind == CheckKind::Shear)?
+                .detail
+                .strip_prefix("QA=")?
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        })
+        .unwrap();
+    let expected_shear = format!("せん断 {:.2}", 112_767.678_125 / qa_n);
+    let mut rec = gravity_test_record(response, response);
+    rec.peak_member_forces[0].as_mut().unwrap().at = response_rows;
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+    set_gravity_forces(&mut app, Some(gravity_rows.clone()));
+    let text = labels(&app, &rec, true);
+    assert!(
+        text.contains(&expected_shear) && text.contains("ハンチ区間・接合部の適合は判定しません"),
+        "{text}"
+    );
+    let at_face = text
+        .split_once("ξ=0.06:")
+        .unwrap()
+        .1
+        .split("ξ=0.19:")
+        .next()
+        .unwrap();
+    assert!(
+        at_face.contains("ハンチ区間") && !at_face.contains("検定比"),
+        "{text}"
+    );
+
+    assert!(app.load_model(unconfirmed));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+    set_gravity_forces(&mut app, Some(gravity_rows));
+    let text = labels(&app, &rec, true);
+    assert!(
+        text.contains("矩形材端フェースと上下の有効主筋が未入力") && !text.contains("せん断 "),
+        "{text}"
+    );
+}
+
+#[test]
 fn time_history_qd1_requires_qy_reaction_at_a_direct_support_and_keeps_bending_ng() {
     use sepika_core::dof::Dof;
     use sepika_design_jp::QdMethod;

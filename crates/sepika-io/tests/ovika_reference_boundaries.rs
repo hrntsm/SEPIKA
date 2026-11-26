@@ -196,6 +196,7 @@ fn ovika_rejects_joint_and_haunch_refs_to_missing_members() {
                 length: 700.0,
                 depth_increase: 100.0,
                 width_increase: 25.0,
+                qd1_face: None,
             }),
             ..MemberDetailAttr::new(ElemId(2))
         },

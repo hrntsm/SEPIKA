@@ -1,7 +1,5 @@
-use super::beam::{
-    beam_qd1_face_distance, frame_end_positions, validate_beam_qd1_section_geometry,
-};
-use super::{axis_props_from_shape, beam_supports_slab};
+use super::beam::{beam_qd1_face_distance, frame_end_positions};
+use super::{axis_props_from_shape, beam_supports_slab, has_beam_qd1_haunch};
 use crate::material_strength::{main_rebar_grade, rebar_sigma_y_of};
 use crate::ultimate::rc_props::RcDirection;
 use sepika_core::adjacency::NodeAdjacency;
@@ -25,6 +23,15 @@ struct Panel<'a> {
     layout: &'a SlabTopReinforcement,
 }
 
+pub(super) fn beam_supports_line_attached_slab(model: &Model, elem: &ElementData) -> bool {
+    model.slabs.iter().any(|slab| {
+        slab.is_attached()
+            && model
+                .attached_slab_supports(slab)
+                .is_ok_and(|supports| supports.iter().any(|part| part.elem == elem.id))
+    })
+}
+
 /// 両端それぞれの上端引張時に算入する床板筋の曲げモーメント [N·mm]。
 /// 床板がない場合は両端0、寄与が未確認の場合は None。
 pub fn beam_qd1_slab_end_moments(
@@ -32,12 +39,7 @@ pub fn beam_qd1_slab_end_moments(
     adjacency: &NodeAdjacency,
     elem: &ElementData,
 ) -> Option<[f64; 2]> {
-    if model.slabs.iter().any(|slab| {
-        slab.is_attached()
-            && model
-                .attached_slab_supports(slab)
-                .is_ok_and(|supports| supports.iter().any(|part| part.elem == elem.id))
-    }) {
+    if beam_supports_line_attached_slab(model, elem) {
         return None;
     }
     if !beam_supports_slab(model, elem) {
@@ -471,7 +473,9 @@ fn slab_support_width(
     {
         return None;
     }
-    validate_beam_qd1_section_geometry(model, elem).ok()?;
+    if has_beam_qd1_haunch(model, elem) {
+        return None;
+    }
     let section = model.element_section(elem)?;
     let SectionShape::RcBeamRect { b, d, .. } = *section.shape.as_ref()? else {
         return None;

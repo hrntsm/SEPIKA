@@ -7,8 +7,7 @@
 //!
 //! いずれも**剛性・応力解析には影響しない**（「ハンチ／テーパーの
 //! 剛性は一様断面として無視する（慣用）」の方針どおり、剛性は基準断面のまま）。
-//! 断面算定の検定位置の追加（ハンチ端・継手位置。「位置はユーザが追加・
-//! 変更可能」）と、数量拾い・製作情報の保持に用いる。
+//! 検定位置の追加、短期地震時のRC梁QD1の材端降伏曲げ、数量拾い・製作情報の保持に用いる。
 
 use super::*;
 
@@ -28,6 +27,69 @@ pub struct Haunch {
     /// 幅増分 `[mm]`（水平ハンチ。フェース位置での基準断面幅への増分。0=なし）。
     #[serde(default)]
     pub width_increase: f64,
+    /// RC梁QD1用に設計者が確認したハンチ付き材端フェース。未指定ならハンチ形状だけから補わない。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qd1_face: Option<HaunchQd1Face>,
+}
+
+/// 梁軸に直交する実矩形フェース。軸力の影響を無視できること、両方向の有効引張主筋の付着・定着を設計者が確認する。
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HaunchQd1Face {
+    /// 当該i/j側の解析材端からフェースまでの材軸方向距離 [mm]（非負）。
+    pub distance_mm: f64,
+    /// フェースでの実幅 [mm]。
+    pub width_mm: f64,
+    /// フェースでの実せい [mm]。
+    pub depth_mm: f64,
+    pub top: HaunchQd1Tension,
+    pub bottom: HaunchQd1Tension,
+}
+
+/// フェースを梁軸方向に平行に横切る、上端引張または下端引張の全有効主筋。同じ降伏点の筋に限る。
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct HaunchQd1Tension {
+    /// 有効引張鉄筋面積の合計 [mm²]。
+    pub area_mm2: f64,
+    /// 実降伏応力度 [N/mm²]。
+    pub yield_strength_n_mm2: f64,
+    /// 圧縮縁から有効引張鉄筋の重心までの距離 [mm]。
+    pub effective_depth_mm: f64,
+}
+
+impl HaunchQd1Face {
+    /// 入力値の数値・断面内の位置関係に矛盾があれば理由を返す。モデル形状や配筋条件は照合しない。
+    pub fn input_issue(&self) -> Option<&'static str> {
+        let positive = |v: f64| v.is_finite() && v > 0.0;
+        if !self.distance_mm.is_finite() || self.distance_mm < 0.0 {
+            return Some("材端からフェースまでの距離は有限の非負値が必要です");
+        }
+        let area_mm2 = self.width_mm * self.depth_mm;
+        if ![self.width_mm, self.depth_mm, area_mm2]
+            .into_iter()
+            .all(positive)
+        {
+            return Some("矩形フェースの実幅・実せい・面積は有限の正値が必要です");
+        }
+        let valid_tension = |t: HaunchQd1Tension| {
+            [t.area_mm2, t.yield_strength_n_mm2, t.effective_depth_mm]
+                .into_iter()
+                .all(positive)
+                && t.effective_depth_mm < self.depth_mm
+        };
+        if !valid_tension(self.top) {
+            return Some("上端引張筋の面積・降伏点・断面内の有効せいを確認できません");
+        }
+        if !valid_tension(self.bottom) {
+            return Some("下端引張筋の面積・降伏点・断面内の有効せいを確認できません");
+        }
+        if self.top.area_mm2 + self.bottom.area_mm2 >= area_mm2 {
+            return Some("上下引張鉄筋面積の合計が矩形フェースの面積以上です");
+        }
+        if self.top.effective_depth_mm <= self.depth_mm - self.bottom.effective_depth_mm {
+            return Some("上端引張筋の重心が下端引張筋の重心より上にありません");
+        }
+        None
+    }
 }
 
 /// 継手の種別（数量拾い・工程区分用）。
@@ -147,11 +209,13 @@ mod tests {
                 length: 700.0,
                 depth_increase: 200.0,
                 width_increase: 0.0,
+                qd1_face: None,
             }),
             haunch_j: Some(Haunch {
                 length: 500.0,
                 depth_increase: 200.0,
                 width_increase: 0.0,
+                qd1_face: None,
             }),
             joints: vec![MemberJoint {
                 distance: 1000.0,
@@ -177,6 +241,7 @@ mod tests {
                 length: 0.0,
                 depth_increase: 100.0,
                 width_increase: 0.0,
+                qd1_face: None,
             }),
             haunch_j: None,
             joints: vec![
@@ -208,11 +273,13 @@ mod tests {
                 length: 3000.0,
                 depth_increase: 0.0,
                 width_increase: 0.0,
+                qd1_face: None,
             }),
             haunch_j: Some(Haunch {
                 length: 3000.0,
                 depth_increase: 0.0,
                 width_increase: 0.0,
+                qd1_face: None,
             }),
             joints: Vec::new(),
         };

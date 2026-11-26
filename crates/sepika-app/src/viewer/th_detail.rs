@@ -930,6 +930,12 @@ fn draw_peak_check<'a>(
         .as_ref()
         .and_then(|result| result.as_ref().ok())
         .and_then(|geometry| rc_beam_qd1_positions(model, elem, *geometry));
+    let rc_beam_qd1_haunches = rc_beam_qd1_geometry.as_ref().and_then(|result| {
+        sepika_design_jp::rc::beam_qd1_haunches(model, elem, result.as_ref().ok().copied())
+    });
+    if rc_beam_qd1_haunches.is_some() {
+        ui.label("短期QD1は確認済みの材端情報を使います。ハンチ区間・接合部の適合は判定しません。");
+    }
     let rc_beam_qd1 = rc_beam_qd1_geometry
         .map(|result| result.and_then(|geometry| geometry.demand_clear_span_mm()));
     let (q_simple, q0_issue) = if rc_beam_qd1.is_some() {
@@ -945,7 +951,7 @@ fn draw_peak_check<'a>(
     };
     let slab_moments_nmm = rc_beam_adjacency
         .as_ref()
-        .filter(|_| matches!(rc_beam_qd1, Some(Ok(_))))
+        .filter(|_| matches!(rc_beam_qd1, Some(Ok(_))) && rc_beam_qd1_haunches.is_none())
         .and_then(|adjacency| {
             sepika_design_jp::rc::beam_qd1_slab_end_moments(model, adjacency, elem)
         });
@@ -1072,8 +1078,10 @@ fn draw_peak_check<'a>(
         rc_beam_qd1_slab_end_moments_nmm: slab_moments_nmm,
         rc_beam_qd1_at_material_end: qd1_positions.is_some(),
         rc_beam_qd1_slab_unverified: slab_moments_nmm.is_none()
-            && matches!(rc_beam_qd1, Some(Ok(_))),
+            && matches!(rc_beam_qd1, Some(Ok(_)))
+            && rc_beam_qd1_haunches.is_none(),
         rc_beam_qd1_issue: q0_issue.or_else(|| rc_beam_qd1.and_then(Result::err)),
+        rc_beam_qd1_haunches,
         rc_grouped_beam_qd1_sum_my_nmm: None,
         seismic_qd,
         ..Default::default()
@@ -1136,7 +1144,11 @@ fn draw_peak_check<'a>(
                                 ui,
                                 &format!("ξ={pos:.2}:"),
                                 &CheckOutcome::Skipped {
-                                    reason: reason.into(),
+                                    reason: ctx
+                                        .rc_beam_qd1_haunches
+                                        .as_ref()
+                                        .and_then(|haunches| haunches.section_issue(pos))
+                                        .unwrap_or_else(|| reason.into()),
                                 },
                                 false,
                             );

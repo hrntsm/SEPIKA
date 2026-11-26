@@ -880,6 +880,9 @@ impl App {
                     .top_reinforcement
                     .clone_from(&input.plate.top_reinforcement);
             }
+            model
+                .member_detail_attrs
+                .clone_from(&self.core.model.member_detail_attrs);
         }
         rmp_serde::to_vec_named(&(
             model,
