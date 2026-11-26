@@ -362,6 +362,15 @@ fn removed_multi_spring_rejects_model_load_without_replacing_the_open_project() 
             "{error}"
         );
         super::secondary_cft_tests::write_invalid_container(&path, &document);
+        let error = sepika_io::ovika::load_ovika(&path).err().unwrap();
+        assert!(
+            matches!(
+                &error,
+                sepika_io::ovika::IoError::Decode(reason)
+                    if reason.contains("unknown variant `MultiSpring`")
+            ),
+            "{error}"
+        );
         app.open_project_from(path.clone());
         let reason = app.core.scoped.last_error.as_deref().unwrap();
         assert!(reason.contains("unknown variant `MultiSpring`"), "{reason}");

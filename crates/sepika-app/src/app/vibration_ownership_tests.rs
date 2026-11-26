@@ -1537,6 +1537,7 @@ fn removed_multi_spring_in_saved_inputs_keeps_the_main_model_and_unaffected_resu
     let mut input: serde_json::Value = rmp_serde::from_slice(input_bytes).unwrap();
     input["model"]["elements"][0]["kind"] = serde_json::json!("MultiSpring");
     *input_bytes = rmp_serde::to_vec_named(&input).unwrap();
+    assert!(result_validity::decode_recorded_input(&key, input_bytes, None).is_err());
     let results = rmp_serde::to_vec_named(&saved).unwrap();
 
     let mut studies: serde_json::Value =
