@@ -298,12 +298,7 @@ pub(super) fn column_check(
     incomplete: &mut Option<String>,
 ) -> CheckOutcome {
     let long_term = ctx.term == LoadTerm::Long;
-    let strict_gravity = matches!(
-        column_gravity,
-        ColumnGravityMode::TimeHistory {
-            strict_gravity: true
-        }
-    );
+    let strict_gravity = column_gravity.requires_exact_gravity();
     let ordinary = matches!(column_gravity, ColumnGravityMode::Ordinary { .. });
     let saved_long_term = matches!(
         column_gravity,
@@ -680,18 +675,9 @@ pub(super) fn column_check(
             });
         }
 
-        if (!boundary_shear_only || short_force_issue)
-            && crate::rc::provisions::is_member_level_station(forces.pos)
-        {
-            let prov = crate::rc::provisions::column_provisions_info(
-                &rebar_info_from_shape(shape, true).unwrap(),
-                d_full,
-                ctx.clear_length.filter(|&l| l > 1e-9).unwrap_or(ctx.length),
-                mat.concrete_class,
-                gross_area,
-                as_total,
-                props.pw,
-            );
+        if (!boundary_shear_only || short_force_issue) && forces.pos == 0.5 {
+            let prov = crate::rc::column_member_provisions(shape, mat, ctx)
+                .expect("円形柱の断面諸元と配筋は確認済み");
             if let Some(c) = prov.provision_component() {
                 components.push(c);
             }
@@ -846,19 +832,9 @@ pub(super) fn column_check(
             });
         }
 
-        if (!boundary_shear_only || short_force_issue)
-            && crate::rc::provisions::is_member_level_station(forces.pos)
-        {
-            let d_min = b.min(*d);
-            let prov = crate::rc::provisions::column_provisions_info(
-                &rebar_info_from_shape(shape, true).unwrap(),
-                d_min,
-                ctx.clear_length.filter(|&l| l > 1e-9).unwrap_or(ctx.length),
-                mat.concrete_class,
-                gross_area,
-                as_total,
-                props_z.pw.min(props_y.pw),
-            );
+        if (!boundary_shear_only || short_force_issue) && forces.pos == 0.5 {
+            let prov = crate::rc::column_member_provisions(shape, mat, ctx)
+                .expect("矩形柱の断面諸元と配筋は確認済み");
             if let Some(c) = prov.provision_component() {
                 components.push(c);
             }

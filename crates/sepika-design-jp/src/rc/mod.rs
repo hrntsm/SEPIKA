@@ -15,6 +15,7 @@ mod column;
 pub mod column_mechanism;
 pub mod joint;
 mod provisions;
+pub(crate) use provisions::column_member_provisions;
 pub mod wall;
 /// 鉄筋コンクリート造耐震壁のせん断非線形特性（トリリニア Qc/βu/Qu）。
 pub mod wall_nonlinear;
@@ -69,10 +70,25 @@ pub(crate) enum ColumnGravityMode {
         boundary_shear_issue: Option<&'static str>,
         response_end_axial_issue: Option<&'static str>,
         saved_long_term: bool,
+        require_same_position_gravity: bool,
     },
     TimeHistory {
         strict_gravity: bool,
     },
+}
+
+impl ColumnGravityMode {
+    fn requires_exact_gravity(self) -> bool {
+        matches!(
+            self,
+            Self::Ordinary {
+                require_same_position_gravity: true,
+                ..
+            } | Self::TimeHistory {
+                strict_gravity: true
+            }
+        )
+    }
 }
 
 impl DesignCheck for RcDesign {
@@ -234,12 +250,7 @@ impl RcDesign {
             incomplete
         };
         let incomplete = combine_incomplete_reasons(incomplete, section_issue.as_deref());
-        let strict_column_gravity = matches!(
-            column_gravity,
-            ColumnGravityMode::TimeHistory {
-                strict_gravity: true
-            }
-        );
+        let strict_column_gravity = column_gravity.requires_exact_gravity();
         let incomplete = if let Some(qd) = ctx.seismic_qd.as_ref().filter(|_| strict_column_gravity)
         {
             [1, 2].into_iter().fold(incomplete, |reason, index| {

@@ -626,6 +626,7 @@ fn set_gravity_forces(app: &mut App, at: Option<Vec<(f64, [f64; 6])>>) {
                 column_end_axial_forces: Vec::new(),
                 panel_moments: Vec::new(),
                 girder_column_face_forces: Vec::new(),
+                rc_column_face_forces: Vec::new(),
                 steel_panel_column_face_forces: Vec::new(),
             },
         )],

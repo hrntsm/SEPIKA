@@ -152,8 +152,13 @@ pub struct StaticOnce {
     pub girder_column_face_forces: Vec<(ElemId, GirderColumnFaceEnds)>,
     /// S造仕口パネルの上下フランジ位置で回収した、荷重込みの柱材軸力。
     pub steel_panel_column_face_forces: Vec<SteelPanelColumnFaceForce>,
+    /// 通常RC柱検定の大梁面の断面力。該当柱のみ、i/j端順。
+    #[serde(default)]
+    pub rc_column_face_forces: Vec<(ElemId, RcColumnFaceEnds)>,
 }
 
+mod rc_column_faces;
+pub use rc_column_faces::{superpose_rc_column_faces, RcColumnFaceEnds, RcColumnFaceForce};
 mod steel_panel_faces;
 pub use steel_panel_faces::SteelPanelColumnFaceForce;
 
@@ -184,6 +189,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
             column_end_axial_forces: Vec::new(),
             panel_moments: Vec::new(),
             girder_column_face_forces: Vec::new(),
+            rc_column_face_forces: Vec::new(),
             steel_panel_column_face_forces: Vec::new(),
         });
     };
@@ -256,6 +262,7 @@ pub fn superpose_static(terms: &[(&StaticOnce, f64)]) -> Result<StaticOnce, Solv
         member_forces,
         panel_moments,
         girder_column_face_forces: superpose_girder_column_faces(terms)?,
+        rc_column_face_forces: superpose_rc_column_faces(terms),
         steel_panel_column_face_forces: steel_panel_faces::superpose(terms)?,
         column_end_horizontal_forces: superpose_column_end_forces(
             terms,
@@ -821,11 +828,16 @@ fn recover_static(
     let mut panel_moments = Vec::new();
     let adjacency = NodeAdjacency::primary_frame(model);
     let mut girder_column_face_forces = Vec::new();
+    let mut rc_column_face_forces = Vec::new();
     let steel_panel_sections = steel_panel_faces::recovery_sections(model, &adjacency);
     let mut steel_panel_column_face_forces = Vec::new();
     for (index, (elem, &(_, behavior, gdofs))) in model.elements.iter().zip(entries).enumerate() {
         let u_elem = crate::common::elem_loop::gather_u_elem(gdofs, u_free);
         let loads = physical.member_loads(elem.id);
+        let rc_column_faces =
+            sepika_core::face_distance::rc_column_girder_faces(model, elem, &adjacency)
+                .map(|geometry| geometry.ends)
+                .filter(|ends| ends.iter().any(Option::is_some));
         if behavior.owns_frame_member_loads() {
             let response = loaded_response(elem, behavior, &u_elem, loads)?;
             let positions = behavior
@@ -840,6 +852,12 @@ fn recover_static(
                 .recover(&positions)
                 .map_err(|reason| element_error(elem.id, reason))?;
             member_forces.push((elem.id, forces));
+            if let Some(faces) = rc_column_faces {
+                rc_column_face_forces.push((
+                    elem.id,
+                    rc_column_faces::recover(faces, Some(&response.section)),
+                ));
+            }
             if elem.kind.is_primary_frame_support()
                 && model
                     .element_section(elem)
@@ -870,6 +888,9 @@ fn recover_static(
                 }
             }
         } else {
+            if let Some(faces) = rc_column_faces {
+                rc_column_face_forces.push((elem.id, rc_column_faces::recover(faces, None)));
+            }
             recover_girder_column_faces(
                 model,
                 elem,
@@ -950,6 +971,7 @@ fn recover_static(
             member_forces,
             panel_moments,
             girder_column_face_forces,
+            rc_column_face_forces,
             steel_panel_column_face_forces,
             column_end_horizontal_forces,
             column_end_axial_forces,

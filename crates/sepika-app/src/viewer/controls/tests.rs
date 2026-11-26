@@ -519,6 +519,7 @@ fn fit_to_view_preserves_direction_selection_and_results_in_model_and_frame_view
                     member_forces: vec![],
                     panel_moments: vec![],
                     girder_column_face_forces: Vec::new(),
+                    rc_column_face_forces: Vec::new(),
                     steel_panel_column_face_forces: Vec::new(),
                     column_end_axial_forces: Vec::new(),
                     column_end_horizontal_forces: Vec::new(),

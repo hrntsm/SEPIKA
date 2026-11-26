@@ -225,6 +225,17 @@ impl App {
                         )
                     })
             });
+        let capture_rc_column_faces = is_seismic_combo
+            && !damage_control
+            && design_model.sections.iter().any(|section| {
+                matches!(
+                    section.shape,
+                    Some(
+                        sepika_core::section_shape::SectionShape::RcColumnRect { .. }
+                            | sepika_core::section_shape::SectionShape::RcColumnCircle { .. }
+                    )
+                )
+            });
         let mut gravity_face_responses = Vec::new();
         let mut gravity_error = None;
         let gravity_long_owned = if needs_gravity {
@@ -232,7 +243,7 @@ impl App {
                 sepika_job::compute::compute_linear_static(self.core.model.clone(), lc)
                     .ok()
                     .map(|r| {
-                        if capture_qd1_faces {
+                        if capture_qd1_faces || capture_rc_column_faces {
                             let factor = gravity_terms[gravity_face_responses.len()].1;
                             let rows = r.member_forces.clone();
                             gravity_face_responses.push((r, factor));
@@ -259,6 +270,15 @@ impl App {
                 .collect();
             sepika_solver::statics::linear::superpose_girder_column_faces(&terms)
                 .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let rc_column_gravity_faces = if capture_rc_column_faces && gravity_long_owned.is_some() {
+            let terms: Vec<_> = gravity_face_responses
+                .iter()
+                .map(|(r, factor)| (r, *factor))
+                .collect();
+            sepika_solver::statics::linear::superpose_rc_column_faces(&terms)
         } else {
             Vec::new()
         };
@@ -379,6 +399,10 @@ impl App {
                     load_terms: load_terms.as_deref(),
                     steel_beam_span_load_terms,
                     rc_column_long_term_shear,
+                    rc_column_face_forces: selected_response
+                        .filter(|_| matches_saved_member_forces)
+                        .map_or(&[], |response| &response.rc_column_face_forces),
+                    rc_column_gravity_face_forces: &rc_column_gravity_faces,
                     rc_damage_control: self.core.analysis_cfg.rc_damage_control,
                     bond_method: self.core.analysis_cfg.bond_method,
                     qd_method: self.core.analysis_cfg.qd_method,

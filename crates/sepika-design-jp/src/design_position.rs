@@ -1,6 +1,6 @@
 //! 危険断面位置（断面検定を行う部材軸上の位置）。
 //!
-//! - [`crate::design_position::design_positions`] — 1 部材の危険断面位置（正規化座標 \[0,1\]）
+//! - [`crate::design_position::design_positions`] — 公称フェースに基づく危険断面位置（正規化座標 \[0,1\]）
 //! - [`crate::design_position::is_near_design_position`] — 内力の評価位置が危険断面位置と一致するか
 //!
 //! 要素側の**内力の評価断面**（`sepika_element` の `eval_sections`）は、
@@ -8,7 +8,8 @@
 
 use sepika_core::model::{ElementData, Model};
 
-/// 1 部材の危険断面位置を正規化座標 \[0,1\] で返す。
+/// 公称フェースに基づく危険断面位置を正規化座標 \[0,1\] で返す。
+/// 通常RC柱検定の実材端面や、RC梁QD1の専用検定位置は含まない。
 ///
 /// 既定は**危険断面の端部フェース（i 端・j 端）と部材中央**の 3 点。フェース距離
 /// （`RigidZone::face_i/face_j`）が未算定の端は解析部材の端（0.0 / 1.0）に一致する。
@@ -18,15 +19,21 @@ use sepika_core::model::{ElementData, Model};
 /// `geom_len` は部材の幾何長 \[mm\]（[`Model::member_length`]）。0 に縮退した
 /// 部材は `[0.0, 0.5, 1.0]` を返す。返り値は昇順で、1e-9 以内の重複は畳む。
 pub fn design_positions(elem: &ElementData, model: &Model, geom_len: f64) -> Vec<f64> {
-    let mut xs = if geom_len > 1e-12 {
-        let xi_i = (elem.rigid_zone.face_i_or_zero() / geom_len).clamp(0.0, 0.5 - 1e-9);
-        let xi_j = (1.0 - elem.rigid_zone.face_j_or_zero() / geom_len).clamp(0.5 + 1e-9, 1.0);
-        vec![xi_i, 0.5, xi_j]
-    } else {
-        vec![0.0, 0.5, 1.0]
-    };
+    let [i, j] = prepared_end_positions(elem, geom_len);
+    let mut xs = vec![i, 0.5, j];
     finish_positions(&mut xs, elem, model, geom_len);
     xs
+}
+
+pub(crate) fn prepared_end_positions(elem: &ElementData, geom_len: f64) -> [f64; 2] {
+    if geom_len > 1e-12 {
+        [
+            (elem.rigid_zone.face_i_or_zero() / geom_len).clamp(0.0, 0.5 - 1e-9),
+            (1.0 - elem.rigid_zone.face_j_or_zero() / geom_len).clamp(0.5 + 1e-9, 1.0),
+        ]
+    } else {
+        [0.0, 1.0]
+    }
 }
 
 /// 実材端を使用するQD1の検定位置。保存断面の選択には `same_qd1_station` を使う。
@@ -72,7 +79,12 @@ pub fn qd1_saved_station_issue(position: f64, forces: &[(f64, [f64; 6])]) -> Opt
     }
 }
 
-fn finish_positions(xs: &mut Vec<f64>, elem: &ElementData, model: &Model, geom_len: f64) {
+pub(crate) fn finish_positions(
+    xs: &mut Vec<f64>,
+    elem: &ElementData,
+    model: &Model,
+    geom_len: f64,
+) {
     if let Some(detail) = model.member_detail(elem.id) {
         xs.extend(detail.extra_check_positions(&elem.rigid_zone, geom_len));
     }

@@ -93,6 +93,7 @@ fn check_report(
         &solved.panel_moments,
         &MemberDesignCheckOptions {
             rc_column_long_term_shear: source,
+            rc_column_face_forces: &solved.rc_column_face_forces,
             ..Default::default()
         },
     )
@@ -127,6 +128,359 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64) {
         (actual - expected).abs() < tolerance,
         "{actual} != {expected}"
     );
+}
+
+#[test]
+fn 回転大梁の実面の符号付き断面力を長期と短期の検定に使う() {
+    for circle in [false, true] {
+        for (reference, section_mm) in [([0.0, 0.0, 1.0], 300.0), (Y, 150.0)] {
+            let mut model = model(circle, false);
+            model.elements[1].local_axis.ref_vector = reference;
+            model.load_cases[0].nodal = vec![NodalLoad::manual(
+                NodeId(1),
+                [20_000.0, 5000.0, -40_000.0, 1e6, 2e6, 0.0],
+            )];
+            model.load_cases[0].member =
+                vec![distributed([0.0, 0.0, 1.0], 0.0, LENGTH_MM, -10.0, -10.0)];
+            let response = analyze(&mut model);
+            let face = response
+                .rc_column_face_forces
+                .iter()
+                .find(|(id, _)| *id == COLUMN)
+                .unwrap()
+                .1[0]
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap();
+            assert_eq!(face.face.position_mm, section_mm);
+            let arm_mm = LENGTH_MM - section_mm;
+            let area_mm2 = if circle {
+                std::f64::consts::PI * 300.0_f64.powi(2)
+            } else {
+                400.0 * 600.0
+            };
+            let top_weight_n = 2.4e-9 * 9806.65 * area_mm2 * 1500.0;
+            let expected = [
+                -40_000.0 - 10.0 * arm_mm - top_weight_n,
+                -20_000.0,
+                -5000.0,
+                0.0,
+                1e6 - 5000.0 * arm_mm,
+                2e6 + 20_000.0 * arm_mm,
+            ];
+            for (actual, expected) in face.forces.as_ref().unwrap().iter().zip(expected) {
+                assert_close(*actual, expected, 1e-4);
+            }
+            for term in [
+                sepika_design_jp::LoadTerm::Long,
+                sepika_design_jp::LoadTerm::Short,
+            ] {
+                let check = run_member_design_checks(
+                    &model,
+                    &response.member_forces,
+                    &response.panel_moments,
+                    &MemberDesignCheckOptions {
+                        term,
+                        rc_column_face_forces: &response.rc_column_face_forces,
+                        rc_column_long_term_shear: RcColumnLongTermShearInput::SingleCase,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                let station = section_mm / LENGTH_MM;
+                assert!(check.member_checks.iter().any(|(id, xi, outcome)| *id == COLUMN && *xi == station
+                    && matches!(outcome, CheckOutcome::Checked(result)
+                        if result.components.iter().any(|part| part.kind == CheckKind::AxialBending))),
+                    "{check:?}");
+                assert!(
+                    section_mm == 300.0
+                        || check
+                            .member_checks
+                            .iter()
+                            .all(|(id, xi, _)| *id != COLUMN || *xi != 0.1)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn 回転大梁の実面で軸力ゼロの長期曲げ適否が変わる() {
+    for (axis, station, is_ng) in [([0.0, 0.0, 1.0], 0.1, false), (Y, 0.05, true)] {
+        let mut model = model(false, false);
+        model.elements[1].local_axis.ref_vector = axis;
+        model.load_cases[0].member.clear();
+        model.load_cases[0].nodal = vec![NodalLoad::manual(
+            NodeId(1),
+            [36_100.0, 0.0, 8472.9456, 0.0, 0.0, 0.0],
+        )];
+        let response = analyze(&mut model);
+        let rows = check_combination(&model, &response);
+        let outcome = &rows.iter().find(|(xi, _)| *xi == station).unwrap().1;
+        let CheckOutcome::Checked(result) = outcome else {
+            panic!("{rows:?}");
+        };
+        let nm = result
+            .components
+            .iter()
+            .find(|part| part.kind == CheckKind::AxialBending)
+            .unwrap();
+        // 三角形コンクリート圧縮域と主筋合力の釣合いから、N=0の強軸許容曲げは約100.20 kN·m。
+        let demand_knm = if is_ng { 102.885 } else { 97.470 };
+        assert_close(nm.ratio, demand_knm / 100.20, 0.002);
+        assert_eq!(nm.ratio > 1.0, is_ng, "{rows:?}");
+    }
+}
+
+#[test]
+fn 同じ位置の保存応答がない実面は未算定で中央の曲げ不適合は残す() {
+    let mut model = model(false, false);
+    model.elements[1].local_axis.ref_vector = Y;
+    model.load_cases[0].nodal.push(NodalLoad::manual(
+        NodeId(1),
+        [0.0, 0.0, 0.0, 0.0, 170e6, 0.0],
+    ));
+    let mut response = analyze(&mut model);
+    response.rc_column_face_forces.clear();
+    let rows = check_combination(&model, &response);
+    assert!(rows.iter().any(|(xi, outcome)| *xi == 0.05
+        && matches!(outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("実材端面の断面力がありません"))));
+    assert!(rows.iter().any(|(xi, outcome)| *xi == 0.5 && matches!(outcome, CheckOutcome::Checked(result)
+        if result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0))));
+    assert!(rows.iter().all(|(xi, _)| *xi != 0.1));
+}
+
+#[test]
+fn 形状不明と非一意の柱脚を検定せず確認済みの柱頭を検定する() {
+    let mut model = model(false, false);
+    let response = analyze(&mut model);
+    for (shape, axis, diagnostic) in [
+        (None, [0.0, 0.0, 1.0], "実断面形状が未指定"),
+        (
+            model.sections[1].shape.clone(),
+            [0.0, 1.0, 1.0],
+            "接合境界を一つの断面位置で表せません",
+        ),
+    ] {
+        model.sections[1].shape = shape;
+        model.elements[1].local_axis.ref_vector = axis;
+        let rows = check(&model, &response, RcColumnLongTermShearInput::SingleCase);
+        assert!(rows.iter().any(|(xi, outcome)| *xi == 0.1
+            && matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(diagnostic))), "{rows:?}");
+        assert!(rows
+            .iter()
+            .all(|(xi, outcome)| *xi != 0.1 || !matches!(outcome, CheckOutcome::Checked(_))));
+        assert!(rows
+            .iter()
+            .any(|(xi, outcome)| *xi == 1.0 && matches!(outcome, CheckOutcome::Checked(_))));
+    }
+}
+
+#[test]
+fn 実柱端面の集中荷重では柱区間側を採用する() {
+    let mut model = model(false, false);
+    let mut upper_end = model.nodes[2].clone();
+    upper_end.id = NodeId(3);
+    upper_end.coord[2] = LENGTH_MM;
+    upper_end.restraint = sepika_core::dof::Dof6Mask::FREE;
+    model.nodes.push(upper_end);
+    let mut upper = model.elements[1].clone();
+    upper.id = ElemId(2);
+    upper.nodes = [NodeId(1), NodeId(3)].into_iter().collect();
+    model.elements.push(upper);
+    model.elements[1].local_axis.ref_vector = Y;
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [12_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    )];
+    model.load_cases[0].member = vec![point(150.0, 50_000.0), point(2700.0, 30_000.0)];
+    let response = analyze(&mut model);
+    let ends = &response
+        .rc_column_face_forces
+        .iter()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap()
+        .1;
+    for (cut, (position, q)) in ends.iter().zip([(150.0, -42_000.0), (2700.0, -42_000.0)]) {
+        let face = cut.as_ref().unwrap().as_ref().unwrap();
+        assert_eq!(face.face.position_mm, position);
+        assert_close(face.forces.as_ref().unwrap()[1], q, 1e-5);
+    }
+    model.load_cases[0].member[0] = point(150.0 + 1e-11, 50_000.0);
+    let response = analyze(&mut model);
+    let ends = &response
+        .rc_column_face_forces
+        .iter()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap()
+        .1;
+    assert!(
+        matches!(ends[0].as_ref().unwrap().as_ref().unwrap().forces, Err(ref reason) if reason.contains("丸め誤差"))
+    );
+    assert!(ends[1].as_ref().unwrap().as_ref().unwrap().forces.is_ok());
+}
+
+#[test]
+fn 短期地震時の実面で同位置の重力せん断を使い別経路の同位置試料で代用しない() {
+    let mut model = model(false, false);
+    model.elements[1].local_axis.ref_vector = Y;
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [20_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    )];
+    model.load_cases[0].member = vec![point(225.0, 12_000.0)];
+    model.load_cases[3].name = "試験用水平力".into();
+    model.load_cases[3].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [80_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    )];
+    let combo = sepika_core::model::LoadCombination {
+        name: "DL+EX".into(),
+        terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(3), 1.0)],
+    };
+    sepika_job::prepare_model_for_analysis(&mut model, &Default::default(), None).unwrap();
+    let analysis = Analysis::prepare(&model).unwrap();
+    let mut gravity = analysis.linear_static(LoadCaseId(0)).unwrap();
+    let response = analysis.linear_combination(&combo).unwrap();
+    gravity
+        .member_forces
+        .iter_mut()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap()
+        .1
+        .at
+        .push((0.05, [0.0, -20_000.0, 0.0, 0.0, 0.0, 0.0]));
+    let run = |gravity_faces: &[_]| {
+        run_member_design_checks(
+            &model,
+            &response.member_forces,
+            &response.panel_moments,
+            &MemberDesignCheckOptions {
+                term: sepika_design_jp::LoadTerm::Short,
+                qd_method: sepika_design_jp::QdMethod::Qd2,
+                long_member_forces: Some(&gravity.member_forces),
+                rc_column_face_forces: &response.rc_column_face_forces,
+                rc_column_gravity_face_forces: gravity_faces,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .member_checks
+        .into_iter()
+        .filter(|(id, xi, _)| *id == COLUMN && *xi == 0.05)
+        .map(|(_, _, outcome)| outcome)
+        .collect::<Vec<_>>()
+    };
+    let rows = run(&gravity.rc_column_face_forces);
+    let component = shear(&rows[0]);
+    let capacity_n = component
+        .detail
+        .split("QAy=")
+        .nth(1)
+        .unwrap()
+        .split(" N")
+        .next()
+        .unwrap()
+        .parse::<f64>()
+        .unwrap();
+    assert_close(component.ratio * capacity_n, 152_000.0, 0.2);
+    let rows = run(&[]);
+    assert!(
+        rows.iter()
+            .any(|outcome| matches!(outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("同位置の重力参照内力が不足"))),
+        "{rows:?}"
+    );
+    assert!(rows.iter().any(|outcome| matches!(outcome, CheckOutcome::Checked(result)
+        if result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0))));
+}
+
+#[test]
+fn 偏心で柱軸を外れても正面積の接触なら実面を定め線接触では定めない() {
+    for (circle, tangent) in [(false, 350.0), (true, 450.0)] {
+        let mut model = model(circle, false);
+        for (offset, has_face) in [
+            (tangent - 0.001, true),
+            (tangent, false),
+            (tangent + 0.001, false),
+        ] {
+            model.elements[1].end_offsets_mm = [[0.0, offset, 0.0]; 2];
+            let adjacency = sepika_core::adjacency::NodeAdjacency::primary_frame(&model);
+            let geometry = sepika_core::face_distance::rc_column_girder_faces(
+                &model,
+                &model.elements[0],
+                &adjacency,
+            )
+            .unwrap();
+            let face = geometry.ends[0].as_ref().unwrap();
+            if has_face {
+                assert_eq!(face.as_ref().unwrap().position_mm, 300.0);
+            } else {
+                assert!(matches!(face, Err(reason) if reason.contains("正の面積")));
+            }
+        }
+    }
+}
+
+#[test]
+fn 中央を越える柱脚面を切り詰めず構造規定の不適合を保持する() {
+    let mut column = column_input::column_model(false, 0.0);
+    if let Some(SectionShape::RcColumnRect { rebar, .. }) = &mut column.sections[0].shape {
+        rebar.hoop.pitch = 120.0;
+    }
+    let mut model = input::model(
+        column,
+        beam_input::section(300.0, 3200.0, 19.0, &[3], &[3]),
+        false,
+    );
+    let response = analyze(&mut model);
+    let rows = check(&model, &response, RcColumnLongTermShearInput::SingleCase);
+    assert!(
+        rows.iter().any(|(xi, outcome)| *xi == 1600.0 / LENGTH_MM
+            && matches!(outcome, CheckOutcome::Checked(result)
+            if result.components.iter().any(|part| part.kind == CheckKind::AxialBending))),
+        "{rows:?}"
+    );
+    assert!(
+        rows.iter().any(|(xi, outcome)| *xi == 0.5
+            && matches!(outcome, CheckOutcome::Checked(result)
+            if result.components.len() == 1 && result.components[0].kind == CheckKind::Provision
+                && result.components[0].ratio > 1.0)),
+        "{rows:?}"
+    );
+    assert!(rows.iter().all(|(xi, _)| *xi != 0.5 - 1e-9));
+}
+
+#[test]
+fn 両端の大梁面が一致または逆転するときは柱区間を設けない() {
+    for depth_mm in [3000.0, 3200.0] {
+        let mut model = input::model(
+            column_input::column_model(false, 0.0),
+            beam_input::section(300.0, depth_mm, 19.0, &[3], &[3]),
+            false,
+        );
+        let mut upper_end = model.nodes[2].clone();
+        upper_end.id = NodeId(3);
+        upper_end.coord[2] = LENGTH_MM;
+        model.nodes.push(upper_end);
+        let mut upper = model.elements[1].clone();
+        upper.id = ElemId(2);
+        upper.nodes = [NodeId(1), NodeId(3)].into_iter().collect();
+        model.elements.push(upper);
+        let adjacency = sepika_core::adjacency::NodeAdjacency::primary_frame(&model);
+        let geometry = sepika_core::face_distance::rc_column_girder_faces(
+            &model,
+            &model.elements[0],
+            &adjacency,
+        )
+        .unwrap();
+        assert!(!geometry.has_positive_span);
+        assert!(geometry.ends.iter().all(|cut| matches!(
+            cut, Some(Err(reason)) if reason.contains("正の長さの柱区間がありません")
+        )));
+    }
 }
 
 #[test]
@@ -180,6 +534,17 @@ fn 軸力曲げの検定位置を欠く場合も材端を復元してせん断�
                     .unwrap();
                 assert_eq!(column.1.at.len(), 6);
                 column.1.at.retain(|(xi, _)| !omitted.contains(xi));
+                if let Some((_, ends)) = incomplete
+                    .rc_column_face_forces
+                    .iter_mut()
+                    .find(|(id, _)| *id == COLUMN)
+                {
+                    for (side, pos) in [0.1, 0.9].into_iter().enumerate() {
+                        if omitted.contains(&pos) {
+                            ends[side] = None;
+                        }
+                    }
+                }
                 let rows = check_combination(&model, &incomplete);
                 let y_peak_mm = if w == 0.0 { 300.0 } else { 1100.0 };
                 let y_demand =
@@ -188,10 +553,10 @@ fn 軸力曲げの検定位置を欠く場合も材端を復元してせん断�
                 for target in omitted {
                     assert!(rows.iter().any(|(xi, outcome)| xi == target && matches!(
                         outcome, CheckOutcome::Skipped { reason } if
-                            reason.contains("軸力・曲げを検定する断面位置の解析内力がありません")
+                            (reason.contains("軸力・曲げを検定する断面位置の解析内力がありません")
+                                || reason.contains("実材端面の断面力がありません"))
                             && reason.contains(&y_demand)
                             && reason.contains(z_demand)
-                            && !reason.contains("未算定")
                     )), "省略位置={omitted:?} {rows:?}");
                 }
                 let expected = shear(&complete[0].1);
@@ -403,7 +768,7 @@ fn 回転大梁の未保存フェースと集中荷重の柱区間側の内力�
         let rows = check_combination(&model, &solved);
         assert_eq!(
             rows.iter().map(|(xi, _)| *xi).collect::<Vec<_>>(),
-            [0.1, 0.5, 1.0]
+            [if rotated { 0.05 } else { 0.1 }, 0.5, 1.0]
         );
         for (_, outcome) in rows {
             let component = shear(&outcome);
@@ -437,6 +802,21 @@ fn 割増係数が不足する方向を保留し他方向の検定比を理由�
     let (_, face) = column.at.iter_mut().find(|(xi, _)| *xi == 0.1).unwrap();
     face[5] = f64::NAN;
     face[4] = f64::NAN;
+    let (_, faces) = solved
+        .rc_column_face_forces
+        .iter_mut()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap();
+    let saved = faces[0]
+        .as_mut()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .forces
+        .as_mut()
+        .unwrap();
+    saved[4] = f64::NAN;
+    saved[5] = f64::NAN;
     let rows = check_combination(&model, &solved);
     assert!(rows.iter().any(|(xi, outcome)| *xi == 0.1 && matches!(
         outcome, CheckOutcome::Skipped { reason } if reason.contains("曲げMzが非有限")
@@ -695,7 +1075,7 @@ fn 回転した大梁断面の実フェースを柱区間の境界にする() {
         let rows = check_combination(&model, &solved);
         assert_eq!(
             rows.iter().map(|(xi, _)| *xi).collect::<Vec<_>>(),
-            [0.1, 0.5, 1.0]
+            [0.05, 0.5, 1.0]
         );
         let expected = if inner_peak {
             "局所Qy最大 |Qy|=314775.000 N（i端から x=225.000000 mm"
@@ -807,7 +1187,8 @@ fn 節点芯と実面が一致する場合は採用し隙間がある場合は�
                 println!("{}", component.detail);
             } else {
                 assert!(
-                    matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("実配置と柱の接合境界を確認できません"))
+                    matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("実配置と柱の接合境界を確認できません")
+                        || reason.contains("正の面積で接触しません"))
                 );
             }
         }

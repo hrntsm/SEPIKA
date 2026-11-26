@@ -20,9 +20,12 @@ use sepika_core::model::{ElementData, ElementKind, Model};
 use sepika_core::section_shape::SectionShape;
 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::frame::beam::MemberForces;
-use sepika_solver::statics::linear::{GirderColumnFaceEnds, SteelPanelColumnFaceForce};
+use sepika_solver::statics::linear::{
+    GirderColumnFaceEnds, RcColumnFaceEnds, SteelPanelColumnFaceForce,
+};
 
 mod rc_column_ductility;
+mod rc_column_faces;
 pub(crate) mod rc_column_long_term_shear;
 mod steel_beam_span;
 pub use rc_column_ductility::{
@@ -115,6 +118,10 @@ pub struct MemberDesignCheckOptions<'a> {
     pub steel_beam_span_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
     /// 通常の長期RC柱検定に渡す線形静的解析結果の由来。
     pub rc_column_long_term_shear: RcColumnLongTermShearInput<'a>,
+    /// 通常RC柱検定と同じ荷重ケース・組合せの実材端面断面力。欠損端を節点・剛域の断面力で補わない。
+    pub rc_column_face_forces: &'a [(ElemId, RcColumnFaceEnds)],
+    /// RC柱実材端面の短期地震時せん断検定に対応する重力参照断面力。
+    pub rc_column_gravity_face_forces: &'a [(ElemId, RcColumnFaceEnds)],
     /// 設計者が判断したRC柱ごとの短期圧縮靱性推奨の適用。未指定の柱は判別不能とする。
     pub rc_column_ductility_applicability:
         Option<&'a HashMap<ElemId, RcColumnDuctilityApplicability>>,
@@ -445,6 +452,30 @@ pub fn run_member_design_checks(
     for (id, _) in member_forces {
         *force_rows.entry(*id).or_default() += 1;
     }
+    let column_adjacency = sepika_core::adjacency::NodeAdjacency::primary_frame(model);
+    let rc_column_geometry: HashMap<_, _> = model
+        .elements
+        .iter()
+        .filter_map(|elem| {
+            let geometry =
+                sepika_core::face_distance::rc_column_girder_faces(model, elem, &column_adjacency)?;
+            geometry
+                .ends
+                .iter()
+                .any(Option::is_some)
+                .then_some((elem.id, geometry))
+        })
+        .collect();
+    let rc_column_responses = rc_column_faces::response_index(options.rc_column_face_forces);
+    let rc_column_gravity = rc_column_faces::response_index(options.rc_column_gravity_face_forces);
+    let missing_column_rows: Vec<_> = model
+        .elements
+        .iter()
+        .filter(|elem| {
+            rc_column_geometry.contains_key(&elem.id) && !force_rows.contains_key(&elem.id)
+        })
+        .map(|elem| (elem.id, MemberForces { at: Vec::new() }))
+        .collect();
     use steel_beam_span::{GroupBending, RecoveredBending};
     let mut grouped_beam_spans = steel_beam_span::grouped_bending_spans(
         model,
@@ -534,7 +565,8 @@ pub fn run_member_design_checks(
         }
     }
 
-    for (elem_id, mf) in member_forces {
+    for (elem_id, mf) in member_forces.iter().chain(&missing_column_rows) {
+        let member_first_row = member_checks.len();
         if unavailable_beam_ids.contains(elem_id) || unavailable_src_ids.contains(elem_id) {
             continue;
         }
@@ -544,7 +576,10 @@ pub fn run_member_design_checks(
         if !frame_check_target(elem) {
             continue;
         }
-        if duplicate_column_ids.contains(elem_id) {
+        let column_geometry = rc_column_geometry.get(elem_id);
+        if duplicate_column_ids.contains(elem_id)
+            || (column_geometry.is_some() && force_rows.get(elem_id).is_some_and(|&n| n > 1))
+        {
             if checked_column_ids.insert(*elem_id) {
                 member_checks.push((
                     *elem_id,
@@ -1044,9 +1079,13 @@ pub fn run_member_design_checks(
         } else {
             length
         };
-        let positions = qd1_positions
-            .clone()
-            .unwrap_or_else(|| design_positions(elem, model, position_length));
+        let positions = match (column_geometry, &qd1_positions) {
+            (Some(geometry), _) => {
+                rc_column_faces::regular_positions(geometry, elem, model, length)
+            }
+            (None, Some(positions)) => positions.clone(),
+            _ => design_positions(elem, model, position_length),
+        };
         if let Some(positions) = &qd1_positions {
             for &pos in positions {
                 if let Some(reason) = crate::design_position::qd1_saved_station_issue(pos, &mf.at) {
@@ -1082,7 +1121,13 @@ pub fn run_member_design_checks(
                 .collect();
             (stations, counts)
         });
-        let missing_positions = if long_term_shear.is_some() {
+        let regular_column_matches = column_geometry.map(|_| {
+            positions
+                .iter()
+                .map(|&expected| mf.at.iter().filter(|(pos, _)| *pos == expected).count())
+                .collect::<Vec<_>>()
+        });
+        let missing_positions = if long_term_shear.is_some() && column_geometry.is_none() {
             missing_design_positions(&positions, mf)
         } else {
             Vec::new()
@@ -1097,6 +1142,42 @@ pub fn run_member_design_checks(
 
         let first_row = member_checks.len();
         let mut peak_sections = Vec::new();
+        let mut column_face_gravity = Vec::new();
+        if let Some(geometry) = column_geometry {
+            let legacy = crate::design_position::prepared_end_positions(elem, length);
+            for (side, end) in geometry.ends.iter().enumerate() {
+                let Some(end) = end else { continue };
+                let name = ["i端", "j端"][side];
+                let (pos, forces) = match end {
+                    Ok(face) => {
+                        let pos = face.position_mm / face.length_mm;
+                        if ctx.seismic_qd.is_some() {
+                            column_face_gravity.push((
+                                pos,
+                                rc_column_faces::response(
+                                    &rc_column_gravity,
+                                    *elem_id,
+                                    side,
+                                    *face,
+                                )
+                                .ok(),
+                            ));
+                        }
+                        (
+                            pos,
+                            rc_column_faces::response(&rc_column_responses, *elem_id, side, *face),
+                        )
+                    }
+                    Err(reason) => (legacy[side], Err(reason.clone())),
+                };
+                match forces {
+                    Ok(forces) => peak_sections.push((pos, forces, None, None)),
+                    Err(reason) => member_checks.push((*elem_id, pos, CheckOutcome::Skipped {
+                        reason: format!("RC柱の{name}の実材端面検定は未算定です（{reason}）。{recovered_shear_detail}"),
+                    })),
+                }
+            }
+        }
         for &(peak, interval) in &beam_peaks {
             if !matches!(peak.right, Ok(None)) {
                 if !peak.is_i_face {
@@ -1136,7 +1217,13 @@ pub fn run_member_design_checks(
                             && crate::design_position::qd1_saved_station_issue(*expected, &mf.at)
                                 .is_none()
                     }),
-                    None => is_near_design_position(*pos, &positions),
+                    None => match &regular_column_matches {
+                        Some(counts) => positions
+                            .iter()
+                            .zip(counts)
+                            .any(|(target, count)| target == pos && *count == 1),
+                        None => is_near_design_position(*pos, &positions),
+                    },
                 };
                 selected_position
                     && !repeated_stations.contains(&station_key(*pos))
@@ -1158,6 +1245,15 @@ pub fn run_member_design_checks(
             })
             .chain(peak_sections);
         for (pos, forces, cut_side, interval) in section_forces {
+            let saved_gravity = column_face_gravity
+                .iter()
+                .find(|(xi, _)| *xi == pos)
+                .and_then(|(_, gravity)| {
+                    let qd = ctx.seismic_qd.as_mut()?;
+                    let original = std::mem::take(&mut qd.long_at);
+                    qd.long_at.extend(gravity.map(|forces| (pos, forces)));
+                    Some(original)
+                });
             if let Some(interval) = interval {
                 ctx.lb = Some(interval.length_mm);
                 ctx.steel_beam_moment_diagram =
@@ -1226,6 +1322,7 @@ pub fn run_member_design_checks(
                         boundary_shear_issue,
                         response_end_axial_issue,
                         saved_long_term: long_term_shear.is_some(),
+                        require_same_position_gravity: saved_gravity.is_some(),
                     },
                 );
                 check_incomplete = incomplete;
@@ -1285,7 +1382,7 @@ pub fn run_member_design_checks(
             if structure == StructureKind::Src {
                 crate::srrc::preserve_route21_shear_detail(sec, &ctx, &outcome, &mut incomplete);
             }
-            if long_term_shear.is_some() {
+            if long_term_shear.is_some() || column_geometry.is_some() {
                 for (value, reason) in [
                     (mfa.n, "軸力Nが非有限のため、軸力・曲げを検定できません"),
                     (
@@ -1350,6 +1447,9 @@ pub fn run_member_design_checks(
                 outcome,
                 incomplete.as_deref(),
             );
+            if let (Some(original), Some(qd)) = (saved_gravity, ctx.seismic_qd.as_mut()) {
+                qd.long_at = original;
+            }
         }
 
         if let Some(span) = beam_span {
@@ -1410,6 +1510,50 @@ pub fn run_member_design_checks(
                     },
                 ));
             }
+        }
+        if let Some(counts) = regular_column_matches {
+            let center_evaluated = member_checks[first_row..].iter().any(|(_, pos, outcome)| {
+                *pos == 0.5 && matches!(outcome, CheckOutcome::Checked(_))
+            });
+            if !center_evaluated {
+                if let Some(provisions) = sec
+                    .shape
+                    .as_ref()
+                    .and_then(|shape| crate::rc::column_member_provisions(shape, mat, &ctx))
+                {
+                    let components: Vec<_> = provisions.provision_component().into_iter().collect();
+                    let detail = provisions.warning_suffix();
+                    if !components.is_empty() || !detail.is_empty() {
+                        member_checks.push((
+                            *elem_id,
+                            0.5,
+                            CheckOutcome::Checked(CheckResult {
+                                basis: "RC柱の構造規定".into(),
+                                detail,
+                                components,
+                            }),
+                        ));
+                    }
+                }
+            }
+            for (pos, count) in positions.iter().copied().zip(counts) {
+                let reason = match count {
+                    0 if !force_rows.contains_key(elem_id) => {
+                        "RC柱の対象部材の解析内力がありません"
+                    }
+                    0 => "RC柱の軸力・曲げを検定する断面位置の解析内力がありません",
+                    1 => continue,
+                    _ => "RC柱の検定位置の解析断面力が重複し、一意の応答を確認できません",
+                };
+                member_checks.push((
+                    *elem_id,
+                    pos,
+                    CheckOutcome::Skipped {
+                        reason: format!("{reason}。{recovered_shear_detail}"),
+                    },
+                ));
+            }
+            member_checks[member_first_row..].sort_by(|(_, a, _), (_, b, _)| a.total_cmp(b));
         }
         if !missing_positions.is_empty() {
             let mut reason = "RC柱の軸力・曲げを検定する断面位置の解析内力がありません".to_owned();

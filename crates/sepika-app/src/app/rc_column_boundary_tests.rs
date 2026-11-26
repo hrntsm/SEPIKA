@@ -30,6 +30,72 @@ fn rc_column_long_term_shear_app(model: sepika_core::model::Model) -> App {
 }
 
 #[test]
+fn 回転大梁の柱実面と判定を保存し旧版の成果を区別する() {
+    use sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION;
+
+    let mut model = rc_column_long_term_shear_model(false);
+    model.elements[1].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    model.load_cases[0].member.clear();
+    model.load_cases[0].nodal = vec![sepika_core::model::NodalLoad::manual(
+        NodeId(1),
+        [36_100.0, 0.0, 8472.9456, 0.0, 0.0, 0.0],
+    )];
+    let app = rc_column_long_term_shear_app(model);
+    let results = app.current_design_results().unwrap();
+    let expected = serde_json::to_value(&results.member_checks).unwrap();
+    let expected_faces = &results.combos[0].1.rc_column_face_forces;
+    let rows = &results
+        .member_checks
+        .iter()
+        .find(|record| record.elem == long_term_shear_input::COLUMN)
+        .unwrap()
+        .positions;
+    assert!(rows.iter().any(|row| row.xi == 0.05 && matches!(&row.outcome, CheckOutcome::Checked(result)
+        if result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0))));
+    assert!(rows.iter().all(|row| row.xi != 0.1));
+    for (analysis, design) in [
+        (ANALYSIS_CONTRACT_VERSION - 1, DESIGN_CONTRACT_VERSION),
+        (ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION - 1),
+        (ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION),
+    ] {
+        let (mut reopened, path) = super::result_contract_tests::restore(
+            &app,
+            Some(analysis),
+            Some(design),
+            &format!("rc-column-rotated-girder-{analysis}-{design}"),
+        );
+        std::fs::remove_file(path).unwrap();
+        if analysis != ANALYSIS_CONTRACT_VERSION {
+            assert!(reopened.require_selected_static_input().is_err());
+            assert!(reopened.current_design_results().is_none());
+            continue;
+        }
+        assert!(reopened.require_selected_static_input().is_ok());
+        assert_eq!(
+            reopened.current_design_results().is_some(),
+            design == DESIGN_CONTRACT_VERSION
+        );
+        assert_eq!(
+            &reopened.core.scoped.results.as_ref().unwrap().combos[0]
+                .1
+                .rc_column_face_forces,
+            expected_faces
+        );
+        reopened.run_design_check();
+        assert!(
+            reopened.core.scoped.last_error.is_none(),
+            "{:?}",
+            reopened.core.scoped.last_error
+        );
+        assert_eq!(
+            serde_json::to_value(&reopened.current_design_results().unwrap().member_checks)
+                .unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
 fn rc_column_long_term_shear_preserves_current_analysis_and_rechecks_old_ovika() {
     use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
 
