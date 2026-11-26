@@ -228,6 +228,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0162](0162-rc-beam-qd1-slab-reinforcement-source.md) | accepted | RC梁のQD1に用いるスラブ筋は床版の実配筋から判定する |
 | [0163](0163-rc-beam-qd1-support-path.md) | accepted | RC梁のQD1の算定条件に接続先の支持経路を含めない |
 | [0164](0164-rc-beam-qd1-eccentric-material-end.md) | accepted | 偏心で実柱面を取れないRC梁端は実材端で検定する |
+| [0166](0166-symmetric-column-time-history-lateral-buckling.md) | accepted | 上下対称H形鋼柱の時刻歴横座屈を同時刻・補剛区間で照査する |
 
 ## 規約
 
