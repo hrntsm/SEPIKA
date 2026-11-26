@@ -410,7 +410,7 @@ pub struct DesignCtx {
     pub rc_beam_qd1_haunches: Option<rc::BeamQd1Haunches>,
     /// 床板が取り付き、QD1でスラブ筋の寄与を確定できない場合に true。
     pub rc_beam_qd1_slab_unverified: bool,
-    /// 実材端を採るQD1で重力の保存断面位置を厳密に照合する場合に true。
+    /// 実材端またはハンチ付き梁の実フェースを採るQD1で、重力の保存断面位置を照合する場合に true。
     pub rc_beam_qd1_at_material_end: bool,
     /// i端・j端それぞれで上端引張時に算入する床板筋の寄与 [N·mm]。
     pub rc_beam_qd1_slab_end_moments_nmm: Option<[f64; 2]>,

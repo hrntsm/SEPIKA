@@ -935,6 +935,7 @@ fn draw_peak_check<'a>(
     });
     if rc_beam_qd1_haunches.is_some() {
         ui.label("短期QD1は確認済みの材端情報を使います。ハンチ区間・接合部の適合は判定しません。");
+        ui.label("許容せん断力は同じ確定ステップの応答で照査します。抽出時刻の結果であり、全時刻の適否は示しません。");
     }
     let rc_beam_qd1 = rc_beam_qd1_geometry
         .map(|result| result.and_then(|geometry| geometry.demand_clear_span_mm()));
@@ -1123,6 +1124,9 @@ fn draw_peak_check<'a>(
             };
             ctx.shear_span = shear_span(5, 1);
             ctx.shear_span_y = shear_span(4, 2);
+            if let Some(haunches) = &mut ctx.rc_beam_qd1_haunches {
+                haunches.set_shear_span_reference(selected.map(|_| forces.at.as_slice()));
+            }
             ctx.column_sum_my = column_mechanism_topology.as_ref().and_then(|topology| {
                 let end_axial = |at: &[(f64, [f64; 6])]| {
                     [0.0, 1.0].map(|xi| at.iter().find(|(p, _)| *p == xi).map(|(_, f)| f[0]))
@@ -1174,6 +1178,7 @@ fn draw_peak_check<'a>(
                     }
                 }
                 let mfa = MemberForcesAt::from_local(pos, f);
+                let haunch_qd1 = ctx.rc_beam_qd1_haunches.is_some();
                 let mut draw_outcome = |outcome: &CheckOutcome| {
                     let with_reference_reason = match (outcome, gravity_reference_issue) {
                         (CheckOutcome::Skipped { reason }, Some(reference_reason)) => {
@@ -1195,7 +1200,7 @@ fn draw_peak_check<'a>(
                             ui,
                             &format!("{side} t={:.6} s  ξ={pos:.2}:", snapshot.time),
                             outcome,
-                            signed_bending || rc_damage_control,
+                            signed_bending || rc_damage_control || haunch_qd1,
                         );
                     } else {
                         draw_outcome_row(ui, pos, outcome);

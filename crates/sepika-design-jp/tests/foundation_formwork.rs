@@ -134,6 +134,7 @@ fn foundation_formwork_width_increment_counts_twice_the_bottom_projection() {
         length: 1000.0,
         depth_increase: 0.0,
         width_increase: 100.0,
+        qd1_face: None,
     };
     let combined = Haunch {
         depth_increase: 200.0,

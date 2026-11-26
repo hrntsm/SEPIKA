@@ -866,16 +866,19 @@ fn linear_haunch_concrete_matches_geometric_volumes_in_public_takeoff() {
         length: 1000.0,
         depth_increase: 200.0,
         width_increase: 0.0,
+        qd1_face: None,
     };
     let width = Haunch {
         length: 1000.0,
         depth_increase: 0.0,
         width_increase: 200.0,
+        qd1_face: None,
     };
     let both = Haunch {
         length: 1000.0,
         depth_increase: 600.0,
         width_increase: 300.0,
+        qd1_face: None,
     };
     // 両寸法2倍の角錐台は0.42 m³、同区間の基準角柱は0.18 m³。
     let cases = [
@@ -960,6 +963,7 @@ fn invalid_haunch_dimensions_and_overlapping_intervals_make_quantity_unavailable
         length: 1000.0,
         depth_increase: 200.0,
         width_increase: 0.0,
+        qd1_face: None,
     };
     for invalid in [
         Haunch {

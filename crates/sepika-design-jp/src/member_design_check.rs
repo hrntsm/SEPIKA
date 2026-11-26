@@ -890,9 +890,12 @@ pub fn run_member_design_checks(
             (None, None, None)
         };
 
-        let rc_beam_qd1_haunches = rc_beam_qd1
+        let mut rc_beam_qd1_haunches = rc_beam_qd1
             .as_ref()
             .and_then(|_| crate::rc::beam_qd1_haunches(model, elem, single_qd1_geometry));
+        if let Some(haunches) = &mut rc_beam_qd1_haunches {
+            haunches.set_shear_span_reference(Some(&mf.at));
+        }
         let slab_moments_nmm = (matches!(rc_beam_qd1, Some(Ok(_)))
             && rc_beam_qd1_haunches.is_none()
             && !grouped_girders.contains(elem_id))

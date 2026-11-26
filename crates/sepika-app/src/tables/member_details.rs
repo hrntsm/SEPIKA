@@ -323,6 +323,15 @@ fn haunch_desc(h: &Option<Haunch>) -> String {
     }
 }
 
+fn apply_member_detail(app: &mut App, attr: MemberDetailAttr) -> bool {
+    if attr.is_empty() {
+        app.apply_model_edit(Box::new(RemoveMemberDetailAttr { elem: attr.elem }))
+    } else {
+        let command = SetMemberDetailAttr { attr }.command_for(&app.core.model);
+        app.apply_model_edit(command)
+    }
+}
+
 pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
     ui.label(
         "部材(柱・梁)の付帯情報(ハンチ・継手位置)を設定します。剛性・応力解析には\
@@ -377,11 +386,7 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
         app.ui.scoped.member_detail_draft.load(&attr);
     }
     if let Some(elem) = pending_remove {
-        app.core.scoped.undo.run(
-            &mut app.core.model,
-            Box::new(RemoveMemberDetailAttr { elem }),
-        );
-        app.core.scoped.staleness.mark_edited();
+        app.apply_model_edit(Box::new(RemoveMemberDetailAttr { elem }));
     }
 
     ui.separator();
@@ -567,24 +572,15 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
                 parsed_haunch_j,
                 parsed_joints,
             ) {
-                let attr = MemberDetailAttr {
-                    elem,
-                    haunch_i,
-                    haunch_j,
-                    joints,
-                };
-                if attr.is_empty() {
-                    app.core.scoped.undo.run(
-                        &mut app.core.model,
-                        Box::new(RemoveMemberDetailAttr { elem }),
-                    );
-                } else {
-                    app.core
-                        .scoped
-                        .undo
-                        .run(&mut app.core.model, Box::new(SetMemberDetailAttr { attr }));
-                }
-                app.core.scoped.staleness.mark_edited();
+                apply_member_detail(
+                    app,
+                    MemberDetailAttr {
+                        elem,
+                        haunch_i,
+                        haunch_j,
+                        joints,
+                    },
+                );
             }
         }
         if app.ui.scoped.member_detail_draft.elem.is_some()
@@ -594,11 +590,7 @@ pub fn member_details_table(ui: &mut egui::Ui, app: &mut App) {
                 .clicked()
         {
             if let Some(elem) = app.ui.scoped.member_detail_draft.elem {
-                app.core.scoped.undo.run(
-                    &mut app.core.model,
-                    Box::new(RemoveMemberDetailAttr { elem }),
-                );
-                app.core.scoped.staleness.mark_edited();
+                app.apply_model_edit(Box::new(RemoveMemberDetailAttr { elem }));
             }
         }
     });
@@ -666,6 +658,84 @@ mod tests {
         draft.bottom[2].clear();
         assert_eq!(draft.apply(haunch).unwrap(), haunch);
         assert_eq!(draft.apply(None).unwrap(), None);
+    }
+
+    #[test]
+    fn haunch_qd1_confirmation_edit_uses_design_identity_without_expiring_analysis() {
+        use crate::app::{signed_q0_acceptance_tests::fixture, ResultInputKey};
+        use sepika_design_jp::QdMethod;
+
+        let mut model = fixture::model();
+        let mut detail = MemberDetailAttr::new(ElemId(0));
+        let haunch = parse_haunch(true, "600", "200", "50").unwrap();
+        detail.haunch_i = haunch;
+        model.member_detail_attrs.push(detail.clone());
+        let static_key = ResultInputKey::Combo(model.combinations[0].name.clone());
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        app.core.analysis_cfg.rc_damage_control = false;
+        app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+        app.run_combination(0);
+        assert!(app.require_result_input(static_key.clone()).is_ok());
+        assert!(app.current_design_results().is_some());
+        let preparation_stale = app.core.scoped.staleness.preparation_stale;
+
+        let mut draft = HaunchQd1FaceDraft {
+            confirmed: true,
+            dimensions: ["0", "350", "800"].map(String::from),
+            top: ["859.5", "385", "750"].map(String::from),
+            bottom: ["1146", "385", "730"].map(String::from),
+        };
+        detail.haunch_i = draft.apply(haunch).unwrap();
+        assert!(apply_member_detail(&mut app, detail.clone()));
+        assert!(app.require_result_input(static_key.clone()).is_ok());
+        assert!(app.current_design_results().is_none());
+        assert!(!app.core.scoped.staleness.results_stale);
+        assert_eq!(
+            app.core.scoped.staleness.preparation_stale,
+            preparation_stale
+        );
+
+        app.undo_action();
+        assert!(app.require_result_input(static_key.clone()).is_ok());
+        assert!(app.current_design_results().is_some());
+        assert!(!app.core.scoped.staleness.results_stale);
+        assert_eq!(
+            app.core.scoped.staleness.preparation_stale,
+            preparation_stale
+        );
+        app.redo_action();
+        assert!(app.require_result_input(static_key.clone()).is_ok());
+        assert!(app.current_design_results().is_none());
+        assert!(!app.core.scoped.staleness.results_stale);
+        assert_eq!(
+            app.core.scoped.staleness.preparation_stale,
+            preparation_stale
+        );
+
+        detail
+            .haunch_i
+            .as_mut()
+            .unwrap()
+            .qd1_face
+            .as_mut()
+            .unwrap()
+            .top
+            .area_mm2 = f64::NAN;
+        let revision = app.core.scoped.undo.revision();
+        assert!(!apply_member_detail(&mut app, detail.clone()));
+        assert_eq!(app.core.scoped.undo.revision(), revision);
+        assert!(app.require_result_input(static_key.clone()).is_ok());
+        assert!(!app.core.scoped.staleness.results_stale);
+
+        draft.top[0] = "950".into();
+        detail.haunch_i = draft
+            .apply(parse_haunch(true, "650", "200", "50").unwrap())
+            .unwrap();
+        assert!(apply_member_detail(&mut app, detail.clone()));
+        assert_eq!(app.core.model.member_detail(ElemId(0)), Some(&detail));
+        assert!(app.core.scoped.staleness.results_stale);
+        assert!(app.require_result_input(static_key).is_err());
     }
 
     #[test]

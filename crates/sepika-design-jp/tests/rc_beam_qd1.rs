@@ -132,7 +132,10 @@ fn haunch_qd1_uses_confirmed_face_rebar_and_only_checks_the_general_section() {
         (QdMethod::Qd2, 30_000.0, 70_000.0),
     ] {
         for mz in [10e6, -10e6] {
-            let rows = positions.map(|pos| (pos, [0.0, qy, 0.0, 0.0, 0.0, mz]));
+            let rows = positions.map(|pos| {
+                let moment = if pos == 0.1 { mz / 2.0 } else { mz };
+                (pos, [0.0, qy, 0.0, 0.0, 0.0, moment])
+            });
             let outcomes = check(&model, method, Some(8_000.0), &rows, -10_000.0);
             assert_eq!(outcomes.len(), positions.len(), "{outcomes:?}");
             for (index, expected_pos) in positions.into_iter().enumerate() {
@@ -181,6 +184,148 @@ fn haunch_qd1_j_side_uses_the_own_face_and_preserves_the_general_section_boundar
         } else {
             assert_shear_n(&outcome, 104_767.678_125);
         }
+    }
+}
+
+#[test]
+fn haunch_qd1_retains_the_general_bending_failure_when_support_fails() {
+    type SupportChange = (&'static str, fn(&mut Model));
+    let variants: [SupportChange; 3] = [
+        ("強軸曲げが解放", |m| {
+            m.elements[0].end_cond[1] = EndCondition::Pinned
+        }),
+        ("自由端", |m| m.nodes[1].restraint = Dof6Mask::FREE),
+        ("局所Qy方向の反力", |m| {
+            m.nodes[1].restraint.set_free(Dof::Uz)
+        }),
+    ];
+    for (expected_reason, change) in variants {
+        let mut model = model();
+        add_confirmed_i_haunch(&mut model);
+        change(&mut model);
+        let rows = [(0.5, [0.0, 60_000.0, 0.0, 0.0, 0.0, 1e9])];
+        for method in [QdMethod::Qd1, QdMethod::Min] {
+            let outcomes = check(&model, method, Some(8_000.0), &rows, -10_000.0);
+            assert!(outcomes.iter().any(|(_, pos, outcome)| *pos == 0.5 &&
+                matches!(outcome, CheckOutcome::Checked(r) if r.components.iter().any(|c| c.kind == CheckKind::Bending && c.ratio > 1.0))), "{outcomes:?}");
+            assert!(outcomes.iter().any(|(_, pos, outcome)| *pos == 0.5 &&
+                matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(expected_reason))), "{outcomes:?}");
+        }
+    }
+}
+
+#[test]
+fn haunch_qd1_accepts_only_the_recorded_transition_for_an_equivalent_face_rounding() {
+    let mut model = model();
+    add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    add_confirmed_i_haunch(&mut model);
+    model.elements[0].rigid_zone.face_i = Some(249.999_999_999_999);
+    let transition = (249.999_999_999_999 + 600.0) / 4_500.0;
+    assert!(transition < 850.0 / 4_500.0);
+    for (position, valid) in [(transition, true), (transition - f64::EPSILON, false)] {
+        let response = [250.0 / 4500.0, position, 0.5, 1.0 - 250.0 / 4500.0].map(|xi| {
+            (
+                xi,
+                [
+                    0.0,
+                    60_000.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    if xi == position { 1e9 } else { 10e6 },
+                ],
+            )
+        });
+        let outcomes = check(&model, QdMethod::Qd1, Some(8_000.0), &response, -10_000.0);
+        assert_eq!(outcomes.iter().any(|(_, pos, outcome)| *pos == position
+            && matches!(outcome, CheckOutcome::Checked(r) if r.components.iter().any(|c| c.kind == CheckKind::Bending && c.ratio > 1.0))), valid, "{outcomes:?}");
+        if !valid {
+            assert!(outcomes.iter().any(|(_, pos, outcome)| *pos == position &&
+                matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("ハンチ区間"))));
+        }
+    }
+}
+
+#[test]
+fn haunch_qd1_uses_depth_and_shear_at_the_actual_governing_bending_station() {
+    let mut model = model();
+    add_confirmed_i_haunch(&mut model);
+    model.member_detail_attrs[0]
+        .haunch_i
+        .as_mut()
+        .unwrap()
+        .qd1_face
+        .as_mut()
+        .unwrap()
+        .bottom
+        .effective_depth_mm = 450.0;
+    let face_i = 250.0 / 4_500.0;
+    let face_j = 1.0 - 250.0 / 4_500.0;
+    let response = [
+        (0.0, 1e12),
+        (face_i, 42e6),
+        (0.1, 12e6),
+        (850.0 / 4500.0, 10e6),
+        (0.5, 10e6),
+        (face_j, -42e6),
+        (1.0, -1e12),
+    ]
+    .map(|(xi, mz)| {
+        let qy = if xi == 0.5 { 120_000.0 } else { 60_000.0 };
+        (xi, [0.0, qy, 0.0, 0.0, 0.0, mz])
+    });
+    let outcomes = check(&model, QdMethod::Qd1, Some(8_000.0), &response, -10_000.0);
+    let (_, _, centre) = outcomes.iter().find(|(_, pos, _)| *pos == 0.5).unwrap();
+    assert_shear_n(centre, 112_767.678_125);
+    let CheckOutcome::Checked(centre) = centre else {
+        unreachable!()
+    };
+    let shear = centre
+        .components
+        .iter()
+        .find(|c| c.kind == CheckKind::Shear)
+        .unwrap();
+    // 同値の実フェースのうちd=450 mmが支配し、M/Q=700 mmでα=1.565。一般部代用では1.760。
+    assert!(shear.detail.contains("α=1.565"), "{shear:?}");
+
+    let mut with_unrelated_nonfinite = response;
+    with_unrelated_nonfinite[1].1[3] = f64::NAN;
+    let outcomes = check(
+        &model,
+        QdMethod::Qd1,
+        Some(8_000.0),
+        &with_unrelated_nonfinite,
+        -10_000.0,
+    );
+    assert_shear_n(
+        &outcomes.iter().find(|(_, pos, _)| *pos == 0.5).unwrap().2,
+        112_767.678_125,
+    );
+
+    for (reference, expected) in [
+        (
+            Some([0.0, 60_000.0, 0.0, 0.0, 0.0, -42e6]),
+            "最大曲げ位置・引張側の有効せい",
+        ),
+        (
+            Some([0.0, f64::NAN, 0.0, 0.0, 0.0, 42e6]),
+            "最大曲げ位置の解析せん断力が非有限",
+        ),
+        (None, "実フェースの応答が欠落"),
+    ] {
+        let mut rows = response.to_vec();
+        if let Some(reference) = reference {
+            rows[2].1 = reference;
+        } else {
+            rows.remove(1);
+        }
+        let outcomes = check(&model, QdMethod::Min, Some(8_000.0), &rows, -10_000.0);
+        assert!(outcomes.iter().any(|(_, pos, outcome)| *pos == 0.5 &&
+            matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(expected) && reason.contains("QD1=112767.7 N"))), "{outcomes:?}");
+        assert!(outcomes.iter().all(
+            |(_, _, outcome)| !matches!(outcome, CheckOutcome::Checked(r)
+            if r.components.iter().any(|c| c.kind == CheckKind::Shear))
+        ));
     }
 }
 
