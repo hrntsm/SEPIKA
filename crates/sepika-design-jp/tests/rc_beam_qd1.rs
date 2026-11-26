@@ -564,6 +564,63 @@ fn haunch_qd1_compares_recovered_peaks_to_the_general_boundary_in_millimetres() 
 }
 
 #[test]
+fn haunch_qd1_keeps_bending_for_both_saved_representations_of_the_j_transition() {
+    use sepika_core::model::{JointKind, MemberJoint};
+
+    let mut model = model();
+    add_confirmed_i_haunch(&mut model);
+    model.elements[0].rigid_zone.face_j = Some(200.0);
+    let detail = &mut model.member_detail_attrs[0];
+    let mut haunch = detail.haunch_i.take().unwrap();
+    haunch.length = 460.0;
+    haunch.qd1_face.as_mut().unwrap().distance_mm = 200.0;
+    detail.haunch_j = Some(haunch);
+    detail.joints.push(MemberJoint {
+        distance: 3840.25,
+        kind: JointKind::Site,
+    });
+    let design_xi = 1.0 - (200.0 + haunch.length) / 4500.0;
+    let physical_xi = (4500.0 - (200.0 + haunch.length)) / 4500.0;
+    let interior_xi = 3840.25 / 4500.0;
+    assert!(physical_xi > design_xi);
+    for transition in [design_xi, physical_xi] {
+        let rows = [
+            250.0 / 4500.0,
+            0.5,
+            transition,
+            interior_xi,
+            1.0 - 200.0 / 4500.0,
+        ]
+        .map(|xi| {
+            (
+                xi,
+                [
+                    0.0,
+                    60_000.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    if xi >= transition { 1e9 } else { 10e6 },
+                ],
+            )
+        });
+        let outcomes = check(&model, QdMethod::Qd1, Some(8_000.0), &rows, -10_000.0);
+        assert!(outcomes.iter().any(|(_, pos, outcome)| *pos == transition &&
+            matches!(outcome, CheckOutcome::Checked(result)
+                if result.components.iter().any(|c| c.kind == CheckKind::Bending && c.ratio > 1.0))), "{outcomes:?}");
+        let interior: Vec<_> = outcomes
+            .iter()
+            .filter(|(_, pos, _)| *pos == interior_xi)
+            .collect();
+        assert!(
+            matches!(interior.as_slice(), [(_, _, CheckOutcome::Skipped { reason })]
+            if reason.contains("ハンチ区間")),
+            "{outcomes:?}"
+        );
+    }
+}
+
+#[test]
 fn haunch_qd1_retains_bending_at_the_rounded_opposite_face_and_with_missing_shear() {
     let mut model = model();
     add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);

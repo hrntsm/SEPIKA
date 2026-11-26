@@ -31,13 +31,16 @@ struct ValidatedFace {
 struct GeneralSectionRange {
     actual_bounds_mm: [f64; 2],
     actual_bounds_xi: [f64; 2],
+    bounds_from_mm_xi: [f64; 2],
     recorded_bounds_xi: [Option<f64>; 2],
 }
 
 impl GeneralSectionRange {
     fn contains(&self, xi: f64) -> bool {
         let [i, j] = self.actual_bounds_xi;
-        (i..=j).contains(&xi) || self.recorded_bounds_xi.contains(&Some(xi))
+        (i..=j).contains(&xi)
+            || self.bounds_from_mm_xi.contains(&xi)
+            || self.recorded_bounds_xi.contains(&Some(xi))
     }
 }
 
@@ -302,6 +305,7 @@ fn general_section_range(
     Ok(GeneralSectionRange {
         actual_bounds_mm: inner_boundaries_mm,
         actual_bounds_xi: inner_boundaries_xi,
+        bounds_from_mm_xi: inner_boundaries_mm.map(|x_mm| x_mm / geometry.axis_length_mm),
         recorded_bounds_xi,
     })
 }

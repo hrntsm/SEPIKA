@@ -1255,6 +1255,75 @@ fn time_history_haunch_qd1_keeps_rounded_nonhaunch_face_and_independent_bending_
 }
 
 #[test]
+fn time_history_haunch_qd1_keeps_bending_for_both_saved_j_transition_representations() {
+    use sepika_core::model::{JointKind, MemberJoint};
+    use sepika_design_jp::QdMethod;
+
+    let mut model = rc_beam_qd1_model::model();
+    rc_beam_qd1_model::add_confirmed_i_haunch(&mut model);
+    model.elements[0].rigid_zone.face_j = Some(200.0);
+    let detail = &mut model.member_detail_attrs[0];
+    let mut haunch = detail.haunch_i.take().unwrap();
+    haunch.length = 460.0;
+    haunch.qd1_face.as_mut().unwrap().distance_mm = 200.0;
+    detail.haunch_j = Some(haunch);
+    detail.joints.push(MemberJoint {
+        distance: 3900.0,
+        kind: JointKind::Site,
+    });
+    let design_xi = 1.0 - (200.0 + haunch.length) / 4500.0;
+    let physical_xi = (4500.0 - (200.0 + haunch.length)) / 4500.0;
+    assert!(physical_xi > design_xi);
+
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+    let stations = [
+        250.0 / 4500.0,
+        0.5,
+        design_xi,
+        3900.0 / 4500.0,
+        1.0 - 200.0 / 4500.0,
+    ];
+    set_gravity_forces(&mut app, Some(stations.map(|xi| (xi, [0.0; 6])).to_vec()));
+    for transition in [design_xi, physical_xi] {
+        let mut rec = gravity_test_record([0.0; 6], [0.0; 6]);
+        let mut rows = stations.map(|xi| {
+            (
+                xi,
+                [
+                    0.0,
+                    60_000.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    if xi >= design_xi { 1e9 } else { 10e6 },
+                ],
+            )
+        });
+        rows[2].0 = transition;
+        rec.peak_member_forces[0].as_mut().unwrap().at = rows.to_vec();
+        rec.axial_force_peaks[0].snapshots[0].forces.at = rows.to_vec();
+        rec.axial_force_peaks[0].snapshots[0].positions = vec![2, 3];
+        let text = labels(&app, &rec, true);
+        let (envelope, confirmed) = text.split_once("軸力極値が生じた確定ステップ").unwrap();
+        for text in [envelope, confirmed] {
+            let (_, from_transition) = text.split_once("ξ=0.85:").unwrap();
+            let (transition, interior) = from_transition.split_once("ξ=0.87:").unwrap();
+            assert!(
+                transition.contains("(NG)") && transition.contains("曲げ "),
+                "{text}"
+            );
+            assert!(
+                interior.contains("ハンチ区間") && !interior.contains("(NG)"),
+                "{text}"
+            );
+        }
+    }
+}
+
+#[test]
 fn time_history_qd1_requires_qy_reaction_at_a_direct_support_and_keeps_bending_ng() {
     use sepika_core::dof::Dof;
     use sepika_design_jp::QdMethod;
