@@ -222,10 +222,7 @@ fn static_beam_support_reason(
     model: &Model,
     connection_counts: &HashMap<NodeId, usize>,
 ) -> Option<String> {
-    if !matches!(
-        elem.kind,
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-    ) {
+    if !matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber) {
         return Some(
             "ultimate_beam_hinge_support_unverified: 強軸曲げを伝達する梁要素を確認できません"
                 .into(),

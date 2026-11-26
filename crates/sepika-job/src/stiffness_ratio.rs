@@ -864,7 +864,7 @@ mod tests {
             MiscWallStiffnessMethod::RepresentativeColumn,
         ] {
             let mut model = fixture(2);
-            model.elements[1].kind = ElementKind::MultiSpring;
+            model.elements[1].kind = ElementKind::Fiber;
             model.stress_cfg.misc_wall_method = method;
             model.stress_cfg.misc_wall_representatives = vec![MiscWallRepresentativeColumn {
                 story: StoryId(2),

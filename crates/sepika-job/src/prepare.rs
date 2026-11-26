@@ -659,7 +659,6 @@ mod tests {
         for kind in [
             ElementKind::Beam,
             ElementKind::Fiber,
-            ElementKind::MultiSpring,
             ElementKind::Brace {
                 tension_only: false,
             },

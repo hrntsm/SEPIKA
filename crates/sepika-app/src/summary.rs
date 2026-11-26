@@ -2470,11 +2470,7 @@ mod tests {
         };
         let metric =
             |model: &Model| compute_story_metrics_with(model, SeismicDir::X, &ctx).remove(0);
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             model.elements[3].kind = kind;
             let evaluated = metric(&model);
             let reason = evaluated.re.unwrap_err();
@@ -2492,11 +2488,7 @@ mod tests {
         model.elements[4].nodes = [NodeId(4), NodeId(0)].into_iter().collect();
         for branch_height_mm in [1000.0, -1000.0, 3500.0] {
             model.nodes[5].coord[2] = branch_height_mm;
-            for kind in [
-                ElementKind::Beam,
-                ElementKind::Fiber,
-                ElementKind::MultiSpring,
-            ] {
+            for kind in [ElementKind::Beam, ElementKind::Fiber] {
                 model.elements[3].kind = kind;
                 let evaluated = metric(&model);
                 let reason = evaluated.re.unwrap_err();
@@ -2591,19 +2583,17 @@ mod tests {
         for branch_end in [4, 8] {
             model.elements[6].nodes = [NodeId(2), NodeId(branch_end)].into_iter().collect();
             assert_eq!(metric(&model).drift.unwrap().unwrap().angle, 6.0 / 3000.0);
-            for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-                for (column_kind, branch_kind) in
-                    [(kind, ElementKind::Beam), (ElementKind::Beam, kind)]
-                {
-                    model.elements[0].kind = column_kind;
-                    model.elements[6].kind = branch_kind;
-                    let evaluated = metric(&model);
-                    assert_eq!(evaluated.re.unwrap(), expected_re);
-                    assert_eq!(evaluated.fes.unwrap(), expected_fes);
-                    let drift = evaluated.drift.unwrap().unwrap();
-                    assert_eq!(drift.column.elem, ElemId(0));
-                    assert_eq!(drift.angle, 14.0 / 3000.0);
-                }
+            let kind = ElementKind::Fiber;
+            for (column_kind, branch_kind) in [(kind, ElementKind::Beam), (ElementKind::Beam, kind)]
+            {
+                model.elements[0].kind = column_kind;
+                model.elements[6].kind = branch_kind;
+                let evaluated = metric(&model);
+                assert_eq!(evaluated.re.unwrap(), expected_re);
+                assert_eq!(evaluated.fes.unwrap(), expected_fes);
+                let drift = evaluated.drift.unwrap().unwrap();
+                assert_eq!(drift.column.elem, ElemId(0));
+                assert_eq!(drift.angle, 14.0 / 3000.0);
             }
             model.elements[0].kind = ElementKind::Beam;
             model.elements[6].kind = ElementKind::Beam;

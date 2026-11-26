@@ -528,11 +528,7 @@ fn rigid_link_to_fixed_master_keeps_its_dependent_support_resistance() {
 
 #[test]
 fn eccentric_confirmed_member_load_response_keeps_support_transfer_moment() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for offset in [-100.0, 0.0, 100.0] {
             let mut model = super::tests::single_column_model(1e10, 0.0);
             model.nodes[1].coord = [3000.0, 0.0, 0.0];
@@ -600,11 +596,7 @@ fn eccentric_confirmed_member_load_response_keeps_support_transfer_moment() {
 
 #[test]
 fn eccentric_physical_path_cuts_include_arms_actual_load_position_and_plane_endpoints_once() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for reversed in [false, true] {
             for (zi, zj, dx, offset, above_fraction, upper_nodes) in [
                 (0.0, 1800.0, 2400.0, 100.0, 2.0 / 9.0, 1),

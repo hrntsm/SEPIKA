@@ -318,12 +318,8 @@ mod tests {
     }
 
     #[test]
-    fn all_three_member_kinds_share_detection_and_index_selection() {
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+    fn beam_and_fiber_share_side_column_detection_and_index_selection() {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut model = make_wall_model();
             for member in model.elements.iter_mut().filter(|e| e.id != ElemId(0)) {
                 member.kind = kind;
@@ -353,11 +349,7 @@ mod tests {
 
     #[test]
     fn steel_wall_does_not_release_adjacent_columns() {
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut model = make_wall_model();
             model.materials[0].category = MaterialCategory::Steel;
             model.materials[0].fy = Some(235.0);

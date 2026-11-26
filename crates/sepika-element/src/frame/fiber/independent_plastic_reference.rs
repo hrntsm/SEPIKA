@@ -1,3 +1,4 @@
+use super::FiberBeam;
 use super::*;
 use approx::assert_relative_eq;
 use sepika_core::model::Model;
@@ -28,11 +29,7 @@ const AXIAL_CASES: [(Option<[f64; 3]>, Option<f64>); 5] = [
     (Some([0.0, 0.6, 0.8]), Some(0.0)),
 ];
 
-fn axial_member(
-    normal: Option<[f64; 3]>,
-    spring: Option<f64>,
-    hardening: f64,
-) -> crate::frame::multi_spring::MultiSpringElement {
+fn axial_member(normal: Option<[f64; 3]>, spring: Option<f64>, hardening: f64) -> FiberBeam {
     use sepika_core::model::EndCondition;
     let mut inner = super::constitutive_tests::bilinear_member();
     for gp in &mut inner.gauss_points {
@@ -53,18 +50,7 @@ fn axial_member(
     if let Some(n) = normal {
         inner.configure_wall_release(n).unwrap();
     }
-    crate::frame::multi_spring::MultiSpringElement { inner }
-}
-
-fn axial_behavior(
-    member: &mut crate::frame::multi_spring::MultiSpringElement,
-    ms: bool,
-) -> &mut dyn ElementBehavior {
-    if ms {
-        member
-    } else {
-        &mut member.inner
-    }
+    inner
 }
 
 fn axial_increment(delta_mm: f64) -> LocalVec {
@@ -79,137 +65,127 @@ fn independent_plastic_axial_event_partition_preserves_work_at_every_history_com
     let ctx = Ctx { model: &model };
     for (normal, spring) in AXIAL_CASES {
         let reference = PrimalReference::with_original(normal, spring);
-        for ms in [false, true] {
-            for sign in [-1.0, 1.0] {
-                let mut member = axial_member(normal, spring, 0.01);
-                let mut delta_mm: f64 = 0.0;
-                let mut p_mm = 0.0;
-                let mut force_n = 0.0;
-                let mut epc = [0.0; 8];
-                let mut observed_epc = [0.0; 8];
-                let mut work_nmm = 0.0;
-                let mut observed_work_nmm = 0.0;
-                let mut observed_force_n = 0.0;
-                let mut dissipation_nmm = 0.0;
-                let mut observed_dissipation_nmm = 0.0;
-                let mut primal_dissipation_nmm = 0.0;
-                let mut max_energy_error_nmm = 0.0_f64;
-                let mut commits = 0;
-                let mut events = 0;
-                for target in [1.5, 6.0, 4.5, 6.0, 0.0, -6.0, -4.5, -6.0, 6.0] {
-                    let target_mm = sign * target;
-                    let direction = (target_mm - delta_mm).signum();
-                    let yield_mm = p_mm + (AXIAL_HA * p_mm + direction * AXIAL_Y) / AXIAL_KE;
-                    let mut endpoints = Vec::new();
-                    if direction * (yield_mm - delta_mm) > 1e-12
-                        && direction * (target_mm - yield_mm) >= -1e-12
-                    {
-                        events += 1;
-                    }
-                    if direction * (yield_mm - delta_mm) > 1e-12
-                        && direction * (target_mm - yield_mm) > 1e-12
-                    {
-                        endpoints.push(yield_mm);
-                    }
-                    endpoints.push(target_mm);
-                    for next_mm in endpoints {
-                        let next_p_mm = if direction * (next_mm - yield_mm) > 1e-12 {
-                            (AXIAL_KE * next_mm - direction * AXIAL_Y) / (AXIAL_KE + AXIAL_HA)
-                        } else {
-                            p_mm
-                        };
-                        let next_force_n = AXIAL_KE * (next_mm - next_p_mm);
-                        work_nmm += 0.5 * (force_n + next_force_n) * (next_mm - delta_mm);
-                        dissipation_nmm += AXIAL_Y * (next_p_mm - p_mm).abs();
-                        let expected = reference.solve(next_mm, &epc);
-                        let behavior = axial_behavior(&mut member, ms);
-                        behavior
-                            .update_state(&axial_increment(next_mm - delta_mm), true, &ctx)
-                            .unwrap();
-                        let actual = behavior.internal_force(&ctx);
-                        let states = behavior.fiber_section_states().unwrap();
-                        observed_work_nmm +=
-                            0.5 * (observed_force_n + actual.data[6]) * (next_mm - delta_mm);
-                        for i in 0..12 {
-                            let axial = if i == 0 {
-                                -next_force_n
-                            } else if i == 6 {
-                                next_force_n
-                            } else {
-                                0.0
-                            };
-                            assert_relative_eq!(actual.data[i], axial, epsilon = 1e-5);
-                            assert_relative_eq!(expected.force[i], axial, epsilon = 1e-5);
-                        }
-                        let mut observed_ep = [0.0; 8];
-                        for (end, state) in states.iter().enumerate() {
-                            for (i, fiber) in state.fibers.iter().enumerate() {
-                                let index = end * 4 + i;
-                                let stress = member.inner.gauss_points[end].trial_stress[i];
-                                let ep = fiber.strain - stress / E;
-                                observed_ep[index] = ep;
-                                assert_relative_eq!(ep, next_p_mm / 600.0, epsilon = 1e-11);
-                                assert_relative_eq!(expected.ep[index], ep, epsilon = 1e-11);
-                                assert_relative_eq!(stress, next_force_n / 1000.0, epsilon = 1e-8);
-                                assert!((stress - HP * ep).abs() <= FY + 1e-8);
-                                observed_dissipation_nmm +=
-                                    LP_AREA * FY * (ep - observed_epc[index]).abs();
-                            }
-                        }
-                        let hinge = &member.inner.hinge;
-                        for i in 0..6 {
-                            let p = if i % 3 == 0 { next_p_mm / 2.0 } else { 0.0 };
-                            let eta = if i % 3 == 0 {
-                                next_p_mm / 600.0 + next_force_n / 2e8
-                            } else {
-                                0.0
-                            };
-                            assert_relative_eq!(hinge.trial_eta[i], eta, epsilon = 1e-11);
-                            assert_relative_eq!(hinge.trial_plastic[i], p, epsilon = 1e-9);
-                        }
-                        assert!(member.inner.trial_int.iter().all(|b| b.abs() < 1e-12));
-                        let observed_p_mm = hinge.trial_plastic[0] + hinge.trial_plastic[3];
-                        let stored_nmm = next_force_n.powi(2) / (2.0 * AXIAL_KE)
-                            + AXIAL_HA * next_p_mm.powi(2) / 2.0;
-                        let observed_stored_nmm = actual.data[6].powi(2) / (2.0 * AXIAL_KE)
-                            + LP_AREA * HP * dot(&observed_ep, &observed_ep) / 2.0;
-                        primal_dissipation_nmm += expected.dissipation_nmm;
-                        assert_relative_eq!(observed_p_mm, next_p_mm, epsilon = 1e-9);
-                        assert_relative_eq!(expected.stored_nmm, stored_nmm, epsilon = 1e-4);
-                        assert_relative_eq!(
-                            expected.hardening_nmm,
-                            AXIAL_HA * next_p_mm.powi(2) / 2.0,
-                            epsilon = 1e-4
-                        );
-                        assert_relative_eq!(
-                            primal_dissipation_nmm,
-                            dissipation_nmm,
-                            epsilon = 1e-4
-                        );
-                        assert_relative_eq!(
-                            observed_dissipation_nmm,
-                            dissipation_nmm,
-                            epsilon = 1e-4
-                        );
-                        assert_relative_eq!(work_nmm, stored_nmm + dissipation_nmm, epsilon = 1e-4);
-                        let energy_error =
-                            observed_work_nmm - observed_stored_nmm - observed_dissipation_nmm;
-                        max_energy_error_nmm = max_energy_error_nmm.max(energy_error.abs());
-                        assert_relative_eq!(observed_work_nmm, work_nmm, epsilon = 1e-4);
-                        assert!(energy_error.abs() < 1e-4, "W-U-D={energy_error} Nmm");
-                        assert!(dissipation_nmm >= 0.0);
-                        epc = expected.ep;
-                        observed_epc = observed_ep;
-                        delta_mm = next_mm;
-                        p_mm = next_p_mm;
-                        force_n = next_force_n;
-                        observed_force_n = actual.data[6];
-                        commits += 1;
-                    }
+        for sign in [-1.0, 1.0] {
+            let mut member = axial_member(normal, spring, 0.01);
+            let mut delta_mm: f64 = 0.0;
+            let mut p_mm = 0.0;
+            let mut force_n = 0.0;
+            let mut epc = [0.0; 8];
+            let mut observed_epc = [0.0; 8];
+            let mut work_nmm = 0.0;
+            let mut observed_work_nmm = 0.0;
+            let mut observed_force_n = 0.0;
+            let mut dissipation_nmm = 0.0;
+            let mut observed_dissipation_nmm = 0.0;
+            let mut primal_dissipation_nmm = 0.0;
+            let mut max_energy_error_nmm = 0.0_f64;
+            let mut commits = 0;
+            let mut events = 0;
+            for target in [1.5, 6.0, 4.5, 6.0, 0.0, -6.0, -4.5, -6.0, 6.0] {
+                let target_mm = sign * target;
+                let direction = (target_mm - delta_mm).signum();
+                let yield_mm = p_mm + (AXIAL_HA * p_mm + direction * AXIAL_Y) / AXIAL_KE;
+                let mut endpoints = Vec::new();
+                if direction * (yield_mm - delta_mm) > 1e-12
+                    && direction * (target_mm - yield_mm) >= -1e-12
+                {
+                    events += 1;
                 }
-                assert!(events >= 3);
-                println!("I3 work normal={normal:?} spring={spring:?} ms={ms} sign={sign} commits={commits} events={events} W={work_nmm:.12e} D={dissipation_nmm:.12e} max_W-U-D={max_energy_error_nmm:.12e} Nmm");
+                if direction * (yield_mm - delta_mm) > 1e-12
+                    && direction * (target_mm - yield_mm) > 1e-12
+                {
+                    endpoints.push(yield_mm);
+                }
+                endpoints.push(target_mm);
+                for next_mm in endpoints {
+                    let next_p_mm = if direction * (next_mm - yield_mm) > 1e-12 {
+                        (AXIAL_KE * next_mm - direction * AXIAL_Y) / (AXIAL_KE + AXIAL_HA)
+                    } else {
+                        p_mm
+                    };
+                    let next_force_n = AXIAL_KE * (next_mm - next_p_mm);
+                    work_nmm += 0.5 * (force_n + next_force_n) * (next_mm - delta_mm);
+                    dissipation_nmm += AXIAL_Y * (next_p_mm - p_mm).abs();
+                    let expected = reference.solve(next_mm, &epc);
+                    let behavior = &mut member;
+                    behavior
+                        .update_state(&axial_increment(next_mm - delta_mm), true, &ctx)
+                        .unwrap();
+                    let actual = behavior.internal_force(&ctx);
+                    let states = behavior.fiber_section_states().unwrap();
+                    observed_work_nmm +=
+                        0.5 * (observed_force_n + actual.data[6]) * (next_mm - delta_mm);
+                    for i in 0..12 {
+                        let axial = if i == 0 {
+                            -next_force_n
+                        } else if i == 6 {
+                            next_force_n
+                        } else {
+                            0.0
+                        };
+                        assert_relative_eq!(actual.data[i], axial, epsilon = 1e-5);
+                        assert_relative_eq!(expected.force[i], axial, epsilon = 1e-5);
+                    }
+                    let mut observed_ep = [0.0; 8];
+                    for (end, state) in states.iter().enumerate() {
+                        for (i, fiber) in state.fibers.iter().enumerate() {
+                            let index = end * 4 + i;
+                            let stress = member.gauss_points[end].trial_stress[i];
+                            let ep = fiber.strain - stress / E;
+                            observed_ep[index] = ep;
+                            assert_relative_eq!(ep, next_p_mm / 600.0, epsilon = 1e-11);
+                            assert_relative_eq!(expected.ep[index], ep, epsilon = 1e-11);
+                            assert_relative_eq!(stress, next_force_n / 1000.0, epsilon = 1e-8);
+                            assert!((stress - HP * ep).abs() <= FY + 1e-8);
+                            observed_dissipation_nmm +=
+                                LP_AREA * FY * (ep - observed_epc[index]).abs();
+                        }
+                    }
+                    let hinge = &member.hinge;
+                    for i in 0..6 {
+                        let p = if i % 3 == 0 { next_p_mm / 2.0 } else { 0.0 };
+                        let eta = if i % 3 == 0 {
+                            next_p_mm / 600.0 + next_force_n / 2e8
+                        } else {
+                            0.0
+                        };
+                        assert_relative_eq!(hinge.trial_eta[i], eta, epsilon = 1e-11);
+                        assert_relative_eq!(hinge.trial_plastic[i], p, epsilon = 1e-9);
+                    }
+                    assert!(member.trial_int.iter().all(|b| b.abs() < 1e-12));
+                    let observed_p_mm = hinge.trial_plastic[0] + hinge.trial_plastic[3];
+                    let stored_nmm = next_force_n.powi(2) / (2.0 * AXIAL_KE)
+                        + AXIAL_HA * next_p_mm.powi(2) / 2.0;
+                    let observed_stored_nmm = actual.data[6].powi(2) / (2.0 * AXIAL_KE)
+                        + LP_AREA * HP * dot(&observed_ep, &observed_ep) / 2.0;
+                    primal_dissipation_nmm += expected.dissipation_nmm;
+                    assert_relative_eq!(observed_p_mm, next_p_mm, epsilon = 1e-9);
+                    assert_relative_eq!(expected.stored_nmm, stored_nmm, epsilon = 1e-4);
+                    assert_relative_eq!(
+                        expected.hardening_nmm,
+                        AXIAL_HA * next_p_mm.powi(2) / 2.0,
+                        epsilon = 1e-4
+                    );
+                    assert_relative_eq!(primal_dissipation_nmm, dissipation_nmm, epsilon = 1e-4);
+                    assert_relative_eq!(observed_dissipation_nmm, dissipation_nmm, epsilon = 1e-4);
+                    assert_relative_eq!(work_nmm, stored_nmm + dissipation_nmm, epsilon = 1e-4);
+                    let energy_error =
+                        observed_work_nmm - observed_stored_nmm - observed_dissipation_nmm;
+                    max_energy_error_nmm = max_energy_error_nmm.max(energy_error.abs());
+                    assert_relative_eq!(observed_work_nmm, work_nmm, epsilon = 1e-4);
+                    assert!(energy_error.abs() < 1e-4, "W-U-D={energy_error} Nmm");
+                    assert!(dissipation_nmm >= 0.0);
+                    epc = expected.ep;
+                    observed_epc = observed_ep;
+                    delta_mm = next_mm;
+                    p_mm = next_p_mm;
+                    force_n = next_force_n;
+                    observed_force_n = actual.data[6];
+                    commits += 1;
+                }
             }
+            assert!(events >= 3);
+            println!("I3 work normal={normal:?} spring={spring:?} sign={sign} commits={commits} events={events} W={work_nmm:.12e} D={dissipation_nmm:.12e} max_W-U-D={max_energy_error_nmm:.12e} Nmm");
         }
     }
 }
@@ -221,49 +197,47 @@ fn independent_plastic_axial_initial_and_reverse_yield_have_distinct_one_sided_t
     let kt = AXIAL_KE * AXIAL_HA / (AXIAL_KE + AXIAL_HA);
     for (normal, spring) in AXIAL_CASES {
         let reference = PrimalReference::with_original(normal, spring);
-        for ms in [false, true] {
-            for sign in [-1.0, 1.0] {
-                for reverse in [false, true] {
-                    let mut member = axial_member(normal, spring, 0.01);
-                    let preload_mm = if reverse { sign * 6.0 } else { sign * 1.5 };
-                    let preload = reference.solve(preload_mm, &[0.0; 8]);
-                    let direction = if reverse { -sign } else { sign };
-                    let pc_mm = 300.0 * (preload.ep[0] + preload.ep[4]);
-                    let yield_mm = pc_mm + (AXIAL_HA * pc_mm + direction * AXIAL_Y) / AXIAL_KE;
-                    let yield_n = AXIAL_HA * pc_mm + direction * AXIAL_Y;
-                    let behavior = axial_behavior(&mut member, ms);
+        for sign in [-1.0, 1.0] {
+            for reverse in [false, true] {
+                let mut member = axial_member(normal, spring, 0.01);
+                let preload_mm = if reverse { sign * 6.0 } else { sign * 1.5 };
+                let preload = reference.solve(preload_mm, &[0.0; 8]);
+                let direction = if reverse { -sign } else { sign };
+                let pc_mm = 300.0 * (preload.ep[0] + preload.ep[4]);
+                let yield_mm = pc_mm + (AXIAL_HA * pc_mm + direction * AXIAL_Y) / AXIAL_KE;
+                let yield_n = AXIAL_HA * pc_mm + direction * AXIAL_Y;
+                let behavior = &mut member;
+                behavior
+                    .update_state(&axial_increment(preload_mm), true, &ctx)
+                    .unwrap();
+                let committed = behavior.snapshot_state();
+                let mut max_tangent_error = 0.0_f64;
+                for side in [-1.0, 1.0] {
+                    let step_mm = 1e-5;
+                    let target_mm = yield_mm + direction * side * step_mm;
+                    let expected_k = if side < 0.0 { AXIAL_KE } else { kt };
+                    let expected_n = yield_n + expected_k * direction * side * step_mm;
+                    let expected = reference.solve(target_mm, &preload.ep);
+                    let behavior = &mut member;
+                    behavior.restore_state(committed.as_ref());
                     behavior
-                        .update_state(&axial_increment(preload_mm), true, &ctx)
+                        .update_state(&axial_increment(target_mm - preload_mm), false, &ctx)
                         .unwrap();
-                    let committed = behavior.snapshot_state();
-                    let mut max_tangent_error = 0.0_f64;
-                    for side in [-1.0, 1.0] {
-                        let step_mm = 1e-5;
-                        let target_mm = yield_mm + direction * side * step_mm;
-                        let expected_k = if side < 0.0 { AXIAL_KE } else { kt };
-                        let expected_n = yield_n + expected_k * direction * side * step_mm;
-                        let expected = reference.solve(target_mm, &preload.ep);
-                        let behavior = axial_behavior(&mut member, ms);
-                        behavior.restore_state(committed.as_ref());
-                        behavior
-                            .update_state(&axial_increment(target_mm - preload_mm), false, &ctx)
-                            .unwrap();
-                        let actual_n = behavior.internal_force(&ctx).data[6];
-                        let actual_k = behavior.tangent_stiffness(&ctx).get(6, 6);
-                        let one_sided_k = (actual_n - yield_n) / (direction * side * step_mm);
-                        let primal_k = reference.branch_tangent(&expected.branches)[6][6];
-                        assert_relative_eq!(expected.force[6], expected_n, epsilon = 1e-5);
-                        assert_relative_eq!(actual_n, expected_n, epsilon = 1e-5);
-                        assert_relative_eq!(actual_k, expected_k, epsilon = 1e-5);
-                        assert_relative_eq!(primal_k, expected_k, epsilon = 1e-5);
-                        assert_relative_eq!(one_sided_k, expected_k, epsilon = 0.02);
-                        for branch in expected.branches {
-                            assert_eq!(branch, if side < 0.0 { 0 } else { direction as i8 });
-                        }
-                        max_tangent_error = max_tangent_error.max((one_sided_k - expected_k).abs());
+                    let actual_n = behavior.internal_force(&ctx).data[6];
+                    let actual_k = behavior.tangent_stiffness(&ctx).get(6, 6);
+                    let one_sided_k = (actual_n - yield_n) / (direction * side * step_mm);
+                    let primal_k = reference.branch_tangent(&expected.branches)[6][6];
+                    assert_relative_eq!(expected.force[6], expected_n, epsilon = 1e-5);
+                    assert_relative_eq!(actual_n, expected_n, epsilon = 1e-5);
+                    assert_relative_eq!(actual_k, expected_k, epsilon = 1e-5);
+                    assert_relative_eq!(primal_k, expected_k, epsilon = 1e-5);
+                    assert_relative_eq!(one_sided_k, expected_k, epsilon = 0.02);
+                    for branch in expected.branches {
+                        assert_eq!(branch, if side < 0.0 { 0 } else { direction as i8 });
                     }
-                    println!("I3 yield normal={normal:?} spring={spring:?} ms={ms} sign={sign} reverse={reverse} yield_delta={yield_mm:.12e} mm max_one_sided_error={max_tangent_error:.12e} N/mm");
+                    max_tangent_error = max_tangent_error.max((one_sided_k - expected_k).abs());
                 }
+                println!("I3 yield normal={normal:?} spring={spring:?} sign={sign} reverse={reverse} yield_delta={yield_mm:.12e} mm max_one_sided_error={max_tangent_error:.12e} N/mm");
             }
         }
     }
@@ -306,58 +280,53 @@ fn independent_plastic_perfectly_plastic_nonunique_end_partition_fails_atomicall
     let model = Model::default();
     let ctx = Ctx { model: &model };
     for (normal, spring) in AXIAL_CASES {
-        for ms in [false, true] {
-            for sign in [-1.0, 1.0] {
-                let mut member = axial_member(normal, spring, 0.0);
-                let mut control = axial_member(normal, spring, 0.0);
-                let behavior = axial_behavior(&mut member, ms);
-                behavior
-                    .update_state(&axial_increment(sign * 1.5), true, &ctx)
-                    .unwrap();
-                let committed_cp = behavior.serialize_checkpoint();
-                behavior
-                    .update_state(&axial_increment(sign * 0.25), false, &ctx)
-                    .unwrap();
-                let trial_cp = behavior.serialize_checkpoint();
-                let trial_force = behavior.internal_force(&ctx).data;
-                let trial_tangent = behavior.tangent_stiffness(&ctx).data;
-                let connection_started = member.inner.connection_started;
-                let behavior = axial_behavior(&mut member, ms);
-                let error = behavior
-                    .update_state(&axial_increment(sign * 4.25), true, &ctx)
-                    .unwrap_err()
-                    .to_string();
-                assert!(error.contains("内側断面釣合いのJacobian"), "{error}");
-                assert_eq!(behavior.serialize_checkpoint(), trial_cp);
-                assert_eq!(behavior.internal_force(&ctx).data, trial_force);
-                assert_eq!(behavior.tangent_stiffness(&ctx).data, trial_tangent);
-                assert_eq!(member.inner.connection_started, connection_started);
-                let behavior = axial_behavior(&mut member, ms);
-                behavior.revert_state();
-                assert_eq!(behavior.serialize_checkpoint(), committed_cp);
-                behavior
-                    .update_state(&axial_increment(sign * 0.5), true, &ctx)
-                    .unwrap();
-                let retried_cp = behavior.serialize_checkpoint();
-                let retried_force = behavior.internal_force(&ctx).data;
-                let retried_tangent = behavior.tangent_stiffness(&ctx).data;
-                assert_relative_eq!(retried_force[6], sign * 133333.3333333333, epsilon = 1e-5);
-                let behavior = axial_behavior(&mut control, ms);
-                behavior
-                    .update_state(&axial_increment(sign * 1.5), true, &ctx)
-                    .unwrap();
-                behavior
-                    .update_state(&axial_increment(sign * 0.5), true, &ctx)
-                    .unwrap();
-                assert_eq!(behavior.serialize_checkpoint(), retried_cp);
-                assert_eq!(behavior.internal_force(&ctx).data, retried_force);
-                assert_eq!(behavior.tangent_stiffness(&ctx).data, retried_tangent);
-                assert_eq!(
-                    member.inner.connection_started,
-                    control.inner.connection_started
-                );
-                println!("I3 nonunique rollback normal={normal:?} spring={spring:?} ms={ms} sign={sign} CP/cache/config exact retry_N={} N error={error}", retried_force[6]);
-            }
+        for sign in [-1.0, 1.0] {
+            let mut member = axial_member(normal, spring, 0.0);
+            let mut control = axial_member(normal, spring, 0.0);
+            let behavior = &mut member;
+            behavior
+                .update_state(&axial_increment(sign * 1.5), true, &ctx)
+                .unwrap();
+            let committed_cp = behavior.serialize_checkpoint();
+            behavior
+                .update_state(&axial_increment(sign * 0.25), false, &ctx)
+                .unwrap();
+            let trial_cp = behavior.serialize_checkpoint();
+            let trial_force = behavior.internal_force(&ctx).data;
+            let trial_tangent = behavior.tangent_stiffness(&ctx).data;
+            let connection_started = member.connection_started;
+            let behavior = &mut member;
+            let error = behavior
+                .update_state(&axial_increment(sign * 4.25), true, &ctx)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("内側断面釣合いのJacobian"), "{error}");
+            assert_eq!(behavior.serialize_checkpoint(), trial_cp);
+            assert_eq!(behavior.internal_force(&ctx).data, trial_force);
+            assert_eq!(behavior.tangent_stiffness(&ctx).data, trial_tangent);
+            assert_eq!(member.connection_started, connection_started);
+            let behavior = &mut member;
+            behavior.revert_state();
+            assert_eq!(behavior.serialize_checkpoint(), committed_cp);
+            behavior
+                .update_state(&axial_increment(sign * 0.5), true, &ctx)
+                .unwrap();
+            let retried_cp = behavior.serialize_checkpoint();
+            let retried_force = behavior.internal_force(&ctx).data;
+            let retried_tangent = behavior.tangent_stiffness(&ctx).data;
+            assert_relative_eq!(retried_force[6], sign * 133333.3333333333, epsilon = 1e-5);
+            let behavior = &mut control;
+            behavior
+                .update_state(&axial_increment(sign * 1.5), true, &ctx)
+                .unwrap();
+            behavior
+                .update_state(&axial_increment(sign * 0.5), true, &ctx)
+                .unwrap();
+            assert_eq!(behavior.serialize_checkpoint(), retried_cp);
+            assert_eq!(behavior.internal_force(&ctx).data, retried_force);
+            assert_eq!(behavior.tangent_stiffness(&ctx).data, retried_tangent);
+            assert_eq!(member.connection_started, control.connection_started);
+            println!("I3 nonunique rollback normal={normal:?} spring={spring:?} sign={sign} CP/cache/config exact retry_N={} N error={error}", retried_force[6]);
         }
     }
 }
@@ -725,142 +694,139 @@ fn coupled_wall_partial_yield_unload_history_matches_uncondensed_primal_state_ta
         11 => -0.004,
         _ => 0.0,
     });
-    for ms in [false, true] {
-        let mut member = axial_member(normal, Some(1e7), 0.01);
-        let mut previous = [0.0; 12];
-        let mut previous_force = [0.0; 12];
-        let mut previous_expected_force = [0.0; 12];
-        let mut epc = [0.0; 8];
-        let mut observed_epc = [0.0; 8];
-        let mut observed_work = 0.0;
-        let mut expected_work = 0.0;
-        let mut observed_dissipation = 0.0;
-        let mut expected_dissipation = 0.0;
-        for factor in [0.25, 1.0, 0.75, 1.01] {
-            let u = target.map(|value| value * factor);
-            let expected = reference.solve_displacement(&u, &epc);
-            println!(
-                "coupled factor={factor} ms={ms} branches={:?} max_ep_increment={:e}",
-                expected.branches,
-                (0..8)
-                    .map(|i| (expected.ep[i] - epc[i]).abs())
-                    .fold(0.0_f64, f64::max)
-            );
-            let tangent = reference.branch_tangent(&expected.branches);
-            for j in 0..12 {
-                for sign in [-1.0, 1.0] {
-                    let mut perturbed = u;
-                    perturbed[j] += sign * if j % 6 < 3 { 1e-6 } else { 1e-9 };
-                    assert_eq!(
-                        reference.solve_displacement(&perturbed, &epc).branches,
-                        expected.branches
-                    );
-                }
-            }
-            if factor >= 1.0 {
-                let count = expected
-                    .branches
-                    .iter()
-                    .filter(|&&branch| branch != 0)
-                    .count();
-                assert!(count > 0 && count < 8);
-            }
-
-            let behavior = axial_behavior(&mut member, ms);
-            let snapshot = behavior.snapshot_state();
-            let du = LocalVec {
-                data: (0..12).map(|i| u[i] - previous[i]).collect(),
-            };
-            behavior.update_state(&du, false, &ctx).unwrap();
-            let force = behavior.internal_force(&ctx);
-            let actual_tangent = behavior.tangent_stiffness(&ctx);
-            let states = behavior.fiber_section_states().unwrap();
-            for i in 0..12 {
-                assert_relative_eq!(force.data[i], expected.force[i], epsilon = 1e-4);
-                for j in 0..12 {
-                    assert_relative_eq!(
-                        actual_tangent.get(i, j),
-                        tangent[i][j],
-                        epsilon = 1e-4,
-                        max_relative = 1e-9
-                    );
-                }
-                observed_work += 0.5 * (force.data[i] + previous_force[i]) * (u[i] - previous[i]);
-                expected_work +=
-                    0.5 * (expected.force[i] + previous_expected_force[i]) * (u[i] - previous[i]);
-            }
-            let hinge = &member.inner.hinge;
-            for i in 0..6 {
-                assert_relative_eq!(hinge.trial_eta[i], expected.eta[i], epsilon = 1e-11);
-                assert_relative_eq!(hinge.trial_plastic[i], expected.plastic[i], epsilon = 1e-9);
-            }
-            let mut observed_ep = [0.0; 8];
-            for (end, state) in states.iter().enumerate() {
-                for (i, fiber) in state.fibers.iter().enumerate() {
-                    let index = end * 4 + i;
-                    let stress = member.inner.gauss_points[end].trial_stress[i];
-                    assert_relative_eq!(fiber.strain, expected.strain[index], epsilon = 1e-11);
-                    assert_relative_eq!(stress, expected.stress[index], epsilon = 1e-8);
-                    observed_ep[index] = fiber.strain - stress / E;
-                    assert_relative_eq!(observed_ep[index], expected.ep[index], epsilon = 1e-11);
-                    observed_dissipation +=
-                        LP_AREA * FY * (observed_ep[index] - observed_epc[index]).abs();
-                }
-            }
-            let mut x = observed_ep.to_vec();
-            for (i, beta) in expected.beta.iter().enumerate() {
-                let column = &reference.columns[8 + i];
-                let observed_beta = member.inner.trial_int[i] - dot(column, &u);
-                assert_relative_eq!(observed_beta, *beta, epsilon = 1e-11);
-                assert!(
-                    (dot(column, &force.data) + reference.springs[8 + i] * observed_beta).abs()
-                        < 1e-4
+    let mut member = axial_member(normal, Some(1e7), 0.01);
+    let mut previous = [0.0; 12];
+    let mut previous_force = [0.0; 12];
+    let mut previous_expected_force = [0.0; 12];
+    let mut epc = [0.0; 8];
+    let mut observed_epc = [0.0; 8];
+    let mut observed_work = 0.0;
+    let mut expected_work = 0.0;
+    let mut observed_dissipation = 0.0;
+    let mut expected_dissipation = 0.0;
+    for factor in [0.25, 1.0, 0.75, 1.01] {
+        let u = target.map(|value| value * factor);
+        let expected = reference.solve_displacement(&u, &epc);
+        println!(
+            "coupled factor={factor} branches={:?} max_ep_increment={:e}",
+            expected.branches,
+            (0..8)
+                .map(|i| (expected.ep[i] - epc[i]).abs())
+                .fold(0.0_f64, f64::max)
+        );
+        let tangent = reference.branch_tangent(&expected.branches);
+        for j in 0..12 {
+            for sign in [-1.0, 1.0] {
+                let mut perturbed = u;
+                perturbed[j] += sign * if j % 6 < 3 { 1e-6 } else { 1e-9 };
+                assert_eq!(
+                    reference.solve_displacement(&perturbed, &epc).branches,
+                    expected.branches
                 );
-                x.push(observed_beta);
             }
-            if factor == 1.0 {
-                assert!(expected.beta.iter().any(|beta| beta.abs() > 1e-6));
-            }
-            let mut elastic = u;
-            for (column, value) in reference.columns.iter().zip(&x) {
-                for i in 0..12 {
-                    elastic[i] += column[i] * value;
-                }
-            }
-            let mut stored = (0..12)
-                .map(|i| elastic[i] * dot(&reference.k[i], &elastic))
-                .sum::<f64>()
-                / 2.0
-                + LP_AREA * HP * dot(&observed_ep, &observed_ep) / 2.0;
-            for (i, beta) in x.iter().enumerate().skip(8) {
-                stored += reference.springs[i] * beta * beta / 2.0;
-            }
-            let r = self_stress_projector();
-            for end in 0..2 {
-                let ep = &observed_ep[end * 4..end * 4 + 4];
-                stored += LP_AREA * E / 2.0 * (0..4).map(|i| ep[i] * dot(&r[i], ep)).sum::<f64>();
-            }
-            assert_relative_eq!(stored, expected.stored_nmm, epsilon = 1e-4);
-            expected_dissipation += expected.dissipation_nmm;
-            assert_relative_eq!(observed_dissipation, expected_dissipation, epsilon = 1e-4);
-            assert_relative_eq!(observed_work, expected_work, epsilon = 1e-4);
-            let behavior = axial_behavior(&mut member, ms);
-            behavior.restore_state(snapshot.as_ref());
-            behavior.update_state(&du, true, &ctx).unwrap();
-            let committed_force = behavior.internal_force(&ctx);
-            assert_eq!(committed_force.data, force.data);
-            previous = u;
-            previous_force = std::array::from_fn(|i| force.data[i]);
-            previous_expected_force = expected.force;
-            observed_epc = observed_ep;
-            epc = expected.ep;
         }
-        assert!(observed_dissipation > 0.0);
+        if factor >= 1.0 {
+            let count = expected
+                .branches
+                .iter()
+                .filter(|&&branch| branch != 0)
+                .count();
+            assert!(count > 0 && count < 8);
+        }
+
+        let behavior = &mut member;
+        let snapshot = behavior.snapshot_state();
+        let du = LocalVec {
+            data: (0..12).map(|i| u[i] - previous[i]).collect(),
+        };
+        behavior.update_state(&du, false, &ctx).unwrap();
+        let force = behavior.internal_force(&ctx);
+        let actual_tangent = behavior.tangent_stiffness(&ctx);
+        let states = behavior.fiber_section_states().unwrap();
+        for i in 0..12 {
+            assert_relative_eq!(force.data[i], expected.force[i], epsilon = 1e-4);
+            for j in 0..12 {
+                assert_relative_eq!(
+                    actual_tangent.get(i, j),
+                    tangent[i][j],
+                    epsilon = 1e-4,
+                    max_relative = 1e-9
+                );
+            }
+            observed_work += 0.5 * (force.data[i] + previous_force[i]) * (u[i] - previous[i]);
+            expected_work +=
+                0.5 * (expected.force[i] + previous_expected_force[i]) * (u[i] - previous[i]);
+        }
+        let hinge = &member.hinge;
+        for i in 0..6 {
+            assert_relative_eq!(hinge.trial_eta[i], expected.eta[i], epsilon = 1e-11);
+            assert_relative_eq!(hinge.trial_plastic[i], expected.plastic[i], epsilon = 1e-9);
+        }
+        let mut observed_ep = [0.0; 8];
+        for (end, state) in states.iter().enumerate() {
+            for (i, fiber) in state.fibers.iter().enumerate() {
+                let index = end * 4 + i;
+                let stress = member.gauss_points[end].trial_stress[i];
+                assert_relative_eq!(fiber.strain, expected.strain[index], epsilon = 1e-11);
+                assert_relative_eq!(stress, expected.stress[index], epsilon = 1e-8);
+                observed_ep[index] = fiber.strain - stress / E;
+                assert_relative_eq!(observed_ep[index], expected.ep[index], epsilon = 1e-11);
+                observed_dissipation +=
+                    LP_AREA * FY * (observed_ep[index] - observed_epc[index]).abs();
+            }
+        }
+        let mut x = observed_ep.to_vec();
+        for (i, beta) in expected.beta.iter().enumerate() {
+            let column = &reference.columns[8 + i];
+            let observed_beta = member.trial_int[i] - dot(column, &u);
+            assert_relative_eq!(observed_beta, *beta, epsilon = 1e-11);
+            assert!(
+                (dot(column, &force.data) + reference.springs[8 + i] * observed_beta).abs() < 1e-4
+            );
+            x.push(observed_beta);
+        }
+        if factor == 1.0 {
+            assert!(expected.beta.iter().any(|beta| beta.abs() > 1e-6));
+        }
+        let mut elastic = u;
+        for (column, value) in reference.columns.iter().zip(&x) {
+            for i in 0..12 {
+                elastic[i] += column[i] * value;
+            }
+        }
+        let mut stored = (0..12)
+            .map(|i| elastic[i] * dot(&reference.k[i], &elastic))
+            .sum::<f64>()
+            / 2.0
+            + LP_AREA * HP * dot(&observed_ep, &observed_ep) / 2.0;
+        for (i, beta) in x.iter().enumerate().skip(8) {
+            stored += reference.springs[i] * beta * beta / 2.0;
+        }
+        let r = self_stress_projector();
+        for end in 0..2 {
+            let ep = &observed_ep[end * 4..end * 4 + 4];
+            stored += LP_AREA * E / 2.0 * (0..4).map(|i| ep[i] * dot(&r[i], ep)).sum::<f64>();
+        }
+        assert_relative_eq!(stored, expected.stored_nmm, epsilon = 1e-4);
+        expected_dissipation += expected.dissipation_nmm;
+        assert_relative_eq!(observed_dissipation, expected_dissipation, epsilon = 1e-4);
+        assert_relative_eq!(observed_work, expected_work, epsilon = 1e-4);
+        let behavior = &mut member;
+        behavior.restore_state(snapshot.as_ref());
+        behavior.update_state(&du, true, &ctx).unwrap();
+        let committed_force = behavior.internal_force(&ctx);
+        assert_eq!(committed_force.data, force.data);
+        previous = u;
+        previous_force = std::array::from_fn(|i| force.data[i]);
+        previous_expected_force = expected.force;
+        observed_epc = observed_ep;
+        epc = expected.ep;
     }
+    assert!(observed_dissipation > 0.0);
 }
 
 #[test]
-fn ordinary_fixed_fiber_and_ms_biaxial_history_matches_uncondensed_primal() {
+fn ordinary_fixed_fiber_biaxial_history_matches_uncondensed_primal() {
     let model = Model::default();
     let ctx = Ctx { model: &model };
     let reference = PrimalReference::with_original(None, None);
@@ -872,49 +838,47 @@ fn ordinary_fixed_fiber_and_ms_biaxial_history_matches_uncondensed_primal() {
         11 => -0.004,
         _ => 0.0,
     });
-    for ms in [false, true] {
-        let mut member = axial_member(None, None, 0.01);
-        let mut previous = [0.0; 12];
-        let mut epc = [0.0; 8];
-        for factor in [0.25, 1.0, 0.75, 1.01] {
-            let u = target.map(|value| value * factor);
-            let expected = reference.solve_displacement(&u, &epc);
-            let tangent = reference.branch_tangent(&expected.branches);
-            let behavior = axial_behavior(&mut member, ms);
-            behavior
-                .update_state(
-                    &LocalVec {
-                        data: (0..12).map(|i| u[i] - previous[i]).collect(),
-                    },
-                    true,
-                    &ctx,
-                )
-                .unwrap();
-            let force = behavior.internal_force(&ctx);
-            let actual_tangent = behavior.tangent_stiffness(&ctx);
-            for i in 0..12 {
-                assert_relative_eq!(force.data[i], expected.force[i], epsilon = 1e-4);
-                for j in 0..12 {
-                    assert_relative_eq!(
-                        actual_tangent.get(i, j),
-                        tangent[i][j],
-                        epsilon = 1e-4,
-                        max_relative = 1e-9
-                    );
-                }
+    let mut member = axial_member(None, None, 0.01);
+    let mut previous = [0.0; 12];
+    let mut epc = [0.0; 8];
+    for factor in [0.25, 1.0, 0.75, 1.01] {
+        let u = target.map(|value| value * factor);
+        let expected = reference.solve_displacement(&u, &epc);
+        let tangent = reference.branch_tangent(&expected.branches);
+        let behavior = &mut member;
+        behavior
+            .update_state(
+                &LocalVec {
+                    data: (0..12).map(|i| u[i] - previous[i]).collect(),
+                },
+                true,
+                &ctx,
+            )
+            .unwrap();
+        let force = behavior.internal_force(&ctx);
+        let actual_tangent = behavior.tangent_stiffness(&ctx);
+        for i in 0..12 {
+            assert_relative_eq!(force.data[i], expected.force[i], epsilon = 1e-4);
+            for j in 0..12 {
+                assert_relative_eq!(
+                    actual_tangent.get(i, j),
+                    tangent[i][j],
+                    epsilon = 1e-4,
+                    max_relative = 1e-9
+                );
             }
-            let hinge = &member.inner.hinge;
-            for i in 0..6 {
-                assert_relative_eq!(hinge.trial_eta[i], expected.eta[i], epsilon = 1e-11);
-                assert_relative_eq!(hinge.trial_plastic[i], expected.plastic[i], epsilon = 1e-9);
-            }
-            println!(
-                "ordinary fixed ms={ms}, factor={factor}, primal_branches={:?}",
-                expected.branches
-            );
-            previous = u;
-            epc = expected.ep;
         }
-        assert!(epc.iter().any(|strain| strain.abs() > 1e-6));
+        let hinge = &member.hinge;
+        for i in 0..6 {
+            assert_relative_eq!(hinge.trial_eta[i], expected.eta[i], epsilon = 1e-11);
+            assert_relative_eq!(hinge.trial_plastic[i], expected.plastic[i], epsilon = 1e-9);
+        }
+        println!(
+            "ordinary fixed, factor={factor}, primal_branches={:?}",
+            expected.branches
+        );
+        previous = u;
+        epc = expected.ep;
     }
+    assert!(epc.iter().any(|strain| strain.abs() > 1e-6));
 }

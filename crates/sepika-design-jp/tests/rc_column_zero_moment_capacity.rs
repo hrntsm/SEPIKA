@@ -124,12 +124,7 @@ fn common_product_entry_retains_only_known_shear_ng_at_the_unchecked_position() 
 #[test]
 fn common_product_entry_uses_required_force_components_for_qd1_and_minimum() {
     for (circle, element_kind) in [false, true].into_iter().flat_map(|circle| {
-        [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ]
-        .map(|element_kind| (circle, element_kind))
+        [ElementKind::Beam, ElementKind::Fiber].map(|element_kind| (circle, element_kind))
     }) {
         let na_n = reference::axial_limit_n(circle);
         let mut model = column_model(circle, na_n);

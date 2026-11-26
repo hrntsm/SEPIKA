@@ -1,6 +1,5 @@
 use super::*;
 use crate::frame::beam::BeamElement;
-use crate::frame::multi_spring::MultiSpringElement;
 use crate::wall::side_column::{InPlaneReleasedColumn, ReleaseAxis};
 use approx::assert_relative_eq;
 use sepika_core::model::{EndCondition, GirderTorsionMode};
@@ -104,7 +103,7 @@ fn independent_mass(beam: &BeamElement, normal: [f64; 2]) -> LocalMat {
 }
 
 #[test]
-fn beam_fiber_ms_wall_connection_matches_expanded_stiffness_forces_work_and_kinetic_energy() {
+fn beam_fiber_wall_connection_matches_expanded_stiffness_forces_work_and_kinetic_energy() {
     for normal in [[1.0, 0.0], [0.0, 1.0], [0.6, 0.8], [-0.6, -0.8]] {
         for conditions in [
             [EndCondition::Fixed; 2],
@@ -173,20 +172,13 @@ fn beam_fiber_ms_wall_connection_matches_expanded_stiffness_forces_work_and_kine
                             AnalysisKind::Incremental,
                         );
                         fiber.configure_wall_release(normal_global).unwrap();
-                        let mut ms = MultiSpringElement::new(
-                            data,
-                            &model,
-                            crate::factory::StrengthBasis::Nominal,
-                            AnalysisKind::Incremental,
-                        );
-                        ms.configure_wall_release(normal_global).unwrap();
                         let column = InPlaneReleasedColumn::new(
                             beam.clone(),
                             ReleaseAxis::LocalDirection(normal),
                         );
                         let ctx = Ctx { model: &model };
                         let mut members: Vec<Box<dyn ElementBehavior>> =
-                            vec![Box::new(column), Box::new(fiber), Box::new(ms)];
+                            vec![Box::new(column), Box::new(fiber)];
                         for member in &mut members {
                             member
                                 .update_state(
@@ -304,17 +296,9 @@ fn both_free_torsion_ends_keep_static_response_but_refuse_inertial_gauge_removal
             AnalysisKind::Incremental,
         );
         fiber.configure_wall_release([0.0, 0.6, 0.8]).unwrap();
-        let mut ms = MultiSpringElement::new(
-            data,
-            &model,
-            crate::factory::StrengthBasis::Nominal,
-            AnalysisKind::Incremental,
-        );
-        ms.configure_wall_release([0.0, 0.6, 0.8]).unwrap();
         let column = InPlaneReleasedColumn::new(beam, ReleaseAxis::LocalDirection([0.6, 0.8]));
         let ctx = Ctx { model: &model };
-        let mut members: Vec<Box<dyn ElementBehavior>> =
-            vec![Box::new(column), Box::new(fiber), Box::new(ms)];
+        let mut members: Vec<Box<dyn ElementBehavior>> = vec![Box::new(column), Box::new(fiber)];
         for member in &mut members {
             member
                 .update_state(

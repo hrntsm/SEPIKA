@@ -1,6 +1,6 @@
 # Fiber と MS の軸・二軸曲げを同じ材料応答へ整合させる
 
-- Status: accepted
+- Status: partially superseded by [ADR 0176](0176-remove-explicit-multi-spring.md)（MSのみ廃止。Fiberの判断は維持）
 - Date: 2026-10-19
 - Related: [#496](https://github.com/hrntsm/SEPIKA/issues/496)、[#715](https://github.com/hrntsm/SEPIKA/issues/715)、[ADR 0063](0063-wall-side-column-foundations.md)
 

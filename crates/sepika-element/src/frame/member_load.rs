@@ -750,9 +750,7 @@ pub fn cmq_with_rigid_zone(
     if data.nodes.len() != 2
         || !matches!(
             data.kind,
-            sepika_core::model::ElementKind::Beam
-                | sepika_core::model::ElementKind::Fiber
-                | sepika_core::model::ElementKind::MultiSpring
+            sepika_core::model::ElementKind::Beam | sepika_core::model::ElementKind::Fiber
         )
     {
         return Err("CMQは2節点梁要素に限ります".into());

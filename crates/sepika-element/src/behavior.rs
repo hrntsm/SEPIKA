@@ -352,7 +352,7 @@ pub trait ElementBehavior: Send + Sync {
     }
     /// 質量行列を**全体系**で返す。
     /// 回転不変でない整合質量は `M_global = Rᵀ M_local R` の変換を済ませること。
-    /// Beam/Fiber/MS の共通質量特性が未解決なら両形式でpanicする。公開組立は要素ID付きエラーを返す。
+    /// Beam/Fiber の共通質量特性が未解決なら両形式でpanicする。公開組立は要素ID付きエラーを返す。
     fn mass_matrix(&self, opt: MassOption) -> LocalMat;
     /// 質量行列を全体系で返す。壁側柱接続の縮約不成立は理由を返す。
     /// 既定実装は [`Self::mass_matrix`] の失敗契約を引き継ぐ。

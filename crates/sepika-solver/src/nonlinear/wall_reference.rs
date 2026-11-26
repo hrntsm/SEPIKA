@@ -543,11 +543,7 @@ mod tests {
             close(actual[0].1[0], expected[0].1[0]);
             close(actual[0].1[1], expected[0].1[1]);
         }
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut model = original.clone();
             for frame in &mut model.elements[..4] {
                 frame.kind = kind;

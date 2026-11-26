@@ -7,9 +7,7 @@ use sepika_core::model::{
 use sepika_core::section_shape::{SectionShape, SrcHManufacture};
 use sepika_element::behavior::{Ctx, ElementBehavior, LocalMat, LocalVec, MassOption};
 use sepika_element::factory::StrengthBasis;
-use sepika_element::frame::{
-    beam::BeamElement, fiber::FiberBeam, multi_spring::MultiSpringElement,
-};
+use sepika_element::frame::{beam::BeamElement, fiber::FiberBeam};
 use sepika_math::solver::SolveError;
 use sepika_solver::common::{assemble::assemble_global_m, constraint::Reducer};
 use sepika_solver::dynamic::damping::{Damping, DampingAccumulation};
@@ -28,11 +26,7 @@ use wall_side_column_fixture::{fixture, rebar, wall_connection_fixture};
 
 #[test]
 fn mass_assembly_rejects_invalid_wall_side_column_frame_before_building_behavior() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = wall_connection_fixture(kind);
         model.elements[0].local_axis.ref_vector = [f64::NAN, 0.0, 0.0];
         let dofmap = DofMap::build(&model);
@@ -78,11 +72,7 @@ fn mass_assembly_rejects_invalid_wall_side_column_frame_before_building_behavior
 fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
     use sepika_element::factory::{build_behavior, ensure_wall_side_column_analysis};
     use sepika_element::frame::panel_offset::{PanelEnd, PanelOffsetMember};
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = wall_connection_fixture(kind);
         let index = sepika_core::model::WallSideColumnIndex::build(&model);
         assert_eq!(index.replacement_bindings(ElemId(0)).unwrap().len(), 1);
@@ -248,11 +238,7 @@ fn wall_connection_options_gate_uses_actual_analysis_and_mass_path() {
 #[test]
 fn wall_connection_gate_accepts_ordinary_frames_and_rejects_steel_walls() {
     use sepika_element::factory::ensure_wall_side_column_analysis;
-    for representation in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for representation in [ElementKind::Beam, ElementKind::Fiber] {
         let mut ordinary = wall_connection_fixture(representation);
         ordinary
             .elements
@@ -356,21 +342,11 @@ fn verify_direct_and_public(model: &Model, mass_t: f64) {
         AnalysisKind::Incremental,
     )
     .unwrap_or_else(|reason| panic!("{:?}: {reason}", model.sections[0].shape));
-    let ms = MultiSpringElement::new(
-        data,
-        model,
-        StrengthBasis::Nominal,
-        AnalysisKind::Incremental,
-    );
     for opt in [MassOption::Lumped, MassOption::Consistent] {
-        for elem in [&beam as &dyn ElementBehavior, &fiber, &ms] {
+        for elem in [&beam as &dyn ElementBehavior, &fiber] {
             assert_mass(&elem.mass_matrix(opt), mass_t, opt);
         }
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut model = model.clone();
             model.elements[0].kind = kind;
             let dofmap = DofMap::build(&model);
@@ -498,16 +474,8 @@ fn fiber_gauss_points_tangents_history_and_missing_mesh_do_not_supply_mass() {
         assert_eq!(fiber.mass_matrix(opt).data, before[i].data);
     }
     fiber.gauss_points.clear();
-    let mut ms = MultiSpringElement::new(
-        data,
-        &model,
-        StrengthBasis::Nominal,
-        AnalysisKind::Incremental,
-    );
-    ms.inner.gauss_points.clear();
     for opt in [MassOption::Lumped, MassOption::Consistent] {
         assert_mass(&fiber.mass_matrix(opt), SRC_MASS_T, opt);
-        assert_mass(&ms.mass_matrix(opt), SRC_MASS_T, opt);
     }
 }
 
@@ -531,7 +499,6 @@ fn both_mass_options_reject_invalid_density_with_element_id_and_lumped_only_bypa
     for kind in [
         ElementKind::Beam,
         ElementKind::Fiber,
-        ElementKind::MultiSpring,
         ElementKind::Brace {
             tension_only: false,
         },
@@ -693,13 +660,7 @@ fn direct_mass_api_retains_errors_instead_of_density_or_zero_fallbacks() {
         AnalysisKind::Incremental,
     )
     .unwrap();
-    let ms = MultiSpringElement::new(
-        data,
-        &model,
-        StrengthBasis::Nominal,
-        AnalysisKind::Incremental,
-    );
-    for elem in [&beam as &dyn ElementBehavior, &fiber, &ms] {
+    for elem in [&beam as &dyn ElementBehavior, &fiber] {
         for opt in [MassOption::Lumped, MassOption::Consistent] {
             let result =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| elem.mass_matrix(opt)));
@@ -748,11 +709,7 @@ fn public_mass_rejects_invalid_dimensions_radii_and_required_materials_before_fa
 
 #[test]
 fn public_eigen_and_timehistories_use_projected_common_mass_for_elastic_axial_response() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = fixture(None, MaterialCategory::Steel);
         model.elements[0].kind = kind;
         model.sections[0].area = 20000.0;
@@ -875,11 +832,7 @@ fn beam_delegates_share_both_mass_forms_and_reject_the_same_resolver_failure() {
 #[test]
 fn src_physical_self_weight_shares_inertial_mass_while_design_dl_distribution_is_preserved() {
     use sepika_core::model::{LoadCfg, MemberLoadKind};
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = src_fixture(0, 400.0);
         model.elements[0].kind = kind;
         let (nodal, member) =
@@ -946,11 +899,7 @@ fn lip_channel_geometry_dynamic_results_reject_all_mass_methods_before_early_suc
 
     let mut failures = vec![];
     for mass_method in [MassMethod::LumpedOnly, MassMethod::CorrectedLumped] {
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             for lip in [75.0, 80.0, 100.0] {
                 for fixed in [false, true] {
                     let mut model = fixture(
@@ -1118,11 +1067,7 @@ fn lip_channel_geometry_dynamic_results_reject_all_mass_methods_before_early_suc
     }
     assert!(failures.is_empty(), "{}", failures.join("; "));
     for mass_method in [MassMethod::LumpedOnly, MassMethod::CorrectedLumped] {
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut model = fixture(
                 Some(SectionShape::SteelLipChannel {
                     height: 150.0,
@@ -1179,11 +1124,7 @@ fn linear_time_history_with_state_and_analysis_preserve_actual_wall_options_reas
     use sepika_element::factory::ensure_wall_side_column_analysis;
     use sepika_solver::dynamic::timehistory::linear_time_history_with_state;
     use sepika_solver::statics::analysis::Analysis;
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = wall_connection_fixture(kind);
         model.wall_plates[0].dl_support = Some(sepika_core::model::WallDlSupport::LowerBeam);
         for element in &mut model.elements[..2] {
@@ -1242,11 +1183,7 @@ fn linear_time_history_with_state_and_analysis_preserve_actual_wall_options_reas
 #[test]
 fn beam_736_wall_column_mass_gate_returns_finite_input_stiffness_diagnostics() {
     use sepika_solver::dynamic::eigen::solve_eigen_with_solver;
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for g in [80_000.0, f64::MAX] {
             let mut model = wall_connection_fixture(kind);
             for node in &mut model.nodes {
@@ -1286,11 +1223,7 @@ fn beam_736_wall_column_mass_gate_returns_finite_input_stiffness_diagnostics() {
 
 #[test]
 fn eccentric_ground_motion_drives_free_rotation_with_restrained_translations() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for offset_mm in [-100.0_f64, 0.0, 100.0] {
             let mut model = fixture(None, MaterialCategory::Steel);
             model.sections[0].frame_use = Some(sepika_core::model::FrameSectionUse::Girder);

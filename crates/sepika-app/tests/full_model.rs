@@ -2655,12 +2655,7 @@ fn ovika_invalid_restored_model_is_not_installed() {
         .model
         .elements
         .iter()
-        .filter(|element| {
-            matches!(
-                element.kind,
-                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-            )
-        })
+        .filter(|element| matches!(element.kind, ElementKind::Beam | ElementKind::Fiber))
         .filter_map(|element| element.section)
         .find(|id| {
             app.core

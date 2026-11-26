@@ -1,6 +1,6 @@
 # ヒンジ詳細の表示は解析要素と同じ非線形モデルを単一情報源とする
 
-Status: accepted
+Status: partially superseded by [ADR 0176](0176-remove-explicit-multi-spring.md)（マルチスプリングへの適用のみ失効）
 
 ヒンジ詳細の背景曲線は、解析が使用していない `squid_n_section::mn_surface` の表示用モデルで描かれていた。表示と解析が別の骨格・曲面を見るため、応答経路が背景曲線に一致しない・はみ出すことがあり、画面上で区別できなかった。
 

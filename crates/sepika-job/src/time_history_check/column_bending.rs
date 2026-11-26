@@ -20,10 +20,8 @@ pub(crate) struct Column<'a> {
 }
 
 pub(crate) fn targets(model: &Model, elem: &ElementData) -> bool {
-    matches!(
-        elem.kind,
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-    ) && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
+    matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber)
+        && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
         && model.element_section(elem).is_some_and(|sec| {
             is_symmetric_h_section(sec)
                 && structure_kind_of(

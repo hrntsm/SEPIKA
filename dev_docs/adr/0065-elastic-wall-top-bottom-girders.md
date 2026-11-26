@@ -1,6 +1,6 @@
 # 壁上下の剛梁を連続した壁板の弾性高剛性部材として扱う
 
-- Status: accepted
+- Status: partially superseded by [ADR 0176](0176-remove-explicit-multi-spring.md)（マルチスプリングへの適用のみ失効）
 - Date: 2026-10-19
 - Related: [#496](https://github.com/hrntsm/SEPIKA/issues/496)、[ADR 0013](0013-adopt-wall-element-model.md)、[ADR 0063](0063-wall-side-column-foundations.md)
 

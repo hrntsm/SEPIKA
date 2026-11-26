@@ -413,10 +413,7 @@ impl Section {
     pub fn validate_rc_element_use(&self, kind: ElementKind) -> Result<(), String> {
         if let Some(expected) = self.rc_frame_use() {
             if self.frame_use != Some(expected)
-                || !matches!(
-                    kind,
-                    ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-                )
+                || !matches!(kind, ElementKind::Beam | ElementKind::Fiber)
             {
                 return Err(self.rc_purpose_error());
             }

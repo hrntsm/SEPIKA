@@ -277,7 +277,6 @@ impl App {
                 elem.kind,
                 sepika_core::model::ElementKind::Beam
                     | sepika_core::model::ElementKind::Fiber
-                    | sepika_core::model::ElementKind::MultiSpring
                     | sepika_core::model::ElementKind::Brace { .. }
             ) {
                 continue;
@@ -596,7 +595,6 @@ impl App {
                     sepika_core::model::ElementKind::Wall
                         | sepika_core::model::ElementKind::Beam
                         | sepika_core::model::ElementKind::Fiber
-                        | sepika_core::model::ElementKind::MultiSpring
                         | sepika_core::model::ElementKind::Brace { .. }
                 ) {
                     continue;

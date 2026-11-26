@@ -32,9 +32,9 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0020](0020-assign-plates-to-member-bounded-regions.md) | accepted | 囲まれた床板・壁版は支持部材で分割された領域へ割り当てる |
 | [0021](0021-same-position-support-members.md) | accepted | 同じ位置に支持部材が重なる場合は同種をエラー、異種は主架構優先とする |
 | [0022](0022-unmapped-slit-specification-warning.md) | accepted | 耐震スリット指定が辺へ反映できない場合は警告する |
-| [0023](0023-hinge-detail-single-source-analysis-models.md) | accepted | ヒンジ詳細の表示は解析要素と同じ非線形モデルを単一情報源とする |
+| [0023](0023-hinge-detail-single-source-analysis-models.md) | partially superseded by ADR-0176（マルチスプリングへの適用のみ失効） | ヒンジ詳細の表示は解析要素と同じ非線形モデルを単一情報源とする |
 | [0024](0024-separate-panel-element-and-joint-check.md) | accepted | 仕口パネル解析要素と柱梁接合部の断面算定を分離する |
-| [0025](0025-consistent-mass-section-properties.md) | accepted | Beam と Fiber の整合質量は共通の断面質量特性から算定する |
+| [0025](0025-consistent-mass-section-properties.md) | partially superseded by ADR-0176（マルチスプリングへの適用のみ失効） | Beam と Fiber の整合質量は共通の断面質量特性から算定する |
 | [0026](0026-current-spec-single-source-docs.md) | partially superseded by ADR-0140 | 現在仕様の正本は docs とし、フェーズ実装仕様書を置かない |
 | [0027](0027-calc-docs-use-code-units.md) | accepted | 計算根拠の単位表記は法令・規準の単位に従う |
 | [0028](0028-src-cft-ns-material-or-fallback.md) | partially superseded by ADR-0062 | SRC/CFT の等価断面剛性は材料由来 ns を通常とし、算定不能時は N_S_EQ=15 へフォールバックして通知する |
@@ -49,7 +49,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0037](0037-cantilever-slab-load-to-attachment-girder.md) | accepted | 線アンカーの取り付く床板は取付き大梁だけへ等分布伝達する |
 | [0038](0038-cantilever-slab-tip-load-transfer.md) | accepted | 片持ちスラブの先端荷重は取付き梁へ力のみ等分布伝達する |
 | [0039](0039-section-property-basis.md) | accepted | 断面性能の算定元を項目別に区別し、フィレット半径・角Rの編集時の更新を分ける |
-| [0040](0040-damper-total-weight-and-mass-source.md) | accepted | ダンパーはモデル化範囲の総重量を直接入力し、断面由来質量を置き換える |
+| [0040](0040-damper-total-weight-and-mass-source.md) | partially superseded by ADR-0176（マルチスプリングへの適用のみ失効） | ダンパーはモデル化範囲の総重量を直接入力し、断面由来質量を置き換える |
 | [0041](0041-holding-result-input-validity.md) | accepted | 保有水平耐力に採用する結果ごとに生成入力を照合する（検定・時刻歴の入力所属にも適用） |
 
 | [0042](0042-attached-slab-validation-and-support-resolution.md) | accepted | 取り付く床板の幾何と支持先を入力境界で共通検査する |
@@ -92,9 +92,9 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 
 | [0063](0063-wall-side-column-foundations.md) | accepted | 側柱の物理分類・回転接続・局所釣合いを要素表現から分離する |
 
-| [0064](0064-fiber-ms-axial-biaxial-consistency.md) | accepted | Fiber と MS の軸・二軸曲げを同じ材料応答へ整合させる |
+| [0064](0064-fiber-ms-axial-biaxial-consistency.md) | partially superseded by ADR-0176（マルチスプリングへの適用のみ失効） | Fiber と MS の軸・二軸曲げを同じ材料応答へ整合させる |
 
-| [0065](0065-elastic-wall-top-bottom-girders.md) | accepted | 壁上下の剛梁を連続した壁板の弾性高剛性部材として扱う |
+| [0065](0065-elastic-wall-top-bottom-girders.md) | partially superseded by ADR-0176（マルチスプリングへの適用のみ失効） | 壁上下の剛梁を連続した壁板の弾性高剛性部材として扱う |
 
 | [0067](0067-nonlinear-timehistory-unconverged-rollback.md) | accepted | 骨組の非線形時刻歴の全体未収束は時刻開始状態へ復元して停止する |
 
@@ -231,10 +231,11 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0165](0165-rc-column-qd1-girder-bending-axis.md) | accepted | RC柱QD1の片端梁降伏は検討曲げ軸に対応する場合に採用する |
 | [0166](0166-symmetric-column-time-history-lateral-buckling.md) | accepted | 上下対称H形鋼柱の時刻歴横座屈を同時刻・補剛区間で照査する |
 | [0167](0167-rc-physical-beam-ultimate-shear.md) | accepted | RC梁の終局せん断は採用ステップの一本部材全体の内力から求める |
-| [0170](0170-src-concentrated-spring-flexural-backbone-hold.md) | accepted | 矩形SRC梁・柱の材端集中ばねは曲げ復元力の適用条件を確認できるまで使わない |
+| [0170](0170-src-concentrated-spring-flexural-backbone-hold.md) | partially superseded by ADR-0176（マルチスプリングへの適用のみ失効） | 矩形SRC梁・柱の材端集中ばねは曲げ復元力の適用条件を確認できるまで使わない |
 | [0171](0171-rc-column-real-girder-face.md) | accepted | RC柱の通常検定では接続大梁が定める実材端面の静的応答を採る |
 | [0173](0173-rc-beam-qd1-confirmed-haunch-face.md) | accepted | RC梁のハンチ付き材端のQD1は確認済みの実フェース・有効主筋を使う |
 | [0174](0174-steel-column-static-braced-span.md) | accepted | 上下対称H形鋼柱の通常検定は同じ補剛区間全体で照査する |
+| [0176](0176-remove-explicit-multi-spring.md) | accepted | 非線形線材のマルチスプリング指定を廃止する |
 
 ## 規約
 

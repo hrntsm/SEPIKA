@@ -835,7 +835,6 @@ fn src_stiffness_errors_reach_nonlinear_input_diagnostics_and_public_factories()
     model.materials[0].poisson = 0.2;
     for (kind, regime) in [
         (ElementKind::Fiber, ForceRegime::Auto),
-        (ElementKind::MultiSpring, ForceRegime::Auto),
         (ElementKind::Beam, ForceRegime::AxialBendingInteract),
     ] {
         model.elements[0].kind = kind;
@@ -1454,7 +1453,6 @@ fn explicit_rc_basis_rejects_every_other_resolved_element_path() {
     }
     for element_kind in [
         ElementKind::Fiber,
-        ElementKind::MultiSpring,
         ElementKind::Shell,
         ElementKind::Wall,
         ElementKind::PanelZone,
@@ -1502,11 +1500,7 @@ fn unspecified_rc_basis_preserves_the_existing_fiber_path() {
     use sepika_core::model::AnalysisKind;
     let mut model = explicit_rc_reference_fixture();
     model.set_member_rc_beam_reference(ElemId(0), None);
-    for element_kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for element_kind in [ElementKind::Beam, ElementKind::Fiber] {
         model.elements[0].kind = element_kind;
         model.elements[0].force_regime = ForceRegime::AxialBendingInteract;
         for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
@@ -1618,11 +1612,7 @@ fn rc_reference_backbone_diagnostics_follow_the_actual_strength_basis() {
 fn finite_extreme_g_rejects_computed_beam_stiffness_without_a_material_upper_limit() {
     use crate::behavior::{ElementBehavior, MassOption};
     use crate::frame::beam::BeamElement;
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = beam_model(steel_h_section(), steel_material());
         model.elements[0].kind = kind;
         for end_cond in [

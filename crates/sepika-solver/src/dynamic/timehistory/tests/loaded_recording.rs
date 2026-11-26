@@ -114,62 +114,61 @@ fn close(actual: f64, expected: f64) {
 
 #[test]
 fn loaded_recording_keeps_signed_udl_sections_and_unstored_step_peaks() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        for rotated in [false, true] {
-            let model = model(rotated, kind);
-            let map = DofMap::build(&model);
-            let mut behaviors = vec![member(&model)];
-            let mut recorder = ThRecorder::new(&model, &map, 4, Some(2));
-            for (step, factor) in [1., -3., 0., 2., -1.].into_iter().enumerate() {
-                behaviors[0]
-                    .update_state_with_member_loads(
-                        &zero(),
-                        &[udl(&model, factor)],
-                        true,
-                        &Ctx { model: &model },
-                    )
-                    .unwrap();
-                let bytes = behaviors[0].serialize_checkpoint();
-                let forces = member_forces_nonlinear(&model, &behaviors).unwrap().forces;
-                assert_eq!(bytes, behaviors[0].serialize_checkpoint());
-                let sections = &forces[0].as_ref().unwrap().at;
-                assert!(sections.len() > 2);
-                for &(xi, f) in sections {
-                    close(f[1], factor * (-1000. + 2000. * xi));
-                    close(f[5], factor * (500000. / 3. - 1e6 * xi + 1e6 * xi * xi));
-                    for k in [0, 2, 3, 4] {
-                        close(f[k], 0.);
-                    }
+    let kind = ElementKind::Fiber;
+    for rotated in [false, true] {
+        let model = model(rotated, kind);
+        let map = DofMap::build(&model);
+        let mut behaviors = vec![member(&model)];
+        let mut recorder = ThRecorder::new(&model, &map, 4, Some(2));
+        for (step, factor) in [1., -3., 0., 2., -1.].into_iter().enumerate() {
+            behaviors[0]
+                .update_state_with_member_loads(
+                    &zero(),
+                    &[udl(&model, factor)],
+                    true,
+                    &Ctx { model: &model },
+                )
+                .unwrap();
+            let bytes = behaviors[0].serialize_checkpoint();
+            let forces = member_forces_nonlinear(&model, &behaviors).unwrap().forces;
+            assert_eq!(bytes, behaviors[0].serialize_checkpoint());
+            let sections = &forces[0].as_ref().unwrap().at;
+            assert!(sections.len() > 2);
+            for &(xi, f) in sections {
+                close(f[1], factor * (-1000. + 2000. * xi));
+                close(f[5], factor * (500000. / 3. - 1e6 * xi + 1e6 * xi * xi));
+                for k in [0, 2, 3, 4] {
+                    close(f[k], 0.);
                 }
-                recorder.record_step(
-                    step as u64,
-                    step as f64,
-                    &model,
-                    &map,
-                    &[],
-                    &[],
-                    &[],
-                    &[],
-                    &[],
-                    &[],
-                    0.,
-                    0.,
-                    &forces,
-                );
             }
-            let recording = recorder.finish();
-            assert_eq!(recording.frame_time, [0., 2., 4.]);
-            for (frame, factor) in recording.member_forces.iter().zip([1., 0., -1.]) {
-                let f = frame[0].as_ref().unwrap();
-                assert_eq!(f.at.len(), 2);
-                close(f.at[0].1[5], factor * 500000. / 3.);
-                close(f.at[1].1[5], factor * 500000. / 3.);
-            }
-            let peak = recording.peak_member_forces[0].as_ref().unwrap();
-            assert!(peak.at.len() > 2);
-            for &(xi, f) in &peak.at {
-                close(f[5], -3. * (500000. / 3. - 1e6 * xi + 1e6 * xi * xi));
-            }
+            recorder.record_step(
+                step as u64,
+                step as f64,
+                &model,
+                &map,
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                0.,
+                0.,
+                &forces,
+            );
+        }
+        let recording = recorder.finish();
+        assert_eq!(recording.frame_time, [0., 2., 4.]);
+        for (frame, factor) in recording.member_forces.iter().zip([1., 0., -1.]) {
+            let f = frame[0].as_ref().unwrap();
+            assert_eq!(f.at.len(), 2);
+            close(f.at[0].1[5], factor * 500000. / 3.);
+            close(f.at[1].1[5], factor * 500000. / 3.);
+        }
+        let peak = recording.peak_member_forces[0].as_ref().unwrap();
+        assert!(peak.at.len() > 2);
+        for &(xi, f) in &peak.at {
+            close(f[5], -3. * (500000. / 3. - 1e6 * xi + 1e6 * xi * xi));
         }
     }
 }

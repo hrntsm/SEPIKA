@@ -1249,11 +1249,7 @@ mod tests {
             finish_intensity: 0.0,
         });
         let totals = [40.0, 5.0, 10.0, 30.0, 5.0, 60.0, 0.0, 0.0, 0.0, 0.0];
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut m = m.clone();
             for frame in m
                 .elements

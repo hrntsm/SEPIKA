@@ -373,9 +373,7 @@ fn cft_section_references_are_valid(model: &Model, section: &sepika_core::model:
         .all(|element| {
             matches!(
                 element.kind,
-                sepika_core::model::ElementKind::Beam
-                    | sepika_core::model::ElementKind::Fiber
-                    | sepika_core::model::ElementKind::MultiSpring
+                sepika_core::model::ElementKind::Beam | sepika_core::model::ElementKind::Fiber
             )
         })
         && model
@@ -407,7 +405,6 @@ fn section_use_is_valid(
                 element.kind,
                 sepika_core::model::ElementKind::Beam
                     | sepika_core::model::ElementKind::Fiber
-                    | sepika_core::model::ElementKind::MultiSpring
                     | sepika_core::model::ElementKind::Brace { .. }
             )
         })
@@ -418,9 +415,7 @@ fn section_use_is_valid(
                     sepika_core::model::ElementKind::Brace { .. },
                     Some(sepika_core::model::FrameSectionUse::Brace),
                 ) | (
-                    sepika_core::model::ElementKind::Beam
-                        | sepika_core::model::ElementKind::Fiber
-                        | sepika_core::model::ElementKind::MultiSpring,
+                    sepika_core::model::ElementKind::Beam | sepika_core::model::ElementKind::Fiber,
                     Some(
                         sepika_core::model::FrameSectionUse::Girder
                             | sepika_core::model::FrameSectionUse::Column,

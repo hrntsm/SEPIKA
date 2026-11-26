@@ -30,11 +30,7 @@ use eccentricity_model::{
 
 #[test]
 fn long_term_center_and_eccentricity_use_the_upper_cut_in_both_end_orders() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for reversed in [false, true] {
             let mut model = column_model(&[[0.0, 0.0], [6000.0, 0.0]], 0.0, 0.0);
             model.nodes[1].mass = Some([1.0; 6]);

@@ -94,11 +94,7 @@ fn close(actual: f64, expected: f64) {
 
 #[test]
 fn eccentric_vertical_girder_self_weight_keeps_its_physical_line_of_action() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = model(kind, false);
         for node in &mut model.nodes {
             node.restraint = Dof6Mask::FREE;
@@ -196,11 +192,7 @@ fn run_with_tolerance(
 
 #[test]
 fn all_fixed_static_keeps_udl_end_and_midspan_forces_for_each_input_kind() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let model = model(kind, false);
         let result = linear_static_once(&model, LoadCaseId(0)).unwrap();
         assert_eq!(result.member_forces.len(), 1);
@@ -213,30 +205,25 @@ fn all_fixed_static_keeps_udl_end_and_midspan_forces_for_each_input_kind() {
 
 #[test]
 fn cantilever_long_term_material_response_and_records_match_independent_elastic_values() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let model = model(kind, true);
-        let result = run(&model);
-        let record = result.recording.unwrap();
-        for frame in &record.member_forces {
-            let at = &frame[0].as_ref().unwrap().at;
-            close(at[0].1[1], -6000.);
-            close(at[0].1[5], 18e6);
-            close(at[1].1[1], 0.);
-            close(at[1].1[5], 0.);
-        }
-        for &(x, f) in &record.peak_member_forces[0].as_ref().unwrap().at {
-            close(f[5], 18e6 * (1. - x).powi(2));
-        }
+    let kind = ElementKind::Fiber;
+    let model = model(kind, true);
+    let result = run(&model);
+    let record = result.recording.unwrap();
+    for frame in &record.member_forces {
+        let at = &frame[0].as_ref().unwrap().at;
+        close(at[0].1[1], -6000.);
+        close(at[0].1[5], 18e6);
+        close(at[1].1[1], 0.);
+        close(at[1].1[5], 0.);
+    }
+    for &(x, f) in &record.peak_member_forces[0].as_ref().unwrap().at {
+        close(f[5], 18e6 * (1. - x).powi(2));
     }
 }
 
 #[test]
 fn zero_reduced_gravity_retains_loaded_fixed_beam_at_initial_and_following_records() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = model(kind, false);
         let mut node = model.nodes[1].clone();
         node.id = NodeId(2);
@@ -269,11 +256,8 @@ fn zero_reduced_gravity_retains_loaded_fixed_beam_at_initial_and_following_recor
 
 #[test]
 fn load_only_updates_material_end_equilibrium_work_and_checkpoint_without_accumulation() {
-    for (kind, fy) in [ElementKind::Fiber, ElementKind::MultiSpring]
-        .into_iter()
-        .flat_map(|kind| [235., 1e10].into_iter().map(move |fy| (kind, fy)))
-    {
-        let mut model = model(kind, false);
+    for fy in [235., 1e10] {
+        let mut model = model(ElementKind::Fiber, false);
         model.materials[0].fy = Some(fy);
         let ctx = Ctx { model: &model };
         let build = || {
@@ -353,121 +337,115 @@ fn load_only_updates_material_end_equilibrium_work_and_checkpoint_without_accumu
 
 #[test]
 fn plastic_fixed_mp_member_load_clear_retains_history_and_support_moments() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut model = model(kind, false);
-        model.materials[0].fy = Some(235.);
-        let ctx = Ctx { model: &model };
-        let mut member = build_nonlinear_behavior(
-            &model.elements[0],
+    let kind = ElementKind::Fiber;
+    let mut model = model(kind, false);
+    model.materials[0].fy = Some(235.);
+    let ctx = Ctx { model: &model };
+    let mut member = build_nonlinear_behavior(
+        &model.elements[0],
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::TimeHistory,
+        None,
+    );
+    let zero = LocalVec {
+        data: smallvec::smallvec![0.; 12],
+    };
+    let loads = [MemberLoad::manual(
+        ElemId(0),
+        [0., 1., 0.],
+        MemberLoadKind::Distributed {
+            a: 0.,
+            b: 6000.,
+            w1: 1000.,
+            w2: 1000.,
+        },
+    )];
+    member
+        .update_state_with_member_loads(&zero, &loads, true, &ctx)
+        .unwrap();
+    assert!(member
+        .fiber_section_states()
+        .unwrap()
+        .iter()
+        .flat_map(|s| &s.fibers)
+        .any(|f| f.yield_ratio > 1.));
+    member
+        .update_state_with_member_loads(&zero, &[], false, &ctx)
+        .unwrap();
+    let response = member.state_frame_load_response().unwrap().unwrap();
+    assert!(response.physical_frame_end_force_global[5].abs() > 1e6);
+    close(response.physical_frame_end_force_global[1], 0.);
+    close(response.physical_frame_end_force_global[7], 0.);
+    assert!(
+        (response.physical_frame_end_force_global[5]
+            + response.physical_frame_end_force_global[11])
+            .abs()
+            < 1e-5
+    );
+}
+
+#[test]
+fn mixed_time_history_member_rhs_keeps_axial_displacement_and_physical_records() {
+    let kind = ElementKind::Fiber;
+    let mut model = model(kind, false);
+    let mut node = model.nodes[1].clone();
+    node.id = NodeId(2);
+    node.coord[0] = 7000.;
+    node.restraint = Dof6Mask(0b111110);
+    model.nodes.push(node);
+    let mut legacy = model.elements[0].clone();
+    legacy.id = ElemId(1);
+    legacy.kind = ElementKind::Beam;
+    legacy.force_regime = ForceRegime::UniaxialBendingShear;
+    legacy.nodes = smallvec::smallvec![NodeId(1), NodeId(2)];
+    legacy.plastic_zone = Some(100.);
+    model.elements.push(legacy);
+    model.load_cases[0].member.push(MemberLoad::manual(
+        ElemId(1),
+        [1., 0., 0.],
+        MemberLoadKind::Distributed {
+            a: 0.,
+            b: 1000.,
+            w1: 2.,
+            w2: 2.,
+        },
+    ));
+    for (i, expected) in [true, true].into_iter().enumerate() {
+        let behavior = build_nonlinear_behavior(
+            &model.elements[i],
             &model,
             StrengthBasis::Nominal,
             AnalysisKind::TimeHistory,
             None,
         );
-        let zero = LocalVec {
-            data: smallvec::smallvec![0.; 12],
-        };
-        let loads = [MemberLoad::manual(
-            ElemId(0),
-            [0., 1., 0.],
-            MemberLoadKind::Distributed {
-                a: 0.,
-                b: 6000.,
-                w1: 1000.,
-                w2: 1000.,
-            },
-        )];
-        member
-            .update_state_with_member_loads(&zero, &loads, true, &ctx)
-            .unwrap();
-        assert!(member
-            .fiber_section_states()
-            .unwrap()
-            .iter()
-            .flat_map(|s| &s.fibers)
-            .any(|f| f.yield_ratio > 1.));
-        member
-            .update_state_with_member_loads(&zero, &[], false, &ctx)
-            .unwrap();
-        let response = member.state_frame_load_response().unwrap().unwrap();
-        assert!(response.physical_frame_end_force_global[5].abs() > 1e6);
-        close(response.physical_frame_end_force_global[1], 0.);
-        close(response.physical_frame_end_force_global[7], 0.);
-        assert!(
-            (response.physical_frame_end_force_global[5]
-                + response.physical_frame_end_force_global[11])
-                .abs()
-                < 1e-5
-        );
+        assert_eq!(behavior.owns_frame_member_loads(), expected);
     }
-}
-
-#[test]
-fn mixed_time_history_member_rhs_keeps_axial_displacement_and_physical_records() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut model = model(kind, false);
-        let mut node = model.nodes[1].clone();
-        node.id = NodeId(2);
-        node.coord[0] = 7000.;
-        node.restraint = Dof6Mask(0b111110);
-        model.nodes.push(node);
-        let mut legacy = model.elements[0].clone();
-        legacy.id = ElemId(1);
-        legacy.kind = ElementKind::Beam;
-        legacy.force_regime = ForceRegime::UniaxialBendingShear;
-        legacy.nodes = smallvec::smallvec![NodeId(1), NodeId(2)];
-        legacy.plastic_zone = Some(100.);
-        model.elements.push(legacy);
-        model.load_cases[0].member.push(MemberLoad::manual(
-            ElemId(1),
-            [1., 0., 0.],
-            MemberLoadKind::Distributed {
-                a: 0.,
-                b: 1000.,
-                w1: 2.,
-                w2: 2.,
-            },
-        ));
-        for (i, expected) in [true, true].into_iter().enumerate() {
-            let behavior = build_nonlinear_behavior(
-                &model.elements[i],
-                &model,
-                StrengthBasis::Nominal,
-                AnalysisKind::TimeHistory,
-                None,
-            );
-            assert_eq!(behavior.owns_frame_member_loads(), expected);
-        }
-        let record = run(&model).recording.unwrap();
-        for (u, frame) in record.node_disp.iter().zip(&record.member_forces) {
-            close(u[2][0], 1e6 / (205000. * 80000.));
-            let owner = &frame[0].as_ref().unwrap().at;
-            close(owner[0].1[1], -3000.);
-            close(owner[1].1[1], 3000.);
-            close(owner[0].1[5], 3e6);
-            close(owner[1].1[5], 3e6);
-            let legacy = &frame[1].as_ref().unwrap().at;
-            close(legacy[0].1[0], 2000.);
-            close(legacy[1].1[0], 0.);
-            let support_reaction_n = -legacy[0].1[0];
-            close(support_reaction_n, -2000.);
-            close(support_reaction_n + 2000., 0.);
-            let nodal_virtual_work_nmm = -legacy[0].1[0] * 0.1 + legacy[1].1[0] * -0.3;
-            close(nodal_virtual_work_nmm, -200.);
-        }
-        for &(x, f) in &record.peak_member_forces[0].as_ref().unwrap().at {
-            close(f[5], 3e6 - 18e6 * x + 18e6 * x * x);
-        }
+    let record = run(&model).recording.unwrap();
+    for (u, frame) in record.node_disp.iter().zip(&record.member_forces) {
+        close(u[2][0], 1e6 / (205000. * 80000.));
+        let owner = &frame[0].as_ref().unwrap().at;
+        close(owner[0].1[1], -3000.);
+        close(owner[1].1[1], 3000.);
+        close(owner[0].1[5], 3e6);
+        close(owner[1].1[5], 3e6);
+        let legacy = &frame[1].as_ref().unwrap().at;
+        close(legacy[0].1[0], 2000.);
+        close(legacy[1].1[0], 0.);
+        let support_reaction_n = -legacy[0].1[0];
+        close(support_reaction_n, -2000.);
+        close(support_reaction_n + 2000., 0.);
+        let nodal_virtual_work_nmm = -legacy[0].1[0] * 0.1 + legacy[1].1[0] * -0.3;
+        close(nodal_virtual_work_nmm, -200.);
+    }
+    for &(x, f) in &record.peak_member_forces[0].as_ref().unwrap().at {
+        close(f[5], 3e6 - 18e6 * x + 18e6 * x * x);
     }
 }
 
 #[test]
 fn all_fixed_time_history_retains_loaded_end_forces_at_every_recorded_step() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let model = model(kind, false);
         let map = DofMap::build(&model);
         let reducer = Reducer::build(&model, &map);

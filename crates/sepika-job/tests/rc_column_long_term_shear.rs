@@ -2443,15 +2443,14 @@ fn 単独ケースは部材区間の最大せん断力で置き換えない() {
 
 #[test]
 fn 準備時に材端フェースを確認できない線材で未算定になる() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut model = model(false, false);
-        model.elements[0].kind = kind;
-        let solved = analyze(&mut model);
-        assert!(!model.elements[0].rigid_zone.faces_computed(), "{kind:?}");
-        assert!(check_combination(&model, &solved).iter().any(|(_, outcome)| matches!(
-            outcome, CheckOutcome::Skipped { reason } if reason.contains("両材端フェース位置が未算定")
-        )));
-    }
+    let kind = ElementKind::Fiber;
+    let mut model = model(false, false);
+    model.elements[0].kind = kind;
+    let solved = analyze(&mut model);
+    assert!(!model.elements[0].rigid_zone.faces_computed(), "{kind:?}");
+    assert!(check_combination(&model, &solved).iter().any(|(_, outcome)| matches!(
+        outcome, CheckOutcome::Skipped { reason } if reason.contains("両材端フェース位置が未算定")
+    )));
 }
 
 #[test]
