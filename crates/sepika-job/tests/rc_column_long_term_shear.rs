@@ -20,7 +20,7 @@ use sepika_design_jp::{
 };
 use sepika_element::frame::beam::MemberForces;
 use sepika_solver::statics::analysis::Analysis;
-use sepika_solver::statics::linear::StaticOnce;
+use sepika_solver::statics::linear::{RcColumnFaceForce, StaticOnce};
 
 const X: [f64; 3] = [1.0, 0.0, 0.0];
 const Y: [f64; 3] = [0.0, 1.0, 0.0];
@@ -329,6 +329,112 @@ fn 実柱端面の集中荷重では柱区間側を採用する() {
     assert!(matches!(&i[5], Err(reason) if reason.contains("丸め誤差")));
     assert!(i[0].is_ok() && i[2..5].iter().all(Result::is_ok));
     assert!(ends[1].as_ref().unwrap().as_ref().unwrap().forces.is_ok());
+}
+
+#[test]
+fn 丸めで集中荷重と同じ座標になった実面は軸力だけ保留する() {
+    for shift_mm in [0.0, 1000.0] {
+        for (beam_offset_mm, expected_axial_n) in [
+            (-0.01, Some(-38_472.946)),
+            (-1e-14, None),
+            (0.0, Some(-8_472.946)),
+        ] {
+            let mut model = model(false, false);
+            translate_z(&mut model, shift_mm);
+            model.elements[1].end_offsets_mm = [[0.0, 0.0, beam_offset_mm]; 2];
+            model.load_cases[0].member = vec![MemberLoad::manual(
+                COLUMN,
+                [0.0, 0.0, 1.0],
+                MemberLoadKind::Point {
+                    a: 300.0,
+                    p: -30_000.0,
+                },
+            )];
+            let response = analyze(&mut model);
+            let face = saved_column_face(&response, 0).as_ref().unwrap();
+            let forces = face.forces.as_ref().unwrap();
+            if let Some(expected) = expected_axial_n {
+                assert_close(*forces[0].as_ref().unwrap(), expected, 0.2);
+            } else {
+                assert_eq!(face.face.position_mm, 300.0);
+                assert!(matches!(&forces[0], Err(reason) if reason.contains("丸め誤差")));
+                let rows = check(&model, &response, RcColumnLongTermShearInput::SingleCase);
+                assert!(rows.iter().any(|(xi, outcome)| *xi == 0.1 && matches!(
+                    outcome, CheckOutcome::Skipped { reason } if reason.contains("軸力N") && reason.contains("丸め誤差")
+                )), "{rows:?}");
+            }
+            assert!(forces[1..].iter().all(Result::is_ok), "{forces:?}");
+        }
+    }
+}
+
+#[test]
+fn 柱頭の実配置と解析材軸が一致しない場合は集中荷重の切断力を採用しない() {
+    let mut model = model(false, false);
+    model.nodes[2].coord[2] = LENGTH_MM;
+    model.stories[1].elevation = Some(LENGTH_MM + 1.0);
+    model.nodes[2].restraint = sepika_core::dof::Dof6Mask::FREE;
+    model.elements[1].nodes = [NodeId(1), NodeId(2)].into_iter().collect();
+    model.elements[0].end_offsets_mm[1][2] = 0.00025;
+    let load = |a| {
+        MemberLoad::manual(
+            COLUMN,
+            [0.0, 0.0, 1.0],
+            MemberLoadKind::Point { a, p: -30_000.0 },
+        )
+    };
+    model.load_cases[0].member = vec![load(2699.999875)];
+    let mut translated = model.clone();
+    translate_z(&mut translated, 2_f64.powi(43));
+    let response = analyze(&mut translated);
+    let reason = "実配置で求めた柱の材軸と解析材軸の一致を確認できません";
+    assert!(matches!(saved_column_face(&response, 1), Err(detail) if detail.contains(reason)));
+    let rows = check(
+        &translated,
+        &response,
+        RcColumnLongTermShearInput::SingleCase,
+    );
+    assert!(rows.iter().any(|(_, outcome)|
+        matches!(outcome, CheckOutcome::Skipped { reason: detail } if detail.contains(reason))), "{rows:?}");
+    assert!(rows
+        .iter()
+        .any(|(xi, outcome)| *xi == 0.5 && matches!(outcome, CheckOutcome::Checked(_))));
+
+    let mut n = Vec::new();
+    for a in [2699.999875, 2700.000125] {
+        model.load_cases[0].member = vec![load(a)];
+        let response = analyze(&mut model);
+        let face = saved_column_face(&response, 1).as_ref().unwrap();
+        assert_close(face.face.position_mm, 2700.0, 1e-9);
+        n.push(*face.forces.as_ref().unwrap()[0].as_ref().unwrap());
+    }
+    assert_close(n[0] - n[1], 30_000.0, 0.2);
+
+    model.elements[0].end_offsets_mm[1][2] = 0.0;
+    model.load_cases[0].member = vec![load(2700.0)];
+    for shift_mm in [0.0, 1000.0] {
+        let mut model = model.clone();
+        translate_z(&mut model, shift_mm);
+        let mut known_axial = Vec::new();
+        for beam_offset_mm in [0.0, 1e-14, 0.01] {
+            model.elements[1].end_offsets_mm = [[0.0, 0.0, beam_offset_mm]; 2];
+            let response = analyze(&mut model);
+            let face = saved_column_face(&response, 1).as_ref().unwrap();
+            let forces = face.forces.as_ref().unwrap();
+            if beam_offset_mm == 1e-14 {
+                assert_eq!(face.face.position_mm, 2700.0);
+                assert!(matches!(&forces[0], Err(reason) if reason.contains("丸め誤差")));
+                let rows = check(&model, &response, RcColumnLongTermShearInput::SingleCase);
+                assert!(rows.iter().any(|(xi, outcome)| *xi == 0.9 && matches!(
+                    outcome, CheckOutcome::Skipped { reason } if reason.contains("軸力N") && reason.contains("丸め誤差")
+                )), "{rows:?}");
+            } else {
+                known_axial.push(*forces[0].as_ref().unwrap());
+            }
+            assert!(forces[1..].iter().all(Result::is_ok), "{forces:?}");
+        }
+        assert_close(known_axial[1] - known_axial[0], 30_000.0, 0.2);
+    }
 }
 
 #[test]
@@ -1745,6 +1851,48 @@ fn 大梁面が丸めで同じmm表示になる場合も共通面とみなさな
 }
 
 #[test]
+fn 傾斜柱でも反対側の梁が同じ法線入力と半厚なら共通面を採用する() {
+    for opposite in [false, true] {
+        let mut model = model(false, false);
+        model.nodes[1].coord = [0.0, 3000.0, 4000.0];
+        model.stories[1].elevation = Some(4000.0);
+        model.elements[1].local_axis.ref_vector = [0.0, 3.0, 4.0];
+        if opposite {
+            let mut end = model.nodes[2].clone();
+            end.id = NodeId(3);
+            end.coord[0] = -3000.0;
+            model.nodes.push(end);
+            let mut beam = model.elements[1].clone();
+            beam.id = ElemId(2);
+            beam.nodes = [NodeId(0), NodeId(3)].into_iter().collect();
+            model.elements.push(beam);
+        }
+        let response = analyze(&mut model);
+        let face = saved_column_face(&response, 0).as_ref().unwrap();
+        assert_eq!(face.face.length_mm, 5000.0);
+        assert_ordinary_foot(&model, &response, Ok(300.0));
+    }
+}
+
+#[test]
+fn 梁遠端だけが柱軸方向に微小偏心する場合は直交面とみなさない() {
+    for z_shift_mm in [0.0, 1000.0] {
+        for offset_mm in [0.0, 1e-12] {
+            let mut model = model(false, false);
+            translate_z(&mut model, z_shift_mm);
+            model.elements[1].end_offsets_mm[1][2] = offset_mm;
+            let response = analyze(&mut model);
+            let expected = if offset_mm == 0.0 {
+                Ok(300.0)
+            } else {
+                Err("大梁 ID 1 の材軸が柱軸に直交しない")
+            };
+            assert_ordinary_foot(&model, &response, expected);
+        }
+    }
+}
+
+#[test]
 fn 同軸でも柱区間と重なる接続柱がある場合は区間を確定しない() {
     for overlaps in [false, true] {
         let mut model = model(false, false);
@@ -1829,21 +1977,25 @@ fn translate_z(model: &mut Model, shift_mm: f64) {
     }
 }
 
-fn assert_ordinary_foot(model: &Model, solved: &StaticOnce, expected: Result<f64, &str>) {
-    let face = solved
+fn saved_column_face(solved: &StaticOnce, side: usize) -> &Result<RcColumnFaceForce, String> {
+    solved
         .rc_column_face_forces
         .iter()
         .find(|(id, _)| *id == COLUMN)
         .unwrap()
-        .1[0]
+        .1[side]
         .as_ref()
-        .unwrap();
+        .unwrap()
+}
+
+fn assert_ordinary_foot(model: &Model, solved: &StaticOnce, expected: Result<f64, &str>) {
+    let face = saved_column_face(solved, 0);
     let rows = check(model, solved, RcColumnLongTermShearInput::SingleCase);
     match expected {
         Ok(distance_mm) => {
             let face = face.as_ref().unwrap().face;
             assert_eq!(face.position_mm, distance_mm);
-            let cut_xi = distance_mm / LENGTH_MM;
+            let cut_xi = distance_mm / face.length_mm;
             assert!(rows.iter().any(|(xi, outcome)| *xi == cut_xi
                 && matches!(outcome, CheckOutcome::Checked(result) if !result.components.is_empty())), "{rows:?}");
         }

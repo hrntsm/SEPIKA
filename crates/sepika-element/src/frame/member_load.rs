@@ -413,12 +413,13 @@ impl LoadedFrameSection {
     }
 
     /// 実材軸i端からの距離・全長 [mm] を指定して `[N,Qy,Qz,Mx,My,Mz]` を返す。
-    /// i側フェースはj側極限、j側フェースはi側極限。切断側を確認できない荷重の影響は成分別のエラー。
+    /// i側はj側極限、j側はi側極限。座標の一致を確認できない面では `position_exact` をfalseとし、切断側が不明な荷重の影響成分を保留する。
     /// 材軸長が不一致または位置が範囲外なら全体が失敗。
     pub fn at_inward_face_mm(
         &self,
         position_mm: f64,
         length_mm: f64,
+        position_exact: bool,
         i_face: bool,
     ) -> Result<[Result<f64, String>; 6], String> {
         if length_mm != self.map.length_mm {
@@ -431,7 +432,8 @@ impl LoadedFrameSection {
         let mut uncertain = [false; 3];
         for load in &self.map.loads {
             if matches!(load.kind, MemberLoadKind::Point { a, p }
-                if p != 0.0 && a != position_mm && (a - position_mm).abs() <= tol_mm)
+                if p != 0.0 && (!position_exact || a != position_mm)
+                    && (a - position_mm).abs() <= tol_mm)
             {
                 for (affected, component) in
                     uncertain.iter_mut().zip(resolve(load, &self.map.frame))

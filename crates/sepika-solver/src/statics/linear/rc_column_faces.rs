@@ -25,7 +25,12 @@ pub(super) fn recover(
                 let forces = section
                     .ok_or_else(|| "実材端面の荷重込み断面力を回収できません".into())
                     .and_then(|section| {
-                        section.at_inward_face_mm(face.position_mm, face.length_mm, i_face)
+                        section.at_inward_face_mm(
+                            face.position_mm,
+                            face.length_mm,
+                            face.position_exact,
+                            i_face,
+                        )
                     });
                 RcColumnFaceForce { face, forces }
             })
