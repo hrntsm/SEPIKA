@@ -1028,6 +1028,303 @@ fn time_history_rc_beam_qd1_does_not_require_a_support_beyond_the_connection() {
 }
 
 #[test]
+fn time_history_haunch_qd1_uses_the_same_confirmed_demand_and_holds_unchecked_sections() {
+    use sepika_core::ids::ElemId;
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+    use sepika_design_jp::{CheckOutcome, LoadTerm, MemberDesignCheckOptions, QdMethod};
+    let mut model = rc_beam_qd1_model::model();
+    rc_beam_qd1_model::add_confirmed_i_haunch(&mut model);
+    model.load_cases[0].member = vec![MemberLoad::manual(
+        ElemId(0),
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Point {
+            a: 2_250.0,
+            p: 16_000.0,
+        },
+    )];
+    let q0_n = sepika_job::design_q0::rc_beam_q0_for_gravity_cases(&model, &model.elements[0])
+        .unwrap()
+        .unwrap();
+    assert_eq!(q0_n, 8_000.0);
+    let mut unconfirmed = model.clone();
+    unconfirmed.member_detail_attrs[0]
+        .haunch_i
+        .as_mut()
+        .unwrap()
+        .qd1_face = None;
+    assert_eq!(
+        bincode::serialize(&model.calculation_model()).unwrap(),
+        bincode::serialize(&unconfirmed.calculation_model()).unwrap(),
+    );
+
+    let positions = [250.0 / 4500.0, 850.0 / 4500.0, 0.5, 1.0 - 250.0 / 4500.0];
+    let gravity_rows = positions
+        .map(|xi| (xi, [0.0, -10_000.0, 0.0, 0.0, 0.0, 0.0]))
+        .to_vec();
+    let response = [0.0, 60_000.0, 0.0, 0.0, 0.0, 10e6];
+    let response_rows = positions.map(|xi| (xi, response)).to_vec();
+    let checks = sepika_design_jp::run_member_design_checks(
+        &model,
+        &[(
+            ElemId(0),
+            MemberForces {
+                at: response_rows.clone(),
+            },
+        )],
+        &[],
+        &MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            qd_method: QdMethod::Qd1,
+            long_member_forces: Some(&[(
+                ElemId(0),
+                MemberForces {
+                    at: gravity_rows.clone(),
+                },
+            )]),
+            q_simple_by_elem: Some(&std::collections::HashMap::from([(ElemId(0), q0_n)])),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(checks.member_checks.iter().any(|(_, pos, outcome)| *pos == 0.5 &&
+        matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("QD1=112767.7 N"))));
+    let mut rec = gravity_test_record(response, response);
+    rec.peak_member_forces[0].as_mut().unwrap().at = response_rows.clone();
+    rec.axial_force_peaks[0].snapshots[0].forces.at = response_rows;
+    rec.axial_force_peaks[0].snapshots[0].positions = vec![2];
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+    set_gravity_forces(&mut app, Some(gravity_rows.clone()));
+    let text = labels(&app, &rec, true);
+    let (envelope, confirmed_step) = text.split_once("軸力極値が生じた確定ステップ").unwrap();
+    assert!(
+        confirmed_step.contains("確定ステップの保存断面力だけでは実フェース間の最大曲げ位置")
+            && confirmed_step.contains("QD1=112767.7 N")
+            && !confirmed_step.contains("せん断 ")
+            && envelope.contains("異時刻の内力包絡")
+            && envelope.contains("QD1=112767.7 N")
+            && !envelope.contains("せん断 ")
+            && text.contains("ハンチ区間・接合部の適合は判定しません"),
+        "{text}"
+    );
+    let at_face = text
+        .split_once("ξ=0.06:")
+        .unwrap()
+        .1
+        .split("ξ=0.19:")
+        .next()
+        .unwrap();
+    assert!(
+        at_face.contains("ハンチ区間") && !at_face.contains("検定比"),
+        "{text}"
+    );
+
+    let mut strong_rec = rec.clone();
+    for forces in [
+        strong_rec.peak_member_forces[0].as_mut().unwrap(),
+        &mut strong_rec.axial_force_peaks[0].snapshots[0].forces,
+    ] {
+        for (_, force) in &mut forces.at {
+            force[1] = 3e6;
+        }
+    }
+    app.core.model.load_cases[0].member[0] = MemberLoad::manual(
+        ElemId(0),
+        [0.0, 0.0, -1.0],
+        MemberLoadKind::Point {
+            a: 2_250.0,
+            p: 1_600_000.0,
+        },
+    );
+    app.core.analysis_cfg.bond_method = sepika_design_jp::BondMethod::Rc1991;
+    for (method, keeps_bond) in [(QdMethod::Qd1, true), (QdMethod::Min, false)] {
+        app.core.analysis_cfg.qd_method = method;
+        let text = labels(&app, &strong_rec, true);
+        let (envelope, confirmed_step) = text.split_once("軸力極値が生じた確定ステップ").unwrap();
+        assert!(
+            envelope.contains("QD1=904767.7 N") && !envelope.contains("採用QD="),
+            "{text}"
+        );
+        assert_eq!(envelope.contains("付着 "), keeps_bond, "{text}");
+        assert!(
+            confirmed_step.contains("付着 ") && !confirmed_step.contains("せん断 "),
+            "{text}"
+        );
+        assert_eq!(
+            confirmed_step.contains("採用QD=904767.7 N"),
+            method == QdMethod::Min,
+            "{text}"
+        );
+    }
+    strong_rec.peak_member_forces[0].as_mut().unwrap().at[2].1[1] = f64::NAN;
+    strong_rec.axial_force_peaks[0].snapshots[0].forces.at[2].1[1] = f64::NAN;
+    for (method, keeps_bond) in [(QdMethod::Qd1, true), (QdMethod::Min, false)] {
+        app.core.analysis_cfg.qd_method = method;
+        let text = labels(&app, &strong_rec, true);
+        let (envelope, confirmed_step) = text.split_once("軸力極値が生じた確定ステップ").unwrap();
+        for text in [envelope, confirmed_step] {
+            let centre = text
+                .split_once("ξ=0.50:")
+                .unwrap()
+                .1
+                .split("ξ=0.94:")
+                .next()
+                .unwrap();
+            assert!(
+                centre.contains("Qyが非有限")
+                    && centre.contains("QAは未算定")
+                    && centre.contains("QD1=904767.7 N")
+                    && !centre.contains("採用QD=")
+                    && !centre.contains("せん断 ")
+                    && !centre.contains("曲げ "),
+                "{text}"
+            );
+            assert_eq!(centre.contains("付着 "), keeps_bond, "{text}");
+        }
+    }
+
+    assert!(app.load_model(unconfirmed));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+    set_gravity_forces(&mut app, Some(gravity_rows));
+    let text = labels(&app, &rec, true);
+    assert!(
+        text.contains("矩形材端フェースと上下の有効主筋が未入力") && !text.contains("せん断 "),
+        "{text}"
+    );
+    rc_beam_qd1_model::add_confirmed_i_haunch(&mut app.core.model);
+    app.core.model.member_detail_attrs.remove(0);
+    app.core.model.elements[0].end_cond[1] = sepika_core::model::EndCondition::Pinned;
+    rec.peak_member_forces[0].as_mut().unwrap().at[2].1[5] = 1e9;
+    rec.axial_force_peaks[0].snapshots[0].forces.at[2].1[5] = 1e9;
+    for method in [QdMethod::Qd1, QdMethod::Min] {
+        app.core.analysis_cfg.qd_method = method;
+        let text = labels(&app, &rec, true);
+        assert!(
+            text.contains("強軸曲げが解放") && text.contains("(NG)") && !text.contains("せん断 "),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn time_history_haunch_qd1_keeps_rounded_nonhaunch_face_and_independent_bending_with_missing_qy() {
+    use sepika_design_jp::QdMethod;
+    let mut model = rc_beam_qd1_model::model();
+    rc_beam_qd1_model::add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    rc_beam_qd1_model::add_confirmed_i_haunch(&mut model);
+    model.elements[0].rigid_zone.face_j = Some(249.999_999_999_999);
+    let actual_j = 1.0 - 250.0 / 4500.0;
+    let recorded_j = 1.0 - 249.999_999_999_999 / 4500.0;
+    assert!(recorded_j > actual_j);
+    let positions = [250.0 / 4500.0, 850.0 / 4500.0, 0.5, actual_j];
+    let gravity = positions
+        .map(|xi| (xi, [0.0, -10_000.0, 0.0, 0.0, 0.0, 0.0]))
+        .to_vec();
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+    set_gravity_forces(&mut app, Some(gravity));
+    for (station, accepted) in [(recorded_j, true), (recorded_j + f64::EPSILON, false)] {
+        let mut rec = gravity_test_record([0.0; 6], [0.0; 6]);
+        let rows = vec![
+            (positions[0], [0.0; 6]),
+            (positions[1], [0.0; 6]),
+            (0.5, [0.0, f64::NAN, 0.0, 0.0, 0.0, 1e9]),
+            (station, [0.0, 60_000.0, 0.0, 0.0, 0.0, 1e9]),
+        ];
+        rec.peak_member_forces[0].as_mut().unwrap().at = rows.clone();
+        rec.axial_force_peaks[0].snapshots[0].forces.at = rows;
+        rec.axial_force_peaks[0].snapshots[0].positions = vec![2, 3];
+        let text = labels(&app, &rec, true);
+        let (envelope, confirmed) = text.split_once("軸力極値が生じた確定ステップ").unwrap();
+        for text in [envelope, confirmed] {
+            let (_, centre) = text.split_once("ξ=0.50:").unwrap();
+            let (centre, end) = centre.split_once("ξ=0.94:").unwrap();
+            assert!(
+                centre.contains("(NG)")
+                    && centre.contains("Qyが非有限")
+                    && centre.contains("QD1=104767.7 N"),
+                "{text}"
+            );
+            assert_eq!(end.contains("(NG)"), accepted, "{text}");
+        }
+    }
+}
+
+#[test]
+fn time_history_haunch_qd1_keeps_bending_for_both_saved_j_transition_representations() {
+    use sepika_core::model::{JointKind, MemberJoint};
+    use sepika_design_jp::QdMethod;
+
+    let mut model = rc_beam_qd1_model::model();
+    rc_beam_qd1_model::add_confirmed_i_haunch(&mut model);
+    model.elements[0].rigid_zone.face_j = Some(200.0);
+    let detail = &mut model.member_detail_attrs[0];
+    let mut haunch = detail.haunch_i.take().unwrap();
+    haunch.length = 460.0;
+    haunch.qd1_face.as_mut().unwrap().distance_mm = 200.0;
+    detail.haunch_j = Some(haunch);
+    detail.joints.push(MemberJoint {
+        distance: 3900.0,
+        kind: JointKind::Site,
+    });
+    let design_xi = 1.0 - (200.0 + haunch.length) / 4500.0;
+    let physical_xi = (4500.0 - (200.0 + haunch.length)) / 4500.0;
+    assert!(physical_xi > design_xi);
+
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+    let stations = [
+        250.0 / 4500.0,
+        0.5,
+        design_xi,
+        3900.0 / 4500.0,
+        1.0 - 200.0 / 4500.0,
+    ];
+    set_gravity_forces(&mut app, Some(stations.map(|xi| (xi, [0.0; 6])).to_vec()));
+    for transition in [design_xi, physical_xi] {
+        let mut rec = gravity_test_record([0.0; 6], [0.0; 6]);
+        let mut rows = stations.map(|xi| {
+            (
+                xi,
+                [
+                    0.0,
+                    60_000.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    if xi >= design_xi { 1e9 } else { 10e6 },
+                ],
+            )
+        });
+        rows[2].0 = transition;
+        rec.peak_member_forces[0].as_mut().unwrap().at = rows.to_vec();
+        rec.axial_force_peaks[0].snapshots[0].forces.at = rows.to_vec();
+        rec.axial_force_peaks[0].snapshots[0].positions = vec![2, 3];
+        let text = labels(&app, &rec, true);
+        let (envelope, confirmed) = text.split_once("軸力極値が生じた確定ステップ").unwrap();
+        for text in [envelope, confirmed] {
+            let (_, from_transition) = text.split_once("ξ=0.85:").unwrap();
+            let (transition, interior) = from_transition.split_once("ξ=0.87:").unwrap();
+            assert!(
+                transition.contains("(NG)") && transition.contains("曲げ "),
+                "{text}"
+            );
+            assert!(
+                interior.contains("ハンチ区間") && !interior.contains("(NG)"),
+                "{text}"
+            );
+        }
+    }
+}
+
+#[test]
 fn time_history_qd1_requires_qy_reaction_at_a_direct_support_and_keeps_bending_ng() {
     use sepika_core::dof::Dof;
     use sepika_design_jp::QdMethod;

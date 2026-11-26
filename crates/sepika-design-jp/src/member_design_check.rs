@@ -45,6 +45,7 @@ fn with_qd1_column_faces(
     rows: &MemberForces,
     geometry: crate::rc::BeamQd1Geometry,
     saved_faces: &[(ElemId, GirderColumnFaceEnds)],
+    allow_partial: bool,
 ) -> MemberForces {
     use crate::design_position::same_qd1_station;
     let mut at = rows.at.clone();
@@ -61,7 +62,7 @@ fn with_qd1_column_faces(
             if (face.face.length_mm - geometry.axis_length_mm).abs()
                 <= 32.0 * f64::EPSILON * geometry.axis_length_mm
                 && same_qd1_station(xi, face.face.position_mm / face.face.length_mm)
-                && forces.iter().all(|value| value.is_finite())
+                && (allow_partial || forces.iter().all(|value| value.is_finite()))
             {
                 at.push((xi, forces));
             }
@@ -116,6 +117,9 @@ pub struct MemberDesignCheckOptions<'a> {
     /// 鋼梁の補剛区間の曲げを照合する、解析に用いた荷重ケースID・係数。モデルは解析時の部材荷重を持つこと。
     /// 不明ならNoneとし、強軸曲げ分布は未確認とする。
     pub steel_beam_span_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
+    /// ハンチ付きRC梁の許容せん断力を確認する、同じ線形静的応答の荷重ケースID・係数。
+    /// モデルは解析時の部材荷重を持つこと。未指定時は正確な曲げ分布を確認できない。
+    pub rc_beam_qd1_haunch_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
     /// 通常の長期RC柱検定に渡す線形静的解析結果の由来。
     pub rc_column_long_term_shear: RcColumnLongTermShearInput<'a>,
     /// 通常RC柱検定と同じ荷重ケース・組合せの実材端面断面力。欠損端を節点・剛域の断面力で補わない。
@@ -413,6 +417,7 @@ pub fn run_member_design_checks(
 
     let beam_span_loads =
         steel_beam_span::BeamSpanLoads::from_terms(model, options.steel_beam_span_load_terms);
+    let mut haunch_span_loads = None;
     let mut column_mechanism_topology = None;
     let mut rc_beam_adjacency = None;
     let mut member_checks: Vec<(ElemId, f64, CheckOutcome)> = Vec::new();
@@ -800,17 +805,38 @@ pub fn run_member_design_checks(
         let qd1_positions = single_qd1_geometry.and_then(|geometry| {
             crate::design_position::rc_beam_qd1_positions(model, elem, geometry)
         });
+        let has_qd1_haunch = rc_beam_qd1.is_some() && crate::rc::has_beam_qd1_haunch(model, elem);
+        let station_issue = |pos, rows: &[_]| {
+            if has_qd1_haunch {
+                crate::design_position::qd1_haunch_station_issue(pos, rows)
+            } else {
+                crate::design_position::qd1_saved_station_issue(pos, rows)
+            }
+        };
         let mf_long = long_mf_by_id
             .as_ref()
             .filter(|_| !rc_damage_control)
             .and_then(|map| map.get(elem_id).copied());
         let verified_geometry = single_qd1_geometry.filter(|_| qd1_positions.is_some());
         let response_with_faces = verified_geometry.map(|geometry| {
-            with_qd1_column_faces(*elem_id, mf, geometry, options.rc_beam_qd1_face_forces)
+            with_qd1_column_faces(
+                *elem_id,
+                mf,
+                geometry,
+                options.rc_beam_qd1_face_forces,
+                has_qd1_haunch,
+            )
         });
         let gravity_with_faces = verified_geometry.zip(mf_long).map(|(geometry, long)| {
-            with_qd1_column_faces(*elem_id, long, geometry, options.rc_beam_qd1_gravity_faces)
+            with_qd1_column_faces(
+                *elem_id,
+                long,
+                geometry,
+                options.rc_beam_qd1_gravity_faces,
+                has_qd1_haunch,
+            )
         });
+        let analysis_mf = mf;
         let mf = response_with_faces.as_ref().unwrap_or(mf);
         let mf_long = gravity_with_faces.as_ref().or(mf_long);
         let checks_grouped_rc_qd1 = grouped_girders.contains(elem_id) && rc_beam_qd1.is_some();
@@ -822,10 +848,7 @@ pub fn run_member_design_checks(
                     .filter(|(pos, _)| {
                         positions.iter().any(|expected| {
                             crate::design_position::same_qd1_station(*expected, *pos)
-                                && crate::design_position::qd1_saved_station_issue(
-                                    *expected, &mf.at,
-                                )
-                                .is_none()
+                                && station_issue(*expected, &mf.at).is_none()
                         })
                     })
                     .copied()
@@ -975,7 +998,29 @@ pub fn run_member_design_checks(
             }
         };
 
+        let mut rc_beam_qd1_haunches = rc_beam_qd1
+            .as_ref()
+            .and_then(|_| crate::rc::beam_qd1_haunches(model, elem, single_qd1_geometry));
+        if let Some(haunches) = &mut rc_beam_qd1_haunches {
+            let loads = haunch_span_loads.get_or_insert_with(|| {
+                steel_beam_span::BeamSpanLoads::from_terms(
+                    model,
+                    options.rc_beam_qd1_haunch_load_terms,
+                )
+            });
+            haunches.set_static_shear_span_reference(
+                model,
+                elem,
+                single_qd1_geometry,
+                loads
+                    .as_ref()
+                    .map(|loads| loads.for_member(*elem_id))
+                    .map_err(|reason| *reason),
+                analysis_mf,
+            );
+        }
         let slab_moments_nmm = (matches!(rc_beam_qd1, Some(Ok(_)))
+            && rc_beam_qd1_haunches.is_none()
             && !grouped_girders.contains(elem_id))
         .then(|| crate::rc::beam_qd1_slab_end_moments(model, rc_beam_adjacency.as_ref()?, elem))
         .flatten();
@@ -1025,8 +1070,10 @@ pub fn run_member_design_checks(
             rc_beam_qd1_at_material_end: qd1_positions.is_some(),
             rc_beam_qd1_slab_unverified: slab_moments_nmm.is_none()
                 && matches!(rc_beam_qd1, Some(Ok(_)))
+                && rc_beam_qd1_haunches.is_none()
                 && !grouped_girders.contains(elem_id),
             rc_beam_qd1_issue: rc_beam_qd1.and_then(Result::err),
+            rc_beam_qd1_haunches,
             steel_attr,
         };
 
@@ -1140,12 +1187,16 @@ pub fn run_member_design_checks(
         };
         if let Some(positions) = &qd1_positions {
             for &pos in positions {
-                if let Some(reason) = crate::design_position::qd1_saved_station_issue(pos, &mf.at) {
+                if let Some(reason) = station_issue(pos, &mf.at) {
                     member_checks.push((
                         *elem_id,
                         pos,
                         CheckOutcome::Skipped {
-                            reason: reason.into(),
+                            reason: ctx
+                                .rc_beam_qd1_haunches
+                                .as_ref()
+                                .and_then(|haunches| haunches.section_issue(pos))
+                                .unwrap_or_else(|| reason.into()),
                         },
                     ));
                 }
@@ -1277,8 +1328,7 @@ pub fn run_member_design_checks(
                     Some((stations, counts)) => stations[*row].is_some_and(|i| counts[i] == 1),
                     None if qd1_positions.is_some() => positions.iter().any(|expected| {
                         crate::design_position::same_qd1_station(*expected, *pos)
-                            && crate::design_position::qd1_saved_station_issue(*expected, &mf.at)
-                                .is_none()
+                            && station_issue(*expected, &mf.at).is_none()
                     }),
                     None => match &regular_column_matches {
                         Some(counts) => positions

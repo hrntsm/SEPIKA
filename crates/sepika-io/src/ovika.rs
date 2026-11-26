@@ -1219,11 +1219,27 @@ mod tests {
                     length: 700.0,
                     depth_increase: 200.0,
                     width_increase: 50.0,
+                    qd1_face: Some(HaunchQd1Face {
+                        distance_mm: 250.0,
+                        width_mm: 400.25,
+                        depth_mm: 800.125,
+                        top: HaunchQd1Tension {
+                            area_mm2: 859.5,
+                            yield_strength_n_mm2: 385.25,
+                            effective_depth_mm: 750.0,
+                        },
+                        bottom: HaunchQd1Tension {
+                            area_mm2: 1_146.0,
+                            yield_strength_n_mm2: 390.25,
+                            effective_depth_mm: 730.75,
+                        },
+                    }),
                 }),
                 haunch_j: Some(Haunch {
                     length: 500.0,
                     depth_increase: 150.0,
                     width_increase: 0.0,
+                    qd1_face: None,
                 }),
                 joints: vec![
                     MemberJoint {
@@ -1242,6 +1258,7 @@ mod tests {
                     length: 400.0,
                     depth_increase: 100.0,
                     width_increase: 0.0,
+                    qd1_face: None,
                 }),
                 haunch_j: None,
                 joints: Vec::new(),

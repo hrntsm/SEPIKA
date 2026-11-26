@@ -162,6 +162,7 @@ fn unverified_actions_and_inapplicable_members_do_not_produce_capacity_or_margin
             length: 600.0,
             depth_increase: 100.0,
             width_increase: 0.0,
+            qd1_face: None,
         }),
         ..MemberDetailAttr::new(ElemId(0))
     });

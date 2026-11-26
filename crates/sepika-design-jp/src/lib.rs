@@ -404,11 +404,13 @@ pub struct DesignCtx {
     /// 中央部の許容曲げを `Ma = at·ft·j` のみとする判定に用いる。
     pub beam_has_slab: bool,
     /// RC矩形梁のQD1を適用できない理由。QD1/minで `None` を渡す呼出側は、
-    /// 両端の強軸曲げ伝達、有限で正のフェース間内法、両端が同じ断面であることを確認する。
+    /// 両端の強軸曲げ伝達と、有限で正のフェース間内法を確認する。
     pub rc_beam_qd1_issue: Option<String>,
+    /// ハンチのあるRC矩形梁でQD1/minを使う場合に指定する、一般部範囲と材端降伏曲げ。
+    pub rc_beam_qd1_haunches: Option<rc::BeamQd1Haunches>,
     /// 床板が取り付き、QD1でスラブ筋の寄与を確定できない場合に true。
     pub rc_beam_qd1_slab_unverified: bool,
-    /// 実材端を採るQD1で重力の保存断面位置を厳密に照合する場合に true。
+    /// 実材端またはハンチ付き梁の実フェースを採るQD1で、重力の保存断面位置を照合する場合に true。
     pub rc_beam_qd1_at_material_end: bool,
     /// i端・j端それぞれで上端引張時に算入する床板筋の寄与 [N·mm]。
     pub rc_beam_qd1_slab_end_moments_nmm: Option<[f64; 2]>,
@@ -447,6 +449,7 @@ impl Default for DesignCtx {
             column_sum_my: None,
             beam_has_slab: false,
             rc_beam_qd1_issue: None,
+            rc_beam_qd1_haunches: None,
             rc_beam_qd1_slab_unverified: false,
             rc_beam_qd1_at_material_end: false,
             rc_beam_qd1_slab_end_moments_nmm: None,

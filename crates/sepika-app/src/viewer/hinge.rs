@@ -2886,6 +2886,7 @@ mod tests {
                         length: 700.0,
                         depth_increase: 100.0,
                         width_increase: 0.0,
+                        qd1_face: None,
                     });
                     if edit == 1 {
                         detail.haunch_i = haunch;

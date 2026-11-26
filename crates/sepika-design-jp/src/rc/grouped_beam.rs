@@ -1,8 +1,6 @@
 //! 分割RC矩形大梁のQD1用スパン。
 
-use super::beam::{
-    beam_qd1_end_moments, beam_qd1_face_distance, validate_beam_qd1_section_geometry,
-};
+use super::beam::{beam_qd1_end_moments, beam_qd1_face_distance};
 use crate::material_strength::{
     main_rebar_category_issue, main_rebar_grade, main_rebar_grade_requiring_approval,
 };
@@ -64,7 +62,9 @@ pub fn grouped_beam_qd1_axis<'a>(
                 id.0
             ));
         }
-        validate_beam_qd1_section_geometry(model, elem)?;
+        if super::has_beam_qd1_haunch(model, elem) {
+            return Err("分割したハンチ付き梁ではQD1用の全スパンの端部断面を確定できません".into());
+        }
         if super::beam_supports_slab(model, elem) {
             return Err(
                 "QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません".into(),

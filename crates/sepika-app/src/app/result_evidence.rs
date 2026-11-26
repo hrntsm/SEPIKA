@@ -1548,6 +1548,7 @@ mod tests {
                 length: 111.0,
                 depth_increase: 22.0,
                 width_increase: 33.0,
+                qd1_face: None,
             }),
             haunch_j: None,
             joints: vec![],

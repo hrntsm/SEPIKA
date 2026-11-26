@@ -513,6 +513,178 @@ fn src_pushover_recovers_shear_in_both_directions_without_a_shear_yield_event() 
     }
 }
 
+fn directional_shear_specimen(frame_use: FrameSectionUse, weak: bool) -> Model {
+    use sepika_core::model::ZoneSource;
+    use sepika_core::section_shape::StandardRebar;
+
+    let mut model = restrained_member(frame_use, 10.0, 45.0);
+    let member = &mut model.elements[0];
+    let main_dia = RebarSize::Standard(StandardRebar::D25);
+    let hoop_dia = RebarSize::Standard(StandardRebar::D10);
+    match model.sections[0].shape.as_mut().unwrap() {
+        SectionShape::SrcBeamRect { rebar, .. } => {
+            rebar.main_dia = main_dia;
+            rebar.stirrup.dia = hoop_dia;
+            if weak {
+                rebar.top = vec![2];
+                rebar.bottom = vec![2];
+            }
+        }
+        SectionShape::SrcColumnRect { rebar, .. } => {
+            rebar.main_dia = main_dia;
+            rebar.hoop.dia = hoop_dia;
+            rebar.x = vec![3];
+            rebar.y = vec![3];
+        }
+        _ => unreachable!(),
+    }
+    model.materials[3].fy = Some(235.0);
+    for material in &mut model.materials {
+        material.strength_factor = Some(1.0);
+    }
+
+    member.rigid_zone.source_i = ZoneSource::Manual;
+    member.rigid_zone.source_j = ZoneSource::Manual;
+    if frame_use == FrameSectionUse::Column {
+        member.rigid_zone.length_i = 300.0;
+        member.rigid_zone.length_j = 300.0;
+        model.nodes[1].coord[2] = 1_200.0;
+        model.stories[1].elevation = Some(1_200.0);
+        member.rigid_zone.face_i = Some(300.0);
+        member.rigid_zone.face_j = Some(300.0);
+        return model;
+    }
+
+    member.rigid_zone.length_i = 200.0;
+    member.rigid_zone.length_j = 200.0;
+    model.nodes[0].coord[2] = 3_000.0;
+    model.nodes[1].coord = [1_400.0, 0.0, 3_000.0];
+    model.stories[1].elevation = Some(3_000.0);
+    if weak {
+        member.local_axis.ref_vector = [0.0, 0.0, 1.0];
+    }
+    let mut support = SectionShape::SteelBox {
+        height: 400.0,
+        width: 400.0,
+        thick: 12.0,
+        horizontal_thick: 12.0,
+        corner_r: Some(0.0),
+    }
+    .input_section(SectionId(1), "箱形断面の境界治具".into())
+    .unwrap();
+    support.frame_use = Some(FrameSectionUse::Column);
+    support.material = Some(MaterialId(3));
+    model.sections.push(support);
+
+    let mut sliding = Dof6Mask::FIXED;
+    sliding.set_free(Dof::Ux);
+    sliding.set_free(Dof::Uy);
+    model.nodes.push(Node {
+        id: NodeId(3),
+        coord: [1_400.0, 0.0, 0.0],
+        restraint: sliding,
+        mass: None,
+        story: None,
+        support_spring: None,
+    });
+    for (id, bottom, top) in [(1, 2, 0), (2, 3, 1)] {
+        model.elements.push(ElementData {
+            id: ElemId(id),
+            kind: ElementKind::Beam,
+            nodes: smallvec::smallvec![NodeId(bottom), NodeId(top)],
+            section: Some(SectionId(1)),
+            local_axis: LocalAxis {
+                ref_vector: [1.0, 0.0, 0.0],
+            },
+            rigid_zone: Default::default(),
+            ..model.elements[0].clone()
+        });
+    }
+    model
+}
+
+#[test]
+fn src_article_33_reference_is_compared_to_confirmed_directional_face_forces() {
+    for (frame_use, direction, weak, clear_span_mm, qu_n, final_local_q_n) in [
+        (
+            FrameSectionUse::Column,
+            SeismicDir::X,
+            false,
+            600.0,
+            874_387.119,
+            -930_000.0,
+        ),
+        (
+            FrameSectionUse::Column,
+            SeismicDir::Y,
+            true,
+            600.0,
+            782_111.067,
+            -840_000.0,
+        ),
+        (
+            FrameSectionUse::Girder,
+            SeismicDir::Y,
+            false,
+            1_000.0,
+            874_387.119,
+            -930_000.0,
+        ),
+        (
+            FrameSectionUse::Girder,
+            SeismicDir::Y,
+            true,
+            1_000.0,
+            409_980.150,
+            440_000.0,
+        ),
+    ] {
+        let case = (frame_use, direction, weak);
+        let mut model = directional_shear_specimen(frame_use, weak);
+        let result = run(&mut model, direction, f64::abs(final_local_q_n))
+            .unwrap_or_else(|error| panic!("{case:?} {error}"));
+        assert_eq!(result.steps.len(), 8, "{case:?} {:?}", result.termination);
+        let histories = result.confirmed_history.as_ref().unwrap();
+        assert_eq!(histories.len(), result.steps.len());
+        let q_index = if weak { 2 } else { 1 };
+        let m_index = if weak { 4 } else { 5 };
+        for (index, history) in histories.iter().enumerate() {
+            assert_eq!(history.step as usize, index);
+            let review = history
+                .src_frame_faces
+                .iter()
+                .find(|r| r.elem == ELEMENT)
+                .unwrap();
+            let [i, j] = review.faces.each_ref().map(|face| *face.as_ref().unwrap());
+            let q_demand_n = final_local_q_n * (index + 1) as f64 / 8.0;
+            if index >= 6 {
+                println!("{case:?} step={index} i={i:?} j={j:?}");
+            }
+            for face in [i, j] {
+                assert!(face[0].abs() < 1.0, "{case:?} {face:?}");
+                assert!(face[3 - q_index].abs() < 1.0, "{case:?} {face:?}");
+                assert!(
+                    (face[q_index] - q_demand_n).abs() < 1.0,
+                    "{case:?} {face:?}"
+                );
+                assert!(
+                    (face[m_index].abs() / face[q_index].abs() - clear_span_mm / 2.0).abs() < 0.1,
+                    "{case:?} {face:?}"
+                );
+                assert_eq!(face[q_index].abs() > qu_n, index == 7, "{case:?} {face:?}");
+            }
+            assert!(i[m_index] * j[m_index] < 0.0, "{case:?} {i:?} {j:?}");
+        }
+        let shear_events = result
+            .shear_yields
+            .iter()
+            .filter(|event| event.elem == ELEMENT)
+            .count();
+        let solver_rejection = result.shear_design_unavailable_at(histories.last().unwrap().step);
+        println!("{case:?} SRC線材のせん断降伏イベント={shear_events}、Solverのせん断採用制限={solver_rejection:?}");
+    }
+}
+
 #[test]
 fn src_pushover_reports_why_internal_fiber_steel_cannot_be_used() {
     for frame_use in [FrameSectionUse::Column, FrameSectionUse::Girder] {

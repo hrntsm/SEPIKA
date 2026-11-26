@@ -7,6 +7,7 @@ use sepika_core::model::{Material, Section};
 use sepika_core::section_shape::SectionShape;
 
 mod beam;
+mod beam_haunch_qd1;
 mod beam_slab_qd1;
 mod bond;
 mod clear_span;
@@ -26,6 +27,8 @@ pub(crate) mod section_props;
 mod shear_capacity;
 
 pub use beam::{beam_qd1_clear_span, beam_qd1_geometry, BeamQd1Geometry};
+pub(crate) use beam_haunch_qd1::has_beam_qd1_haunch;
+pub use beam_haunch_qd1::{beam_qd1_haunches, BeamQd1Haunches};
 pub use beam_slab_qd1::beam_qd1_slab_end_moments;
 mod grouped_beam;
 pub(crate) use beam::{
