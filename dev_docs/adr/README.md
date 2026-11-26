@@ -233,6 +233,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0167](0167-rc-physical-beam-ultimate-shear.md) | accepted | RC梁の終局せん断は採用ステップの一本部材全体の内力から求める |
 | [0170](0170-src-concentrated-spring-flexural-backbone-hold.md) | accepted | 矩形SRC梁・柱の材端集中ばねは曲げ復元力の適用条件を確認できるまで使わない |
 | [0173](0173-rc-beam-qd1-confirmed-haunch-face.md) | accepted | RC梁のハンチ付き材端のQD1は確認済みの実フェース・有効主筋を使う |
+| [0176](0176-remove-explicit-multi-spring.md) | accepted | 非線形線材のマルチスプリング指定を廃止する |
 
 ## 規約
 
