@@ -1,5 +1,8 @@
 use crate::adjacency::NodeAdjacency;
-use crate::geom::vec3::{cross, dist, dot, local_frame_axes, norm, scale, sub, unit};
+use crate::geom::vec3::{
+    cross, dist, dot, local_frame_axes, local_frame_axes_and_fallback_reference, norm, scale, sub,
+    unit,
+};
 use crate::ids::{ElemId, NodeId};
 use crate::model::{BeamPlacement, ElementData, FrameSectionUse, Model, SupportMemberId};
 use crate::section_shape::SectionShape;
@@ -98,10 +101,12 @@ pub fn rc_column_girder_faces(
             return Err("実配置で求めた柱の材軸と解析材軸の一致を確認できません".into());
         }
         let axes = local_frame_axes([0.0; 3], span_mm, elem.local_axis.ref_vector)?;
+        let zero_normal_components =
+            std::array::from_fn(|k| same_axis_coordinate(reference_ends, elem.end_offsets_mm, k));
         let exact_axis = cardinal_axis(axes[0]).filter(|&axis| {
             (0..3)
                 .filter(|&k| k != axis)
-                .all(|k| same_axis_coordinate(reference_ends, elem.end_offsets_mm, k))
+                .all(|k| zero_normal_components[k])
         });
         let length_exact = exact_axis.is_some_and(|axis| {
             let [origin, far] = reference_ends.map(|p| p[axis]);
@@ -110,8 +115,15 @@ pub fn rc_column_girder_faces(
             let (far, far_error) = sum_with_residual(far, offset_j);
             let (_, difference_error) = sum_with_residual(far, -origin);
             far_error == origin_error && difference_error == 0.0
-        });
-        Ok::<_, String>((axes, length_mm, exact_axis, length_exact))
+        }) || elem.end_offsets_mm == [[0.0; 3]; 2]
+            && exact_unoffset_length(reference_ends, length_mm);
+        Ok::<_, String>((
+            axes,
+            length_mm,
+            exact_axis,
+            length_exact,
+            zero_normal_components,
+        ))
     })();
     let nodes = [i, j];
     let mut faces = std::array::from_fn(|side| {
@@ -124,7 +136,8 @@ pub fn rc_column_girder_faces(
         let mut face_at_joint: Option<FaceAtJoint> = None;
         for other in joint {
             let resolve = || {
-                let (axes, _, column_axis, _) = axes_at_ends.as_ref().map_err(Clone::clone)?;
+                let (axes, _, column_axis, _, zero_normal_components) =
+                    axes_at_ends.as_ref().map_err(Clone::clone)?;
                 if model
                     .element_section(other)
                     .and_then(|section| section.frame_use)
@@ -156,8 +169,12 @@ pub fn rc_column_girder_faces(
                     ));
                 }
                 let beam_span_mm = axis_span_mm(beam.reference_ends, beam.end_offsets_mm);
-                let mut beam_axes =
-                    local_frame_axes([0.0; 3], beam_span_mm, other.local_axis.ref_vector)?;
+                let (mut beam_axes, fallback_reference) = local_frame_axes_and_fallback_reference(
+                    [0.0; 3],
+                    beam_span_mm,
+                    other.local_axis.ref_vector,
+                )?;
+                let reference = fallback_reference.unwrap_or(other.local_axis.ref_vector);
                 let normal = girder_normal(&beam.section_shape, beam_axes, inward, other.id)?;
                 let beam_side = usize::from(other.nodes.first() != Some(&nodes[side]));
                 if model
@@ -178,13 +195,25 @@ pub fn rc_column_girder_faces(
                         other.id.0
                     ));
                 }
-                let exact_axis =
-                    column_axis.filter(|&axis| cardinal_axis(beam_axes[normal]) == Some(axis));
                 let beam_axis = cardinal_axis(beam_axes[0]).filter(|&axis| {
                     (0..3)
                         .filter(|&k| k != axis)
                         .all(|k| same_axis_coordinate(beam.reference_ends, beam.end_offsets_mm, k))
                 });
+                if column_axis.is_some_and(|axis| match normal {
+                    1 => beam_axis.is_some_and(|beam_axis| {
+                        (0..3).any(|k| k != beam_axis && k != axis && reference[k] != 0.0)
+                    }),
+                    2 => reference[axis] != 0.0,
+                    _ => unreachable!(),
+                }) {
+                    return Err(format!(
+                        "大梁 ID {} の断面の外面が柱軸に直交しないため接合境界を一つの断面位置で表せません",
+                        other.id.0
+                    ));
+                }
+                let exact_axis =
+                    column_axis.filter(|&axis| cardinal_axis(beam_axes[normal]) == Some(axis));
                 if beam_side == 1 {
                     beam_axes[0] = scale(beam_axes[0], -1.0);
                 }
@@ -200,9 +229,10 @@ pub fn rc_column_girder_faces(
                         normal,
                         offset_mm: beam.end_offsets_mm[beam_side],
                         exact_axis,
+                        zero_normal_components: *zero_normal_components,
                         normal_input: beam_axis.map(|axis| NormalInput {
                             beam_axis: axis,
-                            reference: other.local_axis.ref_vector,
+                            reference,
                             normal,
                         }),
                     },
@@ -218,7 +248,8 @@ pub fn rc_column_girder_faces(
             }
         }
         face_at_joint.map(|face| {
-            let (_, length_mm, _, length_exact) = *axes_at_ends.as_ref().expect("確認済みの柱材軸");
+            let (_, length_mm, _, length_exact, _) =
+                *axes_at_ends.as_ref().expect("確認済みの柱材軸");
             let (position_mm, position_error) = if side == 0 {
                 (face.distance_mm, 0.0)
             } else {
@@ -291,6 +322,7 @@ struct JointGirder<'a> {
     normal: usize,
     offset_mm: [f64; 3],
     exact_axis: Option<usize>,
+    zero_normal_components: [bool; 3],
     normal_input: Option<NormalInput>,
 }
 
@@ -406,6 +438,15 @@ fn contact_distance(
         .fold(column_size_mm.max(1.0), f64::max);
     let roundoff_mm = 32.0 * f64::EPSILON * scale_mm;
     let axial_half_mm = beam_half[girder.normal];
+    let normal_coordinates = |offset_mm: [f64; 3]| {
+        std::array::from_fn(|k| {
+            if girder.zero_normal_components[k] {
+                0.0
+            } else {
+                offset_mm[k]
+            }
+        })
+    };
     let (entry_mm, distance_mm, distance_exact, exact_plane_mm) =
         if let Some(axis) = girder.exact_axis {
             let center_mm = girder.offset_mm[axis] * inward[axis].signum();
@@ -420,11 +461,11 @@ fn contact_distance(
                 Some(exit),
             )
         } else {
-            let center_mm = dot(delta, inward);
+            let center_mm = dot(normal_coordinates(delta), inward);
             (
                 center_mm - axial_half_mm,
                 center_mm + axial_half_mm,
-                girder.offset_mm == column_offset_mm,
+                normal_coordinates(girder.offset_mm) == normal_coordinates(column_offset_mm),
                 None,
             )
         };
@@ -459,7 +500,7 @@ fn contact_distance(
         exact_plane_mm,
         projected_input: girder.normal_input.map(|normal| ProjectedPlaneInput {
             normal,
-            offset_mm: girder.offset_mm,
+            offset_mm: normal_coordinates(girder.offset_mm),
             half_mm: axial_half_mm,
         }),
         roundoff_mm,
@@ -487,6 +528,20 @@ fn axis_span_mm(reference_mm: [[f64; 3]; 2], offset_mm: [[f64; 3]; 2]) -> [f64; 
         let (span, span_residual) = sum_with_residual(reference, offset);
         span + (span_residual + (ref_residual + offset_residual))
     })
+}
+
+fn exact_unoffset_length([a, b]: [[f64; 3]; 2], length_mm: f64) -> bool {
+    let mut squares = 0.0;
+    for k in 0..3 {
+        let (span_mm, span_error) = sum_with_residual(b[k], -a[k]);
+        let square = span_mm * span_mm;
+        let (sum, sum_error) = sum_with_residual(squares, square);
+        if span_error != 0.0 || span_mm.mul_add(span_mm, -square) != 0.0 || sum_error != 0.0 {
+            return false;
+        }
+        squares = sum;
+    }
+    length_mm * length_mm == squares && length_mm.mul_add(length_mm, -squares) == 0.0
 }
 
 fn same_axis_coordinate(

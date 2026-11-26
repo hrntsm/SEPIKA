@@ -1875,6 +1875,88 @@ fn 傾斜柱でも反対側の梁が同じ法線入力と半厚なら共通面�
 }
 
 #[test]
+fn 傾斜柱の共通面は法線への寄与がゼロと分かる梁の偏心では変わらない() {
+    for (offset_mm, expected) in [
+        ([0.0; 3], Ok(300.0)),
+        ([100.0, 0.0, 0.0], Ok(300.0)),
+        (
+            [100.0, 1e-14, 0.0],
+            Err("材端フェースが同じ位置にあることを丸め誤差の範囲で確認できません"),
+        ),
+    ] {
+        let mut model = model(false, false);
+        model.nodes[1].coord = [0.0, 3000.0, 4000.0];
+        model.stories[1].elevation = Some(4000.0);
+        model.elements[1].local_axis.ref_vector = [0.0, 3.0, 4.0];
+        let mut end = model.nodes[2].clone();
+        end.id = NodeId(3);
+        end.coord[0] = -3000.0;
+        model.nodes.push(end);
+        let mut beam = model.elements[1].clone();
+        beam.id = ElemId(2);
+        beam.nodes = [NodeId(0), NodeId(3)].into_iter().collect();
+        beam.end_offsets_mm = [offset_mm; 2];
+        model.elements.push(beam);
+        let response = analyze(&mut model);
+        assert_ordinary_foot(&model, &response, expected);
+    }
+}
+
+#[test]
+fn 傾斜柱でも正確な柱頭面と一致する集中荷重は柱区間側の切断力に入る() {
+    let mut model = model(false, false);
+    model.load_cases[0].nodal.clear();
+    model.nodes[1].coord = [0.0, 3000.0, 4000.0];
+    model.nodes[2].coord = [3000.0, 3000.0, 4000.0];
+    model.nodes[2].restraint = sepika_core::dof::Dof6Mask::FREE;
+    model.stories[1].elevation = Some(4000.0);
+    model.elements[1].nodes = [NodeId(1), NodeId(2)].into_iter().collect();
+    model.elements[1].local_axis.ref_vector = [0.0, 3.0, 4.0];
+    let mut known_axial = Vec::new();
+    for a in [4699.99, 4700.0, 4700.0 + 1e-11] {
+        model.load_cases[0].member = vec![MemberLoad::manual(
+            COLUMN,
+            [0.0, 0.6, 0.8],
+            MemberLoadKind::Point { a, p: -30_000.0 },
+        )];
+        let response = analyze(&mut model);
+        let face = saved_column_face(&response, 1).as_ref().unwrap();
+        assert_eq!(face.face.length_mm, 5000.0);
+        assert_eq!(face.face.position_mm, 4700.0);
+        let forces = face.forces.as_ref().unwrap();
+        let rows = check(&model, &response, RcColumnLongTermShearInput::SingleCase);
+        if a > 4700.0 {
+            assert!(matches!(&forces[0], Err(reason) if reason.contains("丸め誤差")));
+            assert!(rows.iter().any(|(xi, outcome)| *xi == 0.94 && matches!(
+                outcome, CheckOutcome::Skipped { reason } if reason.contains("軸力N") && reason.contains("丸め誤差")
+            )), "{rows:?}");
+        } else {
+            known_axial.push(*forces[0].as_ref().unwrap());
+            assert!(rows.iter().any(|(xi, _)| *xi == 0.94), "{rows:?}");
+            assert!(rows.iter().all(|(xi, outcome)| *xi != 0.94 || !matches!(
+                outcome, CheckOutcome::Skipped { reason } if reason.contains("軸力N") && reason.contains("丸め誤差")
+            )), "{rows:?}");
+        }
+    }
+    assert_close(known_axial[0] - known_axial[1], 30_000.0, 0.2);
+}
+
+#[test]
+fn 梁軸が直交でも断面を微小回転させると実面を確定しない() {
+    for (reference, expected) in [
+        ([0.0, 0.0, 1.0], Ok(300.0)),
+        ([0.0, 1e-15, 1.0], Err("断面の外面が柱軸に直交しない")),
+        ([0.0, 1.0, 0.0], Ok(150.0)),
+        ([0.0, 1.0, 1e-15], Err("断面の外面が柱軸に直交しない")),
+    ] {
+        let mut model = model(false, false);
+        model.elements[1].local_axis.ref_vector = reference;
+        let response = analyze(&mut model);
+        assert_ordinary_foot(&model, &response, expected);
+    }
+}
+
+#[test]
 fn 梁遠端だけが柱軸方向に微小偏心する場合は直交面とみなさない() {
     for z_shift_mm in [0.0, 1000.0] {
         for offset_mm in [0.0, 1e-12] {
