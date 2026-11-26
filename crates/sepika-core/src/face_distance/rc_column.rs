@@ -171,7 +171,8 @@ pub fn rc_column_girder_faces(
                         other.id.0
                     ));
                 }
-                let (beam_span_mm, _) = axis_span_mm(beam.reference_ends, beam.end_offsets_mm);
+                let (beam_span_mm, beam_span_exact) =
+                    axis_span_mm(beam.reference_ends, beam.end_offsets_mm);
                 let (mut beam_axes, fallback_reference) = local_frame_axes_and_fallback_reference(
                     [0.0; 3],
                     beam_span_mm,
@@ -210,11 +211,20 @@ pub fn rc_column_girder_faces(
                     _ => column_axis.and_then(|axis| {
                         if normal == 2 {
                             Some(reference[axis] == 0.0)
+                        } else if (0..3).filter(|&k| k != axis).all(|k| reference[k] == 0.0) {
+                            Some(true)
+                        } else if beam_span_exact {
+                            let u = (axis + 1) % 3;
+                            let v = (axis + 2) % 3;
+                            equal_products(
+                                beam_span_mm[u],
+                                reference[v],
+                                beam_span_mm[v],
+                                reference[u],
+                            )
+                            .map(|parallel| parallel && reference[axis] != 0.0)
                         } else {
-                            (0..3)
-                                .filter(|&k| k != axis)
-                                .all(|k| reference[k] == 0.0)
-                                .then_some(true)
+                            None
                         }
                     }),
                 };
@@ -564,10 +574,13 @@ fn declared_normal_parallel(
         [-reference[v], reference[u]]
     };
     // 正規化後の照合だけでは、入力から分かる斜交まで許容差に隠れる。
-    let p = column[u] * n_v;
-    let q = column[v] * n_u;
-    (p.is_finite() && q.is_finite())
-        .then(|| p == q && column[u].mul_add(n_v, -p) == column[v].mul_add(n_u, -q))
+    equal_products(column[u], n_v, column[v], n_u)
+}
+
+fn equal_products(a: f64, b: f64, c: f64, d: f64) -> Option<bool> {
+    let p = a * b;
+    let q = c * d;
+    (p.is_finite() && q.is_finite()).then(|| p == q && a.mul_add(b, -p) == c.mul_add(d, -q))
 }
 
 fn exact_span_length(span: [f64; 3], length_mm: f64) -> bool {

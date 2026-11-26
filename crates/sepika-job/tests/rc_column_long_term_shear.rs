@@ -2021,6 +2021,36 @@ fn 傾斜柱の材軸方向を確認できない端では表示座標が同じ�
 }
 
 #[test]
+fn 平面内で斜めの梁でも参照の材軸方向成分は面上の荷重の切断側を変えない() {
+    let reason = "断面の外面が柱軸に直交しない";
+    for (reference, expected) in [
+        ([0.0, 0.0, 1.0], Ok(300.0)),
+        ([3.0, 4.0, 1.0], Ok(300.0)),
+        ([3.0, 4.000000000000001, 1.0], Err(reason)),
+        ([3.0000000000000004, 4.000000000000001, 1.0], Err(reason)),
+    ] {
+        let mut model = model(false, false);
+        model.nodes[2].coord = [3000.0, 4000.0, 0.0];
+        model.elements[1].local_axis.ref_vector = reference;
+        model.load_cases[0].member = vec![MemberLoad::manual(
+            COLUMN,
+            [0.0, 0.0, 1.0],
+            MemberLoadKind::Point {
+                a: 300.0,
+                p: -30_000.0,
+            },
+        )];
+        let response = analyze(&mut model);
+        assert_ordinary_foot(&model, &response, expected);
+        if expected.is_ok() {
+            let face = saved_column_face(&response, 0).as_ref().unwrap();
+            let axial_n = *face.forces.as_ref().unwrap()[0].as_ref().unwrap();
+            assert_close(axial_n, -8_472.946, 0.2);
+        }
+    }
+}
+
+#[test]
 fn 梁遠端だけが柱軸方向に微小偏心する場合は直交面とみなさない() {
     for z_shift_mm in [0.0, 1000.0] {
         for offset_mm in [0.0, 1e-12] {
