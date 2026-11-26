@@ -268,7 +268,7 @@ impl RcDesign {
                 .fold(incomplete, |reason, axis_reason| {
                     combine_incomplete_reasons(reason, Some(axis_reason))
                 });
-            if mechanism.floor_yield_holds.iter().all(Option::is_none) {
+            if mechanism.girder_yield_holds.iter().all(Option::is_none) {
                 return (outcome, incomplete);
             }
             let torsion = crate::member_design_check::concrete_member_torsion_reason(
@@ -286,7 +286,7 @@ impl RcDesign {
                 _ => None,
             };
             mechanism
-                .floor_yield_holds
+                .girder_yield_holds
                 .iter()
                 .flatten()
                 .fold(incomplete, |reason, hold| {
