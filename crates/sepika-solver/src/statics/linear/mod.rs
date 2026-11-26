@@ -158,7 +158,9 @@ pub struct StaticOnce {
 }
 
 mod rc_column_faces;
-pub use rc_column_faces::{superpose_rc_column_faces, RcColumnFaceEnds, RcColumnFaceForce};
+pub use rc_column_faces::{
+    superpose_rc_column_faces, RcColumnFaceEnds, RcColumnFaceForce, RcColumnSectionForces,
+};
 mod steel_panel_faces;
 pub use steel_panel_faces::SteelPanelColumnFaceForce;
 

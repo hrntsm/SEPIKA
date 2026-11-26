@@ -1172,6 +1172,11 @@ pub fn run_member_design_checks(
         let first_row = member_checks.len();
         let mut peak_sections = Vec::new();
         let mut column_face_gravity = Vec::new();
+        let mut column_face_issues = Vec::new();
+        let face_qd2 = options.term == LoadTerm::Short
+            && !rc_damage_control
+            && options.qd_method == QdMethod::Qd2
+            && (options.long_member_forces.is_some() || options.rc_column_gravity_error.is_some());
         if let Some(geometry) = column_geometry {
             let legacy = crate::design_position::prepared_end_positions(elem, length);
             for (side, end) in geometry.ends.iter().enumerate() {
@@ -1180,7 +1185,7 @@ pub fn run_member_design_checks(
                 let (pos, forces) = match end {
                     Ok(face) => {
                         let pos = face.position_mm / face.length_mm;
-                        if ctx.seismic_qd.is_some() {
+                        if ctx.seismic_qd.is_some() || face_qd2 {
                             column_face_gravity.push((
                                 pos,
                                 rc_column_faces::response(
@@ -1189,7 +1194,8 @@ pub fn run_member_design_checks(
                                     side,
                                     *face,
                                 )
-                                .ok(),
+                                .ok()
+                                .map(rc_column_faces::numerical_forces),
                             ));
                         }
                         (
@@ -1200,7 +1206,12 @@ pub fn run_member_design_checks(
                     Err(reason) => (legacy[side], Err(reason.clone())),
                 };
                 match forces {
-                    Ok(forces) => peak_sections.push((pos, forces, None, None)),
+                    Ok(forces) => {
+                        if let Some(reason) = rc_column_faces::component_issues(forces) {
+                            column_face_issues.push((pos, reason));
+                        }
+                        peak_sections.push((pos, rc_column_faces::numerical_forces(forces), None, None));
+                    }
                     Err(reason) => member_checks.push((*elem_id, pos, CheckOutcome::Skipped {
                         reason: format!("RC柱の{name}の実材端面検定は未算定です（{reason}）。{recovered_shear_detail}"),
                     })),
@@ -1274,15 +1285,25 @@ pub fn run_member_design_checks(
             })
             .chain(peak_sections);
         for (pos, forces, cut_side, interval) in section_forces {
-            let saved_gravity = column_face_gravity
-                .iter()
-                .find(|(xi, _)| *xi == pos)
-                .and_then(|(_, gravity)| {
-                    let qd = ctx.seismic_qd.as_mut()?;
+            let face_gravity = column_face_gravity.iter().find(|(xi, _)| *xi == pos);
+            let saved_gravity = face_gravity.map(|(_, gravity)| {
+                let at_face = gravity.map(|forces| (pos, forces));
+                if let Some(qd) = &mut ctx.seismic_qd {
                     let original = std::mem::take(&mut qd.long_at);
-                    qd.long_at.extend(gravity.map(|forces| (pos, forces)));
+                    qd.long_at.extend(at_face);
                     Some(original)
-                });
+                } else {
+                    ctx.seismic_qd = Some(SeismicQd {
+                        long_at: at_face.into_iter().collect(),
+                        n_factor: 1.5,
+                        n_mechanism: 1.0,
+                        q_simple: None,
+                        clear_length: ctx.length,
+                        method: QdMethod::Qd2,
+                    });
+                    None
+                }
+            });
             if let Some(interval) = interval {
                 ctx.lb = Some(interval.length_mm);
                 ctx.steel_beam_moment_diagram =
@@ -1355,6 +1376,8 @@ pub fn run_member_design_checks(
                         gravity_error: if column_geometry.is_some()
                             && options.term == LoadTerm::Short
                             && !rc_damage_control
+                            && !(face_qd2
+                                && face_gravity.is_some_and(|(_, gravity)| gravity.is_some()))
                         {
                             options.rc_column_gravity_error
                         } else {
@@ -1421,6 +1444,9 @@ pub fn run_member_design_checks(
                 crate::srrc::preserve_route21_shear_detail(sec, &ctx, &outcome, &mut incomplete);
             }
             if long_term_shear.is_some() || column_geometry.is_some() {
+                if let Some((_, reason)) = column_face_issues.iter().find(|(xi, _)| *xi == pos) {
+                    incomplete = combine_incomplete_reasons(incomplete, Some(reason));
+                }
                 for (value, reason) in [
                     (mfa.n, "軸力Nが非有限のため、軸力・曲げを検定できません"),
                     (
@@ -1485,8 +1511,14 @@ pub fn run_member_design_checks(
                 outcome,
                 incomplete.as_deref(),
             );
-            if let (Some(original), Some(qd)) = (saved_gravity, ctx.seismic_qd.as_mut()) {
-                qd.long_at = original;
+            if let Some(original) = saved_gravity {
+                if let Some(original) = original {
+                    if let Some(qd) = &mut ctx.seismic_qd {
+                        qd.long_at = original;
+                    }
+                } else {
+                    ctx.seismic_qd = None;
+                }
             }
         }
 

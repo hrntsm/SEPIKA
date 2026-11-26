@@ -170,7 +170,7 @@ fn 回転大梁の実面の符号付き断面力を長期と短期の検定に�
                 2e6 + 20_000.0 * arm_mm,
             ];
             for (actual, expected) in face.forces.as_ref().unwrap().iter().zip(expected) {
-                assert_close(*actual, expected, 1e-4);
+                assert_close(*actual.as_ref().unwrap(), expected, 1e-4);
             }
             for term in [
                 sepika_design_jp::LoadTerm::Long,
@@ -306,7 +306,7 @@ fn 実柱端面の集中荷重では柱区間側を採用する() {
     for (cut, (position, q)) in ends.iter().zip([(150.0, -42_000.0), (2700.0, -42_000.0)]) {
         let face = cut.as_ref().unwrap().as_ref().unwrap();
         assert_eq!(face.face.position_mm, position);
-        assert_close(face.forces.as_ref().unwrap()[1], q, 1e-5);
+        assert_close(*face.forces.as_ref().unwrap()[1].as_ref().unwrap(), q, 1e-5);
     }
     model.load_cases[0].member[0] = point(150.0 + 1e-11, 50_000.0);
     let response = analyze(&mut model);
@@ -316,9 +316,17 @@ fn 実柱端面の集中荷重では柱区間側を採用する() {
         .find(|(id, _)| *id == COLUMN)
         .unwrap()
         .1;
-    assert!(
-        matches!(ends[0].as_ref().unwrap().as_ref().unwrap().forces, Err(ref reason) if reason.contains("丸め誤差"))
-    );
+    let i = ends[0]
+        .as_ref()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .forces
+        .as_ref()
+        .unwrap();
+    assert!(matches!(&i[1], Err(reason) if reason.contains("丸め誤差")));
+    assert!(matches!(&i[5], Err(reason) if reason.contains("丸め誤差")));
+    assert!(i[0].is_ok() && i[2..5].iter().all(Result::is_ok));
     assert!(ends[1].as_ref().unwrap().as_ref().unwrap().forces.is_ok());
 }
 
@@ -352,7 +360,7 @@ fn 短期地震時の実面で同位置の重力せん断を使い別経路の�
         .1
         .at
         .push((0.05, [0.0, -20_000.0, 0.0, 0.0, 0.0, 0.0]));
-    let run = |gravity_faces: &[_], gravity_error: Option<&str>| {
+    let run = |gravity_faces: &[_], gravity_error: Option<&str>, ordinary: bool| {
         run_member_design_checks(
             &model,
             &response.member_forces,
@@ -360,7 +368,11 @@ fn 短期地震時の実面で同位置の重力せん断を使い別経路の�
             &MemberDesignCheckOptions {
                 term: sepika_design_jp::LoadTerm::Short,
                 qd_method: sepika_design_jp::QdMethod::Qd2,
-                long_member_forces: gravity_error.is_none().then_some(&gravity.member_forces),
+                long_member_forces: gravity_error.is_none().then_some(if ordinary {
+                    gravity.member_forces.as_slice()
+                } else {
+                    &[]
+                }),
                 rc_column_face_forces: &response.rc_column_face_forces,
                 rc_column_gravity_face_forces: gravity_faces,
                 rc_column_gravity_error: gravity_error,
@@ -374,29 +386,21 @@ fn 短期地震時の実面で同位置の重力せん断を使い別経路の�
         .map(|(_, _, outcome)| outcome)
         .collect::<Vec<_>>()
     };
-    let rows = run(&gravity.rc_column_face_forces, None);
-    let component = shear(&rows[0]);
-    let capacity_n = component
-        .detail
-        .split("QAy=")
-        .nth(1)
-        .unwrap()
-        .split(" N")
-        .next()
-        .unwrap()
-        .parse::<f64>()
-        .unwrap();
-    assert_close(component.ratio * capacity_n, 152_000.0, 0.2);
-    let rows = run(&[], None);
-    assert!(
-        rows.iter()
-            .any(|outcome| matches!(outcome, CheckOutcome::Skipped { reason }
+    for ordinary in [true, false] {
+        let rows = run(&gravity.rc_column_face_forces, None, ordinary);
+        let component = shear(&rows[0]);
+        assert_close(component.ratio * displayed_qay(component), 152_000.0, 0.2);
+        let rows = run(&[], None, ordinary);
+        assert!(
+            rows.iter()
+                .any(|outcome| matches!(outcome, CheckOutcome::Skipped { reason }
         if reason.contains("同位置の重力参照内力が不足"))),
-        "{rows:?}"
-    );
-    assert!(rows.iter().any(|outcome| matches!(outcome, CheckOutcome::Checked(result)
+            "{rows:?}"
+        );
+        assert!(rows.iter().any(|outcome| matches!(outcome, CheckOutcome::Checked(result)
         if result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0))));
-    let rows = run(&[], Some("重力再計算が失敗しました"));
+    }
+    let rows = run(&[], Some("重力再計算が失敗しました"), false);
     assert!(
         rows.iter()
             .any(|outcome| matches!(outcome, CheckOutcome::Skipped { reason }
@@ -406,6 +410,116 @@ fn 短期地震時の実面で同位置の重力せん断を使い別経路の�
     assert!(rows.iter().any(|outcome| matches!(outcome, CheckOutcome::Checked(result)
         if result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0)
         && result.components.iter().all(|part| part.kind != CheckKind::Shear))));
+}
+
+fn displayed_qay(component: &CheckComponent) -> f64 {
+    component
+        .detail
+        .split("QAy=")
+        .nth(1)
+        .unwrap()
+        .split(" N")
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
+#[test]
+fn 丸め帯の集中荷重で不明な成分だけ保留して独立な短期qd2不適合を残す() {
+    for (axis, ambiguous) in [([0.0, 0.0, 1.0], &[0][..]), (X, &[1, 5][..])] {
+        let mut model = model(false, false);
+        model.elements[1].local_axis.ref_vector = Y;
+        model.load_cases[0].nodal = vec![NodalLoad::manual(
+            NodeId(1),
+            [20_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        )];
+        model.load_cases[0].member = vec![MemberLoad::manual(
+            COLUMN,
+            axis,
+            MemberLoadKind::Point {
+                a: 150.0 + 1e-11,
+                p: 50_000.0,
+            },
+        )];
+        model.load_cases[3].name = "試験用水平力".into();
+        model.load_cases[3].nodal = vec![NodalLoad::manual(
+            NodeId(1),
+            [200_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        )];
+        let combo = sepika_core::model::LoadCombination {
+            name: "DL+EX".into(),
+            terms: vec![(LoadCaseId(0), 1.0), (LoadCaseId(3), 1.0)],
+        };
+        sepika_job::prepare_model_for_analysis(&mut model, &Default::default(), None).unwrap();
+        let analysis = Analysis::prepare(&model).unwrap();
+        let gravity = analysis.linear_static(LoadCaseId(0)).unwrap();
+        let response = analysis.linear_combination(&combo).unwrap();
+        for solved in [&gravity, &response] {
+            let forces = solved
+                .rc_column_face_forces
+                .iter()
+                .find(|(id, _)| *id == COLUMN)
+                .unwrap()
+                .1[0]
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .forces
+                .as_ref()
+                .unwrap();
+            for (index, value) in forces.iter().enumerate() {
+                if ambiguous.contains(&index) {
+                    assert!(
+                        matches!(value, Err(reason) if reason.contains("丸め誤差")),
+                        "{value:?}"
+                    );
+                } else {
+                    assert!(matches!(value, Ok(value) if value.is_finite()), "{value:?}");
+                }
+            }
+        }
+        let report = run_member_design_checks(
+            &model,
+            &response.member_forces,
+            &response.panel_moments,
+            &MemberDesignCheckOptions {
+                term: sepika_design_jp::LoadTerm::Short,
+                qd_method: sepika_design_jp::QdMethod::Qd2,
+                long_member_forces: Some(&[]),
+                rc_column_face_forces: &response.rc_column_face_forces,
+                rc_column_gravity_face_forces: &gravity.rc_column_face_forces,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let rows = report
+            .member_checks
+            .iter()
+            .filter(|(id, xi, _)| *id == COLUMN && *xi == 0.05)
+            .map(|(_, _, row)| row)
+            .collect::<Vec<_>>();
+        let component_label = if ambiguous.contains(&0) {
+            "軸力N"
+        } else {
+            "せん断Qy"
+        };
+        assert!(rows.iter().any(|row| matches!(row, CheckOutcome::Skipped { reason } if reason.contains(component_label) && reason.contains("丸め誤差"))), "{rows:?}");
+        let failure = rows.iter().find_map(|row| match row {
+            CheckOutcome::Checked(result) => result
+                .components
+                .iter()
+                .find(|c| c.kind == CheckKind::Shear && c.ratio > 1.0),
+            _ => None,
+        });
+        if ambiguous.contains(&0) {
+            let component = failure.unwrap_or_else(|| panic!("{rows:?}"));
+            assert_close(component.ratio * displayed_qay(component), 320_000.0, 0.2);
+        } else {
+            assert!(failure.is_none(), "{rows:?}");
+        }
+    }
 }
 
 #[test]
@@ -1078,8 +1192,8 @@ fn 割増係数が不足する方向を保留し他方向の検定比を理由�
         .forces
         .as_mut()
         .unwrap();
-    saved[4] = f64::NAN;
-    saved[5] = f64::NAN;
+    saved[4] = Err("曲げMyが非有限です".into());
+    saved[5] = Err("曲げMzが非有限です".into());
     let rows = check_combination(&model, &solved);
     assert!(rows.iter().any(|(xi, outcome)| *xi == 0.1 && matches!(
         outcome, CheckOutcome::Skipped { reason } if reason.contains("曲げMzが非有限")

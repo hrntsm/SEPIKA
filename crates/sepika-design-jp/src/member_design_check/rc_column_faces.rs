@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use sepika_core::face_distance::{RcColumnGirderFace, RcColumnGirderFaces};
 use sepika_core::ids::ElemId;
 use sepika_core::model::{ElementData, Model};
-use sepika_solver::statics::linear::RcColumnFaceEnds;
+use sepika_solver::statics::linear::{RcColumnFaceEnds, RcColumnSectionForces};
 
 use crate::design_position::{finish_positions, prepared_end_positions};
 use crate::{CheckOutcome, CheckResult};
@@ -21,14 +21,15 @@ pub(super) fn response_index(
     index
 }
 
-pub(super) fn response(
-    table: &HashMap<ElemId, Option<&RcColumnFaceEnds>>,
+pub(super) fn response<'a>(
+    table: &HashMap<ElemId, Option<&'a RcColumnFaceEnds>>,
     id: ElemId,
     side: usize,
     face: RcColumnGirderFace,
-) -> Result<[f64; 6], String> {
+) -> Result<&'a RcColumnSectionForces, String> {
     let ends = table
         .get(&id)
+        .copied()
         .ok_or("同じ解析結果に対応する実材端面の断面力がありません")?
         .ok_or("同じ柱の実材端面の断面力が重複しています")?;
     let saved = ends[side]
@@ -39,7 +40,32 @@ pub(super) fn response(
     if saved.face != face {
         return Err("解析結果と検定対象の実材端面位置または材軸長が一致しません".into());
     }
-    saved.forces.as_ref().copied().map_err(Clone::clone)
+    saved.forces.as_ref().map_err(Clone::clone)
+}
+
+pub(super) fn numerical_forces(forces: &RcColumnSectionForces) -> [f64; 6] {
+    std::array::from_fn(|i| forces[i].as_ref().copied().unwrap_or(f64::NAN))
+}
+
+pub(super) fn component_issues(forces: &RcColumnSectionForces) -> Option<String> {
+    let reasons = [
+        "軸力N",
+        "せん断Qy",
+        "せん断Qz",
+        "ねじりMx",
+        "曲げMy",
+        "曲げMz",
+    ]
+    .into_iter()
+    .zip(forces)
+    .filter_map(|(name, value)| {
+        value
+            .as_ref()
+            .err()
+            .map(|reason| format!("{name}が未算定です（{reason}）"))
+    })
+    .collect::<Vec<_>>();
+    (!reasons.is_empty()).then(|| reasons.join("。"))
 }
 
 pub(super) fn regular_positions(

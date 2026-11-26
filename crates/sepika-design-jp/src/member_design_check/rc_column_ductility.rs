@@ -118,7 +118,8 @@ pub(super) fn collect(
                                         *face,
                                     )
                                     .ok()
-                                    .map(|forces| -forces[0]);
+                                    .and_then(|forces| forces[0].as_ref().ok())
+                                    .map(|n| -*n);
                                     face_distances_mm[side] = Some(if side == 0 {
                                         face.position_mm
                                     } else {

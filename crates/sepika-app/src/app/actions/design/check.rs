@@ -249,12 +249,14 @@ impl App {
                 )
             });
         let mut gravity_face_responses = Vec::new();
+        let mut gravity_index = 0;
         let mut gravity_error = None;
         let gravity_long_owned = if needs_gravity {
             match sepika_job::complete_design_gravity_forces(&gravity_terms, |lc| {
+                let factor = gravity_terms[gravity_index].1;
+                gravity_index += 1;
                 solve_gravity(&self.core.model, lc).map(|r| {
                     if capture_qd1_faces || capture_rc_column_faces {
-                        let factor = gravity_terms[gravity_face_responses.len()].1;
                         let rows = r.member_forces.clone();
                         gravity_face_responses.push((r, factor));
                         rows
@@ -283,7 +285,10 @@ impl App {
         } else {
             Vec::new()
         };
-        let rc_column_gravity_faces = if capture_rc_column_faces && gravity_long_owned.is_some() {
+        let rc_column_gravity_faces = if capture_rc_column_faces
+            && !gravity_terms.is_empty()
+            && gravity_face_responses.len() == gravity_terms.len()
+        {
             let terms: Vec<_> = gravity_face_responses
                 .iter()
                 .map(|(r, factor)| (r, *factor))
