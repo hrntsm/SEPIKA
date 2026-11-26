@@ -9,12 +9,16 @@ mod combined_column;
 mod input;
 
 fn checks(model: &Model, mz_nmm: f64) -> Result<Vec<CheckOutcome>, String> {
+    let mut model = model.clone();
+    model.load_cases = combined_column::cantilever(0.0, 0.0, 0.0).load_cases;
+    let terms = [(model.load_cases[0].id, 1.0)];
     run_member_design_checks(
-        model,
+        &model,
         &[(model.elements[0].id, input::moments(mz_nmm))],
         &[],
         &MemberDesignCheckOptions {
             term: LoadTerm::Short,
+            steel_beam_span_load_terms: Some(&terms),
             ..Default::default()
         },
     )
@@ -90,19 +94,40 @@ fn confirmed_end_supports_use_the_eccentric_physical_length() {
 }
 
 #[test]
-fn blank_support_confirmation_uses_nodes_even_with_eccentric_ends() {
+fn blank_support_confirmation_does_not_pair_the_default_node_span_with_eccentric_ends() {
     for count in [None, Some(0)] {
         let mut model = input::column(500.0, false);
         model.steel_design_attrs[0].lateral_brace_count = count;
+        assert_eq!(
+            sepika_design_jp::steel::column_lateral_buckling_length(
+                &model,
+                &model.elements[0],
+                model.steel_design_attrs.first(),
+            ),
+            Ok(3000.0)
+        );
         let outcomes = checks(&model, 215e6).unwrap();
         assert_eq!(outcomes.len(), 3);
         for outcome in outcomes {
             assert!(
-                matches!(&outcome, CheckOutcome::Checked(result) if result.ok() && result.detail.contains("lb=3000 mm（節点間距離の既定値）")),
+                matches!(&outcome, CheckOutcome::Skipped { reason } if reason.contains("両端と実材軸の両端が一致せず")),
                 "{outcome:?}"
             );
         }
     }
+}
+
+#[test]
+fn equal_lengths_do_not_align_a_translated_physical_axis_with_the_default_node_span() {
+    let mut model = input::column(0.0, false);
+    model.elements[0].end_offsets_mm = [[0.0, 500.0, 0.0]; 2];
+    assert_eq!(model.member_length(&model.elements[0]), 3000.0);
+    let outcomes = checks(&model, 215e6).unwrap();
+    assert!(
+        outcomes.iter().all(|outcome| matches!(outcome,
+        CheckOutcome::Skipped { reason } if reason.contains("両端と実材軸の両端が一致せず"))),
+        "{outcomes:?}"
+    );
 }
 
 #[test]

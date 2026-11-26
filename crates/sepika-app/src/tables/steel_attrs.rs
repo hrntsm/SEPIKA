@@ -455,7 +455,7 @@ pub fn steel_attrs_table(ui: &mut egui::Ui, app: &mut App) {
     })
     .response
     .on_hover_text(
-        "空欄=自動算定(材端モーメント比M2/M1・上限2.3)。指定した場合は自動算定・上限2.3を行わず入力値をそのまま採用します。",
+        "直接入力に対応する部材では指定値をそのまま採用し、自動算定の上限2.3は適用しません。上下対称H形鋼柱の通常検定では、この入力を使わず補剛区間全体の曲げ分布から算定します。",
     );
 
     let parsed_flange = parse_loss_percent(&app.ui.scoped.steel_attr_draft.joint_flange_loss, "βf");

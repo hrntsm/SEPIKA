@@ -7,14 +7,13 @@ use sepika_element::frame::beam::BeamElement;
 use sepika_solver::dynamic::timehistory::GroundMotion;
 
 #[test]
-fn h_column_direct_c_still_changes_static_checks() {
+fn h_column_static_span_uses_its_verified_distribution_even_with_direct_c() {
     let forces = steel_column_lateral_buckling_input::moments(215e6);
-    for (c_direct, expected_fb, expected_ratio, expected_ok) in [
-        (None, "fbX=192.3854 N/mm²", 0.973_267_776_f64, true),
-        (Some(0.8), "fbX=182.8236 N/mm²", 1.024_170_496_f64, false),
-    ] {
+    for c_direct in [None, Some(2.3)] {
         let mut model = steel_column_lateral_buckling_input::column(0.0, true);
         model.steel_design_attrs[0].c_direct = c_direct;
+        model.load_cases = super::combined_column::cantilever(0.0, 0.0, 0.0).load_cases;
+        let terms = [(model.load_cases[0].id, 1.0)];
         let id = model.elements[0].id;
         let report = run_member_design_checks(
             &model,
@@ -22,6 +21,7 @@ fn h_column_direct_c_still_changes_static_checks() {
             &[],
             &MemberDesignCheckOptions {
                 term: LoadTerm::Short,
+                steel_beam_span_load_terms: Some(&terms),
                 ..Default::default()
             },
         )
@@ -40,9 +40,9 @@ fn h_column_direct_c_still_changes_static_checks() {
                 result.detail.contains("横座屈長さ lb=3000 mm"),
                 "{result:?}"
             );
-            assert!(bending.detail.contains(expected_fb), "{bending:?}");
-            assert!((bending.ratio - expected_ratio).abs() < 1e-8, "{bending:?}");
-            assert_eq!(result.ok(), expected_ok);
+            assert!(bending.detail.contains("fbX=192.3854 N/mm²"), "{bending:?}");
+            assert!((bending.ratio - 0.973_267_776).abs() < 1e-8, "{bending:?}");
+            assert!(result.ok());
         }
     }
 }

@@ -10,6 +10,17 @@ impl LoadedFrameSection {
     /// 全長に作用する非零の部材荷重に対し、回復でゼロに置換された局所成分がないことを確認する。
     /// 成分が物理的にゼロと確認できなければエラー。
     pub fn verify_load_projections(&self) -> Result<(), String> {
+        self.verify_load_projections_with(|dir, index| {
+            dir.into_iter()
+                .zip(self.frame().rot[index])
+                .all(|(d, a)| d == 0.0 || a == 0.0)
+        })
+    }
+
+    pub(super) fn verify_load_projections_with(
+        &self,
+        provably_zero: impl Fn([f64; 3], usize) -> bool,
+    ) -> Result<(), String> {
         for load in &self.map.loads {
             let specified = match load.kind {
                 MemberLoadKind::Point { p, .. } => [p, 0.0],
@@ -18,27 +29,17 @@ impl LoadedFrameSection {
             if specified == [0.0; 2] {
                 continue;
             }
-            for (axis, comp) in self
-                .frame()
-                .rot
-                .into_iter()
-                .zip(resolve(load, self.frame()))
-            {
+            for (index, comp) in resolve(load, self.frame()).into_iter().enumerate() {
                 let recovered = match comp {
                     Some(Comp::Point { p, .. }) => [p, 0.0],
                     Some(Comp::Dist { w1, w2, .. }) => [w1, w2],
                     None => [0.0; 2],
                 };
-                // 省略された成分を、内積の丸めや相殺だけで物理的にゼロとは判定できない。
                 if specified
                     .into_iter()
                     .zip(recovered)
                     .any(|(input, output)| input != 0.0 && output == 0.0)
-                    && load
-                        .dir
-                        .into_iter()
-                        .zip(axis)
-                        .any(|(d, a)| d != 0.0 && a != 0.0)
+                    && !provably_zero(load.dir, index)
                 {
                     return Err(
                         "部材荷重の局所軸成分が回復時に保持されることを確認できません".into(),

@@ -58,14 +58,15 @@ pub(super) fn time_history_column_strong_bending(
             "強軸曲げが最大となる平坦区間の軸力・弱軸曲げの適用条件を確認できません".into(),
         );
     }
-    let (c, p_lambda_b) = if span.interior_maximum {
-        (1.0, 0.3)
-    } else if span.monotonic {
-        super::section::monotonic_bending_parameters(span.end_moments_nmm)
-            .ok_or("強軸曲げ分布の端部曲げが非有限です")?
-    } else {
+    if !span.interior_maximum && !span.monotonic {
         return Err("強軸曲げの単調変化または区間内部の絶対値最大を確認できません".into());
-    };
+    }
+    let (c, p_lambda_b) = super::section::column_span_parameters(
+        span.interior_maximum,
+        span.monotonic,
+        span.end_moments_nmm,
+    )
+    .ok_or("強軸曲げ分布の端部曲げが非有限です")?;
     let f_mpa = crate::material_strength::section_steel_f(sec, Some(mat))?;
     let (_, tf_mm, _) = shape_of(sec);
     let z_mm3 = confirmed_time_history_strong_modulus(sec)?;
@@ -139,8 +140,12 @@ pub(super) fn strong_bending_material_failure(
     sec: &Section,
     mat: &Material,
     ctx: &DesignCtx,
+    f_cap_mpa: Option<f64>,
 ) -> Option<CheckOutcome> {
-    let (sigma_b_mpa, ft_mpa, ratio) = strong_bending_material_excess(forces.mz, sec, mat, ctx)?;
+    let f_mpa =
+        f_cap_mpa.or_else(|| crate::material_strength::section_steel_f(sec, Some(mat)).ok())?;
+    let (sigma_b_mpa, ft_mpa, ratio) =
+        strong_bending_material_excess_at_f(forces.mz, sec, mat, ctx, f_mpa)?;
     Some(CheckOutcome::Checked(CheckResult {
         basis: "強軸曲げ応力度だけで材料の許容上限を超えるため不適合".into(),
         detail: String::new(),
@@ -158,15 +163,25 @@ pub(super) fn strong_bending_material_excess(
     mat: &Material,
     ctx: &DesignCtx,
 ) -> Option<(f64, f64, f64)> {
+    let f_mpa = crate::material_strength::section_steel_f(sec, Some(mat)).ok()?;
+    strong_bending_material_excess_at_f(mz_nmm, sec, mat, ctx, f_mpa)
+}
+
+fn strong_bending_material_excess_at_f(
+    mz_nmm: f64,
+    sec: &Section,
+    mat: &Material,
+    ctx: &DesignCtx,
+    f_mpa: f64,
+) -> Option<(f64, f64, f64)> {
     if has_section_loss(ctx) {
         return None;
     }
     let z_mm3 = confirmed_time_history_strong_modulus(sec).ok()?;
-    let f = crate::material_strength::section_steel_f(sec, Some(mat)).ok()?;
     let m_only = MemberForcesAt::from_local(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, mz_nmm]);
     check_symmetric_h_plate_slenderness(&m_only, sec, mat).ok()?;
     let sigma_b_mpa = mz_nmm.abs() / z_mm3;
-    let ft_mpa = steel_ft(f, ctx.term);
+    let ft_mpa = steel_ft(f_mpa, ctx.term);
     let ratio = sigma_b_mpa / ft_mpa;
     (ratio.is_finite() && ratio > 1.0).then_some((sigma_b_mpa, ft_mpa, ratio))
 }
@@ -271,12 +286,16 @@ pub(super) fn asymmetric_built_h_combination_reasons(
     .flatten()
 }
 
-pub(super) fn check_symmetric_h_plate_slenderness(
+pub(crate) fn check_symmetric_h_plate_slenderness(
     forces: &MemberForcesAt,
     sec: &Section,
     mat: &Material,
 ) -> Result<(), String> {
-    let shape = sec.shape.as_ref().expect("上下対称H形鋼の形状が必要");
+    let shape = sec
+        .shape
+        .as_ref()
+        .filter(|_| super::symmetric_h_web(sec).is_some())
+        .ok_or("局部座屈の幅厚比照査に必要な上下対称H形鋼の断面形状を確認できません")?;
     let (height_mm, flange_width_mm, flange_thick_mm, web_thick_mm, root_r_mm) = match *shape {
         SectionShape::SteelH {
             height,
@@ -496,7 +515,11 @@ pub(super) enum HColumnCompressionSlenderness {
 impl HColumnCompressionSlenderness {
     pub(super) fn resolve(sec: &Section, ctx: &DesignCtx) -> Self {
         let unresolved = "有効細長比と許容圧縮応力度に必要なH形断面性能を確定できません";
-        let shape = sec.shape.as_ref().expect("上下対称H形鋼の形状が必要");
+        let shape = || {
+            sec.shape
+                .as_ref()
+                .ok_or_else(|| "形状算定に必要なH形断面の形状を確認できません".to_owned())
+        };
         let area_mm2 = match sec.resolved_area() {
             Ok(area_mm2) if area_mm2 > 0.0 => area_mm2,
             result => {
@@ -517,7 +540,7 @@ impl HColumnCompressionSlenderness {
                     sec.property_basis.iy,
                     sec.iy,
                     "強軸",
-                    || shape.try_calc_iy(),
+                    || shape()?.try_calc_iy(),
                     unresolved,
                 ),
             ),
@@ -527,7 +550,7 @@ impl HColumnCompressionSlenderness {
                     sec.property_basis.iz,
                     sec.iz,
                     "弱軸",
-                    || shape.try_calc_iz(),
+                    || shape()?.try_calc_iz(),
                     unresolved,
                 ),
             ),
@@ -1099,7 +1122,7 @@ pub(crate) fn column_allowables(
     ctx: &DesignCtx,
     f: f64,
     checked_slenderness: Option<f64>,
-    lb_mm: Option<f64>,
+    lateral: Option<(f64, Option<(f64, f64)>)>,
 ) -> Result<ColumnAllowables, String> {
     let term = ctx.term;
     let h = sec.depth;
@@ -1118,15 +1141,22 @@ pub(crate) fn column_allowables(
     });
     let fc_val = steel_fc(f, mat.young, lambda, term);
 
-    let c = steel_c_factor(ctx, false);
-    let fb_strong = match (shape, lb_mm) {
-        (ShapeCategory::H, Some(lb_mm)) if lb_mm > 1e-9 => {
+    let fb_strong = match (shape, lateral) {
+        (ShapeCategory::H, Some((lb_mm, span_parameters))) if lb_mm > 1e-9 => {
             let iz = sec.iz;
             let iw = steel_warping_constant(sec, tf);
             let j = sec.resolved_j()?;
             let e = mat.young;
             let g = mat.shear.unwrap_or(e / (2.0 * (1.0 + mat.poisson)));
-            let p_lambda_b = steel_p_lambda_b(ctx, false);
+            let (c, p_lambda_b) = span_parameters
+                .unwrap_or_else(|| (steel_c_factor(ctx, false), steel_p_lambda_b(ctx, false)));
+            if span_parameters.is_some()
+                && [lb_mm, iz, iw, j, e, g, z_strong, f]
+                    .into_iter()
+                    .any(|value| !value.is_finite() || value <= 0.0)
+            {
+                return Err("横座屈に必要な断面性能・材料定数・補剛区間長を確定できません".into());
+            }
             steel_fb_h_asd2019(f, term, lb_mm, iz, iw, j, e, g, z_strong, c, p_lambda_b)
         }
         _ => ft_val,
