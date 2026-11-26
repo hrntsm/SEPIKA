@@ -9,6 +9,44 @@ pub struct RcUltimateShearActions {
     pub max_mq: [(f64, f64); 2],
 }
 
+/// 実フェース間の梁全体から同一確定ステップで求めた終局せん断用内力、または確認できない理由。
+pub type RcBeamUltimateShearResponse = Result<RcUltimateShearActions, RcBeamUltimateShearIssue>;
+
+/// 梁全体の終局せん断に用いる内力を確認できない理由。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum RcBeamUltimateShearIssue {
+    GroupTopology,
+    Section,
+    LocalAxis,
+    InteriorSupport,
+    FacePosition,
+    MissingResponse,
+    Recovery,
+    Equilibrium,
+    Slab,
+    Cutoff,
+    MissingGroupRecord,
+}
+
+impl RcBeamUltimateShearIssue {
+    /// 未算定の理由（表示用）。
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::GroupTopology => "一本部材グループで区間の重複または実材軸の連続性を確認できません",
+            Self::Section => "梁全体が同じ矩形断面・配筋・材料であることを確認できません（ハンチ付き部材は対象外）",
+            Self::LocalAxis => "一本部材の区間の局所軸の向き、または回復応答との一致を確認できません",
+            Self::InteriorSupport => "一本部材の境界に支点・拘束または応力伝達を確認できない接続があります",
+            Self::FacePosition => "RC梁の実フェースと正の評価区間を確認できません",
+            Self::MissingResponse => "梁全体の同一確定ステップの内力を確認できません（区間応答不足）",
+            Self::Recovery => "部材荷重または評価区間の位置を確認できず、断面力の範囲を回復できません",
+            Self::Equilibrium => "確定総応答が軸力・弱軸の釣合いと一致しません",
+            Self::Slab => "スラブ付きRC梁の終局せん断の適用条件を確認できません",
+            Self::Cutoff => "カットオフ筋があるため内法区間で一様な配筋を確認できません",
+            Self::MissingGroupRecord => "一本部材グループ全体の曲げ・せん断の最大値を確認できません。保存応答に梁全体の内力がない場合は増分解析を再実行してください",
+        }
+    }
+}
+
 /// RC 矩形断面の簡易終局耐力算定用の入力一式。
 #[derive(Clone, Copy, Debug)]
 pub struct RcCapacityInput {

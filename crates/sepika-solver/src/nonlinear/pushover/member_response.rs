@@ -13,10 +13,11 @@ use super::geom::{
 use super::types::{MemberStepState, PushoverMemberResponse};
 use sepika_core::adjacency::NodeAdjacency;
 use sepika_core::dof::DofMap;
-use sepika_core::face_distance::girder_column_faces;
 use sepika_core::geom::vec3::{cross, dist, norm, sub, unit};
 use sepika_core::ids::NodeId;
-use sepika_core::model::{Constraint, ElementData, FrameSectionUse, Model, SupportMemberId};
+use sepika_core::model::{
+    Constraint, ElementData, FrameSectionUse, LoadCase, Model, SupportMemberId,
+};
 use sepika_core::rc_capacity::RcUltimateShearActions;
 use sepika_core::section_shape::SectionShape;
 use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse, LocalVec};
@@ -190,7 +191,7 @@ pub(crate) fn compute_member_response(
 ) -> Result<Vec<PushoverMemberResponse>, String> {
     let responses = member_recording_responses(model, behaviors)?;
     Ok(compute_member_response_with_responses(
-        model, dofmap, behaviors, total_disp, dir, &responses,
+        model, dofmap, behaviors, total_disp, dir, &responses, None,
     ))
 }
 
@@ -201,6 +202,7 @@ pub(crate) fn compute_member_response_with_responses(
     total_disp: &[f64],
     dir: crate::statics::analysis::SeismicDir,
     responses: &[Option<LoadedFrameResponse>],
+    applied: Option<(&LoadCase, f64)>,
 ) -> Vec<PushoverMemberResponse> {
     let dir_idx = match dir {
         crate::statics::analysis::SeismicDir::X => 0usize,
@@ -209,6 +211,20 @@ pub(crate) fn compute_member_response_with_responses(
     let ctx = Ctx { model };
     let mut out = Vec::with_capacity(model.elements.len());
     let mut shear_face_geometry = None;
+    let applied = applied
+        .filter(|_| {
+            model
+                .elements
+                .iter()
+                .any(|elem| super::rc_beam_shear::beam_section(model, elem).is_some())
+        })
+        .map(|(case, force_scale)| super::rc_beam_shear::BeamShearStep::new(case, force_scale));
+    let grouped_rc_actions = super::rc_beam_shear::grouped_actions(
+        model,
+        responses,
+        &mut shear_face_geometry,
+        applied.as_ref(),
+    );
     for ((elem, b), response) in model.elements.iter().zip(behaviors).zip(responses) {
         if elem.nodes.len() != 2 {
             continue;
@@ -244,15 +260,33 @@ pub(crate) fn compute_member_response_with_responses(
         let shear_strong = dot3(f_i, ey).abs().max(dot3(f_j, ey).abs());
         let shear_weak = dot3(f_i, ez).abs().max(dot3(f_j, ez).abs());
         let axial = axial_compression(f_i, f_j, ex);
-        let rc_ultimate_shear = response.as_ref().and_then(|response| {
-            rc_ultimate_shear_actions(
-                model,
-                elem,
-                [pi.coord, pj.coord],
-                &response.section,
-                &mut shear_face_geometry,
-            )
+        let rc_beam_ultimate_shear = super::rc_beam_shear::beam_section(model, elem).map(|_| {
+            grouped_rc_actions
+                .get(&elem.id)
+                .copied()
+                .unwrap_or_else(|| {
+                    super::rc_beam_shear::beam_actions(
+                        model,
+                        std::slice::from_ref(&elem.id),
+                        responses,
+                        &mut shear_face_geometry,
+                        applied.as_ref(),
+                    )
+                })
         });
+        let rc_ultimate_shear = if rc_beam_ultimate_shear.is_none() {
+            response.as_ref().and_then(|response| {
+                rc_column_ultimate_shear_actions(
+                    model,
+                    elem,
+                    [pi.coord, pj.coord],
+                    &response.section,
+                    &mut shear_face_geometry,
+                )
+            })
+        } else {
+            None
+        };
         let rp = member_rp_angle(model, dofmap, total_disp, elem);
         let horizontal_force = horizontal_force_in_dir(&f, elem.nodes.len(), dir_idx);
 
@@ -267,12 +301,13 @@ pub(crate) fn compute_member_response_with_responses(
             horizontal_force,
             wall_shear_signed: None,
             rc_ultimate_shear,
+            rc_beam_ultimate_shear,
         });
     }
     out
 }
 
-fn rc_ultimate_shear_actions(
+fn rc_column_ultimate_shear_actions(
     model: &Model,
     elem: &ElementData,
     node_ends: [[f64; 3]; 2],
@@ -280,23 +315,19 @@ fn rc_ultimate_shear_actions(
     geometry: &mut Option<RcShearFaceGeometry>,
 ) -> Option<RcUltimateShearActions> {
     let section = model.element_section(elem)?;
-    if !response.is_unloaded() || !elem.kind.is_primary_frame_support() {
+    if !response.is_unloaded()
+        || !elem.kind.is_primary_frame_support()
+        || section.frame_use != Some(FrameSectionUse::Column)
+        || !matches!(section.shape, Some(SectionShape::RcColumnRect { .. }))
+    {
         return None;
     }
-    let girder = match (section.shape.as_ref()?, section.frame_use?) {
-        (SectionShape::RcBeamRect { .. }, FrameSectionUse::Girder) => true,
-        (SectionShape::RcColumnRect { .. }, FrameSectionUse::Column) => false,
-        _ => return None,
-    };
     let geometry = geometry.get_or_insert_with(|| RcShearFaceGeometry::new(model));
     let ends = model
         .primary_frame_axis_ends(elem)
         .ok()?
         .unwrap_or(node_ends);
     let length_mm = dist(ends[0], ends[1]);
-    let column_faces = girder
-        .then(|| girder_column_faces(model, elem, &geometry.frame))
-        .flatten();
     let position = |end: usize| {
         let node = elem.nodes[end];
         if geometry.other_connections.contains(&node) {
@@ -316,23 +347,6 @@ fn rc_ultimate_shear_actions(
             return (prepared == Some(0.0) && ends[end] == node_ends[end] && panel == 0.0)
                 .then_some(if end == 0 { 0.0 } else { length_mm });
         }
-        if girder {
-            if others.any(|other| {
-                model.element_section(other).is_none_or(|section| {
-                    !matches!(
-                        section.frame_use,
-                        Some(FrameSectionUse::Column | FrameSectionUse::Girder)
-                    )
-                })
-            }) {
-                return None;
-            }
-            let face = column_faces.as_ref()?[end].as_ref().ok()?;
-            if face.columns.iter().any(|&id| has_haunch(model, id)) {
-                return None;
-            }
-            return Some(face.position_mm);
-        }
         let inward = unit(sub(ends[1 - end], ends[end]))?;
         let distance = column_beam_face_distance(model, others, node, ends[end], inward)?;
         Some(if end == 0 {
@@ -344,13 +358,14 @@ fn rc_ultimate_shear_actions(
     rc_ultimate_section_actions(response, length_mm, [position(0)?, position(1)?])
 }
 
-struct RcShearFaceGeometry {
-    frame: NodeAdjacency,
-    other_connections: HashSet<NodeId>,
+pub(super) struct RcShearFaceGeometry {
+    pub(super) frame: NodeAdjacency,
+    pub(super) other_connections: HashSet<NodeId>,
+    pub(super) diaphragm_nodes: HashSet<NodeId>,
 }
 
 impl RcShearFaceGeometry {
-    fn new(model: &Model) -> Self {
+    pub(super) fn new(model: &Model) -> Self {
         let mut other_connections: HashSet<_> = model
             .elements
             .iter()
@@ -364,6 +379,7 @@ impl RcShearFaceGeometry {
                     .flatten(),
             )
             .collect();
+        let mut diaphragm_nodes = HashSet::new();
         for constraint in &model.constraints {
             match constraint {
                 Constraint::RigidLink { master, slaves, .. } => {
@@ -374,17 +390,21 @@ impl RcShearFaceGeometry {
                     other_connections.insert(*master);
                     other_connections.extend(terms.iter().map(|&(node, _, _)| node));
                 }
-                Constraint::RigidDiaphragm { .. } => {}
+                Constraint::RigidDiaphragm { master, slaves, .. } => {
+                    diaphragm_nodes.insert(*master);
+                    diaphragm_nodes.extend(slaves);
+                }
             }
         }
         Self {
             frame: NodeAdjacency::primary_frame(model),
             other_connections,
+            diaphragm_nodes,
         }
     }
 }
 
-fn has_haunch(model: &Model, id: sepika_core::ids::ElemId) -> bool {
+pub(super) fn has_haunch(model: &Model, id: sepika_core::ids::ElemId) -> bool {
     model.member_detail(id).is_some_and(|detail| {
         [detail.haunch_i, detail.haunch_j]
             .into_iter()
@@ -582,8 +602,19 @@ mod tests {
             let mut disp = [0.0; 12];
             disp[global_dof] = 1.0;
             let response = beam.frame_load_response(&disp, &[]).unwrap().unwrap();
-            rc_ultimate_shear_actions(model, elem, ends, &response.section, &mut None)
-                .map(|actions| actions.max_mq[0].0 / actions.max_mq[0].1)
+            let actions = if index == 0 {
+                rc_column_ultimate_shear_actions(model, elem, ends, &response.section, &mut None)
+            } else {
+                super::super::rc_beam_shear::beam_actions(
+                    model,
+                    &[elem.id],
+                    &[None, Some(response)],
+                    &mut None,
+                    None,
+                )
+                .ok()
+            };
+            actions.map(|actions| actions.max_mq[0].0 / actions.max_mq[0].1)
         };
 
         // 柱はz=2650 mmの実梁下面（梁芯z=2950 mm）、梁は柱の幅400 mm側の面を使う。
@@ -597,6 +628,50 @@ mod tests {
         assert!((girder - 1_850.0).abs() < 1e-9, "{girder}");
         model.elements[1].rigid_zone.face_j = Some(25.0);
         assert!(moment_shear_ratio(&model, 1, 8).is_none());
+
+        use sepika_core::rc_capacity::RcBeamUltimateShearIssue as Issue;
+        let mut split = model.nodes[2].clone();
+        split.id = NodeId(3);
+        split.coord = [0.0, 100.0, 3_000.0];
+        split.restraint = Dof6Mask::FREE;
+        model.nodes.push(split);
+        model.nodes[2].coord[2] = 3_000.0;
+        let first = &mut model.elements[1];
+        first.end_offsets_mm = [[0.0; 3]; 2];
+        first.nodes[1] = NodeId(3);
+        first.rigid_zone = RigidZone {
+            face_i: Some(200.0),
+            face_j: Some(0.0),
+            ..Default::default()
+        };
+        let mut last = first.clone();
+        last.id = ElemId(2);
+        last.nodes = [NodeId(3), NodeId(2)].into_iter().collect();
+        last.rigid_zone.face_i = Some(0.0);
+        model.elements.push(last);
+        let group = [ElemId(1), ElemId(2)];
+        model.girder_groups.push(group.to_vec());
+        let response_at = |index, dof| {
+            let mut disp = [0.0; 12];
+            disp[dof] = 1.0;
+            BeamElement::new(&model.elements[index], &model)
+                .frame_load_response(&disp, &[])
+                .unwrap()
+        };
+        let mut responses = [None, response_at(1, 2), response_at(2, 8)];
+        let reference_n = responses[2].as_ref().unwrap().section.at(0.0).unwrap()[1].abs();
+        assert!(responses[1].as_ref().unwrap().section.at(0.0).unwrap()[1].abs() > reference_n);
+        let beam_actions = super::super::rc_beam_shear::beam_actions;
+        let result = beam_actions(&model, &group, &responses, &mut None, None).unwrap();
+        let (m, q) = result.max_mq[0];
+        // 実柱面は始端から200 mm。100 mmの第1区間は内法に含まない。
+        assert_eq!(q, reference_n);
+        assert!((m / q - 1_750.0).abs() < 1e-9, "{result:?}");
+        responses[1] = None;
+        assert_eq!(
+            beam_actions(&model, &group, &responses, &mut None, None),
+            Err(Issue::MissingResponse)
+        );
     }
 
     #[test]
