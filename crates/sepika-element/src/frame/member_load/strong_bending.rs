@@ -50,7 +50,8 @@ pub struct FrameStaticStrongBending {
     pub interior_maximum: bool,
     /// 区間で非零の強軸曲げを確認した場合にtrue。
     pub has_strong_bending: bool,
-    /// 隣接照合位置間の曲げの符号反転に対応する圧縮軸力 [N]。軸力変動がある場合には使用しない。
+    /// 回復または照合済み保存値を起点とする分布で、区間内の曲げゼロ位置に対応する圧縮軸力 [N]。
+    /// 軸力・弱軸曲げの区間一定性を確認できない場合には使用しない。
     pub compression_at_zero_crossing_n: Option<f64>,
     /// 材端、荷重境界、曲げの内部極値を実材軸i端から昇順に返す。集中荷重位置では切断側を区別する。
     pub sections: Vec<FrameStaticBendingSection>,
@@ -155,12 +156,7 @@ pub fn frame_static_strong_bending(
             .verify_partial_bending_stations(&stations)
             .map_err(Stations)?;
         let reason = "保存断面力に非有限な成分があるため、区間全体の組合せを確定できません";
-        if !duplicate
-            && projections_confirmed
-            && stations
-                .iter()
-                .all(|(_, force)| force[1].is_finite() && force[3] == 0.0)
-        {
+        if !duplicate && projections_confirmed {
             let response = LoadedFrameSection::new(load_response.map, response.node_force_local);
             if let Ok(mut span) =
                 StrongBendingResponse::new(&frame, length_mm, &response, &stations)

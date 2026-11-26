@@ -207,12 +207,21 @@ fn a_web_shear_failure_requires_confirmed_absence_of_torsion_on_the_same_cut() {
             )
         })
         .to_vec();
-    for (recovered_mx, saved_mx) in [(1e-10, 0.0), (0.0, 1e-10), (0.0, 0.0)] {
+    for (recovered_mx, saved_mx, end_qz, mid_my) in [
+        (1e-10, 0.0, 0.0, 0.0),
+        (0.0, 1e-10, 0.0, 0.0),
+        (0.0, 0.0, 0.0, 0.0),
+        (1e-10, 0.0, f64::NAN, 0.0),
+        (0.0, 1e-10, f64::NAN, 0.0),
+        (0.0, 0.0, f64::NAN, 0.0),
+        (1e-10, 0.0, 0.0, f64::NAN),
+        (0.0, 0.0, 0.0, f64::NAN),
+    ] {
         let response = MemberForces {
             at: vec![
                 (0.0, [0.0, 0.0, 0.0, recovered_mx, 0.0, -50e6]),
-                (0.5, [0.0, 500_000.0, 0.0, saved_mx, 0.0, 0.0]),
-                (1.0, [0.0, 0.0, 0.0, recovered_mx, 0.0, 50e6]),
+                (0.5, [0.0, 500_000.0, 0.0, saved_mx, mid_my, 0.0]),
+                (1.0, [0.0, 0.0, end_qz, recovered_mx, 0.0, 50e6]),
             ],
         };
         let results = rows(&model, response, Some(&[(input::CASE, 1.0)]));
@@ -465,6 +474,61 @@ fn a_missing_weak_shear_series_does_not_hide_confirmed_compression_slenderness()
         ),
         "{mismatch:?}"
     );
+}
+
+#[test]
+fn a_zero_crossing_from_a_saved_cut_checks_pure_compression_inside_the_span() {
+    use sepika_core::section_shape::SectionShape;
+
+    let mut model = input::column(24_000.0, 0.0);
+    let sec = &mut model.sections[0];
+    let mut thinner_web = SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 6.0,
+        flange_thick: 13.0,
+        root_r: Some(0.0),
+    }
+    .to_section(sec.id, "薄いウェブのH".into());
+    thinner_web.material = sec.material;
+    thinner_web.frame_use = sec.frame_use;
+    *sec = thinner_web;
+    model.steel_design_attrs[0].column_lateral_buckling_end_supports = None;
+    for (saved_j_nmm, expect_pass) in [(-0.25, false), (0.25, true)] {
+        let forces = MemberForces {
+            at: [
+                (0.0, 72_000_000.25),
+                (0.5, 36_000_000.25),
+                (1.0, saved_j_nmm),
+            ]
+            .map(|(xi, mz)| (xi, [-77_000.0, -24_000.0, 0.0, 0.0, 0.0, mz]))
+            .to_vec(),
+        };
+        let results = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+        assert!(!results.is_empty());
+        if expect_pass {
+            assert!(
+                results
+                    .iter()
+                    .all(|(_, row)| matches!(row, CheckOutcome::Checked(result) if result.ok())),
+                "{results:?}"
+            );
+        } else {
+            assert!(
+                results
+                    .iter()
+                    .all(|(_, row)| !matches!(row, CheckOutcome::Checked(result) if result.ok())),
+                "{results:?}"
+            );
+            assert!(
+                results
+                    .iter()
+                    .any(|(_, row)| matches!(row, CheckOutcome::Skipped { reason }
+                if reason.contains("強軸曲げがゼロになる断面") && reason.contains("d/t=62.3333"))),
+                "{results:?}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -1061,6 +1125,48 @@ fn the_confirmed_zero_shear_cut_checks_both_moments_before_rounding() {
         assert_eq!(
             row.detail.contains("保存断面力による照査"),
             offset_nmm < 0.0
+        );
+    }
+}
+
+#[test]
+fn missing_strong_shear_keeps_a_verified_tension_edge_failure() {
+    let model = input::column(0.0, 0.0);
+    for (n, my, mx, saved_mx, missing_at, expect_ng) in [
+        (650_000.0, 0.0, 0.0, 0.0, 2, true),
+        (650_000.0, 0.0, 0.0, 0.0, 0, true),
+        (450_000.0, 0.0, 0.0, 0.0, 2, false),
+        (650_000.0, 1.0, 0.0, 0.0, 2, false),
+        (650_000.0, 0.0, 1.0, 1.0, 2, false),
+        (650_000.0, 0.0, 1e-10, 0.0, 2, false),
+    ] {
+        let mut forces = support_column::moments(200e6);
+        for (_, f) in &mut forces.at {
+            f[0] = n;
+            f[3] = mx;
+            f[4] = my;
+        }
+        forces.at[2].1[3] = saved_mx;
+        forces.at[missing_at].1[1] = f64::NAN;
+        let results = rows(&model, forces, Some(&[(input::CASE, 1.0)]));
+        let tension = checked(&results, 1.0)
+            .flat_map(|row| &row.components)
+            .find(|c| c.kind == CheckKind::AxialBending && c.detail.contains("式(6.3)"));
+        assert_eq!(tension.is_some(), expect_ng, "{results:?}");
+        if let Some(tension) = tension {
+            close(tension.ratio, 1.078_828_933_475_746);
+        }
+        assert!(
+            results.iter().any(|(xi, row)| *xi == 1.0
+                && matches!(row, CheckOutcome::Skipped { reason }
+            if reason.contains("保存断面力に非有限な成分"))),
+            "{results:?}"
+        );
+        assert!(
+            results
+                .iter()
+                .all(|(_, row)| !matches!(row, CheckOutcome::Checked(result) if result.ok())),
+            "{results:?}"
         );
     }
 }

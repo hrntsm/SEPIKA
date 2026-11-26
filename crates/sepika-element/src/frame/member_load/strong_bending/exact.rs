@@ -359,11 +359,39 @@ impl StrongBendingResponse<'_> {
         })
     }
 
-    fn saved_cuts_agree_on_classification(
+    fn compression_at_zero_crossing(
+        &self,
+        bending: &ExactBending,
+    ) -> Result<Option<f64>, ExactSpanError> {
+        let mut compression = None::<f64>;
+        let interior_zero = |cut: &ExactBendingCandidate| {
+            !cut.x.is_zero() && cut.x != bending.length_mm && cut.mz.is_zero()
+        };
+        for pair in bending.candidates.windows(2) {
+            let [left, right] = [&pair[0], &pair[1]];
+            if (left.mz.is_positive() && right.mz.is_negative())
+                || (left.mz.is_negative() && right.mz.is_positive())
+                || interior_zero(left) && !right.mz.is_zero()
+                || interior_zero(right) && !left.mz.is_zero()
+            {
+                // 軸力・弱軸曲げの区間一定性を確認できた場合だけ、この断面力を幅厚比に使う。
+                let [Some(n), _, _, _, Some(my)] = self.response.partial_cut(&left.x, true)? else {
+                    continue;
+                };
+                if n.is_negative() && my.is_zero() {
+                    let n = finite(&n)?;
+                    compression = Some(compression.map_or(n, |prior| prior.min(n)));
+                }
+            }
+        }
+        Ok(compression)
+    }
+
+    fn saved_bending_evidence(
         &self,
         bending: &ExactBending,
         interior: bool,
-    ) -> Result<bool, ExactSpanError> {
+    ) -> Result<(bool, Option<f64>), ExactSpanError> {
         let [i, j] = &bending.end_moments_nmm;
         let direction = j.cmp(i);
         if bending.shear_extrema_n.iter().all(Zero::is_zero)
@@ -373,8 +401,9 @@ impl StrongBendingResponse<'_> {
                 .all(|(_, f)| rational(f[5]).is_ok_and(|mz| &mz == i))
         {
             // 純曲げの端部にだけ微小なせん断差があっても、同値の保存曲げが否定する勾配は根拠にしない。
-            return Ok(true);
+            return Ok((true, None));
         }
+        let mut compression = None::<f64>;
         let origin_qy = rational(self.response.node_force_local[1])?;
         for &(x_mm, force) in self.stations_mm.iter().skip(1) {
             let x = rational(x_mm)?;
@@ -393,10 +422,13 @@ impl StrongBendingResponse<'_> {
                         || alternative.end_moments_nmm[1].cmp(&alternative.end_moments_nmm[0])
                             != direction)
             {
-                return Ok(false);
+                return Ok((false, None));
+            }
+            if let Some(n) = self.compression_at_zero_crossing(&alternative)? {
+                compression = Some(compression.map_or(n, |prior| prior.min(n)));
             }
         }
-        Ok(true)
+        Ok((true, compression))
     }
 
     pub(super) fn exact_static_sections(
@@ -404,40 +436,56 @@ impl StrongBendingResponse<'_> {
         partial: bool,
     ) -> Result<FrameStaticStrongBending, ExactSpanError> {
         let length = rational(self.length_mm)?;
-        let moment_recoverable = self.response.node_force_local[5].is_finite();
-        let (end_moments_nmm, monotonic, interior_maximum, has_strong_bending, mut candidates) =
-            if partial && !moment_recoverable {
-                let mut boundaries = vec![(BigRational::zero(), None)];
-                for (lo, hi) in self.load_intervals() {
-                    self.strong_load_profile(lo, hi)?;
-                    boundaries.push((rational(hi)?, None));
-                }
-                ([f64::NAN; 2], false, false, false, boundaries)
+        let moment_recoverable = [1, 5]
+            .into_iter()
+            .all(|i| self.response.node_force_local[i].is_finite());
+        let (
+            end_moments_nmm,
+            monotonic,
+            interior_maximum,
+            has_strong_bending,
+            mut candidates,
+            compression_at_zero_crossing_n,
+        ) = if partial && !moment_recoverable {
+            let mut boundaries = vec![(BigRational::zero(), None)];
+            for (lo, hi) in self.load_intervals() {
+                self.strong_load_profile(lo, hi)?;
+                boundaries.push((rational(hi)?, None));
+            }
+            ([f64::NAN; 2], false, false, false, boundaries, None)
+        } else {
+            let bending = self.exact_bending()?;
+            let end_moments_nmm = bending.end_moments()?;
+            let interior = bending.interior_maximum();
+            let strong_cuts_confirmed = self
+                .stations_mm
+                .iter()
+                .all(|(_, force)| force[1].is_finite() && force[5].is_finite());
+            let monotonic =
+                strong_cuts_confirmed && self.saved_cuts_confirm_monotonicity(&bending)?;
+            let (agrees, saved_compression) = if strong_cuts_confirmed && (interior || monotonic) {
+                self.saved_bending_evidence(&bending, interior)?
             } else {
-                let bending = self.exact_bending()?;
-                let end_moments_nmm = bending.end_moments()?;
-                let interior = bending.interior_maximum();
-                let strong_cuts_confirmed = self
-                    .stations_mm
-                    .iter()
-                    .all(|(_, force)| force[1].is_finite() && force[5].is_finite());
-                let monotonic =
-                    strong_cuts_confirmed && self.saved_cuts_confirm_monotonicity(&bending)?;
-                let agrees = strong_cuts_confirmed
-                    && (interior || monotonic)
-                    && self.saved_cuts_agree_on_classification(&bending, interior)?;
-                (
-                    end_moments_nmm,
-                    monotonic && agrees,
-                    interior && agrees,
-                    !bending.absolute_maximum().is_zero(),
-                    bending
-                        .candidates
-                        .into_iter()
-                        .map(|candidate| (candidate.x, Some(candidate.mz)))
-                        .collect(),
-                )
+                (false, None)
             };
+            let compression = self
+                .compression_at_zero_crossing(&bending)?
+                .into_iter()
+                .chain(saved_compression)
+                .reduce(f64::min);
+            (
+                end_moments_nmm,
+                monotonic && agrees,
+                interior && agrees,
+                !bending.absolute_maximum().is_zero(),
+                bending
+                    .candidates
+                    .into_iter()
+                    .map(|candidate| (candidate.x, Some(candidate.mz)))
+                    .collect(),
+                compression,
+            )
+        };
         let weak_loads: Vec<_> = self
             .response
             .map
@@ -462,7 +510,8 @@ impl StrongBendingResponse<'_> {
         candidates.extend(saved_cuts);
         candidates.sort_by(|a, b| a.0.cmp(&b.0));
         let mut sections: Vec<FrameStaticBendingSection> = Vec::with_capacity(candidates.len());
-        let mut compression_at_zero_crossing_n = None::<f64>;
+        let torsion_absence_confirmed =
+            !partial || self.stations_mm.iter().all(|(_, force)| force[3] == 0.0);
         for (x, mz) in candidates {
             let x_mm = finite(&x)?;
             let saved_left = if rational(x_mm)? == x {
@@ -481,7 +530,14 @@ impl StrongBendingResponse<'_> {
                     && has_distributed_load_at_cut(&self.strong_loads, &x, true)?
                     && !has_distributed_load_at_cut(&weak_loads, &x, true)?,
             ];
-            let section = self.response.exact_peak(x, mz.as_ref(), &length, partial)?;
+            let mut section = self.response.exact_peak(x, mz.as_ref(), &length, partial)?;
+            if !torsion_absence_confirmed && saved_left.is_none() && section.left[3] == 0.0 {
+                // 保存測点にない断面は、i端の値だけで欠測・食い違いのあるねじりを否定できない。
+                section.left[3] = f64::NAN;
+                if let Ok(Some(right)) = &mut section.right {
+                    right[3] = f64::NAN;
+                }
+            }
             let saved_right = saved_left
                 .filter(|_| section.right.as_ref().is_ok_and(Option::is_some))
                 .map(|left| self.response.saved_right_cut(x_mm, left, partial))
@@ -501,19 +557,6 @@ impl StrongBendingResponse<'_> {
                     false,
                 ]
             };
-            if let Some(previous) = sections.last().map(|section| &section.recovered) {
-                let after_point = previous.right.as_ref().ok().and_then(Option::as_ref);
-                let [n, _, _, _, my, _] = *after_point.unwrap_or(&previous.left);
-                if n < 0.0
-                    && my == 0.0
-                    && previous.left[5] != 0.0
-                    && section.left[5] != 0.0
-                    && previous.left[5].is_sign_positive() != section.left[5].is_sign_positive()
-                {
-                    compression_at_zero_crossing_n =
-                        Some(compression_at_zero_crossing_n.map_or(n, |prior| prior.min(n)));
-                }
-            }
             sections.push(FrameStaticBendingSection {
                 recovered: section,
                 saved_left,
@@ -586,6 +629,20 @@ impl LoadedFrameSection {
         Ok(qy)
     }
 
+    fn exact_point_jump(&self, x_mm: f64) -> Result<ExactVector, ExactSpanError> {
+        let mut jump = std::array::from_fn(|_| BigRational::zero());
+        for load in &self.map.loads {
+            if matches!(load.kind, MemberLoadKind::Point { a, .. } if a == x_mm) {
+                for (axis, comp) in resolve(load, self.frame()).into_iter().enumerate() {
+                    if let Some(Comp::Point { p, .. }) = comp {
+                        jump[axis] += rational(if axis == 0 { -p } else { p })?;
+                    }
+                }
+            }
+        }
+        Ok(jump)
+    }
+
     fn saved_right_cut(
         &self,
         x_mm: f64,
@@ -595,15 +652,9 @@ impl LoadedFrameSection {
         let recover = || {
             let [n, qy, qz, mx, my, mz] = saved_left;
             let mut right = [n, qy, qz, mx, my].map(BigRational::from_float);
-            for load in &self.map.loads {
-                if matches!(load.kind, MemberLoadKind::Point { a, .. } if a == x_mm) {
-                    for (axis, comp) in resolve(load, self.frame()).into_iter().enumerate() {
-                        if let Some(Comp::Point { p, .. }) = comp {
-                            if let Some(component) = &mut right[axis] {
-                                *component += rational(if axis == 0 { -p } else { p })?;
-                            }
-                        }
-                    }
+            for (component, jump) in right.iter_mut().zip(self.exact_point_jump(x_mm)?) {
+                if let Some(component) = component {
+                    *component += jump;
                 }
             }
             partial_forces_to_f64(right, BigRational::from_float(mz).as_ref(), partial)
@@ -751,12 +802,21 @@ impl LoadedFrameSection {
                 matches!(load.kind, MemberLoadKind::Point { a, .. }
                     if a == x_mm && rational(a).is_ok_and(|a| a == x))
             });
-        let right = at_point_load
-            .then(|| self.partial_cut(&x, true))
-            .transpose()?
-            .filter(|right| right != &left)
-            .map(convert)
-            .transpose()?;
+        let right = if at_point_load {
+            let right = self.partial_cut(&x, true)?;
+            let missing_at_jump = partial
+                && right == left
+                && left[..3].iter().any(Option::is_none)
+                && left
+                    .iter()
+                    .zip(self.exact_point_jump(x_mm)?)
+                    .any(|(component, jump)| component.is_none() && !jump.is_zero());
+            (right != left || missing_at_jump)
+                .then(|| convert(right))
+                .transpose()?
+        } else {
+            None
+        };
         Ok(FrameStrongBendingPeak {
             x_mm,
             xi: finite(&(x / length_mm))?,

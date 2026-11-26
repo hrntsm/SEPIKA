@@ -520,14 +520,22 @@ fn section_applicability_difference(
     recovered: [f64; 6],
 ) -> Option<String> {
     let biaxial_tension = |f: [f64; 6]| f[0] > 0.0 && f[4] != 0.0 && f[5] != 0.0;
+    let known = |indices: &[usize]| {
+        indices
+            .iter()
+            .all(|&i| saved[i].is_finite() && recovered[i].is_finite())
+    };
     for (differs, condition) in [
         (
-            (saved[3] == 0.0) != (recovered[3] == 0.0),
+            known(&[3]) && (saved[3] == 0.0) != (recovered[3] == 0.0),
             "材軸ねじりの有無",
         ),
-        ((saved[0] < 0.0) != (recovered[0] < 0.0), "圧縮軸力の有無"),
         (
-            biaxial_tension(saved) != biaxial_tension(recovered),
+            known(&[0]) && (saved[0] < 0.0) != (recovered[0] < 0.0),
+            "圧縮軸力の有無",
+        ),
+        (
+            known(&[0, 4, 5]) && biaxial_tension(saved) != biaxial_tension(recovered),
             "引張軸力と二軸曲げの併存条件",
         ),
     ] {
@@ -535,7 +543,7 @@ fn section_applicability_difference(
             return Some(format!("保存断面力と回復断面力で{condition}が一致しません"));
         }
     }
-    if [0, 3, 4, 5].into_iter().all(|i| saved[i] == recovered[i]) {
+    if !known(&[0, 3, 4, 5]) || [0, 3, 4, 5].into_iter().all(|i| saved[i] == recovered[i]) {
         return None;
     }
     let limitation = |force| {
