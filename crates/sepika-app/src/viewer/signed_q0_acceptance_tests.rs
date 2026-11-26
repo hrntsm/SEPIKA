@@ -56,6 +56,7 @@ fn peak_labels_with_confirmed_long_term(
                     elem,
                     index,
                     rec,
+                    rec.frame_time.len(),
                     nonlinear,
                     applied_long_term,
                     || (!confirmed_long_term).then_some(UNVERIFIED_DAMAGE_CONTROL_GRAVITY),

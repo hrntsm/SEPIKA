@@ -17,6 +17,131 @@ use super::{
     strong_axis_h_tension, strong_axis_tension_bending_ratios, ShapeCategory,
 };
 
+/// 確認済みの曲げ分布で求めた短期許容曲げ [N/mm²] と照査比。
+pub struct ColumnStrongBendingCheck {
+    pub c: f64,
+    pub p_lambda_b: f64,
+    pub fb_mpa: f64,
+    pub ratio: f64,
+}
+
+pub(super) fn time_history_column_strong_bending(
+    sec: &Section,
+    mat: &Material,
+    ctx: &DesignCtx,
+    lb_mm: f64,
+    span: &sepika_element::frame::member_load::FrameStrongBendingSpan,
+    peak: &MemberForcesAt,
+) -> Result<ColumnStrongBendingCheck, String> {
+    if ctx.kind != crate::MemberKind::Column || super::symmetric_h_web(sec).is_none() {
+        return Err("強軸曲げの横座屈には上下対称H形鋼の断面形状が必要です".into());
+    }
+    if let Some(reason) = super::steel_torsion_reason(peak, sec) {
+        return Err(reason.into());
+    }
+    if !peak.n.is_finite() || !peak.mz.is_finite() {
+        return Err("区間最大曲げ位置の断面力が非有限です".into());
+    }
+    if has_section_loss(ctx) {
+        return Err("断面欠損を控除した横座屈の断面性能を確定できません".into());
+    }
+    if peak.n > 0.0 {
+        return Err("引張軸力と強軸曲げが同時に作用するため、強軸曲げの横座屈は未算定です".into());
+    }
+    if peak.my != 0.0 {
+        return Err("弱軸曲げと強軸曲げが同時に作用するため、強軸曲げの横座屈は未算定です".into());
+    }
+    check_symmetric_h_plate_slenderness(peak, sec, mat)?;
+    let (c, p_lambda_b) = if span.interior_maximum {
+        (1.0, 0.3)
+    } else if span.monotonic {
+        super::section::monotonic_bending_parameters(span.end_moments_nmm)
+            .ok_or("強軸曲げ分布の端部曲げが非有限です")?
+    } else {
+        return Err("強軸曲げの単調変化または区間内部の絶対値最大を確認できません".into());
+    };
+    let f_mpa = crate::material_strength::section_steel_f(sec, Some(mat))?;
+    let (_, tf_mm, _) = shape_of(sec);
+    if [
+        sec.property_basis.iy,
+        sec.property_basis.iz,
+        sec.property_basis.depth,
+        sec.property_basis.j,
+    ]
+    .into_iter()
+    .any(|basis| basis != PropertyBasis::Shape)
+    {
+        return Err("横座屈に用いる断面諸量とH形鋼の形状との対応が未確認です".into());
+    }
+    let j_mm4 = sec.resolved_j()?;
+    let iw_mm6 = steel_warping_constant(sec, tf_mm);
+    let z_mm3 = section_modulus(sec.iy, sec.depth / 2.0);
+    let [e_mpa, g_mpa] = [mat.young, mat.shear_modulus()];
+    if [lb_mm, sec.iz, j_mm4, iw_mm6, z_mm3, e_mpa, g_mpa, f_mpa]
+        .into_iter()
+        .any(|value| !value.is_finite() || value <= 0.0)
+    {
+        return Err("横座屈に必要な断面性能・材料定数・補剛区間長を確定できません".into());
+    }
+    let fb_mpa = steel_fb_h_asd2019(
+        f_mpa,
+        LoadTerm::Short,
+        lb_mm,
+        sec.iz,
+        iw_mm6,
+        j_mm4,
+        e_mpa,
+        g_mpa,
+        z_mm3,
+        c,
+        p_lambda_b,
+    );
+    let ratio = (peak.mz.abs() / z_mm3) / fb_mpa;
+    if !ratio.is_finite() || !fb_mpa.is_finite() || fb_mpa <= 0.0 {
+        return Err("短期許容曲げ応力度または検定比を有限値で算定できません".into());
+    }
+    Ok(ColumnStrongBendingCheck {
+        c,
+        p_lambda_b,
+        fb_mpa,
+        ratio,
+    })
+}
+
+pub(super) fn strong_bending_material_failure(
+    forces: &MemberForcesAt,
+    sec: &Section,
+    mat: &Material,
+    ctx: &DesignCtx,
+) -> Option<CheckOutcome> {
+    if super::symmetric_h_web(sec).is_none()
+        || has_section_loss(ctx)
+        || [sec.property_basis.iy, sec.property_basis.depth]
+            .into_iter()
+            .any(|basis| basis != PropertyBasis::Shape)
+    {
+        return None;
+    }
+    let f = crate::material_strength::section_steel_f(sec, Some(mat)).ok()?;
+    let m_only = MemberForcesAt::from_local(forces.pos, [0.0, 0.0, 0.0, 0.0, 0.0, forces.mz]);
+    check_symmetric_h_plate_slenderness(&m_only, sec, mat).ok()?;
+    let sigma_b_mpa = forces.mz.abs() / section_modulus(sec.iy, sec.depth / 2.0);
+    let ft_mpa = steel_ft(f, ctx.term);
+    let ratio = sigma_b_mpa / ft_mpa;
+    if !ratio.is_finite() || ratio <= 1.0 {
+        return None;
+    }
+    Some(CheckOutcome::Checked(CheckResult {
+        basis: "強軸曲げ応力度だけで材料の許容上限を超えるため不適合".into(),
+        detail: String::new(),
+        components: vec![CheckComponent {
+            kind: CheckKind::Bending,
+            ratio,
+            detail: format!("σbX={sigma_b_mpa:.4} N/mm², 材料許容上限={ft_mpa:.4} N/mm²"),
+        }],
+    }))
+}
+
 pub(super) fn asymmetric_built_h_section_reason(
     forces: &MemberForcesAt,
     sec: &Section,

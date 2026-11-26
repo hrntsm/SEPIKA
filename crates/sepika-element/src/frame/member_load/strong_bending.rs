@@ -391,6 +391,14 @@ fn verified_frame_bending_response_mm(
     let mut node_force = [0.0; 12];
     node_force[..6].copy_from_slice(&origin);
     let response = LoadedFrameSection::new(map, node_force);
+    verify_bending_stations(&response, stations_mm)?;
+    Ok(response)
+}
+
+fn verify_bending_stations(
+    response: &LoadedFrameSection,
+    stations_mm: &[(f64, [f64; 6])],
+) -> Result<(), String> {
     let scales: [f64; 6] = std::array::from_fn(|i| {
         stations_mm
             .iter()
@@ -407,10 +415,36 @@ fn verified_frame_bending_response_mm(
         }
     }
 
-    Ok(response)
+    Ok(())
 }
 
 impl LoadedFrameSection {
+    /// 同じ解析応答の全長で符号付き強軸曲げの分布と最大需要を返す。
+    /// 確認済み実材軸長 [mm] と記録断面力が対応しない場合は理由付きエラー。
+    pub fn full_span_strong_bending(
+        &self,
+        length_mm: f64,
+        forces: &MemberForces,
+    ) -> Result<FrameStrongBendingSpan, String> {
+        let response_length = self.map.length_mm;
+        let tolerance_mm = 32.0 * f64::EPSILON * response_length.max(1.0);
+        if !length_mm.is_finite() || (length_mm - response_length).abs() > tolerance_mm {
+            return Err("確認済みの補剛区間が部材荷重応答の全長と一致しません".into());
+        }
+        let stations = bending_stations_mm(response_length, forces)?;
+        if stations
+            .iter()
+            .any(|(x, _)| !(0.0..=response_length).contains(x))
+            || stations.windows(2).any(|pair| pair[0].0 >= pair[1].0)
+        {
+            return Err("解析断面力の評価位置が不正です".into());
+        }
+        verify_bending_stations(self, &stations)?;
+        let span = [0.0, response_length];
+        StrongBendingResponse::new(self.map.frame(), response_length, self, &stations)
+            .span(span, span, false)
+    }
+
     fn point_load_jump(&self, x_mm: f64) -> [f64; 3] {
         let mut jump = [0.0; 3];
         for load in &self.map.loads {

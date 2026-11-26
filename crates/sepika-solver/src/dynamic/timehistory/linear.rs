@@ -507,6 +507,21 @@ fn run_steps(
         let member_forces = member_forces_linear(model, dofmap, behaviors, &u_free)
             .map_err(|reason| step_error(step, time_s, &reason))?;
 
+        recorder.observe(step, time_s, &member_forces, &|index, length_mm| {
+            let behavior = behaviors
+                .get(index)
+                .ok_or("同じ確定時刻の部材応答がありません")?;
+            let forces = member_forces
+                .get(index)
+                .and_then(Option::as_ref)
+                .ok_or("同じ確定時刻の断面力がありません")?;
+            let gdofs = behavior.global_dofs(dofmap);
+            let u_elem = crate::common::elem_loop::gather_u_elem(&gdofs, &u_free);
+            let response = behavior
+                .frame_load_response(&u_elem, &[])?
+                .ok_or("同じ確定時刻の部材応答から強軸曲げ分布を取得できません")?;
+            response.section.full_span_strong_bending(length_mm, forces)
+        });
         time.push(time_s);
         for i in 0..n_free {
             peak_disp_free[i] = peak_disp_free[i].max(u_free[i].abs());

@@ -285,7 +285,7 @@ pub fn compute_time_history(
     }
     let record_every = (cfg.th_record_every > 0).then_some(cfg.th_record_every);
     let newmark = sepika_solver::dynamic::timehistory::NewmarkCfg::average_accel();
-    let (mut result, sections) = crate::time_history_check::collect_asymmetric_column_sections(
+    let (mut result, checks) = crate::time_history_check::collect_time_history_checks(
         &model,
         Default::default(),
         0,
@@ -301,7 +301,7 @@ pub fn compute_time_history(
     )
     .map_err(dynamic_solve_error)?;
     if let Some(recording) = &mut result.recording {
-        recording.asymmetric_column_sections = sections;
+        checks.store(recording);
     }
     Ok(result)
 }
@@ -407,7 +407,7 @@ fn compute_nonlinear_time_history(
         apply_long_term: cfg.th_apply_long_term,
         record_every,
     };
-    let (mut result, sections) = crate::time_history_check::collect_asymmetric_column_sections(
+    let (mut result, checks) = crate::time_history_check::collect_time_history_checks(
         &model,
         Default::default(),
         0,
@@ -432,7 +432,7 @@ fn compute_nonlinear_time_history(
         other => JobError::Convergence(other.to_string()),
     })?;
     if let Some(recording) = &mut result.recording {
-        recording.asymmetric_column_sections = sections;
+        checks.store(recording);
     }
     Ok(result)
 }
