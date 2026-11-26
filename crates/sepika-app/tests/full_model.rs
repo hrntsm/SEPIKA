@@ -1357,8 +1357,12 @@ fn design_check_covers_every_member() {
     const SLAB_GIRDERS: [u32; 17] = [
         40, 41, 48, 49, 56, 57, 66, 67, 76, 77, 78, 91, 92, 93, 103, 104, 105,
     ];
-    const QD1_SLAB_REASON: &str =
-        "QD1用の梁端降伏曲げモーメントに必要なスラブ筋の寄与を確定できません";
+    let qd1_face_reason = |id: ElemId| {
+        format!(
+            "QD1用の内法長さ: 大梁 ID {} i端の実柱面: 梁の実材軸が接続柱の側面を横切りません",
+            id.0
+        )
+    };
 
     let mut app = analyzed();
     app.core.analysis_cfg.rc_damage_control = false;
@@ -1534,17 +1538,18 @@ fn design_check_covers_every_member() {
                         _ => None,
                     })
                     .collect();
-                let expected_reason = match reasons.as_slice() {
-                    [reason] if mx_nmm == 0.0 => *reason == QD1_SLAB_REASON,
+                let face_reason = qd1_face_reason(mc.elem);
+                let has_expected_reason = match reasons.as_slice() {
+                    [reason] if mx_nmm == 0.0 => *reason == face_reason,
                     [reason] => {
-                        reason.starts_with(QD1_SLAB_REASON)
+                        reason.starts_with(&face_reason)
                             && reason.contains("Mx")
                             && reason.contains("同時に作用")
                     }
                     _ => false,
                 };
                 assert!(
-                    expected_reason,
+                    has_expected_reason,
                     "部材 {:?} 位置 {xi}: {outcomes:?}",
                     mc.elem
                 );
@@ -1700,7 +1705,7 @@ fn design_check_covers_every_member() {
     let [CheckOutcome::Checked(ng), CheckOutcome::Skipped { reason }] = outcomes.as_slice() else {
         panic!("スラブ付き梁 {beam_id:?} 中央: {outcomes:?}");
     };
-    assert_eq!(reason, QD1_SLAB_REASON);
+    assert_eq!(*reason, qd1_face_reason(beam_id));
     assert!(ng
         .components
         .iter()
