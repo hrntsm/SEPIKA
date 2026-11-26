@@ -454,8 +454,24 @@ impl LoadedFrameSection {
         }
         verify_bending_stations(self, &stations)?;
         let span = [0.0, response_length];
-        StrongBendingResponse::new(self.map.frame(), response_length, self, &stations)
-            .span(span, span, false)
+        let mut bending =
+            StrongBendingResponse::new(self.map.frame(), response_length, self, &stations)
+                .span(span, span, false)?;
+        let end_max = bending
+            .end_moments_nmm
+            .into_iter()
+            .map(f64::abs)
+            .fold(0.0, f64::max);
+        // 最大候補には丸め誤差の範囲で近い値も残るため、候補に含まれるだけでは同値とみなさない。
+        bending.interior_maximum |= bending
+            .demand_peaks
+            .iter()
+            .all(|peak| peak.left[5].abs() <= end_max)
+            && bending
+                .demand_peaks
+                .iter()
+                .any(|peak| !peak.is_i_face && !peak.is_j_face && peak.left[5].abs() == end_max);
+        Ok(bending)
     }
 
     fn constant_plateau_axial_and_weak_bending(
@@ -509,6 +525,55 @@ fn quadratic_roots(a: f64, b: f64, c: f64) -> [Option<f64>; 2] {
 mod tests {
     use super::*;
     use sepika_core::ids::ElemId;
+
+    #[test]
+    fn time_history_confirms_an_exact_off_center_maximum_tied_with_an_end() {
+        let length_mm = 3000.0;
+        let frame =
+            LocalFrame::from_nodes([0.0; 3], [length_mm, 0.0, 0.0], [0.0, 1.0, 0.0]).unwrap();
+        let point =
+            |a, p| MemberLoad::manual(ElemId(0), [0.0, 1.0, 0.0], MemberLoadKind::Point { a, p });
+        for offset_n in [0.0, -1e-9, 1e-9] {
+            let loads = [point(1000.0, 500e3 + offset_n), point(2000.0, -500e3)];
+            let map = FrameDeadLoadMap::new(&loads, &frame, length_mm, 0.0, 0.0).unwrap();
+            let mut node_force = [0.0; 12];
+            node_force[1] = -250e3;
+            node_force[5] = -250e6;
+            let response = LoadedFrameSection::new(map, node_force);
+            let forces = response.recover(&[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]).unwrap();
+            if offset_n == 0.0 {
+                assert_eq!(
+                    forces
+                        .at
+                        .iter()
+                        .map(|(_, force)| force[5])
+                        .collect::<Vec<_>>(),
+                    [250e6, 0.0, 250e6, 0.0]
+                );
+            }
+
+            let actual = response
+                .full_span_strong_bending(length_mm, &forces)
+                .unwrap();
+            assert!(!actual.monotonic);
+            assert_eq!(actual.interior_maximum, offset_n == 0.0);
+            let interior = actual
+                .demand_peaks
+                .iter()
+                .find(|peak| peak.x_mm == 2000.0)
+                .unwrap();
+            assert_eq!(interior.left[5].total_cmp(&250e6), offset_n.total_cmp(&0.0));
+            let static_span = frame_strong_bending_span(
+                &frame,
+                length_mm,
+                [0.0, length_mm],
+                &[(1.0, &loads[0]), (1.0, &loads[1])],
+                &forces,
+            )
+            .unwrap();
+            assert!(!static_span.interior_maximum);
+        }
+    }
 
     #[test]
     fn a_verified_terminal_zero_does_not_hide_a_nonzero_shear_reversal() {

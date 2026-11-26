@@ -358,8 +358,10 @@ mod tests {
     fn off_center_and_plateau_maxima_are_not_treated_as_end_moment_gradients() {
         let model = model();
         let frame = frame();
-        for (load_n, end_moment_nmm, end_shear_n) in [(-300e3, 100e6, -100e3), (-200e3, 300e6, 0.0)]
-        {
+        for (load_n, i_mz_nmm, j_mz_nmm, j_qy_n, max_mz_nmm, expected_ratio) in [
+            (-300e3, 50e6, 50e6, -100e3, 250e6, 1.131_706_7),
+            (-200e3, 100e6, 300e6, 0.0, 300e6, 1.358_048_04),
+        ] {
             let point = MemberLoad::manual(
                 model.elements[0].id,
                 [1.0, 0.0, 0.0],
@@ -370,8 +372,8 @@ mod tests {
             );
             let response = MemberForces {
                 at: vec![
-                    (0.0, m_and_q(100e6, 200e3)),
-                    (1.0, m_and_q(end_moment_nmm, end_shear_n)),
+                    (0.0, m_and_q(i_mz_nmm, 200e3)),
+                    (1.0, m_and_q(j_mz_nmm, j_qy_n)),
                 ],
             };
             let history = collect(&model, 1, |_, _, lb| {
@@ -381,7 +383,12 @@ mod tests {
             let peak = history.peak.unwrap();
             assert!(!peak.monotonic, "{peak:?}");
             assert_eq!((peak.c, peak.p_lambda_b), (1.0, 0.3));
-            assert_eq!((peak.max_x_mm, peak.max_mz_nmm), (1000.0, 300e6));
+            assert_eq!((peak.max_x_mm, peak.max_mz_nmm), (1000.0, max_mz_nmm));
+            assert!((peak.fb_mpa - 192.385_42).abs() < 1e-5, "{peak:?}");
+            assert!(
+                (peak.ratio - expected_ratio).abs() < 1e-7 && peak.ratio > 1.0,
+                "{peak:?}"
+            );
         }
     }
 

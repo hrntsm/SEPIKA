@@ -959,6 +959,7 @@ impl App {
     }
 
     /// 選択したケースの保存計算モデルを返す。参照元情報のない旧結果でも生成入力自体は復号する。
+    #[cfg(feature = "gui")]
     pub(crate) fn recorded_time_history_model(
         &self,
         id: VibrationCaseId,
