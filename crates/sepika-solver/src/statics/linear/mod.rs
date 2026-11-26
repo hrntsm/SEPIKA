@@ -25,14 +25,12 @@ const AXIAL_DISABLE_FACTOR: f64 = 1.0e-6;
 
 /// 部材が柱用途かどうかを断面用途で判定する。
 fn is_column(elem: &ElementData, model: &Model) -> bool {
-    matches!(
-        elem.kind,
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-    ) && elem
-        .section
-        .and_then(|id| model.sections.get(id.index()))
-        .and_then(|section| section.frame_use)
-        == Some(FrameSectionUse::Column)
+    matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber)
+        && elem
+            .section
+            .and_then(|id| model.sections.get(id.index()))
+            .and_then(|section| section.frame_use)
+            == Some(FrameSectionUse::Column)
 }
 
 /// 長期応力解析で軸力を負担させない部材（対象: ブレース／柱）かどうかを、
@@ -44,7 +42,7 @@ fn is_axial_disabled_target(
 ) -> bool {
     match elem.kind {
         ElementKind::Brace { .. } => cfg.no_long_axial_brace,
-        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
+        ElementKind::Beam | ElementKind::Fiber => {
             cfg.no_long_axial_column && is_column(elem, model)
         }
         _ => false,
@@ -499,10 +497,7 @@ pub fn linear_static_once(model: &Model, lc: LoadCaseId) -> Result<StaticOnce, S
     for elem in model.elements.iter().filter(|elem| {
         elem.kind.is_primary_frame_support() || matches!(elem.kind, ElementKind::Brace { .. })
     }) {
-        if matches!(
-            elem.kind,
-            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-        ) {
+        if matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber) {
             sepika_element::frame::beam::composite_props_of(model, elem)
                 .map_err(SolveError::InvalidInput)?;
         }
@@ -959,7 +954,7 @@ fn recover_static(
 }
 
 /// 内力回収の欠落検出（線材）。
-/// 線材（梁・柱＝`Beam`、`Fiber`、`MultiSpring`、ブレース）は必ず
+/// 線材（梁・柱＝`Beam`、`Fiber`、ブレース）は必ず
 /// `ElementBehavior::recover_forces` を実装している必要がある。実装されていない
 /// 要素は `recover_forces` が `None` を返し、線形静解析のループで**黙って
 /// 読み飛ばされて** `member_forces` から丸ごと欠落する。欠落した部材は応力図・
@@ -979,10 +974,7 @@ pub(crate) fn ensure_line_member_forces(
         .filter(|e| {
             matches!(
                 e.kind,
-                ElementKind::Beam
-                    | ElementKind::Fiber
-                    | ElementKind::MultiSpring
-                    | ElementKind::Brace { .. }
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
             )
         })
         .filter(|e| !recovered.contains(&e.id))

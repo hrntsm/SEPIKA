@@ -4,12 +4,8 @@ use sepika_core::{ids::*, model::*};
 use sepika_job::{prepare::prepare_model_for_analysis, settings::AnalysisSettings};
 use sepika_load::{floor, slab_load};
 
-fn representations() -> [ElementKind; 3] {
-    [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ]
+fn representations() -> [ElementKind; 2] {
+    [ElementKind::Beam, ElementKind::Fiber]
 }
 
 fn anchors() -> SecondaryMemberEnds {

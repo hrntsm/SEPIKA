@@ -1827,11 +1827,7 @@ mod tests {
         let mut section = Section::zero(crate::ids::SectionId(0), "G1".into());
         section.frame_use = Some(FrameSectionUse::Girder);
         model.sections.push(section);
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let element = ElementData {
                 id: ElemId(0),
                 kind,

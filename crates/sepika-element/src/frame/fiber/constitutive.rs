@@ -29,7 +29,7 @@ struct SectionTrial {
 impl FiberBeam {
     pub(super) fn constitutive_failure(&self, error: &str) -> ! {
         panic!(
-            "Fiber/MS 要素 {:?}（節点 {:?}）の構成則を解けません: {error}",
+            "Fiber 要素 {:?}（節点 {:?}）の構成則を解けません: {error}",
             self.element_id, self.nodes
         )
     }

@@ -286,60 +286,58 @@ fn failed_trial_snapshot_checkpoint_revert_and_retry_preserve_axial_history() {
 }
 
 #[test]
-fn public_fiber_and_ms_factories_keep_axial_plasticity_for_fixed_pinned_and_semirigid_ends() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        for end in [
-            EndCondition::Fixed,
-            EndCondition::Pinned,
-            EndCondition::SemiRigid { k_theta: 1e9 },
-        ] {
-            let mut model = super::tests::build_test_model(Some(80000.0));
-            model.elements[0].kind = kind;
-            model.elements[0].end_cond = [end, end];
-            model.elements[0].plastic_zone = Some(300.0);
-            model.sections[0].j = 1e6;
-            model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
-            model.materials[0].category = sepika_core::model::MaterialCategory::Steel;
-            model.materials[0].young = 200000.0;
-            model.materials[0].fy = Some(200.0);
-            model.materials[0].fc = None;
-            let ctx = Ctx { model: &model };
-            let mut member = crate::factory::build_nonlinear_behavior(
-                &model.elements[0],
-                &model,
-                StrengthBasis::Nominal,
-                AnalysisKind::Incremental,
-                None,
-            );
-            let mut previous = [0.0; 12];
-            let initial = member.tangent_stiffness(&ctx).get(6, 6);
-            let mut reference = MenegottoPinto::new(200000.0, 200.0);
-            let (stress, et) = reference.trial(0.005);
-            let delta = 3000.0 * stress / 200000.0 + 600.0 * (0.005 - stress / 200000.0);
-            assert_relative_eq!(
-                axial(member.as_mut(), delta, &mut previous, false, &ctx),
-                20000.0 * stress,
-                epsilon = 1e-4
-            );
-            let serial_tangent =
-                20000.0 / (3000.0 / 200000.0 + 600.0 * (1.0 / et - 1.0 / 200000.0));
-            assert_relative_eq!(
-                member.tangent_stiffness(&ctx).get(6, 6),
-                serial_tangent,
-                epsilon = 1e-3,
-                max_relative = 1e-8
-            );
-            let force = axial(member.as_mut(), 6.0, &mut previous, true, &ctx);
-            assert!(
-                force > 0.0 && force < 0.7 * initial * 6.0,
-                "{kind:?} {end:?}: N={force}, Kel={initial}"
-            );
-            assert!(member.tangent_stiffness(&ctx).get(6, 6) < 0.2 * initial);
-            let unloaded = axial(member.as_mut(), 5.5, &mut previous, false, &ctx);
-            assert!(unloaded < force);
-            member.revert_state();
-            assert_relative_eq!(member.internal_force(&ctx).data[6], force, epsilon = 1e-5);
-        }
+fn public_fiber_factory_keep_axial_plasticity_for_fixed_pinned_and_semirigid_ends() {
+    let kind = ElementKind::Fiber;
+    for end in [
+        EndCondition::Fixed,
+        EndCondition::Pinned,
+        EndCondition::SemiRigid { k_theta: 1e9 },
+    ] {
+        let mut model = super::tests::build_test_model(Some(80000.0));
+        model.elements[0].kind = kind;
+        model.elements[0].end_cond = [end, end];
+        model.elements[0].plastic_zone = Some(300.0);
+        model.sections[0].j = 1e6;
+        model.sections[0].property_basis.j = sepika_core::model::PropertyBasis::Supplied;
+        model.materials[0].category = sepika_core::model::MaterialCategory::Steel;
+        model.materials[0].young = 200000.0;
+        model.materials[0].fy = Some(200.0);
+        model.materials[0].fc = None;
+        let ctx = Ctx { model: &model };
+        let mut member = crate::factory::build_nonlinear_behavior(
+            &model.elements[0],
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+            None,
+        );
+        let mut previous = [0.0; 12];
+        let initial = member.tangent_stiffness(&ctx).get(6, 6);
+        let mut reference = MenegottoPinto::new(200000.0, 200.0);
+        let (stress, et) = reference.trial(0.005);
+        let delta = 3000.0 * stress / 200000.0 + 600.0 * (0.005 - stress / 200000.0);
+        assert_relative_eq!(
+            axial(member.as_mut(), delta, &mut previous, false, &ctx),
+            20000.0 * stress,
+            epsilon = 1e-4
+        );
+        let serial_tangent = 20000.0 / (3000.0 / 200000.0 + 600.0 * (1.0 / et - 1.0 / 200000.0));
+        assert_relative_eq!(
+            member.tangent_stiffness(&ctx).get(6, 6),
+            serial_tangent,
+            epsilon = 1e-3,
+            max_relative = 1e-8
+        );
+        let force = axial(member.as_mut(), 6.0, &mut previous, true, &ctx);
+        assert!(
+            force > 0.0 && force < 0.7 * initial * 6.0,
+            "{kind:?} {end:?}: N={force}, Kel={initial}"
+        );
+        assert!(member.tangent_stiffness(&ctx).get(6, 6) < 0.2 * initial);
+        let unloaded = axial(member.as_mut(), 5.5, &mut previous, false, &ctx);
+        assert!(unloaded < force);
+        member.revert_state();
+        assert_relative_eq!(member.internal_force(&ctx).data[6], force, epsilon = 1e-5);
     }
 }
 
@@ -584,53 +582,52 @@ fn original_rc_factory_combined_point_two_mm_trial_reaches_material_equilibrium(
 }
 
 #[test]
-fn usual_factory_fiber_and_ms_failed_trials_keep_exact_committed_and_trial_states() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut model = super::tests::rc_fiber_model();
-        model.elements[0].kind = kind;
-        model.elements[0].plastic_zone = Some(250.0);
-        let ctx = Ctx { model: &model };
-        let mut member = crate::factory::build_nonlinear_behavior(
-            &model.elements[0],
-            &model,
-            StrengthBasis::Nominal,
-            AnalysisKind::Incremental,
-            None,
-        );
-        let mut previous = [0.0; 12];
-        axial(member.as_mut(), 0.001, &mut previous, true, &ctx);
-        let committed = member.serialize_checkpoint();
-        axial(member.as_mut(), 0.002, &mut previous, false, &ctx);
-        let trial = member.serialize_checkpoint();
-        let force = member.internal_force(&ctx).data;
-        let tangent = member.tangent_stiffness(&ctx).data;
-        for increment in [
-            vec![0.0; 11],
-            vec![f64::NAN; 12],
-            vec![f64::INFINITY; 12],
-            vec![1e300; 12],
-        ] {
-            let error = member
-                .update_state(
-                    &LocalVec {
-                        data: increment.into(),
-                    },
-                    true,
-                    &ctx,
-                )
-                .unwrap_err();
-            assert!(error.to_string().contains("Fiber/MS"), "{error}");
-            assert_eq!(member.serialize_checkpoint(), trial);
-            assert_eq!(member.internal_force(&ctx).data, force);
-            assert_eq!(member.tangent_stiffness(&ctx).data, tangent);
-        }
-        member.revert_state();
-        assert_eq!(member.serialize_checkpoint(), committed);
-        previous = [0.0; 12];
-        previous[6] = 0.001;
-        axial(member.as_mut(), 0.002, &mut previous, false, &ctx);
+fn usual_factory_fiber_failed_trials_keep_exact_committed_and_trial_states() {
+    let kind = ElementKind::Fiber;
+    let mut model = super::tests::rc_fiber_model();
+    model.elements[0].kind = kind;
+    model.elements[0].plastic_zone = Some(250.0);
+    let ctx = Ctx { model: &model };
+    let mut member = crate::factory::build_nonlinear_behavior(
+        &model.elements[0],
+        &model,
+        StrengthBasis::Nominal,
+        AnalysisKind::Incremental,
+        None,
+    );
+    let mut previous = [0.0; 12];
+    axial(member.as_mut(), 0.001, &mut previous, true, &ctx);
+    let committed = member.serialize_checkpoint();
+    axial(member.as_mut(), 0.002, &mut previous, false, &ctx);
+    let trial = member.serialize_checkpoint();
+    let force = member.internal_force(&ctx).data;
+    let tangent = member.tangent_stiffness(&ctx).data;
+    for increment in [
+        vec![0.0; 11],
+        vec![f64::NAN; 12],
+        vec![f64::INFINITY; 12],
+        vec![1e300; 12],
+    ] {
+        let error = member
+            .update_state(
+                &LocalVec {
+                    data: increment.into(),
+                },
+                true,
+                &ctx,
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("Fiber"), "{error}");
         assert_eq!(member.serialize_checkpoint(), trial);
+        assert_eq!(member.internal_force(&ctx).data, force);
+        assert_eq!(member.tangent_stiffness(&ctx).data, tangent);
     }
+    member.revert_state();
+    assert_eq!(member.serialize_checkpoint(), committed);
+    previous = [0.0; 12];
+    previous[6] = 0.001;
+    axial(member.as_mut(), 0.002, &mut previous, false, &ctx);
+    assert_eq!(member.serialize_checkpoint(), trial);
 }
 
 #[test]

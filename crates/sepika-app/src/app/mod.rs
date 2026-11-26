@@ -1727,10 +1727,7 @@ fn wall_has_src_boundary_column(
         wall.nodes.iter().copied().collect();
     model.elements.iter().any(|e| {
         if e.id == wall.id
-            || !matches!(
-                e.kind,
-                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-            )
+            || !matches!(e.kind, ElementKind::Beam | ElementKind::Fiber)
             || e.nodes.len() < 2
             || !e.nodes.iter().take(2).all(|n| wall_nodes.contains(n))
         {

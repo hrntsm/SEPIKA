@@ -104,16 +104,6 @@ fn loaded_behaviors(model: &Model, kind: ElementKind, wall: bool) -> Vec<Box<dyn
             member.configure_wall_release([0., 0., 1.]).unwrap();
             Box::new(member)
         }
-        ElementKind::MultiSpring => {
-            let mut member = sepika_element::frame::multi_spring::MultiSpringElement::new(
-                data,
-                model,
-                StrengthBasis::Nominal,
-                AnalysisKind::TimeHistory,
-            );
-            member.configure_wall_release([0., 0., 1.]).unwrap();
-            Box::new(member)
-        }
         _ => unreachable!(),
     };
     vec![member]
@@ -173,47 +163,44 @@ fn assert_same_state(
 
 #[test]
 fn failed_step_restores_loaded_plastic_snapshot_and_retry_matches_control() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        for wall in [false, true] {
-            let reason = "全体釣合いが反復上限 1 回までに収束しません";
-            let mut model = model(kind);
-            model.materials[0].fy = Some(235.);
-            let ctx = Ctx { model: &model };
-            let mut actual = loaded_behaviors(&model, kind, wall);
-            let mut control = loaded_behaviors(&model, kind, wall);
-            let elastic = actual[0].tangent_stiffness(&ctx).get(6, 6);
-            for batch in [&mut actual, &mut control] {
-                loaded_trial(&model, batch, 1.5, 0.5);
-                assert!(batch[0].tangent_stiffness(&ctx).get(6, 6) < elastic);
-                batch[0].commit_state();
-                loaded_trial(&model, batch, -0.2, 0.75);
-            }
-            let mut resumed = loaded_behaviors(&model, kind, wall);
-            resumed[0]
-                .deserialize_checkpoint(&actual[0].serialize_checkpoint())
-                .unwrap();
-            assert_same_state(&model, &actual, &resumed);
-            let snapshot = StateSnapshot::capture(&actual);
-            loaded_trial(&model, &mut actual, 0.7, 2.);
-            assert_ne!(
-                actual[0].serialize_checkpoint(),
-                control[0].serialize_checkpoint()
-            );
-            let error = rollback_failed_step(&mut actual, &snapshot, 2, 0.002, reason).to_string();
-            assert!(
-                error.contains("step 2")
-                    && error.contains("時刻 0.002 s")
-                    && error.contains(reason),
-                "{error}"
-            );
-            assert_same_state(&model, &actual, &control);
-            for batch in [&mut actual, &mut control, &mut resumed] {
-                loaded_trial(&model, batch, -0.1, 0.8);
-                batch[0].commit_state();
-            }
-            assert_same_state(&model, &actual, &control);
-            assert_same_state(&model, &actual, &resumed);
+    let kind = ElementKind::Fiber;
+    for wall in [false, true] {
+        let reason = "全体釣合いが反復上限 1 回までに収束しません";
+        let mut model = model(kind);
+        model.materials[0].fy = Some(235.);
+        let ctx = Ctx { model: &model };
+        let mut actual = loaded_behaviors(&model, kind, wall);
+        let mut control = loaded_behaviors(&model, kind, wall);
+        let elastic = actual[0].tangent_stiffness(&ctx).get(6, 6);
+        for batch in [&mut actual, &mut control] {
+            loaded_trial(&model, batch, 1.5, 0.5);
+            assert!(batch[0].tangent_stiffness(&ctx).get(6, 6) < elastic);
+            batch[0].commit_state();
+            loaded_trial(&model, batch, -0.2, 0.75);
         }
+        let mut resumed = loaded_behaviors(&model, kind, wall);
+        resumed[0]
+            .deserialize_checkpoint(&actual[0].serialize_checkpoint())
+            .unwrap();
+        assert_same_state(&model, &actual, &resumed);
+        let snapshot = StateSnapshot::capture(&actual);
+        loaded_trial(&model, &mut actual, 0.7, 2.);
+        assert_ne!(
+            actual[0].serialize_checkpoint(),
+            control[0].serialize_checkpoint()
+        );
+        let error = rollback_failed_step(&mut actual, &snapshot, 2, 0.002, reason).to_string();
+        assert!(
+            error.contains("step 2") && error.contains("時刻 0.002 s") && error.contains(reason),
+            "{error}"
+        );
+        assert_same_state(&model, &actual, &control);
+        for batch in [&mut actual, &mut control, &mut resumed] {
+            loaded_trial(&model, batch, -0.1, 0.8);
+            batch[0].commit_state();
+        }
+        assert_same_state(&model, &actual, &control);
+        assert_same_state(&model, &actual, &resumed);
     }
 }
 
@@ -262,115 +249,113 @@ fn public_entry_stops_at_nonfinite_step_after_a_converged_step() {
 
 #[test]
 fn long_term_full_load_commits_fixed_member_state_once_and_failure_restores_all_elements() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut model = model(kind);
-        for node in &mut model.nodes {
-            node.restraint = Dof6Mask::FIXED;
-        }
-        let map = DofMap::build(&model);
-        let reducer = Reducer::build(&model, &map);
-        let mut actual = loaded_behaviors(&model, kind, false);
-        let mut expected = loaded_behaviors(&model, kind, false);
-        loaded_trial(&model, &mut expected, 0., 1.);
-        expected[0].commit_state();
-        apply_long_term_static(
-            &model,
-            &map,
-            &reducer,
-            &mut actual,
-            &[],
-            &[vec![udl()]],
-            &mut [],
-        )
-        .unwrap();
-        assert_same_state(&model, &actual, &expected);
-
-        let mut duplicate = model.elements[0].clone();
-        duplicate.id = ElemId(11);
-        model.elements.push(duplicate.clone());
-        actual.push(build_nonlinear_behavior(
-            &duplicate,
-            &model,
-            StrengthBasis::Nominal,
-            sepika_element::factory::AnalysisKind::TimeHistory,
-            None,
-        ));
-        let before: Vec<_> = actual.iter().map(|b| b.serialize_checkpoint()).collect();
-        let mut invalid = udl();
-        invalid.elem = ElemId(11);
-        if let MemberLoadKind::Distributed { w1, w2, .. } = &mut invalid.kind {
-            *w1 = f64::MAX;
-            *w2 = f64::MAX;
-        }
-        let error = apply_long_term_static(
-            &model,
-            &map,
-            &reducer,
-            &mut actual,
-            &[],
-            &[vec![udl()], vec![invalid]],
-            &mut [],
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(
-            error.contains("長期荷重の初期載荷") && error.contains("11"),
-            "{error}"
-        );
-        assert_eq!(
-            actual
-                .iter()
-                .map(|b| b.serialize_checkpoint())
-                .collect::<Vec<_>>(),
-            before
-        );
+    let kind = ElementKind::Fiber;
+    let mut model = model(kind);
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask::FIXED;
     }
+    let map = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &map);
+    let mut actual = loaded_behaviors(&model, kind, false);
+    let mut expected = loaded_behaviors(&model, kind, false);
+    loaded_trial(&model, &mut expected, 0., 1.);
+    expected[0].commit_state();
+    apply_long_term_static(
+        &model,
+        &map,
+        &reducer,
+        &mut actual,
+        &[],
+        &[vec![udl()]],
+        &mut [],
+    )
+    .unwrap();
+    assert_same_state(&model, &actual, &expected);
+
+    let mut duplicate = model.elements[0].clone();
+    duplicate.id = ElemId(11);
+    model.elements.push(duplicate.clone());
+    actual.push(build_nonlinear_behavior(
+        &duplicate,
+        &model,
+        StrengthBasis::Nominal,
+        sepika_element::factory::AnalysisKind::TimeHistory,
+        None,
+    ));
+    let before: Vec<_> = actual.iter().map(|b| b.serialize_checkpoint()).collect();
+    let mut invalid = udl();
+    invalid.elem = ElemId(11);
+    if let MemberLoadKind::Distributed { w1, w2, .. } = &mut invalid.kind {
+        *w1 = f64::MAX;
+        *w2 = f64::MAX;
+    }
+    let error = apply_long_term_static(
+        &model,
+        &map,
+        &reducer,
+        &mut actual,
+        &[],
+        &[vec![udl()], vec![invalid]],
+        &mut [],
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        error.contains("長期荷重の初期載荷") && error.contains("11"),
+        "{error}"
+    );
+    assert_eq!(
+        actual
+            .iter()
+            .map(|b| b.serialize_checkpoint())
+            .collect::<Vec<_>>(),
+        before
+    );
 }
 
 #[test]
 fn initial_newton_factor_failure_restores_preexisting_trial_and_committed_state() {
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut model = model(kind);
-        for node in &mut model.nodes {
-            node.restraint = Dof6Mask::FIXED;
-        }
-        let mut disconnected = model.nodes[1].clone();
-        disconnected.id = NodeId(2);
-        disconnected.restraint = Dof6Mask(0b111110);
-        model.nodes.push(disconnected);
-        model
-            .constraints
-            .push(sepika_core::model::Constraint::RigidLink {
-                master: NodeId(2),
-                slaves: vec![],
-                dofs: Dof6Mask::FIXED,
-            });
-        let map = DofMap::build(&model);
-        let reducer = Reducer::build(&model, &map);
-        assert_eq!(map.n_active(), 1);
-        assert_eq!(reducer.n_indep, 1);
-        let mut actual = loaded_behaviors(&model, kind, false);
-        loaded_trial(&model, &mut actual, 0., 0.5);
-        actual[0].commit_state();
-        loaded_trial(&model, &mut actual, 0., 0.75);
-        let before = actual[0].serialize_checkpoint();
-        let mut displacement = [0.25];
-        let error = apply_long_term_static(
-            &model,
-            &map,
-            &reducer,
-            &mut actual,
-            &[1.],
-            &[vec![udl()]],
-            &mut displacement,
-        )
-        .unwrap_err()
-        .to_string();
-        assert!(
-            error.contains("長期荷重の初期載荷") && error.contains("factor"),
-            "{error}"
-        );
-        assert_eq!(actual[0].serialize_checkpoint(), before);
-        assert_eq!(displacement, [0.25]);
+    let kind = ElementKind::Fiber;
+    let mut model = model(kind);
+    for node in &mut model.nodes {
+        node.restraint = Dof6Mask::FIXED;
     }
+    let mut disconnected = model.nodes[1].clone();
+    disconnected.id = NodeId(2);
+    disconnected.restraint = Dof6Mask(0b111110);
+    model.nodes.push(disconnected);
+    model
+        .constraints
+        .push(sepika_core::model::Constraint::RigidLink {
+            master: NodeId(2),
+            slaves: vec![],
+            dofs: Dof6Mask::FIXED,
+        });
+    let map = DofMap::build(&model);
+    let reducer = Reducer::build(&model, &map);
+    assert_eq!(map.n_active(), 1);
+    assert_eq!(reducer.n_indep, 1);
+    let mut actual = loaded_behaviors(&model, kind, false);
+    loaded_trial(&model, &mut actual, 0., 0.5);
+    actual[0].commit_state();
+    loaded_trial(&model, &mut actual, 0., 0.75);
+    let before = actual[0].serialize_checkpoint();
+    let mut displacement = [0.25];
+    let error = apply_long_term_static(
+        &model,
+        &map,
+        &reducer,
+        &mut actual,
+        &[1.],
+        &[vec![udl()]],
+        &mut displacement,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        error.contains("長期荷重の初期載荷") && error.contains("factor"),
+        "{error}"
+    );
+    assert_eq!(actual[0].serialize_checkpoint(), before);
+    assert_eq!(displacement, [0.25]);
 }

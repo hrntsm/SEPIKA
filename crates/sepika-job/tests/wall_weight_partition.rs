@@ -187,11 +187,7 @@ fn preparation_reports_invalid_native_wall_rebar_strength() {
     }
 }
 
-const WALL_SYSTEM_KINDS: [ElementKind; 3] = [
-    ElementKind::Beam,
-    ElementKind::Fiber,
-    ElementKind::MultiSpring,
-];
+const WALL_SYSTEM_KINDS: [ElementKind; 2] = [ElementKind::Beam, ElementKind::Fiber];
 
 fn wall_system_mass_fixture(kind: ElementKind, generated: bool) -> Model {
     let mut model = if generated {

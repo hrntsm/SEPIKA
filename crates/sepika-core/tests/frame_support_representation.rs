@@ -73,11 +73,7 @@ fn ブレース壁パネルは床壁の閉領域を支持しない() {
 
 #[test]
 fn 床同一レベルと壁同一面と二節点制限は全表現で維持する() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut floor = fixture::rectangle(false, [kind; 4]);
         floor.nodes[1].coord[2] = 1000.;
         assert!(
@@ -124,7 +120,7 @@ fn 未割当断面でも幾何列挙に新しい用途必須条件を加えな�
 }
 
 #[test]
-fn fiber_ms主架構でも二次材の両端支持だけが割当領域を分割する() {
+fn fiber主架構でも二次材の両端支持だけが割当領域を分割する() {
     use sepika_core::ids::*;
     for wall in [false, true] {
         for kinds in fixture::representations() {

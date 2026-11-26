@@ -92,9 +92,7 @@ pub(super) fn element_draw_shape(kind: sepika_core::model::ElementKind) -> DrawS
     match kind {
         K::Wall | K::Shell => DrawShape::Polygon,
         K::PanelZone => DrawShape::None,
-        K::Beam | K::Fiber | K::MultiSpring | K::Brace { .. } | K::NodalSpring | K::Damper => {
-            DrawShape::Line
-        }
+        K::Beam | K::Fiber | K::Brace { .. } | K::NodalSpring | K::Damper => DrawShape::Line,
     }
 }
 
@@ -1994,7 +1992,6 @@ mod tests {
         for kind in [
             ElementKind::Beam,
             ElementKind::Fiber,
-            ElementKind::MultiSpring,
             ElementKind::Brace {
                 tension_only: false,
             },

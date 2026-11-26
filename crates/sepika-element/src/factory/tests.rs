@@ -157,11 +157,7 @@ fn wall_girder_role_keeps_elastic_stiffness_force_mass_and_hinge_contract() {
     let mut bare_model = model.clone();
     bare_model.elements.retain(|e| e.kind != ElementKind::Wall);
     let bare = BeamElement::new(&model.elements[0], &bare_model);
-    for element_kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for element_kind in [ElementKind::Beam, ElementKind::Fiber] {
         for regime in [
             ForceRegime::Auto,
             ForceRegime::UniaxialBendingShear,
@@ -404,11 +400,7 @@ fn elastic_wall_girder_requires_positive_finite_actual_young_for_every_section()
         model.materials.push(material);
         model.sections[0].material = Some(MaterialId(1));
         model.sections[0].frame_use = Some(FrameSectionUse::Girder);
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             model.elements[0].kind = kind;
             model.materials[1].young = 20000.0;
             assert!(
@@ -434,11 +426,7 @@ fn elastic_wall_girder_requires_positive_finite_actual_young_for_every_section()
 #[test]
 fn elastic_wall_girders_reject_invalid_adopted_shear_modulus() {
     use crate::frame::beam::BeamElement;
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = elastic_wall_girder_model();
         for data in &mut model.elements[..2] {
             data.kind = kind;
@@ -484,11 +472,7 @@ fn elastic_wall_girders_reject_invalid_adopted_shear_modulus() {
 
 #[test]
 fn elastic_wall_girder_factory_rejects_common_geometry_category_and_mass_errors() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         for invalid in 0..3 {
             let mut model = elastic_wall_girder_model();
             model.elements[0].kind = kind;
@@ -1117,7 +1101,7 @@ fn test_resolve_member_hysteresis_two_slots() {
     );
 }
 
-/// ファイバー・MS のコンクリート除荷則の解決を検証する。
+/// ファイバーのコンクリート除荷則の解決を検証する。
 /// - 既定: 増分=逆行型、時刻歴=原点指向型（壁は増分=原点指向型）
 /// - コンクリート履歴として解釈できない指定（武田型等）は既定へフォールバック
 #[test]
@@ -1158,11 +1142,7 @@ fn test_resolve_fiber_concrete_hysteresis_defaults_and_overrides() {
         resolve_wall_concrete_hysteresis(&col, &model, AnalysisKind::TimeHistory),
         HysteresisModel::OriginOriented
     );
-    for element_kind in [
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-        ElementKind::Wall,
-    ] {
+    for element_kind in [ElementKind::Fiber, ElementKind::Wall] {
         let mut data = col.clone();
         data.kind = element_kind;
         for incremental in HysteresisModel::ALL {
@@ -1475,11 +1455,7 @@ fn axial_factor_preserves_nonaxial_stiffness_and_mass() {
     let mut model = make_diaphragm_model();
     model.materials[0].density = 7.85e-9;
     let ctx = crate::behavior::Ctx { model: &model };
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let data = ElementData {
             id: ElemId(0),
             kind,
@@ -1667,11 +1643,7 @@ pub(super) fn wall_side_column_factory_model() -> Model {
 #[test]
 fn direct_side_column_factories_reject_conflicting_endpoint_and_section_ownership() {
     let model = wall_side_column_factory_model();
-    for representation in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for representation in [ElementKind::Beam, ElementKind::Fiber] {
         for conflict in 0..4 {
             let mut data = model.elements[3].clone();
             data.kind = representation;
@@ -1757,11 +1729,7 @@ fn side_column_construction_clones_allow_representation_reverse_ends_and_origina
     use crate::behavior::Ctx;
     let model = wall_side_column_factory_model();
     let ctx = Ctx { model: &model };
-    for representation in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for representation in [ElementKind::Beam, ElementKind::Fiber] {
         for reverse in [false, true] {
             for condition in [
                 EndCondition::Fixed,
@@ -1808,11 +1776,7 @@ fn side_column_construction_clones_allow_representation_reverse_ends_and_origina
 #[test]
 fn wall_side_column_factories_preserve_initial_stiffness_release_and_axial_history() {
     use crate::behavior::{Ctx, LocalVec};
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = wall_side_column_factory_model();
         model.elements[3].kind = kind;
         let data = &model.elements[3];
@@ -1874,14 +1838,7 @@ fn wall_side_column_factories_preserve_initial_stiffness_release_and_axial_histo
             8,
         )
         .unwrap();
-        assert_eq!(
-            view.model,
-            if kind == ElementKind::MultiSpring {
-                AnalysisHingeModel::MultiSpring
-            } else {
-                AnalysisHingeModel::Fiber
-            }
-        );
+        assert_eq!(view.model, AnalysisHingeModel::Fiber);
         for sign in [-1.0, 1.0] {
             let mut member = build_nonlinear_behavior(
                 data,
@@ -1924,11 +1881,7 @@ fn wall_side_column_factories_preserve_initial_stiffness_release_and_axial_histo
 
 #[test]
 fn wall_side_column_rejections_agree_on_analysis_ids_and_reasons() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = wall_side_column_factory_model();
         model.elements[3].kind = kind;
         for analysis in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
@@ -1967,11 +1920,7 @@ fn wall_side_column_rejections_agree_on_analysis_ids_and_reasons() {
 #[test]
 fn wall_side_columns_do_not_connect_out_of_scope_rc_panel_for_three_representations() {
     use crate::behavior::Ctx;
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = wall_side_column_factory_model();
         model.elements[3].kind = kind;
         let mut panel = model.elements[3].clone();
@@ -2084,11 +2033,7 @@ fn panel_757_valid_steel_joint_couples_each_factory_representation_once() {
         "{reason}"
     );
 
-    for representation in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for representation in [ElementKind::Beam, ElementKind::Fiber] {
         model.elements[0].kind = representation;
         let mut bare = model.clone();
         bare.elements.pop();
@@ -2158,7 +2103,6 @@ fn eccentric_beam_factory_preserves_work_stiffness_mass_and_committed_member_for
         (ElementKind::Beam, ForceRegime::UniaxialBendingShear),
         (ElementKind::Beam, ForceRegime::AxialBendingInteract),
         (ElementKind::Fiber, ForceRegime::Auto),
-        (ElementKind::MultiSpring, ForceRegime::Auto),
     ] {
         for offset in [-100.0, 0.0, 100.0] {
             let mut model = eccentric_member_model(kind, offset);
@@ -2396,11 +2340,7 @@ fn eccentric_axis_uses_node_level_and_reports_each_unresolved_input() {
 
 #[test]
 fn eccentric_nonlinear_member_loads_keep_section_forces_separate_from_node_transfer() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let model = eccentric_member_model(kind, 100.0);
         let mut behavior = build_nonlinear_behavior(
             &model.elements[0],
@@ -2469,7 +2409,6 @@ fn xyz_end_offsets_keep_axial_equilibrium_and_physical_end_moments_in_all_formul
                 (ElementKind::Beam, ForceRegime::UniaxialBendingShear),
                 (ElementKind::Beam, ForceRegime::AxialBendingInteract),
                 (ElementKind::Fiber, ForceRegime::Auto),
-                (ElementKind::MultiSpring, ForceRegime::Auto),
             ] {
                 for nonlinear in [false, true] {
                     for reversed in [false, true] {

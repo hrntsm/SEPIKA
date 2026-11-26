@@ -494,12 +494,9 @@ fn draw_component_with_view(
         let p0 = proj.project(p_i);
         let p1 = proj.project(p_j);
 
-        let grad = component.moment_gradient_source().filter(|_| {
-            matches!(
-                elem.kind,
-                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-            )
-        });
+        let grad = component
+            .moment_gradient_source()
+            .filter(|_| matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber));
         let samples: Vec<(f64, f64)> = if let Some(q) = grad {
             let tri: Vec<(f64, f64, f64)> = mf
                 .at

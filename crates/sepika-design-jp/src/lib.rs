@@ -317,11 +317,9 @@ impl MemberKind {
         match (elem.kind, kind) {
             (sepika_core::model::ElementKind::Brace { .. }, MemberKind::Brace)
             | (sepika_core::model::ElementKind::Beam, MemberKind::Girder | MemberKind::Column)
-            | (sepika_core::model::ElementKind::Fiber, MemberKind::Girder | MemberKind::Column)
-            | (
-                sepika_core::model::ElementKind::MultiSpring,
-                MemberKind::Girder | MemberKind::Column,
-            ) => Ok(kind),
+            | (sepika_core::model::ElementKind::Fiber, MemberKind::Girder | MemberKind::Column) => {
+                Ok(kind)
+            }
             _ => Err(format!("要素 {} と断面用途が不整合です", elem.id.0)),
         }
     }

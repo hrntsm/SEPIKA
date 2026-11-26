@@ -69,10 +69,7 @@ pub(crate) fn compute_static_indeterminacy(model: &Model, dir: SeismicDir) -> us
     for e in &model.elements {
         let is_line = matches!(
             e.kind,
-            ElementKind::Beam
-                | ElementKind::Fiber
-                | ElementKind::MultiSpring
-                | ElementKind::Brace { .. }
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
         );
         if !is_line || e.nodes.len() != 2 {
             continue;

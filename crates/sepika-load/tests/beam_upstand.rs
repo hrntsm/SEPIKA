@@ -658,11 +658,7 @@ fn 同じ実配置の対応梁材種と要素表現で嵩上げ増分を変え�
             steel_weight_factor: 1.3,
             ..Default::default()
         });
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             m.elements[0].kind = kind;
             assert!((weight(&m) - 2880.).abs() < 1e-7);
         }

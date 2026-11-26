@@ -389,10 +389,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             };
             if section.is_cft()
                 && (!section.cft_frame_use_allowed()
-                    || !matches!(
-                        e.kind,
-                        ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-                    ))
+                    || !matches!(e.kind, ElementKind::Beam | ElementKind::Fiber))
             {
                 cft_on_invalid_use.push(e.id);
             }
@@ -464,12 +461,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     let zero_shear: Vec<ElemId> = model
         .elements
         .iter()
-        .filter(|e| {
-            matches!(
-                e.kind,
-                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-            )
-        })
+        .filter(|e| matches!(e.kind, ElementKind::Beam | ElementKind::Fiber))
         .filter(|e| {
             e.section
                 .and_then(|sid| model.sections.get(sid.index()))
@@ -491,12 +483,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     let invalid_composite_fc: Vec<ElemId> = model
         .elements
         .iter()
-        .filter(|e| {
-            matches!(
-                e.kind,
-                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-            )
-        })
+        .filter(|e| matches!(e.kind, ElementKind::Beam | ElementKind::Fiber))
         .filter_map(|e| {
             let shape = model.element_section(e)?.shape.as_ref()?;
             if !matches!(
@@ -555,12 +542,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     let invalid_cft_steel: Vec<ElemId> = model
         .elements
         .iter()
-        .filter(|e| {
-            matches!(
-                e.kind,
-                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-            )
-        })
+        .filter(|e| matches!(e.kind, ElementKind::Beam | ElementKind::Fiber))
         .filter_map(|e| {
             let section = model.element_section(e)?;
             if section.frame_use != Some(sepika_core::model::FrameSectionUse::Column) {
@@ -596,10 +578,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
 
     let mut cft_groups = std::collections::HashMap::new();
     for e in &model.elements {
-        if !matches!(
-            e.kind,
-            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-        ) {
+        if !matches!(e.kind, ElementKind::Beam | ElementKind::Fiber) {
             continue;
         }
         let Some(section) = model.element_section(e).filter(|section| section.is_cft()) else {
@@ -632,10 +611,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     }
 
     for e in &model.elements {
-        if matches!(
-            e.kind,
-            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-        ) {
+        if matches!(e.kind, ElementKind::Beam | ElementKind::Fiber) {
             if !model
                 .element_section(e)
                 .and_then(|s| s.shape.as_ref())
@@ -663,12 +639,7 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     let composite_fallback: Vec<ElemId> = model
         .elements
         .iter()
-        .filter(|e| {
-            matches!(
-                e.kind,
-                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-            )
-        })
+        .filter(|e| matches!(e.kind, ElementKind::Beam | ElementKind::Fiber))
         .filter(|e| {
             model
                 .element_section(e)

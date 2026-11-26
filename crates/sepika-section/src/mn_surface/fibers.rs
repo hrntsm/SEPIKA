@@ -3,7 +3,7 @@
 use sepika_core::error::RebarGeometryError;
 use sepika_core::section_shape::{concrete_young_modulus, RebarPoint, RebarSize, SectionShape};
 
-use super::types::{FiberRegion, PlasticFiber, StrengthParams, YieldModelKind};
+use super::types::{FiberRegion, PlasticFiber, StrengthParams};
 
 const NOMINAL_SLAB_WIDTH_MM: f64 = 1000.0;
 
@@ -467,32 +467,17 @@ fn rebar_fibers_from_points(
     }
 }
 
-/// 断面形状からファイバ/バネ配置を生成する。
-/// `kind` により解像度が変わる（細分割と粗い配置）。
+/// 全塑性評価用に断面形状をファイバーへ分割する。
 /// 実配筋を生成できない場合は [`RebarGeometryError`] を返す。
 pub fn plastic_fibers(
     shape: &SectionShape,
     strength: &StrengthParams,
-    kind: YieldModelKind,
 ) -> Result<Vec<PlasticFiber>, RebarGeometryError> {
-    let fine = !matches!(kind, YieldModelKind::MultiSpring);
-    let target = if fine {
-        max_dimension(shape) / 40.0
-    } else {
-        max_dimension(shape) / 4.0
-    };
-    let ring = if fine {
-        AnnulusRes {
-            n_theta: 48,
-            n_r_thin: 4,
-            n_r_solid: 12,
-        }
-    } else {
-        AnnulusRes {
-            n_theta: 8,
-            n_r_thin: 1,
-            n_r_solid: 2,
-        }
+    let target = max_dimension(shape) / 40.0;
+    let ring = AnnulusRes {
+        n_theta: 48,
+        n_r_thin: 4,
+        n_r_solid: 12,
     };
     plastic_fibers_at(shape, strength, target, ring)
 }
@@ -1099,7 +1084,7 @@ mod rounded_tests {
                 concrete_fc: fc,
                 ..StrengthParams::default()
             };
-            let fibers = plastic_fibers(&shape, &strength, YieldModelKind::MultiSpring).unwrap();
+            let fibers = plastic_fibers(&shape, &strength).unwrap();
             assert!(!fibers.is_empty());
             let expected = concrete_young_modulus(fc);
             assert!(

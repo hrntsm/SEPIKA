@@ -16,8 +16,6 @@ pub enum ElementKind {
     Shell,
     /// ファイバー梁要素（積分点断面のファイバー分割による端部塑性化域モデル）。
     Fiber,
-    /// マルチスプリング梁要素（端部塑性化域を軸ばね群で置換したモデル）。
-    MultiSpring,
     Wall,
     PanelZone,
     /// 一般ブレース（軸材。軸剛性のみのトラス要素。材料力学）。
@@ -46,12 +44,12 @@ pub enum ElementKind {
 impl ElementKind {
     /// 床・壁の物理的な主架構支持材を表す解析種別。用途・節点数・幾何の条件は呼出側で判定する。
     pub fn is_primary_frame_support(self) -> bool {
-        matches!(self, Self::Beam | Self::Fiber | Self::MultiSpring)
+        matches!(self, Self::Beam | Self::Fiber)
     }
 
     /// 自重の柱梁接続・仕上げ・被覆を扱う線材種別か（ブレースを除く）。
     pub fn is_weight_frame(self) -> bool {
-        matches!(self, Self::Beam | Self::Fiber | Self::MultiSpring)
+        matches!(self, Self::Beam | Self::Fiber)
     }
 
     /// 剛性の算定に断面（`ElementData::section`）の割当が必須な要素種別か。
@@ -62,7 +60,7 @@ impl ElementKind {
     /// 割り当てられているか」と「その断面が材料を持つか」の 2 段になる
     /// （`Model::element_material`）。
     ///
-    /// 必須なのは線材（梁・ファイバー梁・マルチスプリング梁・ブレース）と
+    /// 必須なのは線材（梁・ファイバー梁・ブレース）と
     /// 面材（シェル・壁）で、断面諸元と材料定数から剛性を作るため、いずれかが
     /// 未割当だとゼロ剛性となり解析が成立しない。
     ///
@@ -80,7 +78,6 @@ impl ElementKind {
         match self {
             ElementKind::Beam
             | ElementKind::Fiber
-            | ElementKind::MultiSpring
             | ElementKind::Brace { .. }
             | ElementKind::Shell
             | ElementKind::Wall => true,
@@ -348,10 +345,7 @@ impl ElementData {
     pub fn validate_frame_node_count(&self) -> Result<(), crate::error::CoreError> {
         if matches!(
             self.kind,
-            ElementKind::Beam
-                | ElementKind::Fiber
-                | ElementKind::MultiSpring
-                | ElementKind::Brace { .. }
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
         ) && (self.nodes.len() != 2 || self.nodes[0] == self.nodes[1])
         {
             return Err(crate::error::CoreError::InvalidInput(format!(

@@ -53,7 +53,7 @@ fn damper_and_fiber_model(
         j: 1e6,
         depth: 200.0,
         width: 100.0,
-        ..Section::zero(SectionId(0), "batch Fiber/MS".into())
+        ..Section::zero(SectionId(0), "batch Fiber".into())
     };
     Model {
         nodes,
@@ -122,83 +122,81 @@ fn real_batch(model: &Model) -> Vec<Box<dyn ElementBehavior>> {
 }
 
 #[test]
-fn real_damper_and_failed_fiber_ms_batch_preserves_uncommitted_state_in_both_modes() {
+fn real_damper_and_failed_fiber_batch_preserves_uncommitted_state_in_both_modes() {
     use sepika_core::model::{DamperKind, ElementKind};
     for parallel in [false, true] {
         for damper_kind in [DamperKind::Maxwell, DamperKind::HystereticBilinear] {
-            for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-                for trial_displacement in [1.0, 20.0] {
-                    let model = damper_and_fiber_model(kind, damper_kind);
-                    let dofmap = DofMap::build(&model);
-                    let ctx = Ctx { model: &model };
-                    let mut behaviors = real_batch(&model);
-                    let mut du = LocalVec {
-                        data: smallvec::smallvec![0.0;12],
-                    };
-                    du.data[8] = 1.0;
-                    behaviors[0].update_state(&du, true, &ctx).unwrap();
-                    du.data[8] = trial_displacement - 1.0;
-                    behaviors[0].update_state(&du, false, &ctx).unwrap();
-                    let checkpoints: Vec<_> =
-                        behaviors.iter().map(|b| b.serialize_checkpoint()).collect();
-                    let forces: Vec<_> = behaviors
-                        .iter()
-                        .map(|b| b.internal_force(&ctx).data)
-                        .collect();
-                    let tangents: Vec<_> = behaviors
+            let kind = ElementKind::Fiber;
+            for trial_displacement in [1.0, 20.0] {
+                let model = damper_and_fiber_model(kind, damper_kind);
+                let dofmap = DofMap::build(&model);
+                let ctx = Ctx { model: &model };
+                let mut behaviors = real_batch(&model);
+                let mut du = LocalVec {
+                    data: smallvec::smallvec![0.0;12],
+                };
+                du.data[8] = 1.0;
+                behaviors[0].update_state(&du, true, &ctx).unwrap();
+                du.data[8] = trial_displacement - 1.0;
+                behaviors[0].update_state(&du, false, &ctx).unwrap();
+                let checkpoints: Vec<_> =
+                    behaviors.iter().map(|b| b.serialize_checkpoint()).collect();
+                let forces: Vec<_> = behaviors
+                    .iter()
+                    .map(|b| b.internal_force(&ctx).data)
+                    .collect();
+                let tangents: Vec<_> = behaviors
+                    .iter()
+                    .map(|b| b.tangent_stiffness(&ctx).data)
+                    .collect();
+                let mut bad = vec![0.0; dofmap.n_active()];
+                bad[dofmap.active(8).unwrap() as usize] = 30.0;
+                bad[dofmap.active(3 * 6 + 3).unwrap() as usize] = f64::MAX;
+                let error = apply_du_trial_mode(&model, &dofmap, &mut behaviors, &bad, parallel)
+                    .unwrap_err();
+                assert!(
+                    error.contains("ElemId(1)") && error.contains("構成則"),
+                    "{error}"
+                );
+                for (i, b) in behaviors.iter().enumerate() {
+                    assert_eq!(b.serialize_checkpoint(), checkpoints[i]);
+                    assert_eq!(b.internal_force(&ctx).data, forces[i]);
+                    assert_eq!(b.tangent_stiffness(&ctx).data, tangents[i]);
+                }
+                let mut control = real_batch(&model);
+                for (b, cp) in control.iter_mut().zip(&checkpoints) {
+                    b.deserialize_checkpoint(cp).unwrap();
+                }
+                for batch in [&mut behaviors, &mut control] {
+                    for b in batch.iter_mut() {
+                        b.commit_state();
+                    }
+                    let committed: Vec<_> =
+                        batch.iter().map(|b| b.serialize_checkpoint()).collect();
+                    let committed_forces: Vec<_> =
+                        batch.iter().map(|b| b.internal_force(&ctx).data).collect();
+                    let committed_tangents: Vec<_> = batch
                         .iter()
                         .map(|b| b.tangent_stiffness(&ctx).data)
                         .collect();
-                    let mut bad = vec![0.0; dofmap.n_active()];
-                    bad[dofmap.active(8).unwrap() as usize] = 30.0;
-                    bad[dofmap.active(3 * 6 + 3).unwrap() as usize] = f64::MAX;
-                    let error =
-                        apply_du_trial_mode(&model, &dofmap, &mut behaviors, &bad, parallel)
-                            .unwrap_err();
-                    assert!(
-                        error.contains("ElemId(1)") && error.contains("構成則"),
-                        "{error}"
+                    let mut good = vec![0.0; dofmap.n_active()];
+                    good[dofmap.active(8).unwrap() as usize] = 5.0;
+                    apply_du_trial_mode(&model, &dofmap, batch, &good, parallel).unwrap();
+                    for (i, b) in batch.iter_mut().enumerate() {
+                        b.revert_state();
+                        assert_eq!(b.serialize_checkpoint(), committed[i]);
+                        assert_eq!(b.internal_force(&ctx).data, committed_forces[i]);
+                        assert_eq!(b.tangent_stiffness(&ctx).data, committed_tangents[i]);
+                    }
+                    apply_du_trial_mode(&model, &dofmap, batch, &good, parallel).unwrap();
+                }
+                for (b, c) in behaviors.iter().zip(&control) {
+                    assert_eq!(b.serialize_checkpoint(), c.serialize_checkpoint());
+                    assert_eq!(b.internal_force(&ctx).data, c.internal_force(&ctx).data);
+                    assert_eq!(
+                        b.tangent_stiffness(&ctx).data,
+                        c.tangent_stiffness(&ctx).data
                     );
-                    for (i, b) in behaviors.iter().enumerate() {
-                        assert_eq!(b.serialize_checkpoint(), checkpoints[i]);
-                        assert_eq!(b.internal_force(&ctx).data, forces[i]);
-                        assert_eq!(b.tangent_stiffness(&ctx).data, tangents[i]);
-                    }
-                    let mut control = real_batch(&model);
-                    for (b, cp) in control.iter_mut().zip(&checkpoints) {
-                        b.deserialize_checkpoint(cp).unwrap();
-                    }
-                    for batch in [&mut behaviors, &mut control] {
-                        for b in batch.iter_mut() {
-                            b.commit_state();
-                        }
-                        let committed: Vec<_> =
-                            batch.iter().map(|b| b.serialize_checkpoint()).collect();
-                        let committed_forces: Vec<_> =
-                            batch.iter().map(|b| b.internal_force(&ctx).data).collect();
-                        let committed_tangents: Vec<_> = batch
-                            .iter()
-                            .map(|b| b.tangent_stiffness(&ctx).data)
-                            .collect();
-                        let mut good = vec![0.0; dofmap.n_active()];
-                        good[dofmap.active(8).unwrap() as usize] = 5.0;
-                        apply_du_trial_mode(&model, &dofmap, batch, &good, parallel).unwrap();
-                        for (i, b) in batch.iter_mut().enumerate() {
-                            b.revert_state();
-                            assert_eq!(b.serialize_checkpoint(), committed[i]);
-                            assert_eq!(b.internal_force(&ctx).data, committed_forces[i]);
-                            assert_eq!(b.tangent_stiffness(&ctx).data, committed_tangents[i]);
-                        }
-                        apply_du_trial_mode(&model, &dofmap, batch, &good, parallel).unwrap();
-                    }
-                    for (b, c) in behaviors.iter().zip(&control) {
-                        assert_eq!(b.serialize_checkpoint(), c.serialize_checkpoint());
-                        assert_eq!(b.internal_force(&ctx).data, c.internal_force(&ctx).data);
-                        assert_eq!(
-                            b.tangent_stiffness(&ctx).data,
-                            c.tangent_stiffness(&ctx).data
-                        );
-                    }
                 }
             }
         }

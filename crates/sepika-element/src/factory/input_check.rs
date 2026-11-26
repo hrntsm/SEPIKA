@@ -248,7 +248,7 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 /// 非線形解析で降伏を扱う要素は、次の強度入力も検査する:
 /// - 耐震壁（`Wall`）: 面内せん断の終局強度 Qu
 ///   （[`crate::wall::wall_element::WallElement::wall_shear_capacity_issue`]）
-/// - 線材（`Beam` / `Fiber` / `MultiSpring`）: 断面と主材料の適合、曲げ・せん断の終局耐力に要する材料強度
+/// - 線材（`Beam` / `Fiber`）: 断面と主材料の適合、曲げ・せん断の終局耐力に要する材料強度
 ///
 /// 壁上下の剛梁は主筋材料の区分と、弾性剛性・形状・質量に必要な入力を検査する。
 ///
@@ -324,7 +324,7 @@ fn nonlinear_input_issues_with_basis(
                     elem, model, basis, kind,
                 )
             }
-            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring => {
+            ElementKind::Beam | ElementKind::Fiber => {
                 member_rebar_material_strength_issue(elem, model, basis)
                     .or_else(|| {
                         if kind == sepika_core::model::AnalysisKind::Incremental {
@@ -978,12 +978,9 @@ pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Optio
     let material = model.element_material(data)?;
     match crate::frame::beam::BeamElement::resolve_properties(data, model) {
         Ok(beam) => elastic_young_issue(data, beam.e).or_else(|| {
-            matches!(
-                data.kind,
-                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-            )
-            .then(|| beam.validate_stiffness().err())
-            .flatten()
+            matches!(data.kind, ElementKind::Beam | ElementKind::Fiber)
+                .then(|| beam.validate_stiffness().err())
+                .flatten()
         }),
         Err(error) => {
             let composite = matches!(
@@ -1003,10 +1000,8 @@ pub fn elastic_stiffness_input_issue(data: &ElementData, model: &Model) -> Optio
                 return Some(reason);
             }
             let g = material.shear_modulus();
-            (matches!(
-                data.kind,
-                ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-            ) && (!g.is_finite() || g <= 0.0))
+            (matches!(data.kind, ElementKind::Beam | ElementKind::Fiber)
+                && (!g.is_finite() || g <= 0.0))
                 .then_some(error)
         }
     }

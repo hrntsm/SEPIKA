@@ -672,11 +672,7 @@ fn length_weighted_rc_slab_and_eccentric_connection_keep_independent_stiffness_a
         for element in &mut model.elements {
             element.end_offsets_mm = [[0.0, 0.0, e_mm]; 2];
         }
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut shifted = model.elements[0].clone();
             shifted.kind = kind;
             model.validate_local_frames().unwrap();

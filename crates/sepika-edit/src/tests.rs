@@ -9223,7 +9223,6 @@ fn add_member_rejects_frame_node_counts_without_changing_model_or_history() {
     for kind in [
         ElementKind::Beam,
         ElementKind::Fiber,
-        ElementKind::MultiSpring,
         ElementKind::Brace { tension_only: true },
     ] {
         let mut model = seeded_model(4, 1);

@@ -6,11 +6,9 @@ pub fn representations() -> Vec<[ElementKind; 4]> {
     vec![
         [Beam; 4],
         [Fiber; 4],
-        [MultiSpring; 4],
         [Fiber, Beam, Beam, Beam],
-        [MultiSpring, Beam, Beam, Beam],
-        [Beam, Fiber, MultiSpring, Fiber],
-        [Beam, Fiber, Beam, MultiSpring],
+        [Beam, Fiber, Fiber, Fiber],
+        [Beam, Fiber, Beam, Fiber],
     ]
 }
 

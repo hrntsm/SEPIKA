@@ -355,11 +355,9 @@ fn mixed_egui_design_table_counts_only_checked_positions_as_checked() {
 }
 
 #[test]
-fn lip_channel_geometry_shared_mass_and_beam_fiber_ms_reject_without_fallback() {
+fn lip_channel_geometry_shared_mass_and_beam_fiber_reject_without_fallback() {
     use sepika_core::model::{AnalysisKind, ElementKind, SectionMassProperties};
-    use sepika_element::frame::{
-        beam::BeamElement, fiber::FiberBeam, multi_spring::MultiSpringElement,
-    };
+    use sepika_element::frame::{beam::BeamElement, fiber::FiberBeam};
     let mut model = lip_model();
     let material = model.element_material(&model.elements[0]).unwrap();
     let section = &model.sections[0];
@@ -375,11 +373,7 @@ fn lip_channel_geometry_shared_mass_and_beam_fiber_ms_reject_without_fallback() 
             thick: 2.3,
         });
         model.sections[0].property_basis = Default::default();
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut element = model
                 .elements
                 .iter()
@@ -405,15 +399,6 @@ fn lip_channel_geometry_shared_mass_and_beam_fiber_ms_reject_without_fallback() 
             .err()
             .unwrap()
             .contains("H=150"));
-            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                MultiSpringElement::new(
-                    &element,
-                    &model,
-                    sepika_element::factory::StrengthBasis::default(),
-                    AnalysisKind::Incremental,
-                )
-            }))
-            .is_err());
         }
     }
 }

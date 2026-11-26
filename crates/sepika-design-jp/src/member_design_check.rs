@@ -254,10 +254,7 @@ fn is_rc_column_target(model: &Model, elem: &ElementData) -> bool {
 fn frame_check_target(elem: &ElementData) -> bool {
     matches!(
         elem.kind,
-        ElementKind::Beam
-            | ElementKind::Fiber
-            | ElementKind::MultiSpring
-            | ElementKind::Brace { .. }
+        ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
     )
 }
 

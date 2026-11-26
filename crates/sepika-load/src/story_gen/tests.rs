@@ -2709,14 +2709,13 @@ fn test_wall_self_weight_uses_clear_dimensions_of_boundary_members() {
     let factor = ((l - 2.0 * 250.0) / l) * ((h - 2.0 * 350.0) / h);
     let w_total = 2.4e-9 * 150.0 * (l * h * factor) * GRAVITY_MM_S2;
     let expected = w_total / 2.0;
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut mixed = model.clone();
-        mixed.elements[4].kind = kind;
-        mixed.elements[6].kind = kind;
-        let actual = generate_stories(&mixed, None).unwrap();
-        assert_eq!(actual.stories, gen.stories);
-        assert_eq!(actual.rep_nodes, gen.rep_nodes);
-    }
+    let kind = ElementKind::Fiber;
+    let mut mixed = model.clone();
+    mixed.elements[4].kind = kind;
+    mixed.elements[6].kind = kind;
+    let actual = generate_stories(&mixed, None).unwrap();
+    assert_eq!(actual.stories, gen.stories);
+    assert_eq!(actual.rep_nodes, gen.rep_nodes);
     assert!(
         (gen.stories[1].seismic_weight.unwrap() - expected).abs() < 1e-6,
         "got={}, expected={}",
@@ -3367,43 +3366,39 @@ fn 明示非線形線材は混在接続でもbeamとdl階重量物理質量が�
         let cfg = baseline.load_cfg.clone().unwrap_or_default();
         let expected_dl = crate::self_weight::self_weight_case_content(&baseline, &cfg).unwrap();
         assert!(!expected_dl.0.is_empty() || !expected_dl.1.is_empty());
-        for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-            for mixed in [false, true] {
-                let mut model = baseline.clone();
-                for (i, elem) in model.elements.iter_mut().enumerate() {
-                    if elem.kind == ElementKind::Beam && (!mixed || i % 2 == 0) {
-                        elem.kind = kind;
-                    }
+        let kind = ElementKind::Fiber;
+        for mixed in [false, true] {
+            let mut model = baseline.clone();
+            for (i, elem) in model.elements.iter_mut().enumerate() {
+                if elem.kind == ElementKind::Beam && (!mixed || i % 2 == 0) {
+                    elem.kind = kind;
                 }
-                let dl = crate::self_weight::self_weight_case_content(&model, &cfg).unwrap();
-                assert_eq!(dl, expected_dl, "{kind:?} mixed={mixed}");
-                for method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
-                    let expected =
-                        generate_stories_with_opts(&baseline, &[], true, method).unwrap();
-                    let direct = generate_stories_with_opts(&model, &[], true, method).unwrap();
-                    assert_eq!(direct.stories, expected.stories);
-                    assert_eq!(direct.rep_nodes, expected.rep_nodes);
-                    model.load_cases = vec![LoadCase {
-                        origin: Default::default(),
-                        id: LoadCaseId(0),
-                        name: "DL".into(),
-                        kind: LoadCaseKind::Dead,
-                        nodal: dl.0.clone(),
-                        member: dl.1.clone(),
-                    }];
-                    let synced =
-                        generate_stories_with_synced_self_weight(&model, &[LoadCaseId(0)], method)
-                            .unwrap();
-                    for (a, b) in direct.stories.iter().zip(&synced.stories) {
-                        assert!(
-                            (a.seismic_weight.unwrap() - b.seismic_weight.unwrap()).abs() < 1e-6
-                        );
-                        let (a, b) = (a.dynamic_mass.unwrap(), b.dynamic_mass.unwrap());
-                        assert!((a.mass_equiv_weight_n - b.mass_equiv_weight_n).abs() < 1e-6);
-                        assert!((a.inertia_t_mm2 - b.inertia_t_mm2).abs() < 1e-6);
-                        for d in 0..2 {
-                            assert!((a.center_xy_mm[d] - b.center_xy_mm[d]).abs() < 1e-8);
-                        }
+            }
+            let dl = crate::self_weight::self_weight_case_content(&model, &cfg).unwrap();
+            assert_eq!(dl, expected_dl, "{kind:?} mixed={mixed}");
+            for method in [MassMethod::CorrectedLumped, MassMethod::LumpedOnly] {
+                let expected = generate_stories_with_opts(&baseline, &[], true, method).unwrap();
+                let direct = generate_stories_with_opts(&model, &[], true, method).unwrap();
+                assert_eq!(direct.stories, expected.stories);
+                assert_eq!(direct.rep_nodes, expected.rep_nodes);
+                model.load_cases = vec![LoadCase {
+                    origin: Default::default(),
+                    id: LoadCaseId(0),
+                    name: "DL".into(),
+                    kind: LoadCaseKind::Dead,
+                    nodal: dl.0.clone(),
+                    member: dl.1.clone(),
+                }];
+                let synced =
+                    generate_stories_with_synced_self_weight(&model, &[LoadCaseId(0)], method)
+                        .unwrap();
+                for (a, b) in direct.stories.iter().zip(&synced.stories) {
+                    assert!((a.seismic_weight.unwrap() - b.seismic_weight.unwrap()).abs() < 1e-6);
+                    let (a, b) = (a.dynamic_mass.unwrap(), b.dynamic_mass.unwrap());
+                    assert!((a.mass_equiv_weight_n - b.mass_equiv_weight_n).abs() < 1e-6);
+                    assert!((a.inertia_t_mm2 - b.inertia_t_mm2).abs() < 1e-6);
+                    for d in 0..2 {
+                        assert!((a.center_xy_mm[d] - b.center_xy_mm[d]).abs() < 1e-8);
                     }
                 }
             }
@@ -4942,7 +4937,6 @@ fn high_density_primary_kinds_and_cft_steel_reference_reject_design_only() {
     for kind in [
         ElementKind::Beam,
         ElementKind::Fiber,
-        ElementKind::MultiSpring,
         ElementKind::Brace {
             tension_only: false,
         },

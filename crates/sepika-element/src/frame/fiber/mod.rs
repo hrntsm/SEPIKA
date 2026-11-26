@@ -1357,7 +1357,7 @@ impl FiberBeam {
     ) -> Result<(), crate::behavior::ElementUpdateError> {
         crate::behavior::validate_trial_increment(du, self.n_dof()).map_err(|error| {
             crate::behavior::ElementUpdateError(format!(
-                "Fiber/MS 要素 {:?}（節点 {:?}）: {error}",
+                "Fiber 要素 {:?}（節点 {:?}）: {error}",
                 self.element_id, self.nodes
             ))
         })?;
@@ -1366,7 +1366,7 @@ impl FiberBeam {
             .transpose()
             .map_err(|error| {
                 crate::behavior::ElementUpdateError(format!(
-                    "Fiber/MS 要素 {:?}（節点 {:?}）の部材荷重: {error}",
+                    "Fiber 要素 {:?}（節点 {:?}）の部材荷重: {error}",
                     self.element_id, self.nodes
                 ))
             })?;
@@ -1398,7 +1398,7 @@ impl FiberBeam {
         {
             self.restore_state(previous.as_ref());
             return Err(crate::behavior::ElementUpdateError(format!(
-                "Fiber/MS 要素 {:?}（節点 {:?}）の構成則を解けません: {error}",
+                "Fiber 要素 {:?}（節点 {:?}）の構成則を解けません: {error}",
                 self.element_id, self.nodes
             )));
         }
@@ -1485,7 +1485,7 @@ impl ElementBehavior for FiberBeam {
         _absolute_loads: &[MemberLoad],
     ) -> Result<Option<crate::behavior::LoadedFrameResponse>, String> {
         Err(format!(
-            "Fiber/MS 要素 {:?}: 非線形要素の線形荷重応答は未対応です。状態更新後の試行応答を使用してください",
+            "Fiber 要素 {:?}: 非線形要素の線形荷重応答は未対応です。状態更新後の試行応答を使用してください",
             self.element_id
         ))
     }
@@ -1500,10 +1500,10 @@ impl ElementBehavior for FiberBeam {
             self.rigid_i,
             self.rigid_j,
         )
-        .map_err(|error| format!("Fiber/MS 要素 {:?}の部材荷重応答: {error}", self.element_id))?;
+        .map_err(|error| format!("Fiber 要素 {:?}の部材荷重応答: {error}", self.element_id))?;
         self.current_response_from_map(&map)
             .map(Some)
-            .map_err(|error| format!("Fiber/MS 要素 {:?}の部材荷重応答: {error}", self.element_id))
+            .map_err(|error| format!("Fiber 要素 {:?}の部材荷重応答: {error}", self.element_id))
     }
 
     fn update_state_with_member_loads(
@@ -1515,7 +1515,7 @@ impl ElementBehavior for FiberBeam {
     ) -> Result<(), crate::behavior::ElementUpdateError> {
         if !self.flex_length.is_finite() || self.flex_length <= 0.0 {
             return Err(crate::behavior::ElementUpdateError(format!(
-                "Fiber/MS 要素 {:?}: 可撓長が不正です",
+                "Fiber 要素 {:?}: 可撓長が不正です",
                 self.element_id
             )));
         }
@@ -1797,7 +1797,7 @@ impl ElementBehavior for FiberBeam {
                         .any(|value| !value.is_finite())
                 {
                     return Err(crate::behavior::CheckpointError::Decode(
-                        "Fiber/MS状態の寸法が一致しません".into(),
+                        "Fiber状態の寸法が一致しません".into(),
                     ));
                 }
                 let trial_load_map = self

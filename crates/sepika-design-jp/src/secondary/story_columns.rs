@@ -295,7 +295,7 @@ pub(super) fn story_layer(model: &Model, top_story: StoryId) -> Option<Layer> {
 }
 
 fn is_mixed_member(elem: &sepika_core::model::ElementData) -> bool {
-    matches!(elem.kind, ElementKind::Fiber | ElementKind::MultiSpring)
+    matches!(elem.kind, ElementKind::Fiber)
 }
 
 fn has_mixed_columns(model: &Model) -> bool {

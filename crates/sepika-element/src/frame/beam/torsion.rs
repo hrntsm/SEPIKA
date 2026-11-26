@@ -24,10 +24,7 @@ pub enum TorsionReleaseSkip {
 fn is_line_member(kind: ElementKind) -> bool {
     matches!(
         kind,
-        ElementKind::Beam
-            | ElementKind::Fiber
-            | ElementKind::MultiSpring
-            | ElementKind::Brace { .. }
+        ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
     )
 }
 

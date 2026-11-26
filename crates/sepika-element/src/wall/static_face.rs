@@ -380,11 +380,7 @@ mod tests {
 
     #[test]
     fn frame_representations_preserve_common_face_and_reject_invalid_bindings() {
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let mut model = fixture::expanded_model();
             for frame in &mut model.elements[..4] {
                 frame.kind = kind;

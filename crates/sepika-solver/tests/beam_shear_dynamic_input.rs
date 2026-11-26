@@ -138,11 +138,7 @@ fn nodal_mass_assembly_preserves_mass_with_a_concrete_slab_on_steel_girders() {
 
 #[test]
 fn public_dynamic_entries_reject_invalid_beam_g_before_initial_resume_and_cached_solver_builds() {
-    for kind in [
-        ElementKind::Beam,
-        ElementKind::Fiber,
-        ElementKind::MultiSpring,
-    ] {
+    for kind in [ElementKind::Beam, ElementKind::Fiber] {
         let baseline = cantilever(kind);
         let dofmap = DofMap::build(&baseline);
         let reducer = Reducer::build(&baseline, &dofmap);

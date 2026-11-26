@@ -77,10 +77,8 @@ impl ShearLimit {
 impl ShearCapacity {
     /// 増分解析のS造・RC造線材に使う断面の条件。今回の対象外は `None`。
     pub fn from_model(model: &Model, elem: &ElementData) -> Result<Option<Self>, String> {
-        if !matches!(
-            elem.kind,
-            ElementKind::Beam | ElementKind::Fiber | ElementKind::MultiSpring
-        ) || super::beam::is_elastic_wall_girder(model, elem)
+        if !matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber)
+            || super::beam::is_elastic_wall_girder(model, elem)
         {
             return Ok(None);
         }

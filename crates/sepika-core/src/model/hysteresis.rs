@@ -76,7 +76,7 @@ pub fn default_member_hysteresis(rc_like: bool) -> HysteresisModel {
     }
 }
 
-/// ファイバー断面・MS 要素のコンクリート除荷則の既定。
+/// ファイバー断面のコンクリート除荷則の既定。
 /// 増分解析は逆行型、時刻歴応答解析は原点指向型。
 pub fn default_fiber_concrete_hysteresis(kind: AnalysisKind) -> HysteresisModel {
     match kind {

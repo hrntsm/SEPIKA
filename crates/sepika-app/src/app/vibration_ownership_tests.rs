@@ -1485,3 +1485,121 @@ fn time_history_missing_phase_y_rejects_csv_and_library_before_requesting_analys
         std::fs::remove_file(path).unwrap();
     }
 }
+
+#[test]
+fn removed_multi_spring_in_saved_inputs_keeps_the_main_model_and_unaffected_results() {
+    use sepika_io::ovika::{load_ovika, save_ovika, OvikaExtras};
+
+    let mut app = ownership_portal();
+    app.run_linear_static(LoadCaseId(0));
+    let static_key = ResultInputKey::Static(StaticCaseKey::User(LoadCaseId(0)));
+    assert!(app.require_result_input(static_key.clone()).is_ok());
+    for marker in [11.0, 21.0] {
+        let input = app
+            .time_history_input(ownership_wave(marker, 0.02), format!("{marker}.csv"))
+            .unwrap();
+        app.apply_time_history_result(Ok(ownership_result(marker)), input.source);
+    }
+    let [retired, kept] = app
+        .core
+        .model
+        .vibration_cases
+        .iter()
+        .map(|case| case.id)
+        .collect::<Vec<_>>()[..]
+    else {
+        panic!("二つの時刻歴ケースが必要");
+    };
+    app.create_study("旧要素指定の確認".into(), vec![]).unwrap();
+    let path = test_tmp().join("removed-line-member-saved-inputs.ovika");
+    app.save_project_to(path.clone());
+
+    let mut loaded = App::default();
+    loaded.open_project_from(path.clone());
+    assert!(loaded
+        .require_result_input(ResultInputKey::TimeHistory(retired))
+        .is_ok());
+    assert!(loaded
+        .require_result_input(ResultInputKey::TimeHistory(kept))
+        .is_ok());
+    assert_eq!(loaded.studies.items.len(), 1);
+
+    let contents = load_ovika(&path).unwrap();
+    let mut saved: SavedResults =
+        rmp_serde::from_slice(contents.results.as_deref().unwrap()).unwrap();
+    let key = ResultInputKey::TimeHistory(retired);
+    let (_, input_bytes) = saved
+        .bundle
+        .input_records
+        .iter_mut()
+        .find(|(k, _)| *k == key)
+        .unwrap();
+    let mut input: serde_json::Value = rmp_serde::from_slice(input_bytes).unwrap();
+    input["model"]["elements"][0]["kind"] = serde_json::json!("MultiSpring");
+    *input_bytes = rmp_serde::to_vec_named(&input).unwrap();
+    let results = rmp_serde::to_vec_named(&saved).unwrap();
+
+    let mut studies: serde_json::Value =
+        rmp_serde::from_slice(contents.studies.as_deref().unwrap()).unwrap();
+    studies["items"][0]["baseline"]["model"]["elements"][0]["kind"] =
+        serde_json::json!("MultiSpring");
+    let studies = rmp_serde::to_vec_named(&studies).unwrap();
+    for (bad_result, bad_study) in [(true, false), (false, true)] {
+        save_ovika(
+            &path,
+            &contents.model,
+            OvikaExtras {
+                results: if bad_result {
+                    Some(&results)
+                } else {
+                    contents.results.as_deref()
+                },
+                studies: if bad_study {
+                    Some(&studies)
+                } else {
+                    contents.studies.as_deref()
+                },
+                preparation: contents.preparation.as_deref(),
+                analysis_settings: contents.analysis_settings.as_deref(),
+            },
+        )
+        .unwrap();
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        assert!(
+            reopened.core.scoped.last_error.is_none(),
+            "{:?}",
+            reopened.core.scoped.last_error
+        );
+        assert_eq!(
+            reopened.core.model.elements[0].kind,
+            sepika_core::model::ElementKind::Beam
+        );
+        assert!(reopened.require_result_input(static_key.clone()).is_ok());
+        assert!(reopened
+            .require_result_input(ResultInputKey::TimeHistory(kept))
+            .is_ok());
+        let notice = reopened.core.scoped.last_notice.as_deref().unwrap();
+        if bad_result {
+            assert!(notice.contains("該当結果を復元しません"), "{notice}");
+            assert!(reopened.require_result_input(key.clone()).is_err());
+            assert!(reopened
+                .core
+                .scoped
+                .results
+                .as_ref()
+                .unwrap()
+                .time_history_for(retired)
+                .is_none());
+            assert_eq!(reopened.studies.items.len(), 1);
+        } else {
+            assert!(
+                notice.contains("保存された検討") && notice.contains("MultiSpring"),
+                "{notice}"
+            );
+            assert!(reopened.require_result_input(key.clone()).is_ok());
+            assert!(reopened.studies.items.is_empty());
+        }
+    }
+    std::fs::remove_file(path).unwrap();
+}

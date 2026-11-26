@@ -1153,7 +1153,6 @@ mod static_analysis_settings_tests {
         use sepika_core::model::ElementKind;
         for kind in [
             ElementKind::Fiber,
-            ElementKind::MultiSpring,
             ElementKind::Brace { tension_only: true },
         ] {
             let factor = if matches!(kind, ElementKind::Brace { .. }) {

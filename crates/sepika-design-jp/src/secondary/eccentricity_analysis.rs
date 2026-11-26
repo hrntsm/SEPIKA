@@ -56,7 +56,7 @@ fn resolved_columns(model: &Model, story: StoryId) -> Result<Vec<StoryColumn>, S
                 let [p0, p1] = actual_axis_ends(model, elem)?;
                 if p0[..2] != p1[..2] || p0[2] == p1[2] {
                     return Err(format!(
-                        "Re: 階{}の柱{}の分割部材{}の実材軸が鉛直でないため、ファイバー柱・マルチスプリング柱を含む連なりの水平剛性を算定できません",
+                        "Re: 階{}の柱{}の分割部材{}の実材軸が鉛直でないため、ファイバー柱を含む連なりの水平剛性を算定できません",
                         story.0, column.top_elem.0, elem.id.0
                     ));
                 }
@@ -66,7 +66,7 @@ fn resolved_columns(model: &Model, story: StoryId) -> Result<Vec<StoryColumn>, S
                     .any(|(end, node)| end[..2] != model.nodes[node.index()].coord[..2])
                 {
                     return Err(format!(
-                        "Re: 階{}の柱{}の分割部材{}の実材軸端と接続節点の平面位置が異なるため、ファイバー柱・マルチスプリング柱を含む連なりの水平剛性を算定できません",
+                        "Re: 階{}の柱{}の分割部材{}の実材軸端と接続節点の平面位置が異なるため、ファイバー柱を含む連なりの水平剛性を算定できません",
                         story.0, column.top_elem.0, elem.id.0
                     ));
                 }
@@ -589,8 +589,8 @@ mod tests {
     use sepika_solver::statics::linear::linear_static_once;
 
     #[test]
-    fn static_rigidity_and_eccentricity_agree_for_beam_fiber_and_multi_spring_columns() {
-        use ElementKind::{Beam, Fiber, MultiSpring};
+    fn static_rigidity_and_eccentricity_agree_for_beam_fiber_columns() {
+        use ElementKind::{Beam, Fiber};
 
         let (mut model, story) = build_symmetric_frame(None);
         model.elements.truncate(4);
@@ -645,11 +645,7 @@ mod tests {
         }
         assert!((ordinary.3.re_x.as_ref().unwrap() - 1200.0 / 18e6_f64.sqrt()).abs() < 1e-10);
         assert!((ordinary.3.re_y.as_ref().unwrap() - 600.0 / 18e6_f64.sqrt()).abs() < 1e-10);
-        for kinds in [
-            [Fiber; 4],
-            [MultiSpring; 4],
-            [Beam, Fiber, MultiSpring, Beam],
-        ] {
+        for kinds in [[Fiber; 4], [Beam, Fiber, Fiber, Beam]] {
             for (elem, kind) in model.elements.iter_mut().zip(kinds) {
                 elem.kind = kind;
             }
@@ -710,7 +706,7 @@ mod tests {
         upper.nodes[0] = NodeId(8);
         model.elements.push(upper);
         model.elements[0].nodes[1] = NodeId(8);
-        model.elements[0].kind = ElementKind::MultiSpring;
+        model.elements[0].kind = ElementKind::Fiber;
         let [x, y] = [
             fabricate_static([10.0, 0.0], [[0.0, 0.0, 1000.0]; 4]),
             fabricate_static([0.0, 10.0], [[0.0, 1000.0, 0.0]; 4]),
@@ -778,28 +774,27 @@ mod tests {
                 center_of_gravity_from_axial(&model, story, &x),
                 Err(reason.clone())
             );
-            for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-                for elem in [0, 1] {
-                    model.elements[elem].kind = kind;
-                    assert_eq!(
-                        story_eccentricity_from_analysis(&model, story, &x, &y, None),
-                        Err(reason.clone())
-                    );
-                    model.elements[elem].kind = ElementKind::Beam;
-                }
-                model.elements[0].kind = kind;
-                let drifts =
-                    crate::secondary::stiffness_ratio::column_drifts(&model, &x.disp, 0, story)
-                        .unwrap();
+            let kind = ElementKind::Fiber;
+            for elem in [0, 1] {
+                model.elements[elem].kind = kind;
                 assert_eq!(
-                    drifts
-                        .into_iter()
-                        .map(|drift| drift.elem)
-                        .collect::<Vec<_>>(),
-                    [ElemId(1), ElemId(2), ElemId(3)]
+                    story_eccentricity_from_analysis(&model, story, &x, &y, None),
+                    Err(reason.clone())
                 );
-                model.elements[0].kind = ElementKind::Beam;
+                model.elements[elem].kind = ElementKind::Beam;
             }
+            model.elements[0].kind = kind;
+            let drifts =
+                crate::secondary::stiffness_ratio::column_drifts(&model, &x.disp, 0, story)
+                    .unwrap();
+            assert_eq!(
+                drifts
+                    .into_iter()
+                    .map(|drift| drift.elem)
+                    .collect::<Vec<_>>(),
+                [ElemId(1), ElemId(2), ElemId(3)]
+            );
+            model.elements[0].kind = ElementKind::Beam;
         }
     }
 
@@ -946,25 +941,20 @@ mod tests {
             assert!(reason.contains("上階SLの柱8"), "{reason}");
             let mixed_elements: &[usize] = if has_branch { &[0, 8, 9] } else { &[0, 8] };
             for &elem in mixed_elements {
-                for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-                    model.elements[elem].kind = kind;
-                    let reason =
-                        story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap_err();
-                    assert!(
-                        reason.contains("柱8") && reason.contains("層境界のSL節点どうし"),
-                        "{reason}"
-                    );
-                }
+                let kind = ElementKind::Fiber;
+                model.elements[elem].kind = kind;
+                let reason =
+                    story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap_err();
+                assert!(
+                    reason.contains("柱8") && reason.contains("層境界のSL節点どうし"),
+                    "{reason}"
+                );
                 model.elements[elem].kind = ElementKind::Beam;
             }
         }
 
         model.elements.retain(|elem| elem.id != ElemId(0));
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             model
                 .elements
                 .iter_mut()
@@ -1027,11 +1017,7 @@ mod tests {
                 copy_column_forces(&mut response, &[ElemId(8), ElemId(9)]);
                 response
             });
-            for kind in [
-                ElementKind::Beam,
-                ElementKind::Fiber,
-                ElementKind::MultiSpring,
-            ] {
+            for kind in [ElementKind::Beam, ElementKind::Fiber] {
                 model.elements[0].kind = kind;
                 let re = story_eccentricity_from_analysis(&model, story, &x, &y, None);
                 let drift = column_drifts(&model, &x.disp, 0, story);
@@ -1083,11 +1069,7 @@ mod tests {
         independent.elements.truncate(8);
         let expected = story_eccentricity_from_analysis(&independent, story, &x, &y, None).unwrap();
 
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             model.elements[4].kind = kind;
             let old = max_column_drift(&model, &x.disp, 0, story)
                 .unwrap()
@@ -1115,33 +1097,31 @@ mod tests {
         upper_story_column.nodes = [NodeId(10), NodeId(11)].into_iter().collect();
         model.elements.push(upper_story_column);
         for index in [1, 10] {
-            for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-                model.elements[index].kind = kind;
-                assert_eq!(
-                    story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap(),
-                    ordinary_re
-                );
-                assert_eq!(
-                    column_drifts(&model, &x.disp, 0, story).unwrap(),
-                    ordinary_drifts
-                );
-            }
+            let kind = ElementKind::Fiber;
+            model.elements[index].kind = kind;
+            assert_eq!(
+                story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap(),
+                ordinary_re
+            );
+            assert_eq!(
+                column_drifts(&model, &x.disp, 0, story).unwrap(),
+                ordinary_drifts
+            );
             model.elements[index].kind = ElementKind::Beam;
         }
         for index in [0, 8, 9] {
-            for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-                model.elements[index].kind = kind;
-                let columns = column_drifts(&model, &x.disp, 0, story).unwrap();
-                assert_eq!(columns.len(), 4);
-                let max = max_column_drift(&model, &x.disp, 0, story)
-                    .unwrap()
-                    .unwrap();
-                assert_eq!((max.elem, max.drift), (ElemId(0), 18.0));
-                assert_eq!(
-                    story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap(),
-                    expected
-                );
-            }
+            let kind = ElementKind::Fiber;
+            model.elements[index].kind = kind;
+            let columns = column_drifts(&model, &x.disp, 0, story).unwrap();
+            assert_eq!(columns.len(), 4);
+            let max = max_column_drift(&model, &x.disp, 0, story)
+                .unwrap()
+                .unwrap();
+            assert_eq!((max.elem, max.drift), (ElemId(0), 18.0));
+            assert_eq!(
+                story_eccentricity_from_analysis(&model, story, &x, &y, None).unwrap(),
+                expected
+            );
             model.elements[index].kind = ElementKind::Beam;
         }
     }

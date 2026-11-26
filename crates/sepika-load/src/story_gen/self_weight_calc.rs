@@ -11,7 +11,7 @@ use sepika_core::section_shape::SectionShape;
 use super::geom::{dist3, is_vertical_pair, polygon_area_3d};
 use super::*;
 
-/// 節点 → その節点に取り付く線材（Beam/Fiber/MultiSpring/Brace、2 節点以上）の `model.elements`
+/// 節点 → その節点に取り付く線材（Beam/Fiber/Brace、2 節点以上）の `model.elements`
 /// 添字一覧。`has_column_below`/`max_depth`（柱脚に接続する部材の探索）を
 /// O(柱数×要素数) から O(1) 参照へ落とすための事前索引（`enumerate_self_weight`
 /// の主ループ前に 1 回だけ構築する）。
@@ -76,7 +76,7 @@ pub(crate) enum SelfWeightItem {
     /// - `matrix_mass_equiv` は通常部のうち解析の質量行列（部材密度質量）が受け持つ分 [N]。
     ///   付加重量・下端付加分は質量行列に対応物がないため含めない。躯体分（CFT は鋼管部）
     ///   の割増増分と付加重量が `mass_equiv − matrix_mass_equiv` に残る。
-    /// - `is_column` は 2 節点の鉛直 Beam/Fiber/MultiSpring（ブレースは false）。
+    /// - `is_column` は 2 節点の鉛直 Beam/Fiber（ブレースは false）。
     Line {
         elem_idx: usize,
         load: f64,
@@ -111,7 +111,7 @@ pub(crate) enum SelfWeightItem {
 
 /// モデル全要素の自重を列挙する（§柱梁自重・§壁自重・§ダンパー自重）。
 ///
-/// - 線材（柱・梁・ブレース, Beam/Fiber/MultiSpring/Brace）: 設計重量（設計単位体積
+/// - 線材（柱・梁・ブレース, Beam/Fiber/Brace）: 設計重量（設計単位体積
 ///   重量×A×L。付加線重量・仕上げを含む）と物理質量相当（質量行列と同じ総断面・
 ///   節点間長で物理密度×g を算定し、鉄骨重量割増を掛けて付加重量を足したもの）を
 ///   別々に持つ。
@@ -121,9 +121,9 @@ pub(crate) enum SelfWeightItem {
 ///   節点間距離（RC/SRC 大梁は柱面間距離、
 ///   RC/SRC 柱は床上面から床上面、S 梁・柱は節点間距離）。
 ///   矩形RC/SRC大梁は、支持する囲まれた床板との実重複を設計重量から控除する。
-///   §柱の長さ: コンクリート柱（2 節点の鉛直 Beam/Fiber/MultiSpring）で下端へ別の柱
-///   （同じく 2 節点の鉛直 Beam/Fiber/MultiSpring）が接続しない場合、下端節点に取り付く
-///   非鉛直 Beam/Fiber/MultiSpring の最大せい [mm] に相当する重量を
+///   §柱の長さ: コンクリート柱（2 節点の鉛直 Beam/Fiber）で下端へ別の柱
+///   （同じく 2 節点の鉛直 Beam/Fiber）が接続しない場合、下端節点に取り付く
+///   非鉛直 Beam/Fiber の最大せい [mm] に相当する重量を
 ///   追加自重として下端節点だけへ加算する（通常自重は上下へ 1/2 ずつ。柱以外・S 柱・
 ///   下階柱ありは 0。ブレースは柱とみなさない）。総重量は `w·(L+Dmax)` で保存する。
 ///   ギャップ対応: 鋼材のみ `load_cfg.effective_steel_factor()`（鉄骨重量割増率）を
@@ -191,10 +191,7 @@ pub(crate) fn enumerate_self_weight(
         let area_mm2 = sec.resolved_area()?;
 
         match elem.kind {
-            ElementKind::Beam
-            | ElementKind::Fiber
-            | ElementKind::MultiSpring
-            | ElementKind::Brace { .. }
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
                 if elem.nodes.len() >= 2 =>
             {
                 let ni = elem.nodes[0].index();

@@ -620,11 +620,10 @@ fn girder_overlap_only_applies_to_rectangular_rc_src_girders() {
             .is_none());
         assert!((dl_weight(&model) - 40320.).abs() < 1e-6);
     }
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
-        let mut model = base.clone();
-        model.elements[0].kind = kind;
-        assert!((weight(&model) - 31680.).abs() < 1e-6);
-    }
+    let kind = ElementKind::Fiber;
+    let mut model = base.clone();
+    model.elements[0].kind = kind;
+    assert!((weight(&model) - 31680.).abs() < 1e-6);
     let mut src = base.clone();
     let rebar = src.sections[1]
         .shape

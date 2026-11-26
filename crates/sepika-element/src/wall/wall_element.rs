@@ -2016,11 +2016,7 @@ mod tests {
                 beam.section = Some(if i % 2 == 0 { girder_id } else { column_id });
                 model.elements.push(beam);
             }
-            for kind in [
-                ElementKind::Beam,
-                ElementKind::Fiber,
-                ElementKind::MultiSpring,
-            ] {
+            for kind in [ElementKind::Beam, ElementKind::Fiber] {
                 model.elements.retain(|e| e.kind != ElementKind::Wall);
                 for frame in &mut model.elements {
                     frame.kind = kind;
@@ -2994,12 +2990,8 @@ mod capacity_issue_tests {
     }
 
     #[test]
-    fn beam_fiber_ms_share_independent_wall_section_and_both_capacity_limits() {
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+    fn beam_fiber_share_independent_wall_section_and_both_capacity_limits() {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let (mut model, wall) = model_with(Some(rc_col(true)), 0.0025);
             for member in model
                 .elements
@@ -3060,11 +3052,7 @@ mod capacity_issue_tests {
 
     #[test]
     fn cft_wall_section_uses_each_explicit_material_and_keeps_capacity_gate() {
-        for kind in [
-            ElementKind::Beam,
-            ElementKind::Fiber,
-            ElementKind::MultiSpring,
-        ] {
+        for kind in [ElementKind::Beam, ElementKind::Fiber] {
             let (mut model, wall) = model_with(Some(rc_col(true)), 0.0025);
             let steel_id = MaterialId(model.materials.len() as u32);
             let mut steel = model.materials[0].clone();
