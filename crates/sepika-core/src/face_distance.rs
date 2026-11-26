@@ -10,6 +10,11 @@ use crate::model::{
 use crate::model::{ElementKind, Model};
 use crate::section_shape::face_geometry::SectionGeometry;
 
+mod rc_column;
+pub use rc_column::{
+    aligned_girder, rc_column_girder_faces, RcColumnGirderFace, RcColumnGirderFaces,
+};
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GirderColumnFace {
     /// 大梁の実材軸のi端から評価位置までの距離 `[mm]`。
