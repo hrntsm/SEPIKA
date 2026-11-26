@@ -799,37 +799,11 @@ fn 平行移動しても柱軸方向の微小な隙間を真の接触と区別�
             (-300.0, 0.0, Some(0.0)),
         ] {
             let mut model = model(false, false);
-            for node in &mut model.nodes {
-                node.coord[2] += translate_mm;
-            }
-            for story in &mut model.stories {
-                story.elevation = story.elevation.map(|z| z + translate_mm);
-            }
+            translate_z(&mut model, translate_mm);
             model.elements[0].end_offsets_mm = [[0.0, 0.0, column_z_mm]; 2];
             model.elements[1].end_offsets_mm = [[0.0, 0.0, beam_z_mm]; 2];
             let solved = analyze(&mut model);
-            let cut = solved
-                .rc_column_face_forces
-                .iter()
-                .find(|(id, _)| *id == COLUMN)
-                .unwrap()
-                .1[0]
-                .as_ref()
-                .unwrap();
-            let rows = check(&model, &solved, RcColumnLongTermShearInput::SingleCase);
-            if let Some(expected) = expected_face_mm {
-                let face = cut.as_ref().unwrap().face;
-                assert_eq!(face.position_mm, expected);
-                assert!(rows.iter().any(|(xi, outcome)| *xi == expected / face.length_mm
-                    && matches!(outcome, CheckOutcome::Checked(result) if !result.components.is_empty())), "{rows:?}");
-            } else {
-                assert!(
-                    matches!(cut, Err(reason) if reason.contains("接触しません")),
-                    "{translate_mm} mm: {cut:?}"
-                );
-                assert!(rows.iter().any(|(_, outcome)|
-                    matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("接触しません"))), "{rows:?}");
-            }
+            assert_ordinary_foot(&model, &solved, expected_face_mm.ok_or("接触しません"));
         }
     }
 }
@@ -1745,6 +1719,32 @@ fn 接続大梁ごとの材端フェースが異なる場合は区間を確定�
 }
 
 #[test]
+fn 大梁面が丸めで同じmm表示になる場合も共通面とみなさない() {
+    for translate_z_mm in [0.0, 1000.0] {
+        for beam_offset_mm in [0.0, 25.0, 1e-14] {
+            let mut model = model(false, false);
+            let mut end = model.nodes[2].clone();
+            end.id = NodeId(3);
+            end.coord = [-3000.0, 0.0, 0.0];
+            model.nodes.push(end);
+            let mut girder = model.elements[1].clone();
+            girder.id = ElemId(2);
+            girder.nodes = [NodeId(3), NodeId(0)].into_iter().collect();
+            girder.end_offsets_mm = [[0.0, 0.0, beam_offset_mm]; 2];
+            model.elements.push(girder);
+            translate_z(&mut model, translate_z_mm);
+            let solved = analyze(&mut model);
+            let direction = if beam_offset_mm == 0.0 {
+                Ok(300.0)
+            } else {
+                Err("接続大梁によって材端フェースの位置が異なります")
+            };
+            assert_ordinary_foot(&model, &solved, direction);
+        }
+    }
+}
+
+#[test]
 fn 同軸でも柱区間と重なる接続柱がある場合は区間を確定しない() {
     for overlaps in [false, true] {
         let mut model = model(false, false);
@@ -1770,6 +1770,90 @@ fn 同軸でも柱区間と重なる接続柱がある場合は区間を確定�
                     .detail
                     .contains("局所Qy最大 |Qy|=14700.000 N（i端から x=300.000000 mm"));
             }
+        }
+    }
+}
+
+#[test]
+fn 接続柱の偏心差による微小な離隔は平行移動後も連続とみなさない() {
+    for translate_z_mm in [0.0, 1000.0] {
+        for z_offset_mm in [0.0, -1e-14] {
+            let mut model = model(false, false);
+            let mut end = model.nodes[0].clone();
+            end.id = NodeId(3);
+            end.coord[2] = -3000.0;
+            model.nodes.push(end);
+            let mut column = model.elements[0].clone();
+            column.id = ElemId(2);
+            column.nodes = [NodeId(3), NodeId(0)].into_iter().collect();
+            column.end_offsets_mm[1][2] = z_offset_mm;
+            model.elements.push(column);
+            translate_z(&mut model, translate_z_mm);
+            let solved = analyze(&mut model);
+            let expected = if z_offset_mm == 0.0 {
+                Ok(300.0)
+            } else {
+                Err("柱の材軸が連続しない接合")
+            };
+            assert_ordinary_foot(&model, &solved, expected);
+        }
+    }
+}
+
+#[test]
+fn 平面内の大きな平行移動でも梁側面との重なりと離隔を区別する() {
+    for translate_y_mm in [0.0, 2_f64.powi(43)] {
+        for offset_y_mm in [349.99975, 350.0, 350.00025] {
+            let mut model = model(false, false);
+            model.elements[1].end_offsets_mm = [[0.0, offset_y_mm, 0.0]; 2];
+            for node in &mut model.nodes {
+                node.coord[1] += translate_y_mm;
+            }
+            let solved = analyze(&mut model);
+            let expected = if offset_y_mm < 350.0 {
+                Ok(300.0)
+            } else {
+                Err("正の面積で接触")
+            };
+            assert_ordinary_foot(&model, &solved, expected);
+        }
+    }
+}
+
+fn translate_z(model: &mut Model, shift_mm: f64) {
+    for node in &mut model.nodes {
+        node.coord[2] += shift_mm;
+    }
+    for story in &mut model.stories {
+        story.elevation = story.elevation.map(|z| z + shift_mm);
+    }
+}
+
+fn assert_ordinary_foot(model: &Model, solved: &StaticOnce, expected: Result<f64, &str>) {
+    let face = solved
+        .rc_column_face_forces
+        .iter()
+        .find(|(id, _)| *id == COLUMN)
+        .unwrap()
+        .1[0]
+        .as_ref()
+        .unwrap();
+    let rows = check(model, solved, RcColumnLongTermShearInput::SingleCase);
+    match expected {
+        Ok(distance_mm) => {
+            let face = face.as_ref().unwrap().face;
+            assert_eq!(face.position_mm, distance_mm);
+            let cut_xi = distance_mm / LENGTH_MM;
+            assert!(rows.iter().any(|(xi, outcome)| *xi == cut_xi
+                && matches!(outcome, CheckOutcome::Checked(result) if !result.components.is_empty())), "{rows:?}");
+        }
+        Err(expected) => {
+            assert!(
+                matches!(face, Err(reason) if reason.contains(expected)),
+                "{face:?}"
+            );
+            assert!(rows.iter().any(|(_, outcome)|
+                matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains(expected))), "{rows:?}");
         }
     }
 }
