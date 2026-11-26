@@ -829,7 +829,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [弾性梁採用G_Issue712_2026-10.md](弾性梁採用G_Issue712_2026-10.md) | 採用Gの直接生成・公開静/動解析、SRC/CFT既存拒否との区別 | 🔶（element497・修正後solver368成功。独立レビューの動解析panicは6入口追補で回復、最後の試験変更後focused1・design3・Clippy/文書検証成功。先行App default13/GUI14を区別。最終ゲート・Validation未） |
 | [仕口パネル参照柱_Issue585_2026-10.md](仕口パネル参照柱_Issue585_2026-10.md) | 共通解決・生成・解析・検定の参照柱、旧計算契約の失効 | 🔶（直接・関連回帰Verification成功、原典/手動GUI/Validation・最終headゲート未） |
 | [壁側柱の物理的分担と局所解放_Issue496_2026-10.md](壁側柱の物理的分担と局所解放_Issue496_2026-10.md) | 共通側柱分類・純鋼板独立K/反力/仕事、Beam/Fiber/MS局所釣合い・軸履歴・同step応答 | 🔶（分離候補のrun別Verification。App lib847・full_model37・壁統合18等のrun別成功と途中失敗を区別。最終ゲート・Validation未確認） |
-| [壁幾何と側柱の試験整理_Issue1059.md](壁幾何と側柱の試験整理_Issue1059.md) | 台形壁・スリット収集・側柱解放と壁面力の固有保証を保持した統合先 | 🔶（既存Verificationの整理。物理Validationの状態は変更しない） |
+| [壁幾何と側柱の試験整理_Issue1059.md](壁幾何と側柱の試験整理_Issue1059.md) | 台形壁・スリット収集・側柱解放と壁面力の試験整理。マルチスプリング廃止後の通常梁・ファイバーの回帰試験も案内 | 🔶（既存Verificationの整理。物理Validationの状態は変更しない） |
 | [断面JとCFTコアねじり_Issue416_2026-10.md](断面JとCFTコアねじり_Issue416_2026-10.md) | H慣用J・Box中心線式、独立P2参照、本番P1校正144levels、供給Js/実GsとBeam/Fiber・公開solver・OVIKA/結果26/18 | 🔶（数値Verificationと物理Validationを区別。正式Windowsgrid160fresh成功・3形状各3反復を記録。最終統合/公開PRゲートは記録待ち） |
 | [STB断面系列別ID_Issue571_2026-10.md](STB断面系列別ID_Issue571_2026-10.md) | 採用namespace・具体系列・数値IDによる定義/部材/強度結合、内部/OVIKA保持、元5Done | 🔶（初期3段階の失敗を保持し、最終feature1322・IO227・Clippy両構成・fmt・文書検査成功。全18 snapshot/1161入力hash一致。XSD124派生期待外0、full_model差分fresh必須指摘なし。文書修正後の再検査/レビュー・親監査・最終ゲート未確認） |
 | [STB標準入力限定_Issue660_2026-10.md](STB標準入力限定_Issue660_2026-10.md) | 旧独自入力互換の撤去・固定XSD照合・両公開import参照不正・内部/OVIKA保持 | 🔶（IO200・App GUI lib837・Clippy・文書検査成功、独立レビュー必須指摘なし。追加feature回帰1292成功/1失敗、共有fixture補正後App統合3成功、App試験移行後対象6成功。全体再実行・親最終監査・最終ゲート未確認） |
