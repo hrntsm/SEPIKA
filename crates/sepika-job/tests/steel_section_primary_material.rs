@@ -5,7 +5,9 @@ use sepika_core::model::{
     LoadCase, LoadCaseKind, LoadCfg, LoadCombination, LocalAxis, Material, MaterialCategory, Model,
     Node, Story, DL_CASE_NAME,
 };
-use sepika_core::section_shape::{RcRectColumnRebar, RectColumnHoop, SectionShape};
+use sepika_core::section_shape::{
+    RcRectColumnRebar, RectColumnHoop, SectionShape, SrcHManufacture,
+};
 use sepika_element::factory::{
     build_hinge_view, ensure_nonlinear_input, nonlinear_input_issues_for_kind, AnalysisHingeModel,
     HingeView, StrengthBasis,
@@ -280,7 +282,7 @@ fn rcとsrcの断面の配筋に鉄筋を割り当てると解析できる() {
         steel_width: 150.0,
         steel_web_thick: 6.5,
         steel_flange_thick: 9.0,
-        steel_manufacture: Default::default(),
+        steel_manufacture: SrcHManufacture::BuiltUp,
     };
     // 0.4 m × 0.6 m × 3 m、入力密度 2.4 t/m³ と重力加速度 9.80665 m/s² による自重の半分。
     let self_weight_at_top_n = 8_472.945_6;
@@ -297,9 +299,11 @@ fn rcとsrcの断面の配筋に鉄筋を割り当てると解析できる() {
             ..rebar()
         });
         if is_src {
+            model.elements[0].force_regime = ForceRegime::AxialBendingInteract;
             section.steel_material = Some(MaterialId(2));
             model.materials.push(Material {
                 id: MaterialId(2),
+                name: "SN400B".into(),
                 ..steel()
             });
         }

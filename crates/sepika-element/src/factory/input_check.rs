@@ -243,6 +243,7 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 
 /// 非線形解析を開始できない部材の設定不備を列挙する（是正内容を示す日本語文）。
 ///
+/// 矩形SRC梁・柱の材端集中ばねは、復元力の適用条件を確認できないため診断する。
 /// 線材は、降伏の扱いにかかわらず鋼断面の主材料と RC・SRC 梁柱の主筋材料の区分を診断する。
 /// 非線形解析で降伏を扱う要素は、次の強度入力も検査する:
 /// - 耐震壁（`Wall`）: 面内せん断の終局強度 Qu
@@ -303,6 +304,10 @@ fn nonlinear_input_issues_with_basis(
             if let Some(issue) = member_strength_issue(elem, model) {
                 issues.push(issue);
             }
+            continue;
+        }
+        if let Some(issue) = src_concentrated_spring_issue(elem, model) {
+            issues.push(issue);
             continue;
         }
         if let Some(issue) = super::springs::rc_reference_target_issue(elem, model) {
@@ -368,6 +373,28 @@ fn nonlinear_input_issues_with_basis(
         }
     }
     issues
+}
+
+/// 壁側柱と壁上下剛梁の判定後に、矩形SRC梁・柱の材端集中ばねの適用外理由を返す。
+pub(super) fn src_concentrated_spring_issue(data: &ElementData, model: &Model) -> Option<String> {
+    if data.kind != ElementKind::Beam
+        || !matches!(
+            model
+                .element_section(data)
+                .and_then(|section| section.shape.as_ref()),
+            Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. })
+        )
+        || !matches!(
+            super::resolve_force_regime(data, model),
+            super::ResolvedRegime::ConcentratedSpring
+        )
+    {
+        return None;
+    }
+    Some(format!(
+        "部材 ID {} のSRC材端集中ばね: 曲げ降伏点およびひび割れ後から最大点までの復元力の適用条件を確認できません。",
+        data.id.0
+    ))
 }
 
 fn shear_yield_rebar_issue(data: &ElementData, model: &Model) -> Option<String> {
