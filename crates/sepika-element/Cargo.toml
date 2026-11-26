@@ -6,6 +6,8 @@ license = "MIT"
 
 [dependencies]
 bincode = { workspace = true }
+num-rational = "0.4.2"
+num-traits = "0.2.19"
 sepika-core   = { path = "../sepika-core" }
 sepika-math   = { path = "../sepika-math" }
 sepika-material = { path = "../sepika-material" }

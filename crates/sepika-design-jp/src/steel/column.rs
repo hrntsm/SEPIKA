@@ -68,20 +68,16 @@ pub(super) fn time_history_column_strong_bending(
     };
     let f_mpa = crate::material_strength::section_steel_f(sec, Some(mat))?;
     let (_, tf_mm, _) = shape_of(sec);
-    if [
-        sec.property_basis.iy,
-        sec.property_basis.iz,
-        sec.property_basis.depth,
-        sec.property_basis.j,
-    ]
-    .into_iter()
-    .any(|basis| basis != PropertyBasis::Shape)
-    {
-        return Err("横座屈に用いる断面諸量とH形鋼の形状との対応が未確認です".into());
+    let z_mm3 = confirmed_time_history_strong_modulus(sec)?;
+    let shape = sec.shape.as_ref().ok_or("H形鋼の断面形状が未入力です")?;
+    if !time_history_inertia_matches_shape(sec.property_basis.iz, sec.iz, || shape.try_calc_iz()) {
+        return Err("時刻歴の弱軸断面二次モーメントIzが現在のH形鋼の形状と一致しません".into());
+    }
+    if sec.property_basis.j != PropertyBasis::Shape {
+        return Err("横座屈に用いるねじり定数JとH形鋼の形状との対応が未確認です".into());
     }
     let j_mm4 = sec.resolved_j()?;
     let iw_mm6 = steel_warping_constant(sec, tf_mm);
-    let z_mm3 = section_modulus(sec.iy, sec.depth / 2.0);
     let [e_mpa, g_mpa] = [mat.young, mat.shear_modulus()];
     if [lb_mm, sec.iz, j_mm4, iw_mm6, z_mm3, e_mpa, g_mpa, f_mpa]
         .into_iter()
@@ -114,6 +110,30 @@ pub(super) fn time_history_column_strong_bending(
     })
 }
 
+fn time_history_inertia_matches_shape(
+    basis: PropertyBasis,
+    stored_mm4: f64,
+    calculate: impl FnOnce() -> Result<f64, String>,
+) -> bool {
+    basis == PropertyBasis::Shape
+        && stored_mm4.is_finite()
+        && stored_mm4 > 0.0
+        && calculate().is_ok_and(|value| stored_mm4 == value)
+}
+
+pub(super) fn confirmed_time_history_strong_modulus(sec: &Section) -> Result<f64, &'static str> {
+    let shape = sec.shape.as_ref().ok_or("H形鋼の断面形状が未入力です")?;
+    let (height_mm, _, _) =
+        super::symmetric_h_web(sec).ok_or("上下対称H形鋼の断面形状が必要です")?;
+    if sec.property_basis.depth != PropertyBasis::Shape || sec.depth != height_mm {
+        return Err("時刻歴の断面せいが現在のH形鋼の形状と一致しません");
+    }
+    if !time_history_inertia_matches_shape(sec.property_basis.iy, sec.iy, || shape.try_calc_iy()) {
+        return Err("時刻歴の強軸断面二次モーメントIyが現在のH形鋼の形状と一致しません");
+    }
+    Ok(section_modulus(sec.iy, height_mm / 2.0))
+}
+
 pub(super) fn strong_bending_material_failure(
     forces: &MemberForcesAt,
     sec: &Section,
@@ -138,18 +158,14 @@ pub(super) fn strong_bending_material_excess(
     mat: &Material,
     ctx: &DesignCtx,
 ) -> Option<(f64, f64, f64)> {
-    if super::symmetric_h_web(sec).is_none()
-        || has_section_loss(ctx)
-        || [sec.property_basis.iy, sec.property_basis.depth]
-            .into_iter()
-            .any(|basis| basis != PropertyBasis::Shape)
-    {
+    if has_section_loss(ctx) {
         return None;
     }
+    let z_mm3 = confirmed_time_history_strong_modulus(sec).ok()?;
     let f = crate::material_strength::section_steel_f(sec, Some(mat)).ok()?;
     let m_only = MemberForcesAt::from_local(0.0, [0.0, 0.0, 0.0, 0.0, 0.0, mz_nmm]);
     check_symmetric_h_plate_slenderness(&m_only, sec, mat).ok()?;
-    let sigma_b_mpa = mz_nmm.abs() / section_modulus(sec.iy, sec.depth / 2.0);
+    let sigma_b_mpa = mz_nmm.abs() / z_mm3;
     let ft_mpa = steel_ft(f, ctx.term);
     let ratio = sigma_b_mpa / ft_mpa;
     (ratio.is_finite() && ratio > 1.0).then_some((sigma_b_mpa, ft_mpa, ratio))
@@ -916,6 +932,43 @@ mod tests {
     use crate::steel::test_support::{h_section, mat, rect_section};
     use crate::steel::SteelDesign;
     use crate::{DesignCheck, MemberKind};
+
+    #[test]
+    fn time_history_keeps_an_independent_shear_failure_but_not_false_bending_failures() {
+        let mut sec = h_section(400.0, 200.0, 8.0, 13.0);
+        let mat = mat("SN400B");
+        let ctx = &mut DesignCtx {
+            kind: MemberKind::Column,
+            term: LoadTerm::Short,
+            ..Default::default()
+        };
+        let span_mz = 260e6;
+        for invalid_iy_mm4 in [sec.iy / 100.0, f64::NAN, f64::INFINITY] {
+            sec.iy = invalid_iy_mm4;
+            assert!(SteelDesign
+                .time_history_column_bending_material_failure(span_mz, &sec, &mat, ctx)
+                .is_none());
+            let force = MemberForcesAt::from_local(0.0, [1e3, 500e3, 0.0, 0.0, 0.0, span_mz]);
+            let results =
+                SteelDesign.check_time_history_h_column_section(&force, &sec, &mat, ctx, false);
+            assert!(results.iter().any(|result| matches!(result, CheckOutcome::Skipped { reason } if reason.contains("強軸断面二次モーメントIy"))), "{results:?}");
+            let checked: Vec<_> = results
+                .iter()
+                .filter_map(|result| match result {
+                    CheckOutcome::Checked(item) => Some(&item.components),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            assert!(
+                !checked.is_empty()
+                    && checked.iter().all(
+                        |component| component.kind == CheckKind::Shear && component.ratio > 1.0
+                    ),
+                "{results:?}"
+            );
+        }
+    }
 
     /// 断片が意図した component に配置されていることの確認
     /// （AxialBending の detail に "軸曲げ比" が含まれ、Shear の detail には

@@ -1,6 +1,8 @@
 use super::{distributed_intensity, resolve, Comp, FrameDeadLoadMap, LoadedFrameSection};
 use crate::frame::beam::MemberForces;
 use crate::transform::LocalFrame;
+use num_rational::BigRational;
+use num_traits::{Signed, Zero};
 use sepika_core::model::{MemberLoad, MemberLoadKind};
 
 /// 補剛区間の符号付き強軸曲げ分布と、指定した需要範囲の断面力。
@@ -95,7 +97,7 @@ pub fn frame_strong_bending_intervals(
         .map(|w| {
             let interval = [w[0], w[1]];
             let demand = [w[0].max(demand_extent_mm[0]), w[1].min(demand_extent_mm[1])];
-            bending.span(interval, demand, true)
+            bending.span(interval, demand, BendingSpanMode::DemandAndEnds)
         })
         .collect()
 }
@@ -113,8 +115,14 @@ pub fn frame_strong_bending_span_mm(
     StrongBendingResponse::new(frame, length_mm, &response, stations_mm).span(
         [0.0, length_mm],
         [demand_lo, demand_hi],
-        false,
+        BendingSpanMode::DemandOnly,
     )
+}
+
+enum BendingSpanMode {
+    DemandOnly,
+    DemandAndEnds,
+    TimeHistory,
 }
 
 struct StrongBendingResponse<'a> {
@@ -155,6 +163,36 @@ impl<'a> StrongBendingResponse<'a> {
         }
     }
 
+    fn has_exact_tied_maximum(&self) -> Option<bool> {
+        let mut point_loads = Vec::new();
+        for &load in &self.strong_loads {
+            match load {
+                Comp::Point { a, p } if p != 0.0 => point_loads.push((a, p)),
+                Comp::Dist { a, b, w1, w2 } if a < b && (w1 != 0.0 || w2 != 0.0) => return None,
+                _ => {}
+            }
+        }
+        point_loads.sort_by(|(x, _), (other, _)| x.total_cmp(other));
+        let mut x_mm = BigRational::zero();
+        let mut shear_n = BigRational::from_float(self.response.node_force_local[1])?;
+        let mut moment_nmm = BigRational::from_float(-self.response.node_force_local[5])?;
+        let first_abs = moment_nmm.abs();
+        let mut interior_max = BigRational::zero();
+        for (x, p) in point_loads.into_iter().chain([(self.length_mm, 0.0)]) {
+            let next_mm = BigRational::from_float(x)?;
+            if x_mm < next_mm && shear_n.is_zero() {
+                interior_max = interior_max.max(moment_nmm.abs());
+            }
+            moment_nmm += &shear_n * (&next_mm - &x_mm);
+            if 0.0 < x && x < self.length_mm {
+                interior_max = interior_max.max(moment_nmm.abs());
+            }
+            shear_n += BigRational::from_float(p)?;
+            x_mm = next_mm;
+        }
+        Some(interior_max == first_abs.max(moment_nmm.abs()))
+    }
+
     fn observed_shear_y(&self, x_mm: f64) -> Option<f64> {
         let index = self.stations_mm.partition_point(|(x, _)| *x < x_mm);
         self.stations_mm
@@ -174,8 +212,10 @@ impl<'a> StrongBendingResponse<'a> {
         &self,
         [span_lo, span_hi]: [f64; 2],
         [demand_lo, demand_hi]: [f64; 2],
-        include_ends: bool,
+        mode: BendingSpanMode,
     ) -> Result<FrameStrongBendingSpan, String> {
+        let include_ends = matches!(mode, BendingSpanMode::DemandAndEnds);
+        let time_history = matches!(mode, BendingSpanMode::TimeHistory);
         if !(0.0 <= span_lo
             && span_lo <= demand_lo
             && demand_lo < demand_hi
@@ -209,8 +249,9 @@ impl<'a> StrongBendingResponse<'a> {
             let force = response.at_mm(x_mm)?;
             let abs = force[5].abs();
             let discernible = 64.0 * f64::EPSILON * abs.max(end_abs);
-            interior_maximum |= abs - end_abs > discernible || (on_plateau && abs == end_abs);
-            if !on_plateau && demand_lo < x_mm && x_mm < demand_hi {
+            interior_maximum |=
+                abs - end_abs > discernible || (!time_history && on_plateau && abs == end_abs);
+            if (!on_plateau || time_history) && demand_lo < x_mm && x_mm < demand_hi {
                 candidates.push((x_mm, force));
             }
             Ok::<_, String>(())
@@ -454,23 +495,21 @@ impl LoadedFrameSection {
         }
         verify_bending_stations(self, &stations)?;
         let span = [0.0, response_length];
-        let mut bending =
-            StrongBendingResponse::new(self.map.frame(), response_length, self, &stations)
-                .span(span, span, false)?;
-        let end_max = bending
-            .end_moments_nmm
-            .into_iter()
-            .map(f64::abs)
-            .fold(0.0, f64::max);
-        // 最大候補には丸め誤差の範囲で近い値も残るため、候補に含まれるだけでは同値とみなさない。
-        bending.interior_maximum |= bending
-            .demand_peaks
-            .iter()
-            .all(|peak| peak.left[5].abs() <= end_max)
+        let response =
+            StrongBendingResponse::new(self.map.frame(), response_length, self, &stations);
+        let mut bending = response.span(span, span, BendingSpanMode::TimeHistory)?;
+        if !bending.interior_maximum
             && bending
                 .demand_peaks
                 .iter()
-                .any(|peak| !peak.is_i_face && !peak.is_j_face && peak.left[5].abs() == end_max);
+                .any(|peak| !peak.is_i_face && !peak.is_j_face && peak.left[5] != 0.0)
+        {
+            // 丸め後の最大候補の一致では、平坦区間も含めて同値を証明できない。
+            bending.interior_maximum = response.has_exact_tied_maximum() == Some(true);
+            if !bending.interior_maximum {
+                bending.monotonic = false;
+            }
+        }
         Ok(bending)
     }
 
@@ -572,6 +611,79 @@ mod tests {
             )
             .unwrap();
             assert!(!static_span.interior_maximum);
+        }
+    }
+
+    #[test]
+    fn rounded_endpoint_ties_do_not_prove_interior_maxima_in_time_history() {
+        let length_mm = 3000.0;
+        let frame =
+            LocalFrame::from_nodes([0.0; 3], [length_mm, 0.0, 0.0], [0.0, 1.0, 0.0]).unwrap();
+        let point =
+            |a, p| MemberLoad::manual(ElemId(0), [0.0, 1.0, 0.0], MemberLoadKind::Point { a, p });
+        for p in [20_000.0_f64.next_down(), 20_000.0_f64.next_up()] {
+            let loads = [point(500.0, p), point(1000.0, -20e3)];
+            let map = FrameDeadLoadMap::new(&loads, &frame, length_mm, 0.0, 0.0).unwrap();
+            let mut node_force = [0.0; 12];
+            node_force[1] = -10e3;
+            node_force[5] = -250e6;
+            let response = LoadedFrameSection::new(map, node_force);
+            let forces = response.recover(&[0.0, 1.0]).unwrap();
+            let span = response
+                .full_span_strong_bending(length_mm, &forces)
+                .unwrap();
+            assert_eq!(span.end_moments_nmm[0], 250e6);
+            assert!(span
+                .demand_peaks
+                .iter()
+                .any(|peak| peak.x_mm == 1000.0 && peak.left[5] == 250e6));
+            assert!(!span.monotonic && !span.interior_maximum);
+        }
+    }
+
+    #[test]
+    fn time_history_confirms_exact_plateaux_but_rejects_rounded_shear_cancellation() {
+        let length_mm = 3000.0;
+        let frame =
+            LocalFrame::from_nodes([0.0; 3], [length_mm, 0.0, 0.0], [0.0, 1.0, 0.0]).unwrap();
+        let point =
+            |a, p| MemberLoad::manual(ElemId(0), [0.0, 1.0, 0.0], MemberLoadKind::Point { a, p });
+        for (loads, initial_qy_n, confirmed) in [
+            (vec![], 0.0, true),
+            (vec![point(500.0, 20e3), point(1000.0, -10e3)], -10e3, true),
+            (
+                vec![
+                    point(500.0, 20e3),
+                    point(750.0, -1e-12),
+                    point(1000.0, -10e3),
+                ],
+                -10e3,
+                false,
+            ),
+            (
+                vec![
+                    point(500.0, 20e3),
+                    point(750.0, 1e-12),
+                    point(1000.0, -10e3),
+                ],
+                -10e3,
+                false,
+            ),
+        ] {
+            let map = FrameDeadLoadMap::new(&loads, &frame, length_mm, 0.0, 0.0).unwrap();
+            let mut node_force = [0.0; 12];
+            node_force[1] = initial_qy_n;
+            node_force[5] = -250e6;
+            let response = LoadedFrameSection::new(map, node_force);
+            let forces = response.recover(&[0.0, 1.0]).unwrap();
+            let span = response
+                .full_span_strong_bending(length_mm, &forces)
+                .unwrap();
+            assert_eq!(span.interior_maximum, confirmed, "{loads:?}");
+            assert!(span
+                .demand_peaks
+                .iter()
+                .any(|peak| !peak.is_i_face && !peak.is_j_face && peak.left[5] == 250e6));
         }
     }
 

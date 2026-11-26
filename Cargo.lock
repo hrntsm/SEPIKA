@@ -4620,6 +4620,8 @@ version = "0.0.1"
 dependencies = [
  "approx",
  "bincode",
+ "num-rational",
+ "num-traits",
  "sepika-core",
  "sepika-material",
  "sepika-math",

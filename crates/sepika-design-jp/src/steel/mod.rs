@@ -647,7 +647,12 @@ impl SteelDesign {
             );
         };
 
-        if envelope {
+        let strong_issue = if envelope {
+            None
+        } else {
+            column::confirmed_time_history_strong_modulus(sec).err()
+        };
+        if envelope || strong_issue.is_some() {
             for (component, value) in [forces.n, forces.qy, forces.qz, 0.0, forces.my]
                 .into_iter()
                 .enumerate()
@@ -668,6 +673,11 @@ impl SteelDesign {
             ctx.column_lateral_buckling_length = previous_length;
         }
 
+        if let Some(reason) = strong_issue {
+            outcomes.push(CheckOutcome::Skipped {
+                reason: reason.into(),
+            });
+        }
         if let Some(reason) = steel_torsion_reason(forces, sec) {
             outcomes.push(CheckOutcome::Skipped {
                 reason: reason.into(),

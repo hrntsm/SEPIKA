@@ -355,6 +355,51 @@ mod tests {
     }
 
     #[test]
+    fn recorded_shape_inertia_must_match_the_section_in_time_history() {
+        for invalid_weak_axis in [true, false] {
+            let mut model = model();
+            if invalid_weak_axis {
+                model.sections[0].iz *= 100.0;
+            } else {
+                model.sections[0].iy /= 100.0;
+            }
+            model.steel_design_attrs[0].column_lateral_buckling_end_supports =
+                model.column_end_supports(&model.elements[0]);
+
+            let samples = [[259e6, 0.0], [0.0, -259e6], [280e6, 0.0]];
+            let history = collect(&model, samples.len(), |step, _, lb| {
+                let [i, j] = samples[step];
+                let q = (j - i) / lb;
+                let forces = MemberForces {
+                    at: vec![(0.0, m_and_q(i, q)), (1.0, m_and_q(j, q))],
+                };
+                frame_strong_bending_span(&frame(), lb, [0.0, lb], &[], &forces)
+            });
+            assert_eq!(history.evaluated_count, 0);
+            assert!(history.peak.is_none(), "{history:?}");
+            let axis = if invalid_weak_axis {
+                "弱軸断面二次モーメントIz"
+            } else {
+                "強軸断面二次モーメントIy"
+            };
+            assert!(
+                history
+                    .unavailable
+                    .iter()
+                    .any(|reason| reason.contains(axis)),
+                "{history:?}"
+            );
+            if invalid_weak_axis {
+                let failure = history.material_failure.unwrap();
+                assert_eq!((failure.step, failure.mz_nmm), (2, 280e6));
+                assert!((failure.ratio - 1.03766).abs() < 5e-6, "{failure:?}");
+            } else {
+                assert!(history.material_failure.is_none(), "{history:?}");
+            }
+        }
+    }
+
+    #[test]
     fn off_center_and_plateau_maxima_are_not_treated_as_end_moment_gradients() {
         let model = model();
         let frame = frame();
