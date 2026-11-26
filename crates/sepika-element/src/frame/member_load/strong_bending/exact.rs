@@ -121,6 +121,7 @@ impl StrongBendingResponse<'_> {
                 .iter()
                 .any(|peak| !peak.is_i_face && !peak.is_j_face),
             unverified_maximum_plateau,
+            unverified_distribution: None,
             demand_peaks,
         })
     }

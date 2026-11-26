@@ -130,17 +130,13 @@ pub(crate) fn record(
             ratio,
         });
     }
+    if let Some(reason) = span.unverified_distribution {
+        item.unavailable.insert(reason.into());
+        return;
+    }
     let Some(lb_mm) = item.lb_mm else {
         return;
     };
-    if !span.interior_maximum
-        && !span.monotonic
-        && span.demand_peaks.iter().all(|peak| peak.left[5] == 0.0)
-    {
-        item.unavailable
-            .insert("強軸曲げの単調変化または区間内部の絶対値最大を確認できません".into());
-        return;
-    }
     let mut complete = !span.demand_peaks.is_empty();
     if !complete {
         item.unavailable
@@ -511,9 +507,27 @@ mod tests {
                 (1.0, [0.0, -280e3, 0.0, 0.0, 1e6, 0.0]),
             ],
         };
-        for reason in ["弱軸曲げと強軸曲げ", "両実材端の支持条件が未確認"] {
+        let unverified_load = "強軸方向の合算分布荷重の強度が区間内で変化";
+        for reason in [
+            "弱軸曲げと強軸曲げ",
+            unverified_load,
+            "両実材端の支持条件が未確認",
+        ] {
+            if reason == "両実材端の支持条件が未確認" {
+                model.steel_design_attrs[0].column_lateral_buckling_end_supports = None;
+            }
             let history = collect(&model, 1, |_, _, length| {
-                frame_strong_bending_span(&frame(), length, [0.0, length], &[(1.0, &load)], &force)
+                let mut span = frame_strong_bending_span(
+                    &frame(),
+                    length,
+                    [0.0, length],
+                    &[(1.0, &load)],
+                    &force,
+                )?;
+                if reason == unverified_load {
+                    span.unverified_distribution = Some(unverified_load);
+                }
+                Ok(span)
             });
             assert_eq!(history.evaluated_count, 0);
             assert!(history.peak.is_none(), "{history:?}");
@@ -525,7 +539,6 @@ mod tests {
             assert!((failure.x_mm - 1000.0).abs() < 1e-9, "{failure:?}");
             assert!((failure.mz_nmm - 280e6).abs() < 1e-6, "{failure:?}");
             assert!((failure.ratio - 1.03766).abs() < 5e-6, "{failure:?}");
-            model.steel_design_attrs[0].column_lateral_buckling_end_supports = None;
         }
     }
 
@@ -601,12 +614,17 @@ mod tests {
                 let mut stations = frame_strong_bending_span(&frame, lb, [0.0, lb], &[], &zero)?;
                 stations.monotonic = false;
                 stations.interior_maximum = false;
+                stations.unverified_distribution = Some("強軸曲げ分布が未確認です");
                 Ok(stations)
             }
         });
         assert_eq!((history.committed_count, history.evaluated_count), (4, 1));
         assert!(history.peak.is_none(), "{history:?}");
-        for expected in ["単調変化または区間内部", "釣合いを確認できません"] {
+        for expected in [
+            "単調変化または区間内部",
+            "釣合いを確認できません",
+            "強軸曲げ分布が未確認",
+        ] {
             assert!(
                 history
                     .unavailable
