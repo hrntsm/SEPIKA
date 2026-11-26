@@ -1157,6 +1157,32 @@ fn time_history_haunch_qd1_uses_the_same_confirmed_demand_and_holds_unchecked_se
             "{text}"
         );
     }
+    strong_rec.peak_member_forces[0].as_mut().unwrap().at[2].1[1] = f64::NAN;
+    strong_rec.axial_force_peaks[0].snapshots[0].forces.at[2].1[1] = f64::NAN;
+    for (method, keeps_bond) in [(QdMethod::Qd1, true), (QdMethod::Min, false)] {
+        app.core.analysis_cfg.qd_method = method;
+        let text = labels(&app, &strong_rec, true);
+        let (envelope, confirmed_step) = text.split_once("軸力極値が生じた確定ステップ").unwrap();
+        for text in [envelope, confirmed_step] {
+            let centre = text
+                .split_once("ξ=0.50:")
+                .unwrap()
+                .1
+                .split("ξ=0.94:")
+                .next()
+                .unwrap();
+            assert!(
+                centre.contains("Qyが非有限")
+                    && centre.contains("QAは未算定")
+                    && centre.contains("QD1=904767.7 N")
+                    && !centre.contains("採用QD=")
+                    && !centre.contains("せん断 ")
+                    && !centre.contains("曲げ "),
+                "{text}"
+            );
+            assert_eq!(centre.contains("付着 "), keeps_bond, "{text}");
+        }
+    }
 
     assert!(app.load_model(unconfirmed));
     app.core.analysis_cfg.rc_damage_control = false;

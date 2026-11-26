@@ -435,6 +435,135 @@ fn haunch_qd1_uses_the_actual_depth_at_a_governing_face_but_not_inside_a_haunch(
 }
 
 #[test]
+fn haunch_qd1_keeps_1991_bond_failure_without_response_qy_but_not_without_gravity() {
+    use sepika_design_jp::BondMethod;
+
+    for (has_haunch, method, ql, bond_confirmed) in [
+        (true, QdMethod::Qd1, -10_000.0, true),
+        (true, QdMethod::Min, -10_000.0, false),
+        (true, QdMethod::Qd1, f64::NAN, false),
+        (false, QdMethod::Qd1, -10_000.0, false),
+    ] {
+        let mut model = model();
+        if has_haunch {
+            add_confirmed_i_haunch(&mut model);
+        }
+        let response = [(
+            ElemId(0),
+            MemberForces {
+                at: vec![(0.5, [0.0, f64::NAN, 0.0, 0.0, 0.0, 10e6])],
+            },
+        )];
+        let gravity = [(
+            ElemId(0),
+            MemberForces {
+                at: vec![(0.5, [0.0, ql, 0.0, 0.0, 0.0, 0.0])],
+            },
+        )];
+        let outcomes = run_member_design_checks(
+            &model,
+            &response,
+            &[],
+            &MemberDesignCheckOptions {
+                term: LoadTerm::Short,
+                bond_method: BondMethod::Rc1991,
+                qd_method: method,
+                long_member_forces: Some(&gravity),
+                q_simple_by_elem: Some(&HashMap::from([(ElemId(0), 800_000.0)])),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .member_checks;
+        let known: Vec<_> = outcomes
+            .iter()
+            .filter_map(|(_, pos, outcome)| match outcome {
+                CheckOutcome::Checked(result) if *pos == 0.5 => Some(&result.components[..]),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        if bond_confirmed {
+            let [bond] = known.as_slice() else {
+                panic!("{outcomes:?}")
+            };
+            assert!(
+                bond.kind == CheckKind::Bond
+                    && bond.ratio > 1.0
+                    && bond.detail.contains("Q=904767.7 N"),
+                "{bond:?}"
+            );
+        } else {
+            assert!(known.is_empty(), "{outcomes:?}");
+        }
+        assert!(outcomes.iter().any(|(_, pos, outcome)| *pos == 0.5 &&
+            matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("Qyが非有限")
+                && (!has_haunch || reason.contains("QAは未算定") && reason.contains("QD1=904767.7 N"))
+                && !reason.contains("採用QD="))), "{outcomes:?}");
+    }
+}
+
+#[test]
+fn haunch_qd1_compares_recovered_peaks_to_the_general_boundary_in_millimetres() {
+    use sepika_core::model::{MemberLoad, MemberLoadKind};
+
+    let mut model = model();
+    add_confirmed_i_haunch(&mut model);
+    model.elements[0].rigid_zone.face_j = Some(200.0);
+    let detail = &mut model.member_detail_attrs[0];
+    let mut haunch = detail.haunch_i.take().unwrap();
+    haunch.length = 460.0;
+    haunch.qd1_face.as_mut().unwrap().distance_mm = 200.0;
+    detail.haunch_j = Some(haunch);
+    let boundary_mm = 4500.0 - (200.0 + haunch.length);
+    assert!(boundary_mm / 4500.0 > 1.0 - (200.0 + haunch.length) / 4500.0);
+    for (point_mm, known_depth) in [(boundary_mm, true), (boundary_mm + 0.25, false)] {
+        model.load_cases[0].member = vec![MemberLoad::manual(
+            ElemId(0),
+            [0.0, 0.0, -1.0],
+            MemberLoadKind::Point {
+                a: point_mm,
+                p: 70_000.0,
+            },
+        )];
+        // 境界例の最大曲げは55.2 kN·m。左Qが30 kNのため、d=550 mmのαは1.000。
+        let peak_nmm = -60e6 + 30_000.0 * point_mm;
+        let rows = [0.0, 250.0, 2250.0, 4300.0, 4500.0].map(|x| {
+            let (q, m) = if x < point_mm {
+                (30_000.0, -60e6 + 30_000.0 * x)
+            } else {
+                (-40_000.0, peak_nmm - 40_000.0 * (x - point_mm))
+            };
+            (x / 4500.0, [0.0, q, 0.0, 0.0, 0.0, m])
+        });
+        let outcomes = check_with_load_evidence(
+            &model,
+            QdMethod::Qd1,
+            Some(8_000.0),
+            &rows,
+            -10_000.0,
+            Some(&[(LoadCaseId(0), 1.0)]),
+        );
+        let (_, _, centre) = outcomes.iter().find(|(_, p, _)| *p == 0.5).unwrap();
+        if known_depth {
+            assert_shear_n(centre, 111_474.25);
+            let CheckOutcome::Checked(centre) = centre else {
+                unreachable!()
+            };
+            assert!(centre
+                .components
+                .iter()
+                .any(|c| c.kind == CheckKind::Shear && c.detail.contains("α=1.000")));
+        } else {
+            assert_haunch_demand_without_qa(centre, 111_474.25, None);
+            assert!(
+                matches!(centre, CheckOutcome::Skipped { reason } if reason.contains("最大曲げ位置・引張側の有効せい"))
+            );
+        }
+    }
+}
+
+#[test]
 fn haunch_qd1_retains_bending_at_the_rounded_opposite_face_and_with_missing_shear() {
     let mut model = model();
     add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);

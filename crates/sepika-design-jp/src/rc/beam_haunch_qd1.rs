@@ -29,6 +29,7 @@ struct ValidatedFace {
 
 #[derive(Clone, Debug)]
 struct GeneralSectionRange {
+    actual_bounds_mm: [f64; 2],
     actual_bounds_xi: [f64; 2],
     recorded_bounds_xi: [Option<f64>; 2],
 }
@@ -109,7 +110,7 @@ impl BeamQd1Haunches {
             for force in [left, right].into_iter().flatten() {
                 let tension_side = usize::from(force[5] >= 0.0);
                 let depth_mm = self
-                    .depth_for_alpha(peak.xi, face_index, tension_side)
+                    .depth_for_alpha(peak.x_mm, face_index, tension_side)
                     .filter(|d| d.is_finite() && *d > 0.0)
                     .ok_or("最大曲げ位置・引張側の有効せいを確認できません")?;
                 let alpha = shear_alpha(force[5].abs(), force[1], depth_mm, 2.0);
@@ -124,7 +125,7 @@ impl BeamQd1Haunches {
 
     fn depth_for_alpha(
         &self,
-        xi: f64,
+        x_mm: f64,
         face_index: Option<usize>,
         tension_side: usize,
     ) -> Option<f64> {
@@ -135,7 +136,7 @@ impl BeamQd1Haunches {
             };
         }
         if self.general_section_range.as_ref().is_some_and(|range| {
-            (range.actual_bounds_xi[0]..=range.actual_bounds_xi[1]).contains(&xi)
+            (range.actual_bounds_mm[0]..=range.actual_bounds_mm[1]).contains(&x_mm)
         }) {
             return self.general_depths_mm[tension_side];
         }
@@ -234,6 +235,8 @@ fn general_section_range(
     let geometry = geometry.ok_or("QD1用のハンチ付き梁の実フェース間内法が確認できません")?;
     let recorded_faces_mm = [elem.rigid_zone.face_i, elem.rigid_zone.face_j];
     let mut lengths_mm = [0.0; 2];
+    let [face_i_mm, face_j_mm] = geometry.face_distances_mm;
+    let mut inner_boundaries_mm = [face_i_mm, geometry.axis_length_mm - face_j_mm];
     let mut inner_boundaries_xi = geometry.end_positions;
     let mut recorded_bounds_xi = [None; 2];
     for (index, end) in ends.into_iter().enumerate() {
@@ -272,9 +275,14 @@ fn general_section_range(
             ));
         }
         lengths_mm[index] = end.length;
-        let haunch_end = |start_mm| to_xi(start_mm + end.length);
-        inner_boundaries_xi[index] = haunch_end(face_mm);
-        let recorded_end_xi = haunch_end(recorded_mm);
+        let distance_mm = face_mm + end.length;
+        inner_boundaries_mm[index] = if index == 0 {
+            distance_mm
+        } else {
+            geometry.axis_length_mm - distance_mm
+        };
+        inner_boundaries_xi[index] = to_xi(distance_mm);
+        let recorded_end_xi = to_xi(recorded_mm + end.length);
         if [inner_boundaries_xi[index], recorded_end_xi]
             .into_iter()
             .any(|xi| same_qd1_station(xi, geometry.end_positions[index]))
@@ -286,11 +294,13 @@ fn general_section_range(
         recorded_bounds_xi[index] = Some(recorded_end_xi);
     }
     if lengths_mm[0] + lengths_mm[1] >= geometry.clear_span_mm
+        || inner_boundaries_mm[0] >= inner_boundaries_mm[1]
         || inner_boundaries_xi[0] >= inner_boundaries_xi[1]
     {
         return Err("QD1用のハンチ付き梁でハンチ区間が重なるか、一般部を挟んでいません".into());
     }
     Ok(GeneralSectionRange {
+        actual_bounds_mm: inner_boundaries_mm,
         actual_bounds_xi: inner_boundaries_xi,
         recorded_bounds_xi,
     })

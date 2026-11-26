@@ -665,7 +665,7 @@ pub(crate) fn beam_check(
     let is_min = seismic_qd.is_some_and(|qd| qd.method == QdMethod::Min);
     let mixed_min = is_min && qd1_haunches.is_some_and(|haunches| haunches.mixes_response_steps());
     let mut qd1_n = None;
-    let q_design = if !shear_reference_valid {
+    let adopted_qd = if !shear_reference_valid {
         None
     } else if let Some(qd) = seismic_qd {
         let (demand, qd1) = super::beam_design_shear(
@@ -690,7 +690,14 @@ pub(crate) fn beam_check(
     } else {
         Some(forces.qy.abs())
     }
-    .filter(|_| !mixed_min && forces.mz.is_finite() && forces.qy.is_finite());
+    .filter(|_| !mixed_min && forces.mz.is_finite());
+    let q_design = adopted_qd.filter(|_| forces.qy.is_finite());
+    let bond_demand =
+        if qd1_haunches.is_some() && seismic_qd.is_some_and(|qd| qd.method == QdMethod::Qd1) {
+            adopted_qd.filter(|_| valid_tension_props)
+        } else {
+            q_design.filter(|_| valid_tension_props)
+        };
     let alpha = if let Some(haunches) = qd1_haunches.filter(|_| uses_qd1) {
         match haunches.shear_alpha() {
             Ok(alpha) => Some(alpha),
@@ -785,7 +792,7 @@ pub(crate) fn beam_check(
             Some("RC 梁付着検定未算定: 丸鋼主筋に適用できる方式がなく、端部フックと実際の付着長さを確認できません"),
         );
     }
-    let (ratio_bond, bond_detail) = match (ctx.bond_method, bond_rebar_supported, q_design) {
+    let (ratio_bond, bond_detail) = match (ctx.bond_method, bond_rebar_supported, bond_demand) {
         (BondMethod::Rc1999, true, _)
             if valid_tension_props
                 && (long_term || stirrup_effect_available)
