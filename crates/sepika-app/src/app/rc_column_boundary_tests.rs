@@ -30,6 +30,317 @@ fn rc_column_long_term_shear_app(model: sepika_core::model::Model) -> App {
 }
 
 #[test]
+fn 回転大梁の柱実面と判定を保存し旧版の成果を区別する() {
+    use sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION;
+
+    let mut model = rc_column_long_term_shear_model(false);
+    model.elements[1].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    model.load_cases[0].member.clear();
+    model.load_cases[0].nodal = vec![sepika_core::model::NodalLoad::manual(
+        NodeId(1),
+        [36_100.0, 0.0, 8472.9456, 0.0, 0.0, 0.0],
+    )];
+    let app = rc_column_long_term_shear_app(model);
+    let results = app.current_design_results().unwrap();
+    let expected = serde_json::to_value(&results.member_checks).unwrap();
+    let expected_faces = &results.combos[0].1.rc_column_face_forces;
+    let rows = &results
+        .member_checks
+        .iter()
+        .find(|record| record.elem == long_term_shear_input::COLUMN)
+        .unwrap()
+        .positions;
+    assert!(rows.iter().any(|row| row.xi == 0.05 && matches!(&row.outcome, CheckOutcome::Checked(result)
+        if result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0))));
+    assert!(rows.iter().all(|row| row.xi != 0.1));
+    for (analysis, design) in [
+        (ANALYSIS_CONTRACT_VERSION - 1, DESIGN_CONTRACT_VERSION),
+        (ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION - 1),
+        (ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION),
+    ] {
+        let (mut reopened, path) = super::result_contract_tests::restore(
+            &app,
+            Some(analysis),
+            Some(design),
+            &format!("rc-column-rotated-girder-{analysis}-{design}"),
+        );
+        std::fs::remove_file(path).unwrap();
+        if analysis != ANALYSIS_CONTRACT_VERSION {
+            assert!(reopened.require_selected_static_input().is_err());
+            assert!(reopened.current_design_results().is_none());
+            continue;
+        }
+        assert!(reopened.require_selected_static_input().is_ok());
+        assert_eq!(
+            reopened.current_design_results().is_some(),
+            design == DESIGN_CONTRACT_VERSION
+        );
+        assert_eq!(
+            &reopened.core.scoped.results.as_ref().unwrap().combos[0]
+                .1
+                .rc_column_face_forces,
+            expected_faces
+        );
+        reopened.run_design_check();
+        assert!(
+            reopened.core.scoped.last_error.is_none(),
+            "{:?}",
+            reopened.core.scoped.last_error
+        );
+        assert_eq!(
+            serde_json::to_value(&reopened.current_design_results().unwrap().member_checks)
+                .unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn 短期地震の重力再計算だけ失敗なら実面曲げと構造規定の不適合を保持する() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{LoadCombination, NodalLoad};
+
+    let mut model = rc_column_long_term_shear_model(false);
+    model.elements[1].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    let Some(sepika_core::section_shape::SectionShape::RcColumnRect { rebar, .. }) =
+        &mut model.sections[0].shape
+    else {
+        unreachable!()
+    };
+    rebar.hoop.pitch = 120.0;
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [20_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    )];
+    model.load_cases[0].member = vec![sepika_core::model::MemberLoad::manual(
+        long_term_shear_input::COLUMN,
+        [1.0, 0.0, 0.0],
+        sepika_core::model::MemberLoadKind::Point {
+            a: 225.0,
+            p: 12_000.0,
+        },
+    )];
+    model.load_cases[3].name = "試験用水平力".into();
+    model.load_cases[3].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [120_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    )];
+    model.combinations = vec![LoadCombination {
+        name: "短期地震の試験組合せ".into(),
+        terms: vec![
+            (LoadCaseId(0), 1.0),
+            (LoadCaseId(1), 1.0),
+            (LoadCaseId(3), 1.0),
+        ],
+    }];
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = sepika_design_jp::QdMethod::Qd2;
+    app.run_combination(0);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    assert!(app.require_selected_static_input().is_ok());
+    app.run_design_check_with_gravity(|model, case| {
+        let mut solved = sepika_job::compute::compute_linear_static(model.clone(), case).ok()?;
+        let (_, beam) = solved
+            .member_forces
+            .iter_mut()
+            .find(|(id, _)| *id == ElemId(1))
+            .unwrap();
+        beam.at[0].1[0] = f64::NAN;
+        Some(solved)
+    });
+    let bundle = app.current_design_results().unwrap();
+    let rows = &bundle
+        .member_checks
+        .iter()
+        .find(|record| record.elem == long_term_shear_input::COLUMN)
+        .unwrap()
+        .positions;
+    let shear = rows
+        .iter()
+        .find_map(|row| match &row.outcome {
+            CheckOutcome::Checked(result) if row.xi == 0.05 => result
+                .components
+                .iter()
+                .find(|part| part.kind == CheckKind::Shear),
+            _ => None,
+        })
+        .unwrap();
+    let capacity_n = shear
+        .detail
+        .split("QAy=")
+        .nth(1)
+        .unwrap()
+        .split(" N")
+        .next()
+        .unwrap()
+        .parse::<f64>()
+        .unwrap();
+    assert!(
+        (shear.ratio * capacity_n - 212_000.0).abs() < 0.2,
+        "{rows:?}"
+    );
+    assert!(rows.iter().any(|row| row.xi == 0.5
+        && matches!(&row.outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("検定用重力応力が不足"))));
+    let mut requests = 0;
+    app.run_design_check_with_gravity(|_, _| {
+        requests += 1;
+        None
+    });
+    assert!(requests > 0);
+    let bundle = app.current_design_results().unwrap();
+    let rows = &bundle
+        .member_checks
+        .iter()
+        .find(|record| record.elem == long_term_shear_input::COLUMN)
+        .unwrap()
+        .positions;
+    assert!(rows.iter().any(|row| row.xi == 0.05 && matches!(&row.outcome, CheckOutcome::Checked(result)
+        if result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0))));
+    assert!(rows.iter().any(|row| row.xi == 0.05
+        && matches!(&row.outcome, CheckOutcome::Skipped { reason }
+        if reason.contains("検定用重力応力が不足"))));
+    assert!(rows.iter().any(|row| row.xi == 0.5 && matches!(&row.outcome, CheckOutcome::Checked(result)
+        if result.components.iter().any(|part| part.kind == CheckKind::Provision && part.ratio > 1.0)
+        && result.components.iter().any(|part| part.kind == CheckKind::AxialBending && part.ratio > 1.0))));
+    assert!(rows
+        .iter()
+        .all(|row| !matches!(&row.outcome, CheckOutcome::Checked(result)
+        if result.components.iter().any(|part| part.kind == CheckKind::Shear))));
+    assert!(bundle
+        .rc_column_ductility_advisories
+        .iter()
+        .filter(|a| a.elem == long_term_shear_input::COLUMN)
+        .flat_map(|a| &a.positions)
+        .any(|(xi, value)| *xi == 0.05
+            && matches!(
+                value,
+                sepika_design_jp::RcColumnDuctilityComparison::Compared { .. }
+            )));
+
+    let stored = app
+        .core
+        .scoped
+        .results
+        .as_mut()
+        .unwrap()
+        .combos
+        .first_mut()
+        .unwrap();
+    let (_, column) = stored
+        .1
+        .member_forces
+        .iter_mut()
+        .find(|(id, _)| *id == long_term_shear_input::COLUMN)
+        .unwrap();
+    column.at[0].1[0] += 1.0;
+    app.run_design_check_with_gravity(|_, _| None);
+    let bundle = app.current_design_results().unwrap();
+    let rows = &bundle
+        .member_checks
+        .iter()
+        .find(|record| record.elem == long_term_shear_input::COLUMN)
+        .unwrap()
+        .positions;
+    assert!(rows
+        .iter()
+        .all(|row| matches!(&row.outcome, CheckOutcome::Skipped { .. })));
+}
+
+#[test]
+fn 丸め帯で軸力未算定の実面でもqd2の不適合を保存して表示できる() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{LoadCombination, MemberLoad, MemberLoadKind, NodalLoad};
+    use sepika_core::result_contract::ANALYSIS_CONTRACT_VERSION;
+
+    let mut model = rc_column_long_term_shear_model(false);
+    model.elements[1].local_axis.ref_vector = [0.0, 1.0, 0.0];
+    model.load_cases[0].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [20_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    )];
+    model.load_cases[0].member = vec![MemberLoad::manual(
+        long_term_shear_input::COLUMN,
+        [0.0, 0.0, 1.0],
+        MemberLoadKind::Point {
+            a: 150.0 + 1e-11,
+            p: 50_000.0,
+        },
+    )];
+    model.load_cases[3].name = "試験用水平力".into();
+    model.load_cases[3].nodal = vec![NodalLoad::manual(
+        NodeId(1),
+        [200_000.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    )];
+    model.combinations = vec![LoadCombination {
+        name: "短期地震の試験組合せ".into(),
+        terms: vec![
+            (LoadCaseId(0), 1.0),
+            (LoadCaseId(1), 1.0),
+            (LoadCaseId(3), 1.0),
+        ],
+    }];
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = sepika_design_jp::QdMethod::Qd2;
+    app.run_combination(0);
+    assert!(
+        app.core.scoped.last_error.is_none(),
+        "{:?}",
+        app.core.scoped.last_error
+    );
+    let compare = |app: &App| {
+        let bundle = app.current_design_results().unwrap();
+        let column = bundle
+            .member_checks
+            .iter()
+            .find(|record| record.elem == long_term_shear_input::COLUMN)
+            .unwrap();
+        let assert_face = || column.positions.iter().filter(|row| row.xi == 0.05);
+        assert!(assert_face().any(
+            |row| matches!(&row.outcome, CheckOutcome::Skipped { reason }
+            if reason.contains("軸力Nが未算定") && reason.contains("丸め誤差"))
+        ));
+        assert!(assert_face().any(|row| matches!(&row.outcome, CheckOutcome::Checked(result)
+            if result.components.iter().any(|part| part.kind == CheckKind::Shear && part.ratio > 1.0))));
+        let face = bundle.combos[0]
+            .1
+            .rc_column_face_forces
+            .iter()
+            .find(|(id, _)| *id == long_term_shear_input::COLUMN)
+            .unwrap()
+            .1[0]
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap();
+        let components = face.forces.as_ref().unwrap();
+        assert!(components[0].is_err());
+        assert!(components[1..]
+            .iter()
+            .all(|value| matches!(value, Ok(value) if value.is_finite())));
+    };
+    compare(&app);
+    let (mut reopened, path) = super::result_contract_tests::restore(
+        &app,
+        Some(ANALYSIS_CONTRACT_VERSION),
+        Some(DESIGN_CONTRACT_VERSION),
+        "rc-column-face-incomplete-components",
+    );
+    std::fs::remove_file(path).unwrap();
+    compare(&reopened);
+    reopened.run_design_check();
+    compare(&reopened);
+}
+
+#[test]
 fn rc_column_long_term_shear_preserves_current_analysis_and_rechecks_old_ovika() {
     use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
 

@@ -6,10 +6,13 @@
 //! 計算ルート依存の項目（割増率下限・pw のルート別下限）はルート設定が未実装のため
 //! 対象外（pw はルート1/3 相当の 0.2% 下限のみ警告）。
 
+use sepika_core::model::Material;
+use sepika_core::section_shape::SectionShape;
 use sepika_core::units::ConcreteClass;
 
-use super::section_props::{AxisProps, RcRebarInfo};
-use crate::{CheckComponent, CheckKind};
+use super::section_props::{axis_props_from_shape, rebar_info_from_shape, AxisProps, RcRebarInfo};
+use crate::ultimate::rc_props::RcDirection;
+use crate::{CheckComponent, CheckKind, DesignCtx};
 
 /// 構造規定の判定結果。
 pub(crate) struct ProvisionCheck {
@@ -40,11 +43,34 @@ impl ProvisionCheck {
 
 /// 部材レベルの項目を付記する位置か。
 ///
-/// 危険断面の既定は柱フェイスと中央であり、剛域ありでは節点芯（pos=0）は
-/// 検定対象外になる。中央（pos≈0.5）は常に危険断面に含まれるため、ここで
-/// 一度だけ付記する（重複を避ける）。
+/// 部材中央（pos≈0.5）に付記する。
 pub(crate) fn is_member_level_station(pos: f64) -> bool {
     (pos - 0.5).abs() < 1e-6
+}
+
+pub(crate) fn column_member_provisions(
+    shape: &SectionShape,
+    mat: &Material,
+    ctx: &DesignCtx,
+) -> Option<ProvisionCheck> {
+    let (d_min, gross_area) = match *shape {
+        SectionShape::RcColumnRect { b, d, .. } => (b.min(d), b * d),
+        SectionShape::RcColumnCircle { d, .. } => (d, std::f64::consts::PI * d * d / 4.0),
+        _ => return None,
+    };
+    let pw = axis_props_from_shape(shape, RcDirection::Strong, true)?
+        .pw
+        .min(axis_props_from_shape(shape, RcDirection::Weak, true)?.pw);
+    let info = rebar_info_from_shape(shape, true)?;
+    Some(column_provisions_info(
+        &info,
+        d_min,
+        ctx.clear_length.filter(|&l| l > 1e-9).unwrap_or(ctx.length),
+        mat.concrete_class,
+        gross_area,
+        info.main_area,
+        pw,
+    ))
 }
 
 /// RC 梁の構造規定（マニュアル 2.5.2(5)）。
