@@ -15,8 +15,10 @@ pub use shear_envelope::{
 };
 pub(super) use shear_span::ShearSpan;
 pub use strong_bending::{
-    frame_strong_bending_intervals, frame_strong_bending_span, frame_strong_bending_span_mm,
-    verify_frame_bending_stations_mm, FrameStrongBendingPeak, FrameStrongBendingSpan,
+    frame_static_strong_bending, frame_strong_bending_intervals, frame_strong_bending_span,
+    frame_strong_bending_span_mm, verify_frame_bending_stations_mm, FrameStaticBendingError,
+    FrameStaticBendingSection, FrameStaticStrongBending, FrameStrongBendingPeak,
+    FrameStrongBendingSpan,
 };
 
 #[derive(Clone, Copy, Debug)]

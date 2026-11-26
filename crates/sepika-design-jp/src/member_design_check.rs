@@ -25,6 +25,7 @@ use sepika_solver::statics::linear::{GirderColumnFaceEnds, SteelPanelColumnFaceF
 mod rc_column_ductility;
 pub(crate) mod rc_column_long_term_shear;
 mod steel_beam_span;
+mod steel_column_span;
 pub use rc_column_ductility::{
     RcColumnDuctilityAdvisory, RcColumnDuctilityApplicability, RcColumnDuctilityComparison,
 };
@@ -111,7 +112,7 @@ pub struct MemberDesignCheckOptions<'a> {
     /// 同じ応力バッチを生成した荷重terms。ケース文字列からは推定しない。
     /// None では大梁の長期たわみは未算定とし、壁は全荷重ケースの未対応部材荷重を検査する。
     pub load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
-    /// 鋼梁の補剛区間の曲げを照合する、解析に用いた荷重ケースID・係数。モデルは解析時の部材荷重を持つこと。
+    /// 鋼梁・鋼柱の補剛区間の曲げを照合する、解析に用いた荷重ケースID・係数。モデルは解析時の部材荷重を持つこと。
     /// 不明ならNoneとし、強軸曲げ分布は未確認とする。
     pub steel_beam_span_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
     /// ハンチ付きRC梁の許容せん断力を確認する、同じ線形静的応答の荷重ケースID・係数。
@@ -462,6 +463,7 @@ pub fn run_member_design_checks(
         .filter(|_| options.term == LoadTerm::Short);
     let mut unavailable_src_ids = HashSet::new();
     let mut unavailable_beam_ids = HashSet::new();
+    let mut unavailable_steel_column_ids = HashSet::new();
     for elem in model
         .elements
         .iter()
@@ -496,6 +498,23 @@ pub fn run_member_design_checks(
             continue;
         }
         if structure != StructureKind::S || !crate::steel::is_symmetric_h_section(sec) {
+            continue;
+        }
+        if MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
+            && unavailable_steel_column_ids.insert(elem.id)
+        {
+            let reason = if row_count == 0 {
+                "鋼柱の解析断面力がありません"
+            } else {
+                "鋼柱の解析断面力が重複し、一意の解析応答を確認できません"
+            };
+            member_checks.push((
+                elem.id,
+                0.5,
+                CheckOutcome::Skipped {
+                    reason: reason.into(),
+                },
+            ));
             continue;
         }
         let Ok(MemberKind::Girder) = MemberKind::try_of_element(elem, model) else {
@@ -540,7 +559,10 @@ pub fn run_member_design_checks(
     }
 
     for (elem_id, mf) in member_forces {
-        if unavailable_beam_ids.contains(elem_id) || unavailable_src_ids.contains(elem_id) {
+        if unavailable_beam_ids.contains(elem_id)
+            || unavailable_src_ids.contains(elem_id)
+            || unavailable_steel_column_ids.contains(elem_id)
+        {
             continue;
         }
         let Some(elem) = elem_by_id.get(elem_id).copied() else {
@@ -586,6 +608,42 @@ pub fn run_member_design_checks(
             |forces: &MemberForcesAt| concrete_member_torsion_reason(structure, forces);
         let length = model.member_length(elem);
         if let Err(reason) = sec.ensure_properties_resolved() {
+            if structure == StructureKind::S
+                && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
+                && crate::steel::is_symmetric_h_section(sec)
+            {
+                let kind = MemberKind::Column;
+                let steel_attr = model
+                    .steel_design_attrs
+                    .iter()
+                    .find(|attr| attr.elem == *elem_id);
+                let (lk_y, lk_z) =
+                    crate::steel::frame_buckling_lengths(model, elem, kind, steel_attr);
+                let ctx = DesignCtx {
+                    kind,
+                    length,
+                    term: options.term,
+                    lk_y: Some(lk_y),
+                    lk_z: Some(lk_z),
+                    node_span_mm: Some(crate::steel::frame_node_span_mm(model, elem)),
+                    column_lateral_buckling_length: Some(
+                        crate::steel::column_lateral_buckling_length(model, elem, steel_attr),
+                    ),
+                    steel_attr: steel_attr.cloned(),
+                    ..Default::default()
+                };
+                if steel_column_span::check(
+                    model,
+                    elem,
+                    mf,
+                    &ctx,
+                    beam_span_loads.as_ref(),
+                    Some(&reason),
+                    &mut member_checks,
+                ) {
+                    continue;
+                }
+            }
             for (pos, forces) in &mf.at {
                 push_strength_outcome(
                     &mut member_checks,
@@ -991,6 +1049,19 @@ pub fn run_member_design_checks(
             rc_beam_qd1_haunches,
             steel_attr,
         };
+        if ctx.column_lateral_buckling_length.is_some()
+            && steel_column_span::check(
+                model,
+                elem,
+                mf,
+                &ctx,
+                beam_span_loads.as_ref(),
+                None,
+                &mut member_checks,
+            )
+        {
+            continue;
+        }
 
         let grouped_steel_beam = structure == StructureKind::S
             && kind == MemberKind::Girder

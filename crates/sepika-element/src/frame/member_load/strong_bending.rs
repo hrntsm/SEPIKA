@@ -1,6 +1,7 @@
 use super::{distributed_intensity, resolve, Comp, FrameDeadLoadMap, LoadedFrameSection};
 use crate::frame::beam::MemberForces;
 use crate::transform::LocalFrame;
+use sepika_core::geom::vec3::{dist, local_frame_axes_and_fallback_reference};
 use sepika_core::model::{MemberLoad, MemberLoadKind};
 
 mod exact;
@@ -37,6 +38,101 @@ pub struct FrameStrongBendingPeak {
     pub is_i_face: bool,
     /// 補剛端または材端フェースで決まる需要範囲のj側端。
     pub is_j_face: bool,
+}
+
+/// 線形静的応答の実材軸全長で確認した符号付き強軸曲げと、同一切断面の断面力。
+pub struct FrameStaticStrongBending {
+    /// i/j実材端の強軸曲げ [N·mm]。
+    pub end_moments_nmm: [f64; 2],
+    /// 実材軸全長で曲げが非減少または非増加ならtrue。
+    pub monotonic: bool,
+    /// 絶対値最大が内部にも存在するならtrue。
+    pub interior_maximum: bool,
+    /// 区間で非零の強軸曲げを確認した場合にtrue。
+    pub has_strong_bending: bool,
+    /// 隣接照合位置間の曲げの符号反転に対応する圧縮軸力 [N]。軸力変動がある場合には使用しない。
+    pub compression_at_zero_crossing_n: Option<f64>,
+    /// 材端、荷重境界、曲げの内部極値を実材軸i端から昇順に返す。集中荷重位置では切断側を区別する。
+    pub sections: Vec<FrameStaticBendingSection>,
+    /// 軸力の変動、弱軸せん断、引張と二軸曲げの併存で、全区間の組合せを確定できない場合の理由。
+    pub combination_issue: Option<&'static str>,
+}
+
+/// 静的照査位置の回復値と、同じ位置の保存断面力。
+pub struct FrameStaticBendingSection {
+    /// 回復した照査位置と切断側の断面力。
+    pub recovered: FrameStrongBendingPeak,
+    /// 回復した切断位置と厳密に一致する保存断面力の左極限 [N, N·mm]。
+    pub saved_left: Option<[f64; 6]>,
+}
+
+/// 静的な強軸曲げ分布の算定に失敗した段階と理由。
+pub enum FrameStaticBendingError {
+    /// 同じ実材軸の応答として保存断面力を照合できない。
+    Stations(String),
+    /// 断面力の矛盾は検出されていないが、区間全体の分布を確認できない。
+    Distribution(String),
+}
+
+/// 線形静的応答と同じ部材荷重・係数および両端を含む保存断面力から実材軸全長の強軸曲げを確認する。
+/// 区間座標は実材軸i端を起点とする [mm]。断面力の不整合、荷重の投影・曲げ分布を確認できない場合はエラー。
+pub fn frame_static_strong_bending(
+    [i, j]: [[f64; 3]; 2],
+    reference: [f64; 3],
+    loads: &[(f64, &MemberLoad)],
+    forces: &MemberForces,
+) -> Result<FrameStaticStrongBending, FrameStaticBendingError> {
+    use FrameStaticBendingError::{Distribution, Stations};
+    let (rot, fallback) = local_frame_axes_and_fallback_reference(i, j, reference)
+        .map_err(|reason| Stations(reason.into()))?;
+    let frame = LocalFrame { rot };
+    let length_mm = dist(i, j);
+    let stations = bending_stations_mm(length_mm, forces).map_err(Distribution)?;
+    for &(factor, load) in loads {
+        let input = match load.kind {
+            MemberLoadKind::Point { p, .. } => [p, 0.0],
+            MemberLoadKind::Distributed { w1, w2, .. } => [w1, w2],
+        };
+        if factor != 0.0 && input.into_iter().any(|p| p != 0.0 && factor * p == 0.0) {
+            return Err(Distribution(
+                "荷重係数を適用した部材荷重の強度を保持できません".into(),
+            ));
+        }
+    }
+    let response =
+        frame_bending_response_mm(&frame, length_mm, loads, &stations).map_err(Stations)?;
+    if stations
+        .iter()
+        .any(|(_, row)| row.iter().any(|value| !value.is_finite()))
+    {
+        verify_partial_bending_stations(
+            &LoadedFrameSection::new(response.map, [0.0; 12]),
+            &stations,
+        )
+        .map_err(Stations)?;
+        return Err(Distribution(
+            "保存断面力に非有限な成分があるため、区間全体の組合せを確定できません".into(),
+        ));
+    }
+    verify_bending_stations(&response, &stations).map_err(Stations)?;
+    response
+        .verify_static_load_projections([i, j], fallback.unwrap_or(reference))
+        .map_err(Distribution)?;
+    verify_bending_stations_with(&stations, |x_mm| response.exact_static_cut_mm(x_mm))
+        .map_err(|reason| Stations(format!("厳密な回復値。{reason}")))?;
+    StrongBendingResponse::new(&frame, length_mm, &response, &stations)
+        .exact_static_sections()
+        .map_err(|error| {
+            Distribution(match error {
+                ExactSpanError::VaryingStrongLoad => {
+                    "強軸方向の合算分布荷重の強度が区間内で変化するため、曲げ分布を確定できません"
+                        .into()
+                }
+                ExactSpanError::Unconfirmed => {
+                    "強軸曲げの分布と照合位置の断面力を有限値として確定できません".into()
+                }
+            })
+        })
 }
 
 /// 同じ線形静的応答に使った全長の部材荷重・係数と両端を含む断面力から、強軸曲げを回復する。
@@ -402,6 +498,17 @@ fn verified_frame_bending_response_mm(
     loads: &[(f64, &MemberLoad)],
     stations_mm: &[(f64, [f64; 6])],
 ) -> Result<LoadedFrameSection, String> {
+    let response = frame_bending_response_mm(frame, length_mm, loads, stations_mm)?;
+    verify_bending_stations(&response, stations_mm)?;
+    Ok(response)
+}
+
+fn frame_bending_response_mm(
+    frame: &LocalFrame,
+    length_mm: f64,
+    loads: &[(f64, &MemberLoad)],
+    stations_mm: &[(f64, [f64; 6])],
+) -> Result<LoadedFrameSection, String> {
     let Some(&(0.0, start)) = stations_mm.first() else {
         return Err("i端の解析断面力がありません".into());
     };
@@ -438,14 +545,19 @@ fn verified_frame_bending_response_mm(
     ];
     let mut node_force = [0.0; 12];
     node_force[..6].copy_from_slice(&origin);
-    let response = LoadedFrameSection::new(map, node_force);
-    verify_bending_stations(&response, stations_mm)?;
-    Ok(response)
+    Ok(LoadedFrameSection::new(map, node_force))
 }
 
 fn verify_bending_stations(
     response: &LoadedFrameSection,
     stations_mm: &[(f64, [f64; 6])],
+) -> Result<(), String> {
+    verify_bending_stations_with(stations_mm, |x_mm| response.at_mm(x_mm))
+}
+
+fn verify_bending_stations_with(
+    stations_mm: &[(f64, [f64; 6])],
+    recover: impl Fn(f64) -> Result<[f64; 6], String>,
 ) -> Result<(), String> {
     let scales: [f64; 6] = std::array::from_fn(|i| {
         stations_mm
@@ -454,7 +566,7 @@ fn verify_bending_stations(
             .fold(1.0, f64::max)
     });
     for &(x_mm, observed) in stations_mm {
-        let recovered = response.at_mm(x_mm)?;
+        let recovered = recover(x_mm)?;
         if (0..6).any(|i| {
             !observed[i].is_finite()
                 || (recovered[i] - observed[i]).abs() > 1e-8 * scales[i].max(recovered[i].abs())
@@ -462,8 +574,66 @@ fn verify_bending_stations(
             return Err("解析断面力と部材荷重の釣合いを確認できません".into());
         }
     }
-
     Ok(())
+}
+
+fn verify_partial_bending_stations(
+    load_response: &LoadedFrameSection,
+    stations_mm: &[(f64, [f64; 6])],
+) -> Result<(), String> {
+    let applied = stations_mm
+        .iter()
+        .map(|(x, _)| load_response.exact_static_cut_mm(*x))
+        .collect::<Result<Vec<_>, _>>()?;
+    let finite_cuts = |index: usize| {
+        stations_mm
+            .iter()
+            .zip(&applied)
+            .filter_map(move |(&(x, force), load)| {
+                force[index]
+                    .is_finite()
+                    .then_some((x, force[index], load[index]))
+            })
+    };
+    let verify = |index, slope: Option<f64>| {
+        let mut cuts = finite_cuts(index);
+        let Some((x0, f0, load0)) = cuts.next() else {
+            return Ok(());
+        };
+        let origin = f0 - load0;
+        if !origin.is_finite() {
+            return Err("解析断面力と部材荷重の釣合いを確認できません".into());
+        }
+        let Some(slope) = slope.or_else(|| {
+            cuts.clone()
+                .next_back()
+                .map(|(x, f, load)| (f - load - origin) / (x - x0))
+        }) else {
+            return Ok(());
+        };
+        let scale = finite_cuts(index)
+            .map(|(_, f, _)| f.abs())
+            .fold(1.0, f64::max);
+        if !slope.is_finite()
+            || cuts.any(|(x, f, load)| {
+                let recovered = slope.mul_add(x - x0, origin) + load;
+                !recovered.is_finite() || (recovered - f).abs() > 1e-8 * scale.max(recovered.abs())
+            })
+        {
+            return Err("解析断面力と部材荷重の釣合いを確認できません".into());
+        }
+        Ok::<(), String>(())
+    };
+    for index in 0..4 {
+        verify(index, Some(0.0))?;
+    }
+    let origin_shear = |index| {
+        finite_cuts(index)
+            .next()
+            .map(|(_, shear, load)| shear - load)
+    };
+    verify(4, origin_shear(2).map(|qz| -qz))?;
+    verify(5, origin_shear(1))
 }
 
 impl LoadedFrameSection {

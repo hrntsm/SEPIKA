@@ -539,7 +539,14 @@ pub fn design_post(model: &Model, sm: &SecondaryMember) -> PostDesignResult {
                 {
                     CheckOutcome::Skipped { reason } => Err(reason),
                     CheckOutcome::Checked(_) => f.and_then(|f| {
-                        crate::steel::column_allowables(sec, mat, &ctx, f, None, Some(ctx.length))
+                        crate::steel::column_allowables(
+                            sec,
+                            mat,
+                            &ctx,
+                            f,
+                            None,
+                            Some((ctx.length, None)),
+                        )
                     }),
                 }
             } else {
