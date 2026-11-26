@@ -3380,7 +3380,8 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
     let model = src_analysis_ratio_model();
     let data = &model.elements[0];
     let beam = BeamElement::try_new(data, &model).unwrap();
-    let expected_d = [5130576000.0, 30629959872000.0, 150579426048000.0];
+    let expected_ea_n = 5_130_576_000.0;
+    let expected_eiy_n_mm2 = 30_629_959_872_000.0;
     assert_eq!(beam.a, 250272.0);
     assert!((beam.mass_properties.total_mass(beam.length) - 1.3766168875202032).abs() < 1e-12);
     assert_ne!(beam.iz, model.sections[0].iy);
@@ -3404,12 +3405,12 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
         let h = &fiber.hinge;
         assert_relative_eq!(
             h.k_el.get(4, 4),
-            expected_d[1] * (4.0 + fiber.phi_z) / (fiber.flex_length * (1.0 + fiber.phi_z)),
+            expected_eiy_n_mm2 * (4.0 + fiber.phi_z) / (fiber.flex_length * (1.0 + fiber.phi_z)),
             max_relative = 1e-12
         );
         assert_relative_eq!(
             h.k_el.get(0, 0),
-            expected_d[0] / fiber.flex_length,
+            expected_ea_n / fiber.flex_length,
             max_relative = 1e-12
         );
         assert_eq!(fiber.initial_elastic_stiffness.get(0, 0), h.k_el.get(0, 0));
@@ -3425,9 +3426,14 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
     }
 
     let ctx = Ctx { model: &model };
-    for kind in [ElementKind::Fiber, ElementKind::MultiSpring] {
+    for (kind, force_regime) in [
+        (ElementKind::Fiber, ForceRegime::Auto),
+        (ElementKind::MultiSpring, ForceRegime::Auto),
+        (ElementKind::Beam, ForceRegime::AxialBendingInteract),
+    ] {
         let mut data = data.clone();
         data.kind = kind;
+        data.force_regime = force_regime;
         let behavior = crate::factory::build_nonlinear_behavior(
             &data,
             &model,
@@ -3438,7 +3444,7 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
         let k = behavior.tangent_stiffness(&ctx);
         assert_relative_eq!(
             k.get(0, 0),
-            expected_d[0] / beam.length,
+            expected_ea_n / beam.length,
             max_relative = 1e-12
         );
         assert_relative_eq!(
@@ -3447,35 +3453,6 @@ fn src_nonlinear_entries_keep_validated_ns10_nominal_stiffness_and_torsion() {
             max_relative = 1e-12
         );
     }
-
-    let mut spring_data = data.clone();
-    spring_data.kind = ElementKind::Beam;
-    spring_data.force_regime = ForceRegime::UniaxialBendingShear;
-    let behavior = crate::factory::build_nonlinear_behavior(
-        &spring_data,
-        &model,
-        StrengthBasis::Nominal,
-        AnalysisKind::Incremental,
-        None,
-    );
-    let snapshot = behavior.snapshot_state();
-    let state = snapshot
-        .downcast_ref::<(
-            Vec<Box<dyn sepika_material::uniaxial::UniaxialMaterial>>,
-            [f64; 4],
-            [f64; 4],
-            crate::frame::beam::state::ElasticLoadState,
-        )>()
-        .unwrap();
-    let expected_k_rot = 6.0 * 150579426048000.0 / 3000.0;
-    for spring in &state.0 {
-        assert_relative_eq!(spring.probe(0.0).1, expected_k_rot, max_relative = 1e-12);
-    }
-    assert_relative_eq!(
-        behavior.tangent_stiffness(&ctx).get(0, 0),
-        expected_d[0] / beam.length,
-        max_relative = 1e-12
-    );
 }
 
 #[test]
@@ -3523,7 +3500,7 @@ fn src_nonlinear_entries_reject_invalid_materials_instead_of_provisional_propert
         for (kind, regime) in [
             (ElementKind::Fiber, ForceRegime::Auto),
             (ElementKind::MultiSpring, ForceRegime::Auto),
-            (ElementKind::Beam, ForceRegime::UniaxialBendingShear),
+            (ElementKind::Beam, ForceRegime::AxialBendingInteract),
         ] {
             let mut data = data.clone();
             data.kind = kind;

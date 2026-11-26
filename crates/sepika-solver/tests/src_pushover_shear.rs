@@ -651,12 +651,71 @@ fn src_nonlinear_analysis_identifies_unconfirmed_manufacture_and_plate_thickness
     }
 }
 
+fn assert_src_spring_issue(error: &str) {
+    for expected in [
+        "部材 ID 0",
+        "SRC材端集中ばね",
+        "曲げ降伏点",
+        "ひび割れ後から最大点まで",
+        "復元力の適用条件を確認できません",
+    ] {
+        assert!(error.contains(expected), "{error}");
+    }
+}
+
 #[test]
-fn rigid_diaphragm_src_girder_keeps_auto_spring_but_explicit_fiber_requires_manufacture() {
+fn src_concentrated_spring_stops_pushover_and_time_history() {
+    use sepika_core::model::Constraint;
+
+    for (frame_use, force_regime) in [
+        (FrameSectionUse::Girder, ForceRegime::Auto),
+        (FrameSectionUse::Girder, ForceRegime::UniaxialBendingShear),
+        (FrameSectionUse::Column, ForceRegime::UniaxialBendingShear),
+    ] {
+        for (manufacture, primary_fy) in [
+            (SrcHManufacture::BuiltUp, None),
+            (SrcHManufacture::BuiltUp, Some(120.0)),
+            (SrcHManufacture::Unknown, None),
+            (SrcHManufacture::Rolled, None),
+        ] {
+            let mut model = restrained_member(frame_use, 45.0, 13.0);
+            model.elements[0].kind = ElementKind::Beam;
+            model.elements[0].force_regime = force_regime;
+            if force_regime == ForceRegime::Auto {
+                model
+                    .constraints
+                    .push(Constraint::rigid_diaphragm(StoryId(1), NodeId(1), vec![]));
+            }
+            match model.sections[0].shape.as_mut().unwrap() {
+                SectionShape::SrcBeamRect {
+                    steel_manufacture, ..
+                }
+                | SectionShape::SrcColumnRect {
+                    steel_manufacture, ..
+                } => *steel_manufacture = manufacture,
+                _ => unreachable!(),
+            }
+            model.materials[0].fy = primary_fy;
+
+            let Err(SolveError::InvalidInput(time_history_error)) =
+                run_time_history(&mut model.clone())
+            else {
+                panic!("{frame_use:?} {force_regime:?} {manufacture:?}: 入力エラーが必要です");
+            };
+            let pushover_error = run(&mut model, SeismicDir::Y, 1_000.0).unwrap_err();
+            assert_src_spring_issue(&time_history_error);
+            assert_src_spring_issue(&pushover_error);
+        }
+    }
+}
+
+#[test]
+fn rigid_diaphragm_src_girder_with_axial_bending_interaction_requires_manufacture() {
     use sepika_core::model::Constraint;
 
     let mut model = restrained_member(FrameSectionUse::Girder, 10.0, 13.0);
     model.elements[0].kind = ElementKind::Beam;
+    model.elements[0].force_regime = ForceRegime::AxialBendingInteract;
     model
         .constraints
         .push(Constraint::rigid_diaphragm(StoryId(1), NodeId(1), vec![]));
@@ -668,16 +727,109 @@ fn rigid_diaphragm_src_girder_keeps_auto_spring_but_explicit_fiber_requires_manu
     };
     *steel_manufacture = SrcHManufacture::Unknown;
 
-    let result = run(&mut model, SeismicDir::Y, 1_000.0).unwrap();
-    assert!((result.member_response[0].shear_strong - 1_000.0).abs() < 1.0);
-    assert!(result.fiber_states.is_empty());
+    let Err(SolveError::InvalidInput(time_history_error)) = run_time_history(&mut model.clone())
+    else {
+        panic!("内蔵鉄骨の製造区分が不明なら入力エラーが必要です");
+    };
+    let pushover_error = run(&mut model, SeismicDir::Y, 1_000.0).unwrap_err();
+    for error in [time_history_error, pushover_error] {
+        assert!(
+            error.contains("部材 ID 0") && error.contains("製造区分が不明"),
+            "{error}"
+        );
+    }
+}
 
-    model.elements[0].force_regime = ForceRegime::AxialBendingInteract;
-    let error = run(&mut model, SeismicDir::Y, 1_000.0).unwrap_err();
-    assert!(
-        error.contains("部材 ID 0") && error.contains("製造区分が不明"),
-        "{error}"
-    );
+#[test]
+fn src_built_up_h_fiber_and_multi_spring_models_still_run() {
+    use sepika_core::model::Constraint;
+
+    for (frame_use, kind, force_regime, rigid_floor) in [
+        (
+            FrameSectionUse::Girder,
+            ElementKind::Beam,
+            ForceRegime::AxialBendingInteract,
+            true,
+        ),
+        (
+            FrameSectionUse::Girder,
+            ElementKind::Beam,
+            ForceRegime::Auto,
+            false,
+        ),
+        (
+            FrameSectionUse::Column,
+            ElementKind::Beam,
+            ForceRegime::Auto,
+            true,
+        ),
+        (
+            FrameSectionUse::Girder,
+            ElementKind::Fiber,
+            ForceRegime::UniaxialBendingShear,
+            true,
+        ),
+        (
+            FrameSectionUse::Girder,
+            ElementKind::MultiSpring,
+            ForceRegime::UniaxialBendingShear,
+            true,
+        ),
+    ] {
+        let mut model = restrained_member(frame_use, 45.0, 13.0);
+        model.elements[0].kind = kind;
+        model.elements[0].force_regime = force_regime;
+        if rigid_floor {
+            model
+                .constraints
+                .push(Constraint::rigid_diaphragm(StoryId(1), NodeId(1), vec![]));
+        }
+
+        let result = run_time_history(&mut model.clone())
+            .unwrap_or_else(|error| panic!("{frame_use:?} {kind:?} {force_regime:?}: {error}"));
+        assert!(result.nonlinear);
+        assert_eq!(result.time.len(), 3);
+        assert!(result.history.node_disp.iter().any(|&u| u.abs() > 0.0));
+
+        let result = run(&mut model, SeismicDir::Y, 1_000.0)
+            .unwrap_or_else(|error| panic!("{frame_use:?} {kind:?} {force_regime:?}: {error}"));
+        let response = &result.member_response[0];
+        let shear_n = if frame_use == FrameSectionUse::Column {
+            response.shear_weak
+        } else {
+            response.shear_strong
+        };
+        assert!((shear_n - 1_000.0).abs() < 1.0, "{response:?}");
+    }
+}
+
+#[test]
+fn src_concentrated_spring_selection_does_not_stop_linear_analysis() {
+    use sepika_core::ids::LoadCaseId;
+    use sepika_core::model::{LoadCase, LoadCaseKind, LoadSource, NodalLoad};
+    use sepika_solver::statics::linear::linear_static_once;
+
+    let mut model = restrained_member(FrameSectionUse::Column, 45.0, 13.0);
+    model.elements[0].kind = ElementKind::Beam;
+    model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+    model.nodes[1].restraint.set_free(Dof::Uy);
+    model.load_cases.push(LoadCase {
+        id: LoadCaseId(0),
+        name: "SRC柱の水平荷重".into(),
+        kind: LoadCaseKind::Other,
+        nodal: vec![NodalLoad {
+            node: NodeId(1),
+            values: [0.0, 1_000.0, 0.0, 0.0, 0.0, 0.0],
+            name: String::new(),
+            source: LoadSource::Manual,
+        }],
+        member: vec![],
+        origin: Default::default(),
+    });
+
+    let result = linear_static_once(&model, LoadCaseId(0)).unwrap();
+    assert!(result.disp[1][1].is_finite() && result.disp[1][1] > 0.0);
+    assert_eq!(result.member_forces[0].0, ELEMENT);
 }
 
 #[test]
