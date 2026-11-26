@@ -1027,6 +1027,68 @@ fn time_history_rc_beam_qd1_does_not_require_a_support_beyond_the_connection() {
 }
 
 #[test]
+fn time_history_qd1_requires_qy_reaction_at_a_direct_support_and_keeps_bending_ng() {
+    use sepika_core::dof::Dof;
+    use sepika_design_jp::QdMethod;
+
+    let mut app = App::default();
+    let mut model = crate::app::signed_q0_acceptance_tests::grouped_rc_qd1_model(false);
+    model.elements[0].rigid_zone.face_i = Some(0.0);
+    model.elements[0].rigid_zone.face_j = Some(0.0);
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    let record = gravity_test_record(
+        [0.0, 60_000.0, 0.0, 0.0, 0.0, 1e9],
+        [0.0, 60_000.0, 0.0, 0.0, 0.0, 1e9],
+    );
+    set_gravity_forces(
+        &mut app,
+        Some(
+            [0.0, 0.5, 0.75, 1.0]
+                .map(|x| (x, [0.0, -10_000.0, 0.0, 0.0, 0.0, 0.0]))
+                .to_vec(),
+        ),
+    );
+    for supported in [true, false] {
+        app.core.model.nodes[1].restraint.set(Dof::Uz, supported);
+        assert_eq!(
+            sepika_job::design_q0::rc_beam_q0_for_gravity_cases(
+                &app.core.model,
+                &app.core.model.elements[0]
+            ),
+            Ok(Some(20_000.0))
+        );
+        for method in [QdMethod::Qd1, QdMethod::Min, QdMethod::Qd2] {
+            app.core.analysis_cfg.qd_method = method;
+            let text = labels(&app, &record, true);
+            let (envelope, snapshot) = text.split_once("軸力極値が生じた確定ステップ").unwrap();
+            for part in [envelope, snapshot] {
+                assert!(part.contains("(NG)"), "{method:?}: {text}");
+                if supported || method == QdMethod::Qd2 {
+                    assert!(
+                        part.contains("せん断 ") && !part.contains("検定不能"),
+                        "{method:?}: {text}"
+                    );
+                } else {
+                    assert!(!part.contains("せん断 "), "{method:?}: {text}");
+                    assert!(
+                        part.contains("検定不能: QD1用の梁のj端で局所Qy方向の反力"),
+                        "{method:?}: {text}"
+                    );
+                }
+            }
+        }
+    }
+    app.core.analysis_cfg.qd_method = QdMethod::Qd1;
+    app.core.model.load_cases[0].member[0].dir = [0.0; 3];
+    let text = labels(&app, &record, true);
+    assert!(
+        text.contains("部材荷重由来Q0が不足または不正") && text.contains("j端で局所Qy方向の反力"),
+        "{text}"
+    );
+}
+
+#[test]
 fn signed_q0_th_detail_released_beam_keeps_independent_bending_failure() {
     use sepika_core::model::EndCondition;
 
@@ -1404,6 +1466,53 @@ fn time_history_eccentric_beam_replaces_only_the_automatic_face() {
     forces.at[0].0 = 1e-8;
     let text = labels(&app, &record, true);
     assert!(text.contains("保存解析断面力がありません"), "{text}");
+}
+
+#[test]
+fn time_history_qd1_direct_support_failure_keeps_the_opposite_eccentric_material_end() {
+    use sepika_core::dof::{Dof, Dof6Mask};
+    use sepika_design_jp::QdMethod;
+
+    let mut model = rc_beam_qd1_model::model();
+    rc_beam_qd1_model::add_columns_at_outer_nodes(&mut model, [0.0, 1.0, 0.0]);
+    model.elements.pop().unwrap();
+    model.nodes.pop().unwrap();
+    model.nodes[1].restraint = Dof6Mask::FIXED;
+    model.nodes[1].restraint.set_free(Dof::Uz);
+    model.elements[0].end_offsets_mm = [[0.0, 0.0, 1_000.0]; 2];
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.rc_damage_control = false;
+    app.core.analysis_cfg.qd_method = QdMethod::Min;
+    set_gravity_forces(
+        &mut app,
+        Some(
+            [0.0, 250.0 / 4500.0, 0.5, 1.0 - 250.0 / 4500.0]
+                .map(|x| (x, [0.0, -10_000.0, 0.0, 0.0, 0.0, 0.0]))
+                .to_vec(),
+        ),
+    );
+    let mut record = gravity_test_record([0.0, 60_000.0, 0.0, 0.0, 0.0, 10e6], [0.0; 6]);
+    let forces = &mut record.peak_member_forces[0].as_mut().unwrap().at;
+    forces[0].1[5] = 1e9;
+    forces.insert(1, (250.0 / 4500.0, [0.0, 60_000.0, 0.0, 0.0, 0.0, 10e6]));
+    forces.last_mut().unwrap().0 = 1.0 - 250.0 / 4500.0;
+    let text = labels(&app, &record, true);
+    let at_material_end = text
+        .split_once("ξ=0.00:")
+        .unwrap()
+        .1
+        .split("ξ=0.50:")
+        .next()
+        .unwrap();
+    assert!(
+        at_material_end.contains("(NG)") && at_material_end.contains("j端で局所Qy方向の反力"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("ξ=0.06:") && !text.contains("せん断 "),
+        "{text}"
+    );
 }
 
 #[test]
