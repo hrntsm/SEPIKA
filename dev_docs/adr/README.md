@@ -237,6 +237,7 @@ ST-Bridge 固有の入出力・保存・編集・診断は [ADR 0141](0141-remov
 | [0174](0174-steel-column-static-braced-span.md) | accepted | 上下対称H形鋼柱の通常検定は同じ補剛区間全体で照査する |
 | [0176](0176-remove-explicit-multi-spring.md) | accepted | 非線形線材のマルチスプリング指定を廃止する |
 | [0177](0177-remove-shell-elements.md) | accepted | シェル要素による解析を廃止する |
+| [0178](0178-member-analysis-method-from-preparation.md) | accepted | 部材表と解析モデルの3D表示は準備計算の方式判定を共有する |
 
 ## 規約
 
