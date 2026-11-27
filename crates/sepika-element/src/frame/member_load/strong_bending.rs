@@ -42,15 +42,16 @@ pub struct FrameStrongBendingPeak {
 
 /// 線形静的応答の実材軸全長で確認した符号付き強軸曲げと、同一切断面の断面力。
 pub struct FrameStaticStrongBending {
-    /// i/j実材端の強軸曲げ [N·mm]。
+    /// i/j実材端の強軸曲げ [N·mm]。不明なら NaN。
     pub end_moments_nmm: [f64; 2],
-    /// 実材軸全長で曲げが非減少または非増加ならtrue。
+    /// 回復値、保存せん断力、保存曲げの単調方向が実材軸全長で一致する場合にtrue。
     pub monotonic: bool,
     /// 絶対値最大が内部にも存在するならtrue。
     pub interior_maximum: bool,
     /// 区間で非零の強軸曲げを確認した場合にtrue。
     pub has_strong_bending: bool,
-    /// 隣接照合位置間の曲げの符号反転に対応する圧縮軸力 [N]。軸力変動がある場合には使用しない。
+    /// 回復または照合済み保存値を起点とする分布で、区間内の曲げゼロ位置に対応する圧縮軸力 [N]。
+    /// 軸力・弱軸曲げの区間一定性を確認できない場合には使用しない。
     pub compression_at_zero_crossing_n: Option<f64>,
     /// 材端、荷重境界、曲げの内部極値を実材軸i端から昇順に返す。集中荷重位置では切断側を区別する。
     pub sections: Vec<FrameStaticBendingSection>,
@@ -60,10 +61,15 @@ pub struct FrameStaticStrongBending {
 
 /// 静的照査位置の回復値と、同じ位置の保存断面力。
 pub struct FrameStaticBendingSection {
-    /// 回復した照査位置と切断側の断面力。
+    /// 回復した照査位置と切断側の断面力。保存値と同じ荷重から確認できない成分は NaN。
     pub recovered: FrameStrongBendingPeak,
     /// 回復した切断位置と厳密に一致する保存断面力の左極限 [N, N·mm]。
     pub saved_left: Option<[f64; 6]>,
+    /// 同位置の保存左極限に集中荷重の跳びを加えた右極限 [N, N·mm]。回復値に右極限がある場合のみ。
+    pub saved_right: Result<Option<[f64; 6]>, String>,
+    /// 保存値または回復値のせん断がゼロで、隣接域の強軸せん断の連続極限を照査できる切断側。左・右の順。
+    /// `recovered.right` がなければ、共通の切断面に対する判定を左に返す。
+    pub zero_shear_limits: [bool; 2],
 }
 
 /// 静的な強軸曲げ分布の算定に失敗した段階と理由。
@@ -76,6 +82,7 @@ pub enum FrameStaticBendingError {
 
 /// 線形静的応答と同じ部材荷重・係数および両端を含む保存断面力から実材軸全長の強軸曲げを確認する。
 /// 区間座標は実材軸i端を起点とする [mm]。断面力の不整合、荷重の投影・曲げ分布を確認できない場合はエラー。
+/// 非有限な保存成分で全体の組合せが未確認でも、独立に照合できた成分の回復値を返すことがある。
 pub fn frame_static_strong_bending(
     [i, j]: [[f64; 3]; 2],
     reference: [f64; 3],
@@ -87,52 +94,124 @@ pub fn frame_static_strong_bending(
         .map_err(|reason| Stations(reason.into()))?;
     let frame = LocalFrame { rot };
     let length_mm = dist(i, j);
-    let stations = bending_stations_mm(length_mm, forces).map_err(Distribution)?;
+    if forces.at.iter().any(|(xi, _)| !xi.is_finite()) {
+        return Err(Stations("保存断面力の評価位置が非有限です".into()));
+    }
+    let duplicate = forces.at.windows(2).any(|w| w[0].0 == w[1].0);
+    let recover_error = if duplicate { Stations } else { Distribution };
+    let stations = bending_stations_mm(length_mm, forces).map_err(recover_error)?;
+    let mut positions = Vec::new();
+    let mut repeated_positions_mm = Vec::new();
+    let response_stations = if duplicate {
+        for (i, pair) in forces.at.windows(2).enumerate() {
+            if pair[0].0 == pair[1].0 {
+                if pair[0]
+                    .1
+                    .iter()
+                    .zip(pair[1].1)
+                    .any(|(a, b)| a.is_finite() && b.is_finite() && *a != b)
+                {
+                    return Err(Stations(
+                        "重複した測点の保存断面力が一致せず、解析断面力と部材荷重の釣合いを確認できません".into(),
+                    ));
+                }
+                if pair
+                    .iter()
+                    .flat_map(|(_, force)| force)
+                    .any(|v| !v.is_finite())
+                {
+                    return Err(Stations(
+                        "重複した測点の保存断面力に非有限な成分があり、同値であることを確認できません".into(),
+                    ));
+                }
+                repeated_positions_mm.push(stations[i].0);
+            }
+        }
+        positions.extend(stations.iter().enumerate().filter_map(|(index, &station)| {
+            (index == 0 || forces.at[index - 1].0 != forces.at[index].0).then_some(station)
+        }));
+        &positions
+    } else {
+        &stations
+    };
     for &(factor, load) in loads {
         let input = match load.kind {
             MemberLoadKind::Point { p, .. } => [p, 0.0],
             MemberLoadKind::Distributed { w1, w2, .. } => [w1, w2],
         };
         if factor != 0.0 && input.into_iter().any(|p| p != 0.0 && factor * p == 0.0) {
-            return Err(Distribution(
+            return Err(recover_error(
                 "荷重係数を適用した部材荷重の強度を保持できません".into(),
             ));
         }
     }
     let response =
-        frame_bending_response_mm(&frame, length_mm, loads, &stations).map_err(Stations)?;
+        frame_bending_response_mm(&frame, length_mm, loads, response_stations).map_err(Stations)?;
+    let duplicate_reason =
+        "保存断面力の評価位置が重複しているため、補剛区間全体の組合せを確定できません";
+    let verify_projections = || {
+        response
+            .verify_static_load_projections([i, j], fallback.unwrap_or(reference))
+            .map_err(recover_error)
+    };
+    let recover_sections = |response, partial| {
+        let mut span = StrongBendingResponse::new(&frame, length_mm, response, response_stations)
+            .exact_static_sections(partial)?;
+        if duplicate {
+            span.sections
+                .retain(|cut| !repeated_positions_mm.contains(&cut.recovered.x_mm));
+            span.monotonic = false;
+            span.interior_maximum = false;
+            span.combination_issue = Some(duplicate_reason);
+        }
+        Ok(span)
+    };
     if stations
         .iter()
         .any(|(_, row)| row.iter().any(|value| !value.is_finite()))
     {
-        verify_partial_bending_stations(
-            &LoadedFrameSection::new(response.map, [0.0; 12]),
-            &stations,
-        )
-        .map_err(Stations)?;
-        return Err(Distribution(
-            "保存断面力に非有限な成分があるため、区間全体の組合せを確定できません".into(),
-        ));
+        let projections_confirmed = match verify_projections() {
+            Ok(()) => true,
+            Err(reason) if duplicate => return Err(reason),
+            Err(_) => false,
+        };
+        let load_response = LoadedFrameSection::new(response.map, [0.0; 12]);
+        load_response
+            .verify_partial_bending_stations(&stations)
+            .map_err(Stations)?;
+        let reason = if duplicate {
+            "保存断面力の評価位置が重複し、非有限な成分もあるため、区間全体の組合せを確定できません"
+        } else {
+            "保存断面力に非有限な成分があるため、区間全体の組合せを確定できません"
+        };
+        if projections_confirmed {
+            let response = LoadedFrameSection::new(load_response.map, response.node_force_local);
+            if let Ok(mut span) = recover_sections(&response, true) {
+                span.combination_issue = Some(reason);
+                return Ok(span);
+            }
+        }
+        return Err(Distribution(reason.into()));
     }
     verify_bending_stations(&response, &stations).map_err(Stations)?;
-    response
-        .verify_static_load_projections([i, j], fallback.unwrap_or(reference))
-        .map_err(Distribution)?;
+    verify_projections()?;
     verify_bending_stations_with(&stations, |x_mm| response.exact_static_cut_mm(x_mm))
         .map_err(|reason| Stations(format!("厳密な回復値。{reason}")))?;
-    StrongBendingResponse::new(&frame, length_mm, &response, &stations)
-        .exact_static_sections()
-        .map_err(|error| {
-            Distribution(match error {
-                ExactSpanError::VaryingStrongLoad => {
-                    "強軸方向の合算分布荷重の強度が区間内で変化するため、曲げ分布を確定できません"
-                        .into()
-                }
-                ExactSpanError::Unconfirmed => {
-                    "強軸曲げの分布と照合位置の断面力を有限値として確定できません".into()
-                }
-            })
+    recover_sections(&response, false).map_err(|error| {
+        let reason = match error {
+            ExactSpanError::VaryingStrongLoad => {
+                "強軸方向の合算分布荷重の強度が区間内で変化するため、曲げ分布を確定できません"
+            }
+            ExactSpanError::Unconfirmed => {
+                "強軸曲げの分布と照合位置の断面力を有限値として確定できません"
+            }
+        };
+        Distribution(if duplicate {
+            format!("{duplicate_reason}。{reason}")
+        } else {
+            reason.into()
         })
+    })
 }
 
 /// 同じ線形静的応答に使った全長の部材荷重・係数と両端を含む断面力から、強軸曲げを回復する。
@@ -575,65 +654,6 @@ fn verify_bending_stations_with(
         }
     }
     Ok(())
-}
-
-fn verify_partial_bending_stations(
-    load_response: &LoadedFrameSection,
-    stations_mm: &[(f64, [f64; 6])],
-) -> Result<(), String> {
-    let applied = stations_mm
-        .iter()
-        .map(|(x, _)| load_response.exact_static_cut_mm(*x))
-        .collect::<Result<Vec<_>, _>>()?;
-    let finite_cuts = |index: usize| {
-        stations_mm
-            .iter()
-            .zip(&applied)
-            .filter_map(move |(&(x, force), load)| {
-                force[index]
-                    .is_finite()
-                    .then_some((x, force[index], load[index]))
-            })
-    };
-    let verify = |index, slope: Option<f64>| {
-        let mut cuts = finite_cuts(index);
-        let Some((x0, f0, load0)) = cuts.next() else {
-            return Ok(());
-        };
-        let origin = f0 - load0;
-        if !origin.is_finite() {
-            return Err("解析断面力と部材荷重の釣合いを確認できません".into());
-        }
-        let Some(slope) = slope.or_else(|| {
-            cuts.clone()
-                .next_back()
-                .map(|(x, f, load)| (f - load - origin) / (x - x0))
-        }) else {
-            return Ok(());
-        };
-        let scale = finite_cuts(index)
-            .map(|(_, f, _)| f.abs())
-            .fold(1.0, f64::max);
-        if !slope.is_finite()
-            || cuts.any(|(x, f, load)| {
-                let recovered = slope.mul_add(x - x0, origin) + load;
-                !recovered.is_finite() || (recovered - f).abs() > 1e-8 * scale.max(recovered.abs())
-            })
-        {
-            return Err("解析断面力と部材荷重の釣合いを確認できません".into());
-        }
-        Ok::<(), String>(())
-    };
-    for index in 0..4 {
-        verify(index, Some(0.0))?;
-    }
-    let origin_shear = |index| {
-        finite_cuts(index)
-            .next()
-            .map(|(_, shear, load)| shear - load)
-    };
-    verify(4, origin_shear(2).map(|qz| -qz))?;
-    verify(5, origin_shear(1))
 }
 
 impl LoadedFrameSection {
