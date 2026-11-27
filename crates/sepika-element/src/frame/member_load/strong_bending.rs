@@ -61,7 +61,7 @@ pub struct FrameStaticStrongBending {
 
 /// 静的照査位置の回復値と、同じ位置の保存断面力。
 pub struct FrameStaticBendingSection {
-    /// 回復した照査位置と切断側の断面力。部分回復で確認できない成分は NaN。
+    /// 回復した照査位置と切断側の断面力。保存値と同じ荷重から確認できない成分は NaN。
     pub recovered: FrameStrongBendingPeak,
     /// 回復した切断位置と厳密に一致する保存断面力の左極限 [N, N·mm]。
     pub saved_left: Option<[f64; 6]>,

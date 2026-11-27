@@ -510,8 +510,7 @@ impl StrongBendingResponse<'_> {
         candidates.extend(saved_cuts);
         candidates.sort_by(|a, b| a.0.cmp(&b.0));
         let mut sections: Vec<FrameStaticBendingSection> = Vec::with_capacity(candidates.len());
-        let torsion_absence_confirmed =
-            !partial || self.stations_mm.iter().all(|(_, force)| force[3] == 0.0);
+        let torsion_absence_confirmed = self.stations_mm.iter().all(|(_, force)| force[3] == 0.0);
         for (x, mz) in candidates {
             let x_mm = finite(&x)?;
             let saved_left = if rational(x_mm)? == x {

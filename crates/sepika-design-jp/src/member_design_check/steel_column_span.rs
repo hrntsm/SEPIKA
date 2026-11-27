@@ -257,7 +257,10 @@ pub(super) fn check(
             }
             let disagreement = saved
                 .and_then(|saved| section_applicability_difference(sec, mat, saved, recovered));
-            let issue = disagreement.as_deref();
+            let issue = disagreement.as_deref().or_else(|| {
+                (saved.is_none() && !recovered[3].is_finite())
+                    .then_some("未保存の切断側で材軸ねじりがないことを確認できません")
+            });
             let weak_shear_disagreement = saved.is_some_and(|saved| {
                 saved[2].is_finite()
                     && recovered[2].is_finite()

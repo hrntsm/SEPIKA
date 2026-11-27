@@ -304,6 +304,28 @@ fn a_web_shear_failure_requires_confirmed_absence_of_torsion_on_the_same_cut() {
                 "{results:?}"
             );
         }
+        for (x_mm, side) in [(1400.0, "右側"), (1600.0, "左側")] {
+            let xi = x_mm / 3000.0;
+            let shear = checked(&results, xi)
+                .filter(|row| row.detail.contains(side))
+                .flat_map(|row| &row.components)
+                .find(|c| c.kind == CheckKind::Shear && c.ratio > 1.0);
+            if recovered_mx == 0.0 && saved_mx == 0.0 {
+                let shear = shear.unwrap_or_else(|| panic!("{x_mm} mm {side}: {results:?}"));
+                if end_qz.is_finite() && mid_my.is_finite() && weak_inertia.is_finite() {
+                    close(shear.ratio, 1.243_814_729_114_235);
+                }
+            } else {
+                assert!(shear.is_none(), "{x_mm} mm {side}: {results:?}");
+                if recovered_mx == 0.0 {
+                    assert!(results.iter().any(|(pos, row)| {
+                        (*pos - xi).abs() < 1e-12 && matches!(row,
+                            CheckOutcome::Skipped { reason }
+                            if reason.contains(side) && reason.contains("材軸ねじりがないことを確認できません"))
+                    }), "{x_mm} mm {side}: {results:?}");
+                }
+            }
+        }
     }
 }
 
