@@ -1,5 +1,7 @@
 # 複数剛床と床面内変形による柱の層間変位相殺（Issue #1683）
 
+> シェル床の照合は廃止前の記録です。[#2033](https://github.com/hrntsm/SEPIKA/issues/2033) により現行版ではシェル床は対応外です。現在の恒久回帰は複数剛床を対象とします。
+
 [Issue #1683](https://github.com/hrntsm/SEPIKA/issues/1683) の照合。状態🔶。複数剛床と面内変形する床の両方で、柱の加力方向の層間変位が小さくても、直交方向の変形によって加力方向の柱頭力が残った。製品の柱剛性入口は大きな比を返し、偏心率入口はこの二例では方向間連成候補と床の適用条件を理由に保留した。
 
 ## 原典と照合範囲
@@ -96,11 +98,13 @@ Cでは `Qx = kd δx − t δy`。同じ＋0.000250 mmに対するX変位の分�
 
 ## 再現と未確認の範囲
 
-[統合試験](../../crates/sepika-design-jp/tests/multi_floor_torsional_cancellation.rs)が、独立一様変位反力、公開線形解析による層と柱の応答、全荷重の比例縮小、公開柱比とRe・Fesの算定可否を再現する。
+現行版で次のコマンドを実行すると、[統合試験](../../crates/sepika-design-jp/tests/multi_floor_torsional_cancellation.rs)は複数剛床のみを対象に、独立一様変位反力、公開線形解析による層と柱の応答、全荷重の比例縮小、公開柱比とRe・Fesの算定可否を照合する。
 
 ```bash
 cargo test --locked -p sepika-design-jp --test multi_floor_torsional_cancellation -- --nocapture --test-threads=1
 ```
+
+シェル床を含む照合を再現する場合は、[廃止前の統合試験](https://github.com/hrntsm/SEPIKA/blob/eabc94da274cedea44dc844fd57026cb14b20810/crates/sepika-design-jp/tests/multi_floor_torsional_cancellation.rs)を収めたコミットで同じコマンドを実行する。以下は当初の検証記録である。
 
 基点 `4db6848a` に本変更を適用し、WindowsのRust 1.100.0で上記再現試験2件、先行の相殺試験を含むsepika-design-jpの全950試験、同クレートの全ターゲットClippy、`xtask check-docs`、`mdbook build docs`、変更文書のローカルリンクとアンカー、`git diff --check` の成功を確認した。Cargoでは既存の未使用ワークスペース依存宣言 `schemars` の警告が出た。
 

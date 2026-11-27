@@ -61,7 +61,7 @@ ST-Bridge に関する各レポートは [ADR 0141](../adr/0141-remove-st-bridge
 
 [単一RC矩形梁のQ0の支点と作用腕（#1976）](RC梁QD1の長期荷重項_Issue1976_照合記録.md)では、原典が示す範囲と、実材軸端・実柱面で支持した場合の荷重別の差を照合した。状態🔶。
 
-[RC床シェルと単一RC大梁の地震時せん断（#1965）](RC床シェルと梁QD1_Issue1965_照合記録.md)では、床なし・一点共有・境界辺共有を通常／時刻歴簡易で比較し、梁本体のQD1・minで床板筋未確認の警告が出ない条件と、過小評価の可能性を記録した。状態🔶。
+[RC床シェルと単一RC大梁の地震時せん断（#1965）](RC床シェルと梁QD1_Issue1965_照合記録.md)では、床なし・一点共有・境界辺共有を通常／時刻歴簡易で比較し、梁本体のQD1・minで床板筋未確認の警告が出ない条件と、過小評価の可能性を記録した。状態🔶。床シェルは [#2033](https://github.com/hrntsm/SEPIKA/issues/2033) で対応外となり、この照合は履歴として残す。
 
 ## RC柱の曲げ降伏時における常時せん断力の算入（#1905）
 
@@ -629,11 +629,11 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 ## 複数剛床と床面内変形による柱の層間変位相殺（#1683）
 
-[一様変位の独立反力・線形解析・公開偏心率の照合](複数剛床と床面内変形による柱の層間変位相殺_Issue1683_照合記録.md)に、複数剛床・シェル床各1例の層間変位相殺、符号付き柱頭力、比例小荷重との違い、公開柱比とRe・Fesの算定可否、設計採用に必要な条件を記録した。状態🔶。実建物の一次設計用載荷と設計用剛心・弾力半径の妥当性確認は未実施。
+[一様変位の独立反力・線形解析・公開偏心率の照合](複数剛床と床面内変形による柱の層間変位相殺_Issue1683_照合記録.md)に、複数剛床・シェル床各1例の層間変位相殺、符号付き柱頭力、比例小荷重との違い、公開柱比とRe・Fesの算定可否、設計採用に必要な条件を記録した。状態🔶。シェル床は廃止前の照合履歴で、現行の回帰は複数剛床を扱う。実建物の一次設計用載荷と設計用剛心・弾力半径の妥当性確認は未実施。
 
 ## 複数剛床とシェル床の二次元質点系層剛性（#1701・#1705）
 
-[公開質点系生成と独立並進対照の照合](複数剛床とシェル床の二次元質点系層剛性_Issue1701_照合記録.md)に、複数剛床とシェル床の「柱 ki」方式で、層間変位の局所相殺が層ばね・周期に与える影響と、修正後の比例小荷重を含む診断付き保留の確認を記録した。状態🔶。
+[公開質点系生成と独立並進対照の照合](複数剛床とシェル床の二次元質点系層剛性_Issue1701_照合記録.md)に、複数剛床とシェル床の「柱 ki」方式で、層間変位の局所相殺が層ばね・周期に与える影響と、修正後の比例小荷重を含む診断付き保留の確認を記録した。状態🔶。シェル床は廃止前の照合履歴で、現行の回帰は複数剛床を扱う。
 
 ## 複数剛床の代表節点と地震用重量（#1706）
 
@@ -662,7 +662,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | 区分 | 該当項目 | 許容差 |
 |------|----------|--------|
 | 厳密一致 | IIE 梁・CMQ・σ=M/Z・剛性率 | 1e-9 |
-| 収束 | MITC4 板・固有値・時刻歴 | ±5% |
+| 収束 | 固有値・時刻歴 | ±5% |
 | 規準例題照合 | Ai・Ds・許容応力度 | 告示値一致 |
 
 ## テスト階層
@@ -695,7 +695,11 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 
 ## 平面凸四角形シェルの面積（#1154）
 
-[独立面積・質量・ドリリング剛性の確認記録](平面凸四角形シェル面積_Issue1154.md)に公開入口48入力と解析契約68による旧成果失効を記録する。有限なVerificationと、未確認の全体応答・反り／凹形状・実験Validationを区別する。
+[独立面積・質量・ドリリング剛性の確認記録](平面凸四角形シェル面積_Issue1154.md)に公開入口48入力と解析契約68による旧成果失効を記録する。[#2033](https://github.com/hrntsm/SEPIKA/issues/2033) でシェル解析を廃止したため、面積・膜・曲げ・せん断・収束の試験は現行索引から除き、検証履歴を維持する。有限なVerificationと、未確認の全体応答・反り／凹形状・実験Validationを区別する。
+
+## シェル解析の廃止（#2033）
+
+[モデル読込の回帰](../../crates/sepika-app/src/app/frame_node_count_tests.rs)は、現行の要素種別にない `Shell` を含む入力の復号に失敗し、開いていたモデル・成果・編集履歴を保持することを確認する。通常入力の回帰は[床板の物理質量](../../crates/sepika-job/tests/slab_physical_mass.rs)、[床板付き大梁を考慮するRC柱の検定](../../crates/sepika-design-jp/tests/rc_column_mechanism.rs)、[複数剛床](../../crates/sepika-job/tests/planar_column_ki_torsional_cancellation.rs)、[壁版の重量](../../crates/sepika-job/tests/wall_weight_partition.rs)を参照。
 
 ## レポート目録
 
@@ -712,7 +716,7 @@ docs deployはPRでは適用外のskipであり、公開サイトへのdeploy成
 | [RC柱QD1の床板付き梁候補保留](RC柱QD1の床板付き梁候補保留_Issue1936_検証.md) | 最上階・一般階、通常・時刻歴簡易検定での需要と理由、独立候補とQD2単独の保持 | 🔶（原典と対照架構の照合。床板筋の実寄与は未確認） |
 | [RC柱QD1に用いる梁端のスラブ筋](RC柱QD1の梁端スラブ筋_Issue1906_検証.md) | 最上階・一般階の梁端降伏と床取付きの対照、通常・時刻歴の機構値 | 🔶（仮定した寄与の感度照合。実際のスラブ筋の寄与は未検証） |
 | [RC梁QD1の床板筋](RC梁QD1の床板筋_Issue1882_検証.md) | 上端筋の協力幅と端部定着、公開検定値と未確認警告 | ✅（原典の照合と独立数値比較。適用外の実際の寄与は未検証） |
-| [RC床シェルと単一RC大梁の地震時せん断](RC床シェルと梁QD1_Issue1965_照合記録.md) | 床なし・一点共有・境界辺共有の通常／時刻歴簡易、QD1・min・QD2単独と警告 | 🔶（限定Verification。床シェルの認識・警告は後続、実際の筋の寄与は未検証） |
+| [RC床シェルと単一RC大梁の地震時せん断](RC床シェルと梁QD1_Issue1965_照合記録.md) | 床なし・一点共有・境界辺共有の通常／時刻歴簡易、QD1・min・QD2単独と警告 | 🔶（廃止前の限定Verification。床シェルは対応外、実際の筋の寄与は未検証） |
 | [RC柱QD1の柱側梁端条件](RC柱QD1の柱側梁端条件_Issue1839_照合記録.md) | ピン・半剛接・剛域・XYZ偏心の候補判定、通常・時刻歴簡易検定、保存検定版103 | 🔶（有限の解析・検定例を独立計算と照合。実験Validationは未確認） |
 | [RC柱QD1の接続大梁](RC柱QD1の接続大梁_Issue1820_照合記録.md) | 梁・ファイバー・マルチスプリングの降伏モーメント和、算定不能時の両端柱降伏、保存検定版102 | 🔶（独立計算と有限の解析・検定例を照合。実験Validationは未確認） |
 | [RC柱の短期地震時QD1の柱頭係数](RC柱頭の梁降伏による設計用せん断力_Issue1800_照合記録.md) | 柱頭の上階柱の有無、通常・時刻歴簡易検定、保存検定版100 | 🔶（原典と有限例を照合。実験Validationは未確認） |
@@ -1101,10 +1105,6 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 1b | 明示線材自重・ダンパー総重量 | sepika-core / sepika-load / sepika-solver / sepika-job / sepika-edit / sepika-app / sepika-io | story_gen/tests.rs, tests/weight_mass.rs, tests/damper_mass_errors.rs, dynamic/lumped_mass/model.rs・job/lumped_mass.rs, load_case.rs・edit/tests.rs, app/tests.rs, model/tests.rs, ovika.rs | [Issue #422 検証](明示線材とダンパー総重量_Issue422_2026-10.md) のテスト対応表。実M・両方式・重量／配置・ゼロ追加・公開フレーム／質点系入口・undo／保存を含む | P1/P2 | ✅（Verification） |
 | 2 | 剛域あり梁 | sepika-element | beam.rs | `test_apply_auto_rigid_zones_and_manual_protection`, `test_auto_rigid_zone_only_when_all_members_are_rc`（自動剛域の適用と手動端の保護・適用条件。テスト再編により旧 `test_auto_rigid_zone_standard_formula` を統合） | P1 | 🔶 |
 | 3 | 端部ばね（ピン・半剛） | sepika-element | beam.rs | `test_pinned_end_rotation_stiffness_exactly_zero`（テスト再編により旧 `test_pinned_end_releases_moment` を統合） | P1 | 🔶 |
-| 4 | MITC4 シェル（膜） | sepika-element | shell.rs | `test_patch_membrane_distorted`（歪みメッシュ・機械精度） | P1.5 | ✅ |
-| 5 | MITC4 シェル（曲げ） | sepika-element | shell.rs | `test_patch_bending_distorted`（歪みメッシュ定曲率・機械精度） | P1.5 | ✅ |
-| 5a | 平面凸四角形シェル（面積・質量・ドリリング） | sepika-element / sepika-app | tests/shell_quadrilateral.rs・result_contract_tests.rs | [Issue1154の独立値・公開入口](平面凸四角形シェル面積_Issue1154.md#公開入口と観測) | P1.5 | 🔶（有限Verification、全体応答・Validation未） |
-| 6 | MITC4 シェル（せん断/収束） | sepika-solver | linear.rs | `test_plate_convergence`（単純支持・四辺固定の板たわみ ±2% 収束＝ロッキングなし。テスト再編により旧 2 テストを統合） | P1.5 | ✅ |
 | 916 | CFT充填コンクリートの法定Fc下限 | sepika-design-jp / sepika-core / sepika-app | cft/mod.rs・result_contract.rs・app/result_contract_tests.rs | [独立境界と製品入口](CFT充填Fc下限_Issue916_2026-10.md#独立境界と製品入口) | 公開／App／保存 | 🔶（下限Verification、手動GUI・Validation未） |
 | 1400 | CFT柱の座屈長さ | sepika-design-jp / sepika-app / sepika-mcp | tests/cft_column_buckling.rs・app/cft_column_buckling_tests.rs・job/design_check.rs | [原典・独立有限例・回帰](CFT柱の座屈長さ_Issue1400_2026-11.md) | 公開／App／MCP／保存 | 🔶（境界条件と採用式への入力のVerification。耐力式全体のValidationは対象外） |
 | 887 | CFT適用・材料・許容耐力 | sepika-design-jp / sepika-core | cft/mod.rs / material_grade / section_shape/composite.rs | [原画像・独立6数値とFc4条件](CFT適用材料許容耐力_Issue887_原典照合.md#独立数値と公開入口のverification)、既存cft_steel_young6試験 | 原典／公開入口 | 🔶（別原典・法定条件・Validation残） |
@@ -1154,8 +1154,8 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 1685 | 方向間連成層のRe・Fes・Qun | sepika-design-jp / sepika-app | eccentricity_analysis.rs、holding_capacity.rs、app/tests.rs | [独立計算と現行経路](方向間で連成する層の偏心率_Issue1685_照合記録.md#再現と現行経路) | 二次設計 | 🔶（原典と有限例のVerification。連成層の設計採用根拠・Validation未確認） |
 | 1698 | 方向間で連成する層の設計方向と正負載荷 | 独立Python / sepika-design-jp / sepika-app | 弾性立体解析、増分釣合い、塑性上下界、設計値の保留 | [再現と現行経路](方向間で連成する層の設計載荷_Issue1698_照合記録.md#再現と現行経路) | 二次設計 | 🔶（対象有限例のVerification。設計採用は個別根拠が必要） |
 | 1595 / 1680 | ねじれによる柱の層間変位相殺と偏心率 | sepika-design-jp / sepika-solver / sepika-app / sepika-job | tests/torsional_cancellation_eccentricity.rs、summary.rs、stiffness_ratio.rs、lumped_mass.rs | [独立釣合いと修正後の公開経路](ねじれで柱の層間変位が相殺される場合の偏心率_Issue1595_照合記録.md#1680-の修正後の照合) | 二次設計 | 🔶（単一剛床での算定保留。並進架構等による再評価・Validation未） |
-| 1683 | 複数剛床・シェル床の柱の層間変位相殺 | sepika-design-jp / sepika-solver | tests/multi_floor_torsional_cancellation.rs | [一様変位と線形応答の照合](複数剛床と床面内変形による柱の層間変位相殺_Issue1683_照合記録.md#再現と未確認の範囲) | 二次設計 | 🔶（各1例の柱比とRe・Fesの算定可否。設計値の採用・Validation未） |
-| 1701 / 1705 | 複数剛床・シェル床の2次元質点系層剛性 | sepika-job / sepika-solver | tests/planar_column_ki_torsional_cancellation.rs、lumped_mass.rs | [公開入口と独立並進対照](複数剛床とシェル床の二次元質点系層剛性_Issue1701_照合記録.md#再現) | 動的解析 | 🔶（各床1例の診断付き保留・層ばね・1自由度周期。時刻歴応答・Validation未） |
+| 1683 | 複数剛床の柱の層間変位相殺 | sepika-design-jp / sepika-solver | tests/multi_floor_torsional_cancellation.rs | [一様変位と線形応答の照合](複数剛床と床面内変形による柱の層間変位相殺_Issue1683_照合記録.md#再現と未確認の範囲) | 二次設計 | 🔶（複数剛床1例の柱比とRe・Fesの算定可否。シェル床は廃止前の履歴。設計値の採用・Validation未） |
+| 1701 / 1705 | 複数剛床の2次元質点系層剛性 | sepika-job / sepika-solver | tests/planar_column_ki_torsional_cancellation.rs、lumped_mass.rs | [公開入口と独立並進対照](複数剛床とシェル床の二次元質点系層剛性_Issue1701_照合記録.md#再現) | 動的解析 | 🔶（複数剛床1例の診断付き保留・層ばね・1自由度周期。シェル床は廃止前の履歴。時刻歴応答・Validation未） |
 | 1706 | 複数剛床への地震用重量と物理質量の帰属 | sepika-job / sepika-load / sepika-solver | tests/planar_column_ki_torsional_cancellation.rs、tests/seismic_freshness.rs | [公開準備からの再現](複数剛床の代表節点と地震用重量_Issue1706_照合記録.md#再現と未確認範囲) | 荷重・動的解析 | 🔶（1層2剛床の準備と独立対照。立体の動的応答・Validation未） |
 | 718 | Fes 算定不能の伝播 | sepika-design-jp / sepika-app / sepika-job | secondary/holding_capacity・stiffness_ratio・eccentricity、summary、actions/design/holding、lumped_mass | [独立期待値と直接入口](Fes算定不能の伝播_Issue718_2026-10.md#独立期待値と直接入口) | 横断 | 🔶（Scope 内の自動 Verification 成功、手動 GUI・原典/Validation・最終ゲートは未確認） |
 | 15 | プッシュオーバー | sepika-solver / sepika-job / sepika-app / sepika-mcp | nonlinear/pushover/driver.rs・tests.rs / compute.rs | [Issue433既存増分回帰](弧長法削除と既存増分回帰_Issue433_2026-10.md#既存回帰と観測)、[柱4材端の形成荷重（#1160）](剛域_保有水平耐力_系レベル検証.md#柱4材端の形成荷重を独立に照合する模型) | P5 | 🔶（弧長削除、固有材端の初回降伏の識別、1層門形架構の柱4材端でVerification。4方向等は未検証） |
@@ -1211,7 +1211,7 @@ Issue #879の重点項目→入口・ハーネス・独立値は[詳細記録](�
 | 1980 | RC柱QD1の左右大梁の非対称配筋と引張面の組合せ | sepika-design-jp / sepika-app | rc/column_mechanism.rs、viewer/th_detail.rs | [原典・独立算術と通常／時刻歴簡易検定の観測](RC柱QD1の左右大梁の引張側_Issue1980_照合記録.md) | 一次設計 | 🔶（現行方式維持。採否と実応答は未検証） |
 | 1970 | RC柱QD1の梁降伏候補の実曲げ軸と方向別の需要 | sepika-design-jp / sepika-app | rc/column_mechanism.rs、viewer/th_detail.rs | [独立需要・公開通常検定・時刻歴簡易検定](RC柱QD1の実曲げ軸_Issue1970_検証.md) | 一次設計 | 🔶（立体の降伏・実応答は未検証） |
 | 1907 | RC柱QD1の梁降伏に用いる曲げ軸 | sepika-design-jp / sepika-element / sepika-app | rc/column_mechanism.rs、transform.rs、viewer/th_detail.rs | [独立した軸変換、通常公開検定、時刻歴共通入口](RC柱QD1の大梁曲げ軸_Issue1907_照合記録.md) | 一次設計 | 🔶（立体の降伏・実応答は未検証） |
-| 1965 | RC床シェルと単一RC大梁の地震時せん断 | sepika-design-jp / sepika-app | rc/beam_slab_qd1.rs、member_design_check.rs、viewer/th_detail.rs | [独立算術と通常・時刻歴簡易検定の観測](RC床シェルと梁QD1_Issue1965_照合記録.md#独立期待値と実入口) | 一次設計 | 🔶（床シェルのみでは未確認警告なし。認識の是正・実験Validationは未実施） |
+| 1965 | RC床シェルと単一RC大梁の地震時せん断 | sepika-design-jp / sepika-app | rc/beam_slab_qd1.rs、member_design_check.rs、viewer/th_detail.rs | [独立算術と通常・時刻歴簡易検定の観測](RC床シェルと梁QD1_Issue1965_照合記録.md#独立期待値と実入口) | 一次設計 | 🔶（廃止前の実装を照合。床シェルは対応外、実験Validationは未実施） |
 | 1582 | RC梁の方向別両端降伏せん断 | sepika-design-jp | ultimate/rc_beam_hinge_shear.rs、tests/rc_ultimate_beam_hinge_shear.rs、tests/rc_ultimate_beam_bond_direction.rs | [独立した自由体と公開入口](RC梁の方向別両端降伏せん断_Issue1582_検証.md#公開入口での照合) | 二次設計 | 🔶（実建物の機構同定・GUI入力は範囲外） |
 | 1857 | RC梁の非有限なあばら筋間隔による終局検定 | sepika-design-jp | ultimate/rc_check.rs、tests/rc_ultimate_beam_hinge.rs | [独立算術と公開検定](RC梁の非有限なあばら筋間隔による終局検定_Issue1857_検証.md#独立算術と公開検定) | 二次設計 | 🔶（両方式・両需要の未算定と独立したNG。実験Validationは未確認） |
 | 27 | 材料グレード対応表（F 値・鉄筋・Fc・プリセット） | sepika-core | material_grade.rs | `material_grade::tests::*`（告示値一致） | 横断 | ✅ |
