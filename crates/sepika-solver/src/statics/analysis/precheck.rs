@@ -6,7 +6,7 @@
 //! 判定の本体は [`model_issues`] にあり、解析前チェック `precheck_model` と
 //! UI のモデル整合性チェック（診断タブ）はどちらもこれを呼ぶ。
 
-use sepika_core::ids::{ElemId, MaterialId, NodeId};
+use sepika_core::ids::{ElemId, NodeId};
 use sepika_core::model::Model;
 use sepika_core::section_shape::SectionShape;
 use sepika_math::solver::SolveError;
@@ -125,8 +125,6 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     if let Err(error) = model.validate_frame_node_counts() {
         return vec![ModelIssue::model(error.to_string())];
     }
-    use sepika_core::model::ElementKind;
-
     let mut issues = if model.stories.is_empty() {
         Vec::new()
     } else {
@@ -171,6 +169,63 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         ));
     }
     let unresolved_start = issues.len();
+    member_property_issues(model, &mut issues);
+    if issues.len() > unresolved_start {
+        return issues;
+    }
+    if let Err(error) = sepika_load::floor::validate_one_way_directions(model) {
+        issues.push(ModelIssue::model(error.to_string()));
+        return issues;
+    }
+    if model.elements.is_empty() {
+        issues.push(ModelIssue::model(
+            "部材がありません。モデルタブで部材を追加してください。",
+        ));
+    }
+    if !model.nodes.iter().any(|n| n.restraint.0 != 0) {
+        issues.push(ModelIssue::model(
+            "拘束(支点)が 1 つもありません。境界条件タブで支点を設定してください\
+             (拘束がないと構造全体が剛体移動し、剛性行列が特異になります)。",
+        ));
+    }
+    member_section_issues(model, &mut issues);
+    if let Err(reason) =
+        sepika_element::factory::ensure_wall_side_column_analysis(model, None, "線形解析", None)
+    {
+        issues.push(ModelIssue::model(reason));
+    }
+    member_wall_issues(model, &mut issues);
+    remaining_model_issues(model, issues)
+}
+
+/// 部材単位の弾性準備診断を公開解析と同じ順で返す。
+/// 他部材の不備による早期終了やモデル全体の診断は含めない。
+pub fn elastic_member_issues(model: &Model) -> Vec<ModelIssue> {
+    let mut issues = Vec::new();
+    member_property_issues(model, &mut issues);
+    member_section_issues(model, &mut issues);
+    let index = sepika_core::model::WallSideColumnIndex::build(model);
+    for data in &model.elements {
+        if let Some(reason) = sepika_element::factory::wall_side_column_input_issue_with_index(
+            data, model, None, &index,
+        ) {
+            issues.push(ModelIssue {
+                severity: IssueSeverity::Error,
+                message: reason.clone(),
+                short: reason,
+                targets: IssueTargets::Members(vec![data.id]),
+            });
+        }
+    }
+    member_wall_issues(model, &mut issues);
+    issues.retain(|issue| {
+        issue.severity == IssueSeverity::Error && matches!(issue.targets, IssueTargets::Members(_))
+    });
+    issues
+}
+
+fn member_property_issues(model: &Model, issues: &mut Vec<ModelIssue>) {
+    use sepika_core::model::ElementKind;
     for elem in &model.elements {
         if elem.kind.is_primary_frame_support() || matches!(elem.kind, ElementKind::Brace { .. }) {
             if let Some(reason) =
@@ -210,121 +265,67 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             }
         }
     }
-    if issues.len() > unresolved_start {
-        return issues;
-    }
-    if let Err(error) = sepika_load::floor::validate_one_way_directions(model) {
-        issues.push(ModelIssue::model(error.to_string()));
-        return issues;
-    }
-    if model.elements.is_empty() {
-        issues.push(ModelIssue::model(
-            "部材がありません。モデルタブで部材を追加してください。",
-        ));
-    }
-    if !model.nodes.iter().any(|n| n.restraint.0 != 0) {
-        issues.push(ModelIssue::model(
-            "拘束(支点)が 1 つもありません。境界条件タブで支点を設定してください\
-             (拘束がないと構造全体が剛体移動し、剛性行列が特異になります)。",
-        ));
-    }
+}
 
-    let needs_input = |e: &&sepika_core::model::ElementData| e.kind.requires_section_and_material();
-    let no_section: Vec<ElemId> = model
-        .elements
-        .iter()
-        .filter(needs_input)
-        .filter(|e| e.section.is_none())
-        .map(|e| e.id)
-        .collect();
+fn member_section_issues(model: &Model, issues: &mut Vec<ModelIssue>) {
+    use sepika_core::model::ElementKind;
+    use sepika_element::factory::MissingMemberAssignment;
+    let collect_ids = |assignment: MissingMemberAssignment| {
+        model
+            .elements
+            .iter()
+            .filter(|e| assignment.applies_to(e, model))
+            .map(|e| e.id)
+            .collect::<Vec<_>>()
+    };
+    let no_section = collect_ids(MissingMemberAssignment::Section);
     if !no_section.is_empty() {
         issues.push(ModelIssue::members(
             "断面が未割当の部材があります",
             "ID ",
             no_section,
-            "断面が未割当です",
+            MissingMemberAssignment::Section.reason(),
             "部材タブで断面を割り当ててください。",
         ));
     }
-    let no_material: Vec<ElemId> = model
-        .elements
-        .iter()
-        .filter(needs_input)
-        .filter(|e| e.section.is_some() && model.element_material(e).is_none())
-        .map(|e| e.id)
-        .collect();
+    let no_material = collect_ids(MissingMemberAssignment::Material);
     if !no_material.is_empty() {
         issues.push(ModelIssue::members(
             "材料が未割当の断面を使う部材があります",
             "ID ",
             no_material,
-            "断面に材料が未割当です",
+            MissingMemberAssignment::Material.reason(),
             "断面タブで材料を割り当ててください。",
         ));
     }
 
-    let uses_shape_with =
-        |e: &sepika_core::model::ElementData,
-         want: fn(&SectionShape) -> bool,
-         slot: fn(&sepika_core::model::Section) -> Option<MaterialId>| {
-            model
-                .element_section(e)
-                .is_some_and(|s| s.shape.as_ref().is_some_and(want) && slot(s).is_none())
-        };
-    let has_rebar = |sh: &SectionShape| {
-        matches!(
-            sh,
-            SectionShape::RcBeamRect { .. }
-                | SectionShape::RcColumnRect { .. }
-                | SectionShape::RcColumnCircle { .. }
-                | SectionShape::SrcBeamRect { .. }
-                | SectionShape::SrcColumnRect { .. }
-        )
-    };
-    let is_src = |sh: &SectionShape| {
-        matches!(
-            sh,
-            SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. }
-        )
-    };
-    let collect_ids =
-        |want: fn(&SectionShape) -> bool,
-         slot: fn(&sepika_core::model::Section) -> Option<MaterialId>| {
-            model
-                .elements
-                .iter()
-                .filter(needs_input)
-                .filter(|e| uses_shape_with(e, want, slot))
-                .map(|e| e.id)
-                .collect::<Vec<_>>()
-        };
-    let no_rebar = collect_ids(has_rebar, |s| s.rebar_material);
+    let no_rebar = collect_ids(MissingMemberAssignment::MainRebar);
     if !no_rebar.is_empty() {
         issues.push(ModelIssue::members(
             "主筋の材料が未割当の断面を使う部材があります",
             "ID ",
             no_rebar,
-            "断面に主筋の材料が未割当です",
+            MissingMemberAssignment::MainRebar.reason(),
             "断面タブで主筋の材料を割り当ててください。",
         ));
     }
-    let no_shear_rebar = collect_ids(has_rebar, |s| s.shear_rebar_material);
+    let no_shear_rebar = collect_ids(MissingMemberAssignment::ShearRebar);
     if !no_shear_rebar.is_empty() {
         issues.push(ModelIssue::members(
             "せん断補強筋の材料が未割当の断面を使う部材があります",
             "ID ",
             no_shear_rebar,
-            "断面にせん断補強筋の材料が未割当です",
+            MissingMemberAssignment::ShearRebar.reason(),
             "断面タブでせん断補強筋の材料を割り当ててください。",
         ));
     }
-    let no_steel = collect_ids(is_src, |s| s.steel_material);
+    let no_steel = collect_ids(MissingMemberAssignment::EmbeddedSteel);
     if !no_steel.is_empty() {
         issues.push(ModelIssue::members(
             "内蔵鉄骨の材料が未割当の SRC 断面を使う部材があります",
             "ID ",
             no_steel,
-            "断面に内蔵鉄骨の材料が未割当です",
+            MissingMemberAssignment::EmbeddedSteel.reason(),
             "断面タブで内蔵鉄骨の材料を割り当ててください。",
         ));
     }
@@ -431,7 +432,9 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
                      断面タブで段別本数・かぶり・断面寸法を見直してください。",
                     id.0
                 ),
-                short: "断面の実配筋の幾何が不整合です".into(),
+                short: format!(
+                    "断面の実配筋の幾何が不整合です（断面 ID {section_id}({section_name}) の配筋: {reason}）"
+                ),
                 targets: IssueTargets::Members(vec![id]),
             });
         }
@@ -574,14 +577,14 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
     cft_groups.sort_unstable_by_key(|group| group[0].id.0);
     for group in cft_groups {
         let first = group[0];
-        let reason = match sepika_element::frame::beam::composite_props_of(model, first) {
-            Ok(Some(_)) => continue,
-            Ok(None) => "CFT の等価断面性能が未算定です".to_string(),
-            Err(reason) => reason,
+        let Some((reason, member_message)) =
+            sepika_element::frame::beam::cft_equivalent_input_issue(first, model)
+        else {
+            continue;
         };
         let section = model.element_section(first).expect("集約済みの断面");
         issues.push(ModelIssue::members(
-            &format!("CFT 断面「{}」の等価断面性能を算定できません: {reason}", section.name),
+            &format!("CFT 断面「{}」の等価断面性能を算定できません: {member_message}", section.name),
             "ID ",
             group.iter().map(|element| element.id).collect(),
             &reason,
@@ -654,12 +657,9 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             .warn(),
         );
     }
+}
 
-    if let Err(reason) =
-        sepika_element::factory::ensure_wall_side_column_analysis(model, None, "線形解析", None)
-    {
-        issues.push(ModelIssue::model(reason));
-    }
+fn member_wall_issues(model: &Model, issues: &mut Vec<ModelIssue>) {
     let side_edges = sepika_element::wall::side_column::SideColumnEdges::build(model);
     let undefined_side_shapes = model
         .elements
@@ -678,7 +678,9 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             "断面タブで側柱の断面形状を指定してください。断面積・幅・せいだけでは壁との重複領域を確定できません。",
         ));
     }
+}
 
+fn remaining_model_issues(model: &Model, mut issues: Vec<ModelIssue>) -> Vec<ModelIssue> {
     for e in &model.elements {
         if e.kind == sepika_core::model::ElementKind::Wall {
             if let Err(message) = sepika_element::wall::shear_section::wall_shear_rigidity(e, model)
@@ -700,7 +702,6 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
             });
         }
     }
-
     {
         let crossings = sepika_core::region_gen::crossing_beams(model);
         if !crossings.is_empty() {

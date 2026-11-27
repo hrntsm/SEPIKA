@@ -388,6 +388,59 @@ pub struct PrepLoadCaseRow {
 pub const RIGID_ZONE_RATIO_WARN: f64 = 0.5;
 
 impl App {
+    /// 現在の入力と荷重・質量設定に対応する部材判定。未実行・陳腐化・不成立では案内を返す。
+    pub fn prepared_frame_analysis(
+        &self,
+    ) -> Result<&sepika_job::prepare::PreparedFrameAnalysis, &str> {
+        match self.current_frame_preparation() {
+            Some(Ok((analysis, _))) => Ok(analysis),
+            Some(Err((_, reason))) => Err(reason),
+            None => Err("現在の入力で準備計算を実行してください。"),
+        }
+    }
+
+    pub(super) fn current_frame_preparation(&self) -> Option<&FramePreparationState> {
+        if self.core.scoped.staleness.frame_preparation_stale {
+            return None;
+        }
+        let prepared = self.core.scoped.prepared_frame_analysis.as_ref()?;
+        match prepared {
+            Ok((analysis, _)) => analysis.matches_load_settings(&self.core.analysis_cfg),
+            Err((generation, _)) => *generation == self.input_generation(),
+        }
+        .then_some(prepared)
+    }
+
+    fn record_frame_preparation_failure(&mut self, reason: String) {
+        self.core.scoped.prepared_frame_analysis = Some(Err((self.input_generation(), reason)));
+        self.core.scoped.staleness.frame_preparation_stale = false;
+    }
+
+    pub(super) fn invalidate_frame_preparation_if_auto_load_inputs_changed(&mut self) {
+        if let Some(Ok((_, sync_hash))) = &self.core.scoped.prepared_frame_analysis {
+            if *sync_hash != self.compute_auto_load_sync_hash() {
+                self.core.scoped.prepared_frame_analysis = None;
+            }
+        }
+    }
+
+    fn record_prepared_frame_analysis(&mut self) {
+        let (Some(preparation), Some(sync_hash)) = (
+            &self.core.scoped.auto_load_frame_preparation,
+            self.core.scoped.auto_load_sync_hash,
+        ) else {
+            return;
+        };
+        match preparation.analysis(&self.core.model, &self.core.analysis_cfg) {
+            Ok(analysis) => {
+                self.core.scoped.prepared_frame_analysis =
+                    Some(Ok((std::sync::Arc::new(analysis), sync_hash)));
+                self.core.scoped.staleness.frame_preparation_stale = false;
+            }
+            Err(error) => self.record_frame_preparation_failure(error.to_string()),
+        }
+    }
+
     /// 準備計算を実行する（利用者が明示的に実行する入口）。
     /// FL・ΔSL の明示入力を要求し、変更した重量入力と自動荷重を一括更新する。
     /// 階生成失敗時も、階に依存しない診断・断面などの集計は継続する。
@@ -399,12 +452,12 @@ impl App {
         self.core.scoped.last_error = None;
         self.core.scoped.last_notice = None;
         self.generate_stories_action();
-        let story_error = self.core.scoped.last_error.is_some();
-        self.refresh_preparation();
+        let story_error = self.core.scoped.last_error.clone();
+        self.refresh_preparation(story_error.as_deref());
         if self.core.scoped.preparation.is_none() && self.core.scoped.last_error.is_some() {
             return;
         }
-        if story_error {
+        if story_error.is_some() {
             self.report_info("準備計算を実行しました（階の生成に失敗したため、階を前提とする項目は算定していません）");
             return;
         }
@@ -427,24 +480,31 @@ impl App {
     /// 解析前に既存階の重量・自動荷重・準備表示を現在入力へ同期する。
     /// 階を必要とする項目は FL・ΔSL の明示入力を要求する。
     pub(crate) fn ensure_preparation(&mut self) {
-        self.refresh_preparation();
+        self.refresh_preparation(None);
     }
 
     /// 剛域の反映・荷重の同期・整合性チェックを行い、結果を集計して
     /// `self.core.scoped.preparation` へ格納する。モデルの階構成は変更しない。
     ///
     /// 割当領域の再構築は解析ジョブと同じ順で行い、GUI の表示・操作対象を解析入力と一致させる。
-    fn refresh_preparation(&mut self) {
+    fn refresh_preparation(&mut self, story_error: Option<&str>) {
         self.core.scoped.preparation = None;
+        self.core.scoped.prepared_frame_analysis = None;
         self.apply_parallelism_setting();
         let previous_error = self.core.scoped.last_error.take();
         self.sync_auto_load_cases_action();
-        if self.core.scoped.last_error.is_some() {
+        if let Some(reason) = self.core.scoped.last_error.clone() {
             self.run_diagnostics();
+            self.record_frame_preparation_failure(reason);
             return;
         }
         self.core.scoped.last_error = previous_error;
         self.run_diagnostics();
+        if let Some(reason) = story_error {
+            self.record_frame_preparation_failure(reason.into());
+        } else {
+            self.record_prepared_frame_analysis();
+        }
         match self.build_preparation_result() {
             Ok(result) => self.core.scoped.preparation = Some(result),
             Err(error) => {
@@ -1245,6 +1305,231 @@ mod tests {
     }
 
     #[test]
+    fn frame_preparation_reports_all_kinds_until_model_is_edited() {
+        use sepika_core::model::{AnalysisKind, ForceRegime};
+        use sepika_element::factory::FrameAnalysisMethod;
+
+        let mut app = App::default();
+        assert!(app.load_model(crate::sample::portal_frame()));
+        assert!(app.prepared_frame_analysis().is_err());
+        let mut public_model = app.core.model.clone();
+        let job =
+            sepika_job::prepare_model_for_analysis(&mut public_model, &app.core.analysis_cfg, None)
+                .unwrap()
+                .frame_preparation
+                .analysis(&public_model, &app.core.analysis_cfg)
+                .unwrap();
+        app.run_preparation();
+        let report = app.prepared_frame_analysis().unwrap();
+        for (kind, expected) in [
+            (None, FrameAnalysisMethod::Elastic),
+            (Some(AnalysisKind::Incremental), FrameAnalysisMethod::Fiber),
+            (Some(AnalysisKind::TimeHistory), FrameAnalysisMethod::Fiber),
+        ] {
+            let member = ElemId(0);
+            let observed = report.decision(member, kind).unwrap().as_ref().unwrap();
+            assert_eq!(observed.method, expected);
+            assert_eq!(
+                observed.method,
+                job.decision(member, kind).unwrap().as_ref().unwrap().method
+            );
+        }
+
+        let mut before = app.core.model.clone();
+        app.core.model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+        app.core.scoped.staleness.mark_edited();
+        assert!(app.prepared_frame_analysis().is_err());
+        app.run_preparation();
+        let report = app.prepared_frame_analysis().unwrap();
+        assert_eq!(
+            report
+                .decision(ElemId(0), None)
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .method,
+            FrameAnalysisMethod::Elastic
+        );
+        assert_eq!(
+            report
+                .decision(ElemId(0), Some(AnalysisKind::Incremental))
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .method,
+            FrameAnalysisMethod::ConcentratedSpring
+        );
+        assert_eq!(
+            sepika_design_jp::MemberKind::try_of_element(
+                &app.core.model.elements[0],
+                &app.core.model,
+            ),
+            Ok(sepika_design_jp::MemberKind::Column)
+        );
+        let mut after = app.core.model.clone();
+        after.elements[0].force_regime = ForceRegime::Auto;
+        before.seismic_weight_generation = None;
+        after.seismic_weight_generation = None;
+        assert!(before.eq_ignoring_dofmap(&after));
+        assert!(app.core.scoped.results.is_none());
+    }
+
+    #[test]
+    fn committed_mass_and_ai_settings_invalidate_only_the_frame_decision() {
+        use sepika_core::model::MassMethod;
+        use sepika_load::ai::SoilClass;
+        use sepika_solver::statics::analysis::AiMode;
+
+        let mut app = App::default();
+        assert!(app.load_model(crate::sample::portal_frame()));
+        app.run_linear_static(sepika_core::ids::LoadCaseId(0));
+        assert!(app.core.scoped.last_error.is_none());
+        assert!(app.prepared_frame_analysis().is_ok());
+        let last_static = app.core.scoped.last_static.unwrap();
+        let initial = app.core.analysis_cfg;
+        let new_mass = AnalysisSettings {
+            mass_method: MassMethod::LumpedOnly,
+            ..initial
+        };
+        for next in [
+            new_mass,
+            AnalysisSettings {
+                ai_mode: AiMode::SemiPrecise,
+                ..initial
+            },
+            AnalysisSettings { z: 0.8, ..initial },
+            AnalysisSettings {
+                soil: SoilClass::III,
+                ..initial
+            },
+            AnalysisSettings { c0: 0.3, ..initial },
+        ] {
+            app.run_preparation();
+            assert!(app.prepared_frame_analysis().is_ok());
+            let prepared_at = app.core.scoped.preparation.as_ref().unwrap().computed_at;
+            assert!(app.commit_analysis_settings(next));
+            assert_eq!(
+                app.prepared_frame_analysis().err(),
+                Some("現在の入力で準備計算を実行してください。")
+            );
+            assert_eq!(
+                app.core.scoped.preparation.as_ref().unwrap().computed_at,
+                prepared_at
+            );
+            assert!(!app.core.scoped.staleness.preparation_stale);
+            assert_eq!(app.core.scoped.last_static, Some(last_static));
+            assert!(app.core.scoped.results.is_some());
+            assert!(app.commit_analysis_settings(initial));
+        }
+        app.run_preparation();
+        assert!(app.commit_analysis_settings(AnalysisSettings {
+            th_damping: 0.04,
+            ..initial
+        }));
+        assert!(app.prepared_frame_analysis().is_ok());
+        assert!(app.commit_analysis_settings(new_mass));
+        app.run_preparation();
+        assert!(app.prepared_frame_analysis().is_ok());
+        assert_eq!(app.core.model.mass_method, MassMethod::LumpedOnly);
+    }
+
+    #[test]
+    fn first_analysis_preparation_reports_weight_failure_even_without_generation_record() {
+        use sepika_core::ids::{NodeId, StoryId};
+        use sepika_core::model::Constraint;
+
+        let mut app = App::default();
+        let mut model = crate::sample::portal_frame();
+        for (i, slaves) in [vec![NodeId(2), NodeId(3)], vec![NodeId(3)]]
+            .into_iter()
+            .enumerate()
+        {
+            let mut master = model.nodes[2 + i].clone();
+            master.id = NodeId(model.nodes.len() as u32);
+            model
+                .constraints
+                .push(Constraint::rigid_diaphragm(StoryId(1), master.id, slaves));
+            model.nodes.push(master);
+        }
+        assert!(app.load_model(model));
+        assert!(app.core.model.seismic_weight_generation.is_none());
+        let mut public_input = app.core.model.clone();
+        let report =
+            sepika_job::prepare_model_for_analysis(&mut public_input, &app.core.analysis_cfg, None)
+                .unwrap();
+        assert!(public_input.seismic_weight_generation.is_none());
+        let reason = report
+            .frame_preparation
+            .analysis(&public_input, &app.core.analysis_cfg)
+            .err()
+            .expect("重量生成の失敗は方式判定を許可しない")
+            .to_string();
+        assert!(reason.contains("一意に帰属できません"), "{reason}");
+        for _ in 0..2 {
+            app.ensure_preparation();
+            assert_eq!(app.prepared_frame_analysis().err(), Some(reason.as_str()));
+            assert!(app.core.scoped.last_error.is_none());
+            assert!(app.core.model.seismic_weight_generation.is_none());
+        }
+        assert!(app.core.scoped.preparation.is_some());
+        let path = std::env::temp_dir().join(format!("sepika-2041-{}.ovika", uuid::Uuid::new_v4()));
+        app.save_project_to(path.clone());
+        assert!(app.core.scoped.last_error.is_none());
+        let mut reopened = App::default();
+        reopened.open_project_from(path.clone());
+        std::fs::remove_file(path).unwrap();
+        assert!(reopened.core.scoped.last_error.is_none());
+        assert!(reopened.core.scoped.preparation.is_some());
+        assert!(reopened.core.model.seismic_weight_generation.is_none());
+        assert_eq!(
+            reopened.prepared_frame_analysis().err(),
+            Some("現在の入力で準備計算を実行してください。")
+        );
+        reopened.ensure_preparation();
+        assert_eq!(
+            reopened.prepared_frame_analysis().err(),
+            Some(reason.as_str())
+        );
+    }
+
+    #[test]
+    fn failed_common_preparation_reports_its_reason_instead_of_a_method() {
+        let mut app = App::default();
+        assert!(app.load_model(crate::sample::portal_frame()));
+        app.run_preparation();
+        assert!(app.prepared_frame_analysis().is_ok());
+        app.core.model.elements[0].nodes[1] = app.core.model.elements[0].nodes[0];
+        app.core.scoped.staleness.mark_edited();
+        app.run_preparation();
+        assert_eq!(
+            app.prepared_frame_analysis().err(),
+            app.core.scoped.last_error.as_deref()
+        );
+        let reason = app.prepared_frame_analysis().err().unwrap().to_owned();
+        #[cfg(feature = "gui")]
+        for analysis in [
+            crate::viewer::ModelingAnalysis::Static,
+            crate::viewer::ModelingAnalysis::Incremental,
+            crate::viewer::ModelingAnalysis::TimeHistory,
+        ] {
+            app.ui.scoped.modeling_analysis = analysis;
+            assert_eq!(app.prepared_frame_analysis().err(), Some(reason.as_str()));
+            assert!(app.core.scoped.preparation.is_none());
+            assert!(app.core.scoped.results.is_none());
+        }
+        app.core.scoped.staleness.mark_edited();
+        let retry = Some("現在の入力で準備計算を実行してください。");
+        assert_eq!(app.prepared_frame_analysis().err(), retry);
+        app.run_preparation();
+        assert_eq!(app.prepared_frame_analysis().err(), Some(reason.as_str()));
+        assert!(app.commit_analysis_settings(AnalysisSettings {
+            mass_method: sepika_core::model::MassMethod::LumpedOnly,
+            ..app.core.analysis_cfg
+        }));
+        assert_eq!(app.prepared_frame_analysis().err(), retry);
+    }
+
+    #[test]
     fn preparation_and_report_use_current_shape_j_and_preserve_supplied_j() {
         let mut app = section_app(
             SectionShape::SteelBox {
@@ -1365,12 +1650,51 @@ mod tests {
                 .filter(|e| e.section == Some(SectionId(0)))
                 .count()
         );
+        assert!(rows.len() > 1);
+        let grouped = sepika_solver::statics::analysis::precheck::model_issues(&app.core.model)
+            .into_iter()
+            .find(|issue| {
+                issue
+                    .message
+                    .starts_with("CFT 断面「J観測断面」の等価断面性能を算定できません")
+            })
+            .unwrap();
+        let first = rows[0].elem;
+        assert!(grouped
+            .message
+            .contains(&format!("部材 ID {} の断面", first.0)));
+        let public_error = sepika_job::compute::compute_linear_static(
+            app.core.model.clone(),
+            sepika_core::ids::LoadCaseId(0),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(public_error.contains(&grouped.message), "{public_error}");
         for row in rows {
             assert!(row.composite.is_none());
             assert_eq!(row.effective_area, None);
             assert_eq!(row.effective_iy, None);
             let reason = row.unavailable_reason.as_ref().unwrap();
             assert!(reason.contains(&failure.reason), "{reason}");
+            let report = app
+                .prepared_frame_analysis()
+                .expect("局所不備で共通準備を失わない");
+            let issue = report
+                .decision(row.elem, None)
+                .unwrap()
+                .as_ref()
+                .err()
+                .unwrap();
+            assert!(
+                issue.reason().contains(&failure.reason),
+                "{}",
+                issue.reason()
+            );
+            assert_eq!(
+                issue.reason(),
+                format!("部材 ID {}: {}", row.elem.0, grouped.short)
+            );
+            assert_eq!(issue.reason().matches("部材 ID ").count(), 1);
             assert!(
                 reason.contains(&format!("部材 ID {} ", row.elem.0)),
                 "{reason}"

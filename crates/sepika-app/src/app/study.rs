@@ -205,6 +205,8 @@ pub struct StudyRun {
     #[serde(default)]
     expected_result_checks: Option<comparison::ExpectedChecks>,
     pub preparation: Option<PreparationResult>,
+    #[serde(skip)]
+    frame_analysis: Option<FramePreparationState>,
     pub last_static: Option<StaticKey>,
     pub app_version: String,
     pub created: SystemTime,
@@ -306,6 +308,7 @@ fn finish_study_run(worker: &mut App, input: &StudyInput, name: String) -> Study
         .recorded_diagnostics
         .take()
         .unwrap_or_else(|| worker.core.scoped.diagnostics.clone());
+    let frame_analysis = worker.current_frame_preparation().cloned();
     StudyRun {
         expected_result_checks: worker
             .core
@@ -324,6 +327,7 @@ fn finish_study_run(worker: &mut App, input: &StudyInput, name: String) -> Study
         prepared: StudyInput::capture(&worker.core),
         results: worker.core.scoped.results.take(),
         preparation: worker.core.scoped.preparation.take(),
+        frame_analysis,
         last_static: worker.core.scoped.last_static,
         app_version: env!("CARGO_PKG_VERSION").into(),
         created: SystemTime::now(),
@@ -573,6 +577,8 @@ impl App {
                 slot.core.scoped.staleness.results_stale = false;
                 slot.core.scoped.staleness.preparation_stale =
                     slot.core.scoped.preparation.is_none();
+                slot.core.scoped.prepared_frame_analysis = run.frame_analysis.clone();
+                slot.core.scoped.staleness.frame_preparation_stale = run.frame_analysis.is_none();
                 slot.core.scoped.undo.restrict_sections(Vec::new());
                 slot
             }
@@ -770,6 +776,9 @@ impl App {
     }
     fn saved_study_runs(&self, s: usize) -> Vec<StudyRun> {
         let mut runs = self.studies.items[s].runs.clone();
+        for run in &mut runs {
+            run.frame_analysis = None;
+        }
         match self.studies.active {
             Location::History(active, r) if active == s => {
                 runs[r].result_view_references = ViewReferences::capture(
@@ -1776,6 +1785,88 @@ mod tests {
             assert!(error.contains("鋼板壁版 ID 0"), "{target}: {error}");
             assert!(reopened.studies.items.is_empty());
         }
+    }
+
+    #[test]
+    fn live_study_history_keeps_the_frame_analysis_of_its_prepared_input() {
+        use sepika_core::model::{AnalysisKind, ForceRegime};
+        use sepika_element::factory::FrameAnalysisMethod;
+
+        let mut app = app();
+        let s = app.create_study("検討".into(), vec![ElemId(2)]).unwrap();
+        let a = app.create_comparison(s, "案A".into()).unwrap();
+        let b = app.create_comparison(s, "案B".into()).unwrap();
+        let decision = |app: &App| {
+            app.prepared_frame_analysis()
+                .unwrap()
+                .decision(ElemId(2), Some(AnalysisKind::Incremental))
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .method
+        };
+        for (r, (regime, method)) in [
+            (
+                ForceRegime::UniaxialBendingShear,
+                FrameAnalysisMethod::ConcentratedSpring,
+            ),
+            (
+                ForceRegime::AxialBendingInteract,
+                FrameAnalysisMethod::Fiber,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            app.switch_study(Location::Proposal(s, a)).unwrap();
+            app.core.model.elements[2].force_regime = regime;
+            app.core.scoped.staleness.mark_edited();
+            app.start_study_calculation(s, a).unwrap();
+            wait(&mut app);
+            app.switch_study(Location::StartedInput(s, r)).unwrap();
+            assert!(app.prepared_frame_analysis().is_err());
+            app.switch_study(Location::History(s, r)).unwrap();
+            assert_eq!(decision(&app), method);
+        }
+        app.switch_study(Location::Proposal(s, b)).unwrap();
+        assert!(app.prepared_frame_analysis().is_err());
+        app.switch_study(Location::History(s, 0)).unwrap();
+        assert_eq!(decision(&app), FrameAnalysisMethod::ConcentratedSpring);
+
+        let mut reopened = App::default();
+        let saved = rmp_serde::from_slice(&bytes(&app.saved_studies())).unwrap();
+        reopened.restore_studies(saved).unwrap();
+        reopened.switch_study(Location::History(s, 0)).unwrap();
+        assert!(reopened.core.scoped.preparation.is_some());
+        assert!(reopened.core.scoped.results.is_some());
+        assert!(reopened.prepared_frame_analysis().is_err());
+    }
+
+    #[test]
+    fn live_study_history_keeps_its_worker_preparation_failure() {
+        let mut app = app();
+        let s = app.create_study("検討".into(), vec![ElemId(2)]).unwrap();
+        let p = app.create_comparison(s, "案A".into()).unwrap();
+        app.switch_study(Location::Proposal(s, p)).unwrap();
+        let member = &mut app.core.model.elements[2];
+        member.nodes[1] = member.nodes[0];
+        app.core.scoped.staleness.mark_edited();
+        app.start_study_calculation(s, p).unwrap();
+        wait(&mut app);
+        let reason = app.studies.items[s].runs[0].error.clone().unwrap();
+        assert!(reason.contains("部材"), "{reason}");
+        app.switch_study(Location::StartedInput(s, 0)).unwrap();
+        assert_ne!(app.prepared_frame_analysis().err(), Some(reason.as_str()));
+        app.switch_study(Location::History(s, 0)).unwrap();
+        assert_eq!(app.prepared_frame_analysis().err(), Some(reason.as_str()));
+        let mut reopened = App::default();
+        let saved = rmp_serde::from_slice(&bytes(&app.saved_studies())).unwrap();
+        reopened.restore_studies(saved).unwrap();
+        reopened.switch_study(Location::History(s, 0)).unwrap();
+        assert_ne!(
+            reopened.prepared_frame_analysis().err(),
+            Some(reason.as_str())
+        );
     }
 
     #[test]

@@ -35,7 +35,7 @@
 //!   アームである」ことを示す。
 //!
 //! 分類ロジックは要素生成（`sepika_element::factory`）と同じ判定関数
-//! （[`resolve_force_regime`] / [`wall_side_column_release`] / [`wall_is_seismic`]）を
+//! （準備計算の方式判定 / [`wall_is_seismic`]）を
 //! 用いるため、実際に解析へ渡る要素種別と一致する。
 
 use crate::app::App;
@@ -45,10 +45,11 @@ use sepika_core::geom::vec3;
 use sepika_core::ids::NodeId;
 use sepika_core::model::{ElementData, ElementKind, EndCondition, Model};
 use sepika_core::units::to_display::force_kn;
-use sepika_element::factory::{resolve_force_regime, ResolvedRegime};
+use sepika_element::factory::FrameAnalysisMethod;
 use sepika_element::wall::misc_wall::wall_is_seismic;
-use sepika_element::wall::side_column::{wall_side_column_release, SideColumnEdges};
+use sepika_element::wall::side_column::SideColumnEdges;
 use sepika_element::wall::wall_element::wall_element_geometry;
+use sepika_job::prepare::PreparedFrameMethod;
 
 use super::{ModelingAnalysis, Projector};
 
@@ -75,6 +76,7 @@ pub(super) enum ModelClass {
     Truss,
     /// ばね・ダンパー等その他の要素。
     Other,
+    Unconfirmed,
 }
 
 impl ModelClass {
@@ -92,6 +94,7 @@ impl ModelClass {
             ModelClass::Panel => Color32::from_rgb(0x6D, 0x28, 0xD9),
             ModelClass::Truss => Color32::from_rgb(0x0D, 0x94, 0x88),
             ModelClass::Other => theme::GRAY_300,
+            ModelClass::Unconfirmed => theme::GRAY_300,
         }
     }
 
@@ -108,78 +111,41 @@ impl ModelClass {
             ModelClass::Panel => "仕口パネル",
             ModelClass::Truss => "トラス/軸材",
             ModelClass::Other => "その他(ばね/ダンパー)",
+            ModelClass::Unconfirmed => "方式未確認・適用外",
         }
     }
 }
 
-/// 部材 `data` が解析種別 `analysis` の下でどのモデルへ振り分けられるかを分類する。
-///
-/// 判定は要素生成（`sepika_element::factory::build_behavior` /
-/// `build_nonlinear_behavior`）と同じ関数に委譲するため、実際に解析へ渡る要素種別と
-/// 一致する。
-pub(super) fn classify(
+fn displayed_class(
     data: &ElementData,
     model: &Model,
     analysis: ModelingAnalysis,
+    prepared: Option<&PreparedFrameMethod>,
+    side_cols: &SideColumnEdges,
 ) -> ModelClass {
-    classify_with(data, model, analysis, None)
-}
-
-/// [`classify`] の全部材ループ向け変種。側柱判定（1 部材ごとに全要素を走査する）を
-/// 事前構築した [`SideColumnEdges`] の共通判定の参照へ差し替えられる。
-/// `None` は 1 部材だけ分類する呼び出し（ツールチップ・テスト）用で、
-/// [`wall_side_column_release`] による走査判定になる。
-pub(super) fn classify_with(
-    data: &ElementData,
-    model: &Model,
-    analysis: ModelingAnalysis,
-    side_cols: Option<&SideColumnEdges>,
-) -> ModelClass {
-    let kind = match analysis {
-        ModelingAnalysis::Static => None,
-        ModelingAnalysis::Incremental => Some(sepika_core::model::AnalysisKind::Incremental),
-        ModelingAnalysis::TimeHistory => Some(sepika_core::model::AnalysisKind::TimeHistory),
-    };
-    let issue = match side_cols {
-        Some(index) => sepika_element::factory::wall_side_column_input_issue_with_index(
-            data,
-            model,
-            kind,
-            index.classification(),
-        ),
-        None => sepika_element::factory::wall_side_column_input_issue(data, model, kind),
-    };
-    if issue.is_some() {
-        return ModelClass::Other;
-    }
-    if sepika_element::frame::beam::is_elastic_wall_girder(model, data) {
-        return ModelClass::Elastic;
-    }
     match data.kind {
-        ElementKind::Beam | ElementKind::Fiber => {
-            let is_side_column = match side_cols {
-                Some(idx) => idx.release_axis(data, model).is_some(),
-                None => wall_side_column_release(data, model).is_some(),
-            };
-            if is_side_column && analysis == ModelingAnalysis::Static {
-                return ModelClass::SideColumnPin;
+        ElementKind::Beam | ElementKind::Fiber => match prepared.map(|p| p.method) {
+            Some(FrameAnalysisMethod::Elastic)
+                if prepared.is_some_and(|p| p.wall_side_release && !p.elastic_wall_girder) =>
+            {
+                ModelClass::SideColumnPin
             }
-            match analysis {
-                ModelingAnalysis::Static => ModelClass::Elastic,
-                ModelingAnalysis::Incremental | ModelingAnalysis::TimeHistory => {
-                    if data.kind == ElementKind::Fiber {
-                        ModelClass::Fiber
-                    } else {
-                        match resolve_force_regime(data, model) {
-                            ResolvedRegime::ConcentratedSpring => ModelClass::ConcentratedPlastic,
-                            ResolvedRegime::Fiber => ModelClass::Fiber,
-                        }
-                    }
-                }
-            }
-        }
+            Some(FrameAnalysisMethod::Elastic) => ModelClass::Elastic,
+            Some(FrameAnalysisMethod::ConcentratedSpring) => ModelClass::ConcentratedPlastic,
+            Some(FrameAnalysisMethod::Fiber) => ModelClass::Fiber,
+            _ => ModelClass::Unconfirmed,
+        },
         ElementKind::Wall => {
-            if wall_is_seismic(data, model) {
+            if sepika_element::factory::wall_side_column_input_issue_with_index(
+                data,
+                model,
+                analysis.kind(),
+                side_cols.classification(),
+            )
+            .is_some()
+            {
+                ModelClass::Other
+            } else if wall_is_seismic(data, model) {
                 ModelClass::Wall
             } else {
                 ModelClass::WallMisc
@@ -410,19 +376,23 @@ pub(super) fn draw_modeling_with_view(
     proj: &Projector,
     frame_filter: super::FrameFilter,
 ) {
-    let analysis = view.modeling_analysis;
+    let analysis = app.ui.scoped.modeling_analysis;
+    let prepared = app.prepared_frame_analysis();
 
     let mut present: Vec<ModelClass> = Vec::new();
     let mut sym = Symbols::default();
     let mut beam_adjacency: Option<NodeAdjacency> = None;
-    let wall_nodes = seismic_wall_nodes(model);
     let side_cols = SideColumnEdges::build(model);
 
     for elem in &model.elements {
         if !frame_filter.shows(elem.id) {
             continue;
         }
-        let class = classify_with(elem, model, analysis, Some(&side_cols));
+        let data = prepared
+            .ok()
+            .and_then(|report| report.decision(elem.id, analysis.kind()))
+            .and_then(|decision| decision.as_ref().ok());
+        let class = displayed_class(elem, model, analysis, data, &side_cols);
         if !present.contains(&class) {
             present.push(class);
         }
@@ -458,16 +428,7 @@ pub(super) fn draw_modeling_with_view(
                 elem,
                 class.color(),
             ),
-            _ => draw_line_member(
-                painter,
-                model,
-                pts,
-                proj,
-                elem,
-                class,
-                &wall_nodes,
-                &mut sym,
-            ),
+            _ => draw_line_member(painter, model, pts, proj, elem, class, data, &mut sym),
         }
     }
 
@@ -551,64 +512,7 @@ struct Symbols {
     wall_leader: bool,
 }
 
-/// 耐震壁の節点の集合。
-///
-/// 付帯梁になりうるのは耐震壁の節点を両端に持つ部材だけなので、
-/// [`is_wall_girder`] の安価な絞り込みに使う。`stiffness_breakdown` は内部でモデル
-/// 全体を走査するため、部材ごとに素で呼ぶと部材数の二乗に比例する。1 回の描画につき
-/// 一度だけ集合を作り、通過した部材にだけ本判定を掛ける。
-fn seismic_wall_nodes(model: &Model) -> std::collections::HashSet<NodeId> {
-    model
-        .elements
-        .iter()
-        .filter(|e| e.kind == ElementKind::Wall && wall_is_seismic(e, model))
-        .flat_map(|e| e.nodes.iter().copied())
-        .collect()
-}
-
-/// 部材 `elem` が耐震壁の付帯梁（上下大梁）か。
-///
-/// 判定・倍率ともに要素生成（[`sepika_element::frame::beam::stiffness_breakdown`]）へ委ねる
-/// ため、図に現れる付帯梁は実際に倍率が乗って解析へ入る梁と一致する。倍率の値は
-/// 剛性計算条件で変わりうるため図には出さず、付帯梁であることのみを示す。
-///
-/// 倍率が乗るのは梁要素として組まれる線材だけのため、線材以外は対象外とする
-/// （壁要素自身も先頭 2 節点が下辺と一致すると `stiffness_breakdown` は倍率を
-/// 返すが、壁は `BeamElement` として組まれないため倍率は解析に効かない）。
-///
-/// `wall_nodes`（[`seismic_wall_nodes`]）は本判定を掛ける部材を絞り込むためのもので、
-/// 付帯梁の条件（耐震壁の節点を 2 つとも両端に持つ水平材）より広い集合である。
-/// 最終判定は `stiffness_breakdown` に委ねるため、絞り込んでも解析との一致は崩れない。
-fn is_wall_girder(
-    elem: &ElementData,
-    model: &Model,
-    wall_nodes: &std::collections::HashSet<NodeId>,
-) -> bool {
-    matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber)
-        && elem.nodes.len() >= 2
-        && wall_nodes.contains(&elem.nodes[0])
-        && wall_nodes.contains(&elem.nodes[1])
-        && sepika_element::frame::beam::is_elastic_wall_girder(model, elem)
-}
-
-fn is_end_plastic_zone_model(class: ModelClass) -> bool {
-    class == ModelClass::Fiber
-}
-
-/// 端部塑性化域モデルの有効な塑性化域長 Lp [mm]（可撓長 `l_flex` 基準）。
-/// 要素生成と同じ既定・同じクランプを用いるため、表示は解析のモデル化と一致する。
-fn plastic_zone_len(elem: &ElementData, model: &Model, l_flex: f64) -> f64 {
-    if l_flex <= 1e-9 {
-        return 0.0;
-    }
-    sepika_element::frame::fiber::clamp_plastic_zone(
-        sepika_element::factory::plastic_zone_length(elem, model),
-        l_flex,
-    )
-}
-
 /// 線材（梁・柱・ファイバー・側柱）のモデル化を描く。
-/// `wall_nodes` は壁の付帯梁の絞り込み用（[`seismic_wall_nodes`]）。
 #[allow(clippy::too_many_arguments)]
 fn draw_line_member(
     painter: &egui::Painter,
@@ -617,7 +521,7 @@ fn draw_line_member(
     proj: &Projector<'_>,
     elem: &ElementData,
     class: ModelClass,
-    wall_nodes: &std::collections::HashSet<NodeId>,
+    prepared: Option<&PreparedFrameMethod>,
     sym: &mut Symbols,
 ) {
     if elem.nodes.len() < 2 {
@@ -633,16 +537,25 @@ fn draw_line_member(
     };
     let l = model.member_length(elem);
     let color = class.color();
+    if class == ModelClass::Unconfirmed {
+        painter.line_segment([p0, p1], egui::Stroke::new(2.0_f32, color));
+        return;
+    }
 
-    let end_plastic = is_end_plastic_zone_model(class);
-    let (s_i, s_j, l_flex) = flexible_span(elem, l);
+    let plastic_zone_mm = prepared.and_then(|p| p.plastic_zone_mm);
+    let (s_i, s_j, l_flex) = if let Some(data) = prepared.filter(|_| l > 1e-9) {
+        let [li, lj] = data.rigid_lengths_mm;
+        ((li / l) as f32, 1.0 - (lj / l) as f32, l - li - lj)
+    } else {
+        flexible_span(elem, l)
+    };
 
     let fa = lerp(p0, p1, s_i);
     let fb = lerp(p0, p1, s_j);
 
-    if end_plastic {
+    if let Some(plastic_zone_mm) = plastic_zone_mm {
         let lp = if l_flex > 1e-9 {
-            (plastic_zone_len(elem, model, l_flex) / l_flex) as f32
+            (plastic_zone_mm / l_flex) as f32
         } else {
             0.0
         };
@@ -659,7 +572,7 @@ fn draw_line_member(
         painter.line_segment([fa, fb], egui::Stroke::new(3.0_f32, color));
     }
 
-    if is_wall_girder(elem, model, wall_nodes) {
+    if prepared.is_some_and(|p| p.elastic_wall_girder) {
         draw_wall_girder_mark(painter, p0, p1);
         sym.wall_girder = true;
     }
@@ -673,13 +586,13 @@ fn draw_line_member(
         sym.rigid = true;
     }
 
-    if end_plastic {
+    if plastic_zone_mm.is_some() {
         draw_fiber_section_marker(painter, fa, fb, color);
         draw_fiber_section_marker(painter, fb, fa, color);
         sym.fiber_section = true;
     }
 
-    if wall_side_column_release(elem, model).is_some() {
+    if prepared.is_some_and(|p| p.wall_side_release) {
         draw_pin_marker(painter, fa, fb, color);
         draw_pin_marker(painter, fb, fa, color);
         sym.pin = true;
@@ -695,7 +608,7 @@ fn draw_line_member(
                 sym.semi = true;
             }
             EndCondition::Fixed => {
-                if class == ModelClass::ConcentratedPlastic && !end_plastic {
+                if class == ModelClass::ConcentratedPlastic {
                     draw_hinge_marker(painter, near, far, color);
                     sym.hinge = true;
                 }
@@ -1259,7 +1172,14 @@ pub(super) fn show_modeling_tooltip_with_view(
     let Some(elem) = model.element(elem_id) else {
         return;
     };
-    let class = classify(elem, model, view.modeling_analysis);
+    let analysis = app.ui.scoped.modeling_analysis;
+    let kind = analysis.kind();
+    let prepared = app.prepared_frame_analysis();
+    let decision = prepared
+        .ok()
+        .and_then(|report| report.decision(elem_id, kind));
+    let data = decision.and_then(|decision| decision.as_ref().ok());
+    let class = displayed_class(elem, model, analysis, data, &SideColumnEdges::build(model));
     let end_label = |c: EndCondition| -> &'static str {
         match c {
             EndCondition::Fixed => "剛",
@@ -1276,73 +1196,56 @@ pub(super) fn show_modeling_tooltip_with_view(
         |ui| {
             ui.label(format!("部材 #{}", elem_id.0));
             ui.colored_label(class.color(), class.label());
-            let kind = match view.modeling_analysis {
-                ModelingAnalysis::Static => None,
-                ModelingAnalysis::Incremental => {
-                    Some(sepika_core::model::AnalysisKind::Incremental)
-                }
-                ModelingAnalysis::TimeHistory => {
-                    Some(sepika_core::model::AnalysisKind::TimeHistory)
-                }
-            };
-            if let Some(reason) =
-                sepika_element::factory::wall_side_column_input_issue(elem, model, kind)
-            {
+            if class == ModelClass::Unconfirmed {
+                let reason = match prepared {
+                    Err(reason) => reason,
+                    Ok(_) => match decision {
+                        Some(Err(issue)) => issue.reason(),
+                        _ => "準備計算にこの部材の方式判定がありません。",
+                    },
+                };
                 ui.label(reason);
                 return;
             }
-            if wall_side_column_release(elem, model).is_some() {
+            if elem.kind == ElementKind::Wall {
+                if let Some(reason) =
+                    sepika_element::factory::wall_side_column_input_issue(elem, model, kind)
+                {
+                    ui.label(reason);
+                    return;
+                }
+            }
+            if data.is_some_and(|p| p.wall_side_release) {
                 ui.label("壁側柱: 壁法線まわりの両端回転のみ解放（全回転のピンではありません）");
                 if kind.is_some() {
                     ui.label("軸・面外応答の材料履歴を保持します");
                 }
             }
             if class == ModelClass::Wall {
-                show_wall_modeling_detail_with_view(
-                    view,
-                    ui,
-                    app,
-                    model,
-                    view.modeling_analysis,
-                    elem,
-                );
+                show_wall_modeling_detail_with_view(view, ui, app, model, analysis, elem);
                 return;
             }
-            if is_wall_girder(elem, model, &seismic_wall_nodes(model)) {
+            if data.is_some_and(|p| p.elastic_wall_girder) {
                 ui.label("壁上下の剛梁（弾性高剛性部材。材料降伏は評価しません）");
             }
-            let is_frame_line = matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber);
-            let end_plastic = is_end_plastic_zone_model(class);
-            if is_frame_line {
+            if let Some(data) = data {
                 ui.label(format!(
                     "端条件: i={} / j={}",
                     end_label(elem.end_cond[0]),
                     end_label(elem.end_cond[1])
                 ));
-                if sepika_element::frame::beam::i_end_torsion_release(elem, model) {
+                if data.torsion_released {
                     ui.label("ねじれ: i 端ピン（部材全長で Mx=0）");
                 }
-                let rz = &elem.rigid_zone;
-                if rz.length_i > 0.0 || rz.length_j > 0.0 {
-                    ui.label(format!(
-                        "剛域長: i={:.0} / j={:.0} mm",
-                        rz.length_i, rz.length_j
-                    ));
+                let [li, lj] = data.rigid_lengths_mm;
+                if li > 0.0 || lj > 0.0 {
+                    ui.label(format!("剛域長: i={li:.0} / j={lj:.0} mm"));
                 }
             }
-            if end_plastic {
-                let l = elem
-                    .nodes
-                    .first()
-                    .zip(elem.nodes.get(1))
-                    .and_then(|(i, j)| {
-                        let a = model.nodes.get(i.index())?;
-                        let b = model.nodes.get(j.index())?;
-                        Some(vec3::dist(a.coord, b.coord))
-                    })
-                    .unwrap_or(0.0);
-                let (_, _, l_flex) = flexible_span(elem, l);
-                let lp = plastic_zone_len(elem, model, l_flex);
+            if let Some((lp, [li, lj])) =
+                data.and_then(|p| p.plastic_zone_mm.map(|lp| (lp, p.rigid_lengths_mm)))
+            {
+                let l_flex = model.member_length(elem) - li - lj;
                 let src = if elem.plastic_zone.is_some() {
                     "指定値"
                 } else {
@@ -1350,7 +1253,7 @@ pub(super) fn show_modeling_tooltip_with_view(
                 };
                 ui.label("ファイバー断面: 可撓部の材端 2 箇所（積分点 ξ=∓1）");
                 ui.label(format!("塑性化域 Lp={:.0} mm（{}）／中央弾性", lp, src));
-                if l_flex < l - 1e-9 {
+                if li + lj > 1e-9 {
                     ui.label(format!("可撓長 L'={:.0} mm（Lp は L' 基準）", l_flex));
                 }
             }
@@ -1393,6 +1296,106 @@ mod tests {
     }
 
     #[test]
+    fn modeling_hover_uses_prepared_rigid_lengths_when_global_setting_changes() {
+        let mut app = App::default();
+        let mut model = crate::sample::portal_frame();
+        model.panel_zone = sepika_core::model::PanelZoneMode::None;
+        let member = model.elements[2].id;
+        let zone = &mut model.elements[2].rigid_zone;
+        zone.length_i = 300.0;
+        zone.source_i = sepika_core::model::ZoneSource::Manual;
+        assert!(app.load_model(model));
+        let render = |app: &App| {
+            let context = egui::Context::default();
+            crate::app::install_japanese_fonts(&context);
+            let mut text = Vec::new();
+            for _ in 0..3 {
+                let output = context.run_ui(
+                    egui::RawInput {
+                        events: vec![egui::Event::PointerMoved(egui::pos2(100.0, 100.0))],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        show_modeling_tooltip_with_view(
+                            &app.ui.view.viewport,
+                            ui,
+                            app,
+                            &app.core.model,
+                            member,
+                        );
+                    },
+                );
+                text.extend(
+                    output
+                        .shapes
+                        .into_iter()
+                        .filter_map(|shape| match shape.shape {
+                            egui::Shape::Text(value) => Some(value.galley.text().to_string()),
+                            _ => None,
+                        }),
+                );
+            }
+            assert!(
+                text.iter().any(|line| line.starts_with("端条件:")),
+                "{text:?}"
+            );
+            text
+        };
+        app.core.model.stress_cfg.consider_rigid_zones = true;
+        app.run_preparation();
+        assert!(render(&app)
+            .iter()
+            .any(|line| line == "剛域長: i=300 / j=0 mm"));
+        app.core.model.stress_cfg.consider_rigid_zones = false;
+        app.core.scoped.staleness.mark_edited();
+        app.run_preparation();
+        assert_eq!(
+            app.core.model.element(member).unwrap().rigid_zone.length_i,
+            300.0
+        );
+        assert!(!render(&app).iter().any(|line| line.starts_with("剛域長:")));
+    }
+
+    #[test]
+    fn modeling_uses_the_shared_selection_without_preparing_or_solving_again() {
+        let mut app = App::default();
+        assert!(app.load_model(crate::sample::portal_frame()));
+        app.run_preparation();
+        let prepared_at = app.core.scoped.preparation.as_ref().unwrap().computed_at;
+        let before = app.core.model.clone();
+        for (analysis, expected) in [
+            (ModelingAnalysis::Static, ModelClass::Elastic),
+            (ModelingAnalysis::Incremental, ModelClass::Fiber),
+            (ModelingAnalysis::TimeHistory, ModelClass::Fiber),
+        ] {
+            app.ui.scoped.modeling_analysis = analysis;
+            let model = &app.core.model;
+            let data = &model.elements[0];
+            let selected = app.ui.scoped.modeling_analysis;
+            let decision = app
+                .prepared_frame_analysis()
+                .unwrap()
+                .decision(data.id, selected.kind());
+            assert_eq!(
+                displayed_class(
+                    data,
+                    model,
+                    selected,
+                    decision.and_then(|value| value.as_ref().ok()),
+                    &SideColumnEdges::build(model),
+                ),
+                expected
+            );
+        }
+        assert_eq!(
+            app.core.scoped.preparation.as_ref().unwrap().computed_at,
+            prepared_at
+        );
+        assert!(app.core.model.eq_ignoring_dofmap(&before));
+        assert!(app.core.scoped.results.is_none());
+    }
+
+    #[test]
     fn eccentric_girder_modeling_and_rigid_zones_use_physical_axis_and_length() {
         let mut model = crate::sample::portal_frame();
         model.elements[2].end_offsets_mm = [[0.0, 1000.0, 0.0], [0.0, 1000.0, 300.0]];
@@ -1422,7 +1425,7 @@ mod tests {
                 &proj,
                 &model.elements[2],
                 ModelClass::Elastic,
-                &Default::default(),
+                None,
                 &mut Symbols::default(),
             )
         });
@@ -1522,18 +1525,37 @@ mod tests {
         }
     }
 
-    /// 静解析では断面の降伏を考えないため、梁はフォースレジームに依らず弾性。
+    fn prepare_frame_report(model: &Model) -> sepika_job::prepare::PreparedFrameAnalysis {
+        let mut model = model.clone();
+        let settings = Default::default();
+        sepika_job::prepare_model_for_analysis(&mut model, &settings, None)
+            .unwrap()
+            .frame_preparation
+            .analysis(&model, &settings)
+            .unwrap()
+    }
+
+    fn classify(data: &ElementData, model: &Model, analysis: ModelingAnalysis) -> ModelClass {
+        let report = matches!(data.kind, ElementKind::Beam | ElementKind::Fiber)
+            .then(|| prepare_frame_report(model));
+        let view = report
+            .as_ref()
+            .and_then(|report| report.decision(data.id, analysis.kind()))
+            .and_then(|x| x.as_ref().ok());
+        displayed_class(data, model, analysis, view, &SideColumnEdges::build(model))
+    }
+
     #[test]
     fn test_static_beam_is_elastic() {
-        let model = Model::default();
+        let mut model = crate::sample::portal_frame();
         for regime in [
             ForceRegime::Auto,
             ForceRegime::UniaxialBendingShear,
             ForceRegime::AxialBendingInteract,
         ] {
-            let e = elem(ElementKind::Beam, regime);
+            model.elements[2].force_regime = regime;
             assert_eq!(
-                classify(&e, &model, ModelingAnalysis::Static),
+                classify(&model.elements[2], &model, ModelingAnalysis::Static),
                 ModelClass::Elastic
             );
         }
@@ -1542,15 +1564,15 @@ mod tests {
     /// 増分解析では、集中ばね指定の梁は材端集中塑性、軸-曲げ連成指定はファイバー。
     #[test]
     fn test_incremental_beam_regime_split() {
-        let model = Model::default();
-        let concentrated = elem(ElementKind::Beam, ForceRegime::UniaxialBendingShear);
+        let mut model = crate::sample::portal_frame();
+        model.elements[2].force_regime = ForceRegime::UniaxialBendingShear;
         assert_eq!(
-            classify(&concentrated, &model, ModelingAnalysis::Incremental),
+            classify(&model.elements[2], &model, ModelingAnalysis::Incremental),
             ModelClass::ConcentratedPlastic
         );
-        let fiber = elem(ElementKind::Beam, ForceRegime::AxialBendingInteract);
+        model.elements[2].force_regime = ForceRegime::AxialBendingInteract;
         assert_eq!(
-            classify(&fiber, &model, ModelingAnalysis::Incremental),
+            classify(&model.elements[2], &model, ModelingAnalysis::Incremental),
             ModelClass::Fiber
         );
     }
@@ -1997,16 +2019,22 @@ mod tests {
     /// （[`sepika_element::frame::beam::stiffness_breakdown`] と同じ結果）を確認する。
     #[test]
     fn 壁の上下大梁だけを付帯梁として判定する() {
-        let (mut model, _) = wall_model(150.0);
+        let mut model = crate::app::rc_wall_side_column_tests::fixture::input_model();
+        let report = prepare_frame_report(&model);
         let girders: Vec<u32> = model
             .elements
             .iter()
-            .filter(|e| is_wall_girder(e, &model, &seismic_wall_nodes(&model)))
+            .filter(|e| {
+                report
+                    .decision(e.id, None)
+                    .and_then(|d| d.as_ref().ok())
+                    .is_some_and(|p| p.elastic_wall_girder)
+            })
             .map(|e| e.id.0)
             .collect();
         assert_eq!(
             girders,
-            vec![1, 2],
+            vec![2, 3],
             "付帯梁は上下の水平材のみ（鉛直辺は対象外）"
         );
         for kind in [ElementKind::Beam, ElementKind::Fiber] {
@@ -2015,18 +2043,30 @@ mod tests {
                 ForceRegime::UniaxialBendingShear,
                 ForceRegime::AxialBendingInteract,
             ] {
-                model.elements[1].kind = kind;
-                model.elements[1].force_regime = regime;
-                let girder = &model.elements[1];
+                model.elements[2].kind = kind;
+                model.elements[2].force_regime = regime;
+                let girder = &model.elements[2];
+                let report = prepare_frame_report(&model);
                 for analysis in [
                     ModelingAnalysis::Static,
                     ModelingAnalysis::Incremental,
                     ModelingAnalysis::TimeHistory,
                 ] {
-                    let class = classify(girder, &model, analysis);
+                    let data = report
+                        .decision(girder.id, analysis.kind())
+                        .unwrap()
+                        .as_ref()
+                        .unwrap();
+                    let class = displayed_class(
+                        girder,
+                        &model,
+                        analysis,
+                        Some(data),
+                        &SideColumnEdges::build(&model),
+                    );
                     assert_eq!(class, ModelClass::Elastic);
-                    assert!(!is_end_plastic_zone_model(class));
-                    assert!(is_wall_girder(girder, &model, &seismic_wall_nodes(&model)));
+                    assert_eq!(data.plastic_zone_mm, None);
+                    assert!(data.elastic_wall_girder);
                 }
             }
         }
@@ -2037,51 +2077,41 @@ mod tests {
     /// 材端回転ばねの梁は該当しない。
     #[test]
     fn 端部塑性化域モデルの判定は増分解析のファイバーのみ() {
-        let model = Model::default();
-        let fiber = elem(ElementKind::Fiber, ForceRegime::Auto);
-        let spring_beam = elem(ElementKind::Beam, ForceRegime::UniaxialBendingShear);
-
-        for e in [&fiber, &spring_beam] {
-            let class = classify(e, &model, ModelingAnalysis::Static);
-            assert!(!is_end_plastic_zone_model(class));
-        }
-
-        assert!(is_end_plastic_zone_model(classify(
-            &fiber,
-            &model,
-            ModelingAnalysis::Incremental
-        )));
-        assert!(!is_end_plastic_zone_model(classify(
-            &spring_beam,
-            &model,
-            ModelingAnalysis::Incremental
-        )));
+        let mut model = crate::sample::portal_frame();
+        model.elements[0].kind = ElementKind::Fiber;
+        model.elements[2].force_regime = ForceRegime::UniaxialBendingShear;
+        let report = prepare_frame_report(&model);
+        let zone = |id, kind| {
+            report
+                .decision(ElemId(id), kind)
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .plastic_zone_mm
+        };
+        let incremental = ModelingAnalysis::Incremental.kind();
+        assert_eq!(zone(0, None), None);
+        assert_eq!(zone(2, None), None);
+        assert!(zone(0, incremental).is_some());
+        assert_eq!(zone(2, incremental), None);
     }
 
     /// 塑性化域長 Lp の表示値は要素生成の既定と一致する
     /// （`plastic_zone` 指定時はその値、未指定なら断面せいの 0.5 倍）。
     #[test]
     fn 塑性化域長は要素生成の既定と一致する() {
-        let shape = SectionShape::SteelH {
-            root_r: Some(0.0),
-            height: 600.0,
-            width: 200.0,
-            web_thick: 11.0,
-            flange_thick: 17.0,
-        };
-        let model = Model {
-            sections: vec![shape.to_section(SectionId(0), "H-600x200".into())],
-            ..Default::default()
-        };
-        let mut e = elem(ElementKind::Fiber, ForceRegime::Auto);
-        e.section = Some(SectionId(0));
-        assert!((plastic_zone_len(&e, &model, 3000.0) - 300.0).abs() < 1e-6);
-
-        e.plastic_zone = Some(600.0);
-        assert!((plastic_zone_len(&e, &model, 3000.0) - 600.0).abs() < 1e-6);
-
-        e.plastic_zone = Some(3000.0);
-        assert!((plastic_zone_len(&e, &model, 3000.0) - 1350.0).abs() < 1e-6);
+        let mut model = crate::sample::portal_frame();
+        model.elements[2].kind = ElementKind::Fiber;
+        for (input, expected) in [(None, 200.0), (Some(600.0), 600.0), (Some(3000.0), 2700.0)] {
+            model.elements[2].plastic_zone = input;
+            let report = prepare_frame_report(&model);
+            let data = report
+                .decision(model.elements[2].id, ModelingAnalysis::Incremental.kind())
+                .unwrap()
+                .as_ref()
+                .unwrap();
+            assert!((data.plastic_zone_mm.unwrap() - expected).abs() < 1e-6);
+        }
     }
 
     /// 可とう区間・可撓長の算定は要素側（`rigid_arm::resolve_lengths`）と一致する。
@@ -2113,48 +2143,37 @@ mod tests {
     #[test]
     fn 側柱の解放と材料履歴は解析種別に一致する() {
         for kind in [ElementKind::Beam, ElementKind::Fiber] {
-            let (mut model, _) = wall_model(150.0);
-            model.elements[3].kind = kind;
-            let column = &model.elements[3];
-            let index = SideColumnEdges::build(&model);
+            let mut model = crate::app::rc_wall_side_column_tests::fixture::input_model();
+            model.elements[0].kind = kind;
+            let column = &model.elements[0];
             assert_eq!(
-                classify_with(column, &model, ModelingAnalysis::Static, Some(&index)),
+                classify(column, &model, ModelingAnalysis::Static),
                 ModelClass::SideColumnPin
             );
-            let nonlinear =
-                classify_with(column, &model, ModelingAnalysis::Incremental, Some(&index));
+            let nonlinear = classify(column, &model, ModelingAnalysis::Incremental);
             assert_eq!(nonlinear, ModelClass::Fiber);
-            assert!(is_end_plastic_zone_model(nonlinear));
-            assert!(wall_side_column_release(column, &model).is_some());
-            let mut conflicting = column.clone();
-            conflicting.nodes = model.elements[1].nodes.clone();
-            for analysis in [
-                ModelingAnalysis::Static,
-                ModelingAnalysis::Incremental,
-                ModelingAnalysis::TimeHistory,
-            ] {
-                assert_eq!(classify(&conflicting, &model, analysis), ModelClass::Other);
-            }
             assert_eq!(
                 classify(column, &model, ModelingAnalysis::TimeHistory),
-                ModelClass::Other
+                ModelClass::Unconfirmed
             );
-            let issue = sepika_element::factory::wall_side_column_input_issue(
-                column,
-                &model,
-                Some(sepika_core::model::AnalysisKind::TimeHistory),
-            )
-            .unwrap();
-            assert!(issue.contains("部材 ID 3") && issue.contains("非線形時刻歴解析"));
+            let report = prepare_frame_report(&model);
+            let issue = report
+                .decision(column.id, ModelingAnalysis::TimeHistory.kind())
+                .unwrap()
+                .as_ref()
+                .err()
+                .unwrap()
+                .reason();
+            assert!(issue.contains("部材 ID 0") && issue.contains("非線形時刻歴解析"));
             for condition in [
                 EndCondition::Pinned,
                 EndCondition::SemiRigid { k_theta: 1e8 },
             ] {
                 let mut altered = model.clone();
-                altered.elements[3].end_cond[0] = condition;
+                altered.elements[0].end_cond[0] = condition;
                 assert_eq!(
                     classify(
-                        &altered.elements[3],
+                        &altered.elements[0],
                         &altered,
                         ModelingAnalysis::Incremental
                     ),

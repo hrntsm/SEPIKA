@@ -5,13 +5,16 @@
 //! 単位: 長さ [mm]、力 [N]、モーメント [N·mm]、回転角 [rad]。
 
 use sepika_core::error::RebarGeometryError;
-use sepika_core::model::{AnalysisKind, ElementData, ElementKind, Model};
+use sepika_core::model::{
+    AnalysisKind, ElementData, HysteresisModel, Model, RcBeamReference, RigidZone,
+    WallSideColumnIndex,
+};
 use sepika_section::fiber::Fiber;
 use sepika_section::mn_surface::{
     build_surface, FiberRegion, MnSurface, PlasticFiber, StrengthParams, YieldModelKind,
 };
 
-use super::regime::{resolve_force_regime, ResolvedRegime};
+use super::regime::{frame_analysis_method, FrameAnalysisMethod};
 use super::springs::{build_flexural_springs, yield_moment_and_axial};
 use super::{resolve_member_hysteresis, StrengthBasis};
 use crate::frame::concentrated::MnInteraction;
@@ -39,7 +42,7 @@ pub struct HingeView {
     pub backbone: Option<Vec<[f64; 2]>>,
     /// RC明示基準の総部材角骨格。backboneは弾性M/S控除後の追加角を表示する。
     pub total_backbone: Option<Vec<[f64; 2]>>,
-    /// 骨格を算定できない場合の入力不足・対象外理由。
+    /// 非線形特性を算定できない場合の解析診断・対象外理由。
     pub unavailability_reason: Option<String>,
     /// N-M 線形相関（材端集中ばね）。持たないモデル・非対応の履歴則は `None`。
     pub mn_linear: Option<MnInteraction>,
@@ -60,9 +63,68 @@ impl HingeView {
     }
 }
 
+/// ヒンジの骨格・曲面のキャッシュに使う方式と接続・履歴則の依存情報。
+#[derive(Clone, Debug, PartialEq)]
+pub struct HingeViewDependencies {
+    concentrated: bool,
+    wall_side_column: bool,
+    elastic_wall_girder: bool,
+    wall_side_column_diagnostic: Option<String>,
+    rigid_zone: Option<RigidZone>,
+    rc_beam_reference: Option<RcBeamReference>,
+    rc_reference_diagnostic: Option<String>,
+    hysteresis: Option<HysteresisModel>,
+}
+
+impl HingeViewDependencies {
+    /// ステップと軸力をキャッシュの照合に含めるか。
+    pub fn uses_step_response(&self) -> bool {
+        self.concentrated
+    }
+}
+
+/// 骨格・曲面を生成せず、増分解析のヒンジビューの方式別依存情報を返す。
+pub fn hinge_view_dependencies(
+    data: &ElementData,
+    model: &Model,
+    basis: StrengthBasis,
+) -> HingeViewDependencies {
+    let kind = AnalysisKind::Incremental;
+    let concentrated = resolves_to_concentrated_spring(data, model);
+    HingeViewDependencies {
+        concentrated,
+        wall_side_column: crate::wall::side_column::wall_side_column_release(data, model).is_some(),
+        elastic_wall_girder: crate::frame::beam::is_elastic_wall_girder(model, data),
+        wall_side_column_diagnostic: super::wall_side_column_input_issue(data, model, Some(kind)),
+        rigid_zone: concentrated.then_some(data.rigid_zone),
+        rc_beam_reference: model.member_rc_beam_reference(data.id),
+        rc_reference_diagnostic: super::rc_beam_reference_input_issue(data, model, kind, basis),
+        hysteresis: concentrated.then(|| resolve_member_hysteresis(data, model, kind)),
+    }
+}
+
+/// ヒンジビューの方式に対応する履歴則の表示項目名と値。骨格・曲面は再生成しない。
+pub fn hinge_history_label(
+    data: &ElementData,
+    model: &Model,
+    kind: AnalysisKind,
+    hinge_model: AnalysisHingeModel,
+) -> Option<(&'static str, &'static str)> {
+    match hinge_model {
+        AnalysisHingeModel::ConcentratedSpring => Some((
+            "履歴則",
+            resolve_member_hysteresis(data, model, kind).label(),
+        )),
+        AnalysisHingeModel::Fiber => Some((
+            "コンクリート除荷則",
+            super::resolve_fiber_concrete_hysteresis(data, model, kind).label(),
+        )),
+        AnalysisHingeModel::Other => None,
+    }
+}
+
 /// 解析で実際に使用した非線形特性を返す。
-/// 鋼断面の主材料が鉄筋またはコンクリートの場合、材端集中ばねの骨格は取得不能の理由を返す。
-/// 矩形SRC梁・柱の材端集中ばねはモデル種別を保ち、骨格・相関・曲面に代えて適用外理由を返す。
+/// 部材の適用条件を満たさない場合は、非線形特性に代えて解析診断を返す。
 ///
 /// `axial_force_compression_positive` `[N]` は材端集中ばねの N-M 線形相関に用いる
 /// 軸力。`MnInteraction::moment_limit` は絶対値のみを使うため引張正・圧縮正の
@@ -76,116 +138,97 @@ pub fn build_hinge_view(
     n_alpha: usize,
     n_beta: usize,
 ) -> Result<HingeView, RebarGeometryError> {
-    if let Some(reason) = super::wall_side_column_input_issue(data, model, Some(kind)) {
-        let mut view = HingeView::none(AnalysisHingeModel::Other);
-        view.unavailability_reason = Some(reason);
-        return Ok(view);
-    }
-    if crate::frame::beam::is_elastic_wall_girder(model, data) {
-        let mut view = HingeView::none(AnalysisHingeModel::Other);
-        view.unavailability_reason =
-            Some("壁上下の剛梁は弾性高剛性部材です。材料降伏は評価しません。".into());
-        return Ok(view);
-    }
-    if let Some(reason) = super::input_check::src_concentrated_spring_issue(data, model) {
-        let mut view = HingeView::none(AnalysisHingeModel::ConcentratedSpring);
-        view.unavailability_reason = Some(reason);
-        return Ok(view);
-    }
-    if let Some(reason) = super::steel_section_primary_material_issue(data, model)
-        .or_else(|| super::springs::rc_reference_target_issue(data, model))
-        .or_else(|| super::input_check::member_rebar_material_strength_issue(data, model, basis))
+    let index = WallSideColumnIndex::build(model);
+    if let Some(reason) =
+        super::wall_side_column_input_issue_with_index(data, model, Some(kind), &index)
     {
-        let model_kind = match data.kind {
-            ElementKind::Beam if resolves_to_concentrated_spring(data, model) => {
-                AnalysisHingeModel::ConcentratedSpring
-            }
-            ElementKind::Beam => AnalysisHingeModel::Fiber,
-            ElementKind::Fiber => AnalysisHingeModel::Fiber,
-            _ => AnalysisHingeModel::Other,
-        };
-        let mut view = HingeView::none(model_kind);
+        let mut view = HingeView::none(AnalysisHingeModel::Other);
         view.unavailability_reason = Some(reason);
         return Ok(view);
     }
-    match data.kind {
-        ElementKind::Beam => beam_view(
+    match super::nonlinear_frame_analysis_decision(data, model, kind, basis, &index) {
+        Some(Err(reason)) => {
+            let hinge_model = match frame_analysis_method(data, model, Some(kind)) {
+                Some(FrameAnalysisMethod::ConcentratedSpring) => {
+                    AnalysisHingeModel::ConcentratedSpring
+                }
+                Some(FrameAnalysisMethod::Fiber) => AnalysisHingeModel::Fiber,
+                _ => AnalysisHingeModel::Other,
+            };
+            let mut view = HingeView::none(hinge_model);
+            view.unavailability_reason = Some(reason);
+            Ok(view)
+        }
+        Some(Ok(FrameAnalysisMethod::Elastic)) => {
+            let mut view = HingeView::none(AnalysisHingeModel::Other);
+            view.unavailability_reason =
+                Some("壁上下の剛梁は弾性高剛性部材です。材料降伏は評価しません。".into());
+            Ok(view)
+        }
+        Some(Ok(FrameAnalysisMethod::ConcentratedSpring)) => Ok(spring_view(
             data,
             model,
             basis,
             kind,
             axial_force_compression_positive,
-            n_alpha,
-            n_beta,
-        ),
-        ElementKind::Fiber => fiber_view(data, model, basis, kind, n_alpha, n_beta),
-        _ => Ok(HingeView::none(AnalysisHingeModel::Other)),
+        )),
+        Some(Ok(FrameAnalysisMethod::Fiber)) => {
+            fiber_view(data, model, basis, kind, n_alpha, n_beta)
+        }
+        None => {
+            let mut view = HingeView::none(AnalysisHingeModel::Other);
+            view.unavailability_reason = super::steel_section_primary_material_issue(data, model)
+                .or_else(|| super::input_check::rc_reference_target_diagnostic(data, model));
+            Ok(view)
+        }
     }
 }
 
 /// [`build_hinge_view`] が `Beam` に対して材端集中ばね分岐を取るか。
 /// 壁側柱の面内解放がある場合と、ファイバーに解決される場合は `false`。
 pub fn resolves_to_concentrated_spring(data: &ElementData, model: &Model) -> bool {
-    data.kind == ElementKind::Beam
-        && !crate::frame::beam::is_elastic_wall_girder(model, data)
+    frame_analysis_method(data, model, Some(AnalysisKind::Incremental))
+        == Some(FrameAnalysisMethod::ConcentratedSpring)
         && super::wall_side_column_input_issue(data, model, None).is_none()
         && crate::wall::side_column::wall_side_column_release(data, model).is_none()
-        && matches!(
-            resolve_force_regime(data, model),
-            ResolvedRegime::ConcentratedSpring
-        )
 }
 
-/// `Beam` はフォースレジームで材端集中ばね／ファイバーに分岐する。
-#[allow(clippy::too_many_arguments)]
-fn beam_view(
+fn spring_view(
     data: &ElementData,
     model: &Model,
     basis: StrengthBasis,
     kind: AnalysisKind,
     axial_force_compression_positive: f64,
-    n_alpha: usize,
-    n_beta: usize,
-) -> Result<HingeView, RebarGeometryError> {
-    if resolves_to_concentrated_spring(data, model) {
-        let rule = resolve_member_hysteresis(data, model, kind);
-        if let Some(reason) = super::input_check::member_strength_issue(data, model)
-            .or_else(|| super::springs::rc_reference_issue(data, model, rule, basis))
-        {
-            let mut view = HingeView::none(AnalysisHingeModel::ConcentratedSpring);
-            view.unavailability_reason = Some(reason);
-            return Ok(view);
-        }
-        let (_i, _j, backbone) = build_flexural_springs(data, model, rule, basis);
-        let (my0, n_allow) = yield_moment_and_axial(data, model, basis);
-        let mn = backbone.use_mn.then(|| MnInteraction::new(my0, n_allow));
-        let points = backbone.points_with_mn(mn.as_ref(), axial_force_compression_positive);
-        let total_reference = super::springs::uses_rc_alpha_reference(data, model)
-            && matches!(
-                rule,
-                sepika_core::model::HysteresisModel::Takeda
-                    | sepika_core::model::HysteresisModel::Retrograde
-                    | sepika_core::model::HysteresisModel::MaxPointOriented
-            );
-        let total_backbone = total_reference.then(|| points.clone());
-        let points = if total_reference {
-            points
-                .into_iter()
-                .map(|[theta, moment]| [theta - moment / backbone.k_rot, moment])
-                .collect()
-        } else {
-            points
-        };
-        return Ok(HingeView {
-            model: AnalysisHingeModel::ConcentratedSpring,
-            backbone: Some(points),
-            total_backbone,
-            unavailability_reason: None,
-            mn_linear: mn,
-            mn_surface: None,
-        });
+) -> HingeView {
+    let rule = resolve_member_hysteresis(data, model, kind);
+    let (_i, _j, backbone) = build_flexural_springs(data, model, rule, basis);
+    let (my0, n_allow) = yield_moment_and_axial(data, model, basis);
+    let mn = backbone.use_mn.then(|| MnInteraction::new(my0, n_allow));
+    let points = backbone.points_with_mn(mn.as_ref(), axial_force_compression_positive);
+    let total_reference = super::springs::uses_rc_alpha_reference(data, model)
+        && matches!(
+            rule,
+            sepika_core::model::HysteresisModel::Takeda
+                | sepika_core::model::HysteresisModel::Retrograde
+                | sepika_core::model::HysteresisModel::MaxPointOriented
+        );
+    let total_backbone = total_reference.then(|| points.clone());
+    let points = if total_reference {
+        points
+            .into_iter()
+            .map(|[theta, moment]| [theta - moment / backbone.k_rot, moment])
+            .collect()
+    } else {
+        points
+    };
+    HingeView {
+        model: AnalysisHingeModel::ConcentratedSpring,
+        backbone: Some(points),
+        total_backbone,
+        unavailability_reason: None,
+        mn_linear: mn,
+        mn_surface: None,
     }
-    fiber_view(data, model, basis, kind, n_alpha, n_beta)
 }
 
 /// ファイバー要素（解析の `nw=12`, `nd=20`）の N-M 曲面。
@@ -295,7 +338,7 @@ mod tests {
     use sepika_core::dof::Dof6Mask;
     use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId, StoryId};
     use sepika_core::model::{
-        Constraint, EndCondition, ForceRegime, HysteresisModel, LocalAxis, Material,
+        Constraint, ElementKind, EndCondition, ForceRegime, HysteresisModel, LocalAxis, Material,
         MaterialCategory, Node, Section,
     };
     use sepika_core::section_shape::{
@@ -856,12 +899,13 @@ mod tests {
     /// コンクリート系断面で Fc が未設定のとき、ファイバ材料の生成で panic せず
     /// 曲面を返さない（表示 API の「近似は返さない」契約）。
     #[test]
-    fn concrete_shape_without_fc_returns_no_surface() {
+    fn concrete_shape_without_fc_returns_analysis_diagnostic_instead_of_surface() {
         let mut model = make_model(Some(rc_column_shape()), None);
         model.materials[0].category = MaterialCategory::Concrete;
         let col = elem(ElementKind::Fiber, [NodeId(0), NodeId(2)]);
-        let issue = crate::factory::input_check::member_strength_issue(&col, &model)
-            .expect("Fc 未設定は不備と判定される");
+        model.elements.push(col.clone());
+        let issues = super::super::nonlinear_input_issues(&model);
+        let issue = issues.iter().find(|issue| issue.contains("Fc")).unwrap();
         assert!(issue.contains("Fc"), "Fc 未設定の経路を通る: {issue}");
         assert!(analysis_plastic_fibers(
             &col,
@@ -883,6 +927,7 @@ mod tests {
         .expect("配筋は妥当");
         assert_eq!(view.model, AnalysisHingeModel::Fiber);
         assert!(view.mn_surface.is_none());
+        assert_eq!(view.unavailability_reason.as_deref(), Some(issue.as_str()));
     }
 
     /// 耐震壁とその側柱（鉛直な `Beam`）を持つ壁展開モデル相当。返り値は側柱要素。

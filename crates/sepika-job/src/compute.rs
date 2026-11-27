@@ -387,7 +387,7 @@ fn compute_nonlinear_time_history(
     wave: sepika_solver::dynamic::timehistory::GroundMotion,
     damping: sepika_solver::dynamic::damping::Damping,
 ) -> JobResult<sepika_solver::dynamic::timehistory::ResponseResult> {
-    sepika_element::factory::ensure_nonlinear_input_with_basis(
+    let elements = sepika_element::factory::prepare_nonlinear_elements(
         &model,
         sepika_core::model::AnalysisKind::TimeHistory,
         sepika_element::factory::StrengthBasis::Nominal,
@@ -412,8 +412,8 @@ fn compute_nonlinear_time_history(
         Default::default(),
         0,
         |observer| {
-            sepika_solver::dynamic::timehistory::nonlinear_time_history_with_force_observer(
-                &model,
+            sepika_solver::dynamic::timehistory::nonlinear_time_history_with_prepared_elements(
+                elements,
                 &dofmap,
                 &reducer,
                 &wave,

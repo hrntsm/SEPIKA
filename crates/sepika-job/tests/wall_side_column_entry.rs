@@ -3,13 +3,24 @@ mod fixture;
 
 #[test]
 fn time_history_job_preserves_actual_wall_connection_reason_before_damping_eigen() {
-    use sepika_core::model::{AnalysisKind, ElementKind};
+    use sepika_core::ids::StoryId;
+    use sepika_core::model::{AnalysisKind, ElementKind, Story, WallDlSupport};
     use sepika_element::behavior::MassOption;
     use sepika_element::factory::ensure_wall_side_column_analysis;
     use sepika_job::{compute::compute_time_history, AnalysisSettings};
     use sepika_solver::dynamic::timehistory::GroundMotion;
     for representation in [ElementKind::Beam, ElementKind::Fiber] {
         let mut model = fixture::wall_connection_fixture(representation);
+        model.wall_plates[0].dl_support = Some(WallDlSupport::LowerBeam);
+        model.stories = vec![
+            Story::new(StoryId(0), "1F".into(), Some(0.0), Some(0.0)),
+            Story::new(StoryId(1), "2F".into(), Some(3000.0), Some(0.0)),
+        ];
+        model.sections[0].rebar_material = None;
+        let settings = AnalysisSettings {
+            th_nonlinear: true,
+            ..Default::default()
+        };
         let expected = ensure_wall_side_column_analysis(
             &model,
             Some(AnalysisKind::TimeHistory),
@@ -21,12 +32,29 @@ fn time_history_job_preserves_actual_wall_connection_reason_before_damping_eigen
             .elements
             .retain(|element| element.kind != ElementKind::Wall);
         model.generated_wall_origins.clear();
+        let report = sepika_job::prepare_model_for_analysis(&mut model, &settings, None)
+            .unwrap()
+            .frame_preparation
+            .analysis(&model, &settings)
+            .unwrap();
+        let member = model.elements[0].id;
+        let linear = report
+            .decision(member, None)
+            .unwrap()
+            .as_ref()
+            .err()
+            .unwrap();
+        assert!(linear.reason().contains("主筋の材料が未割当"));
+        let nonlinear = report
+            .decision(member, Some(AnalysisKind::TimeHistory))
+            .unwrap()
+            .as_ref()
+            .err()
+            .unwrap();
+        assert_eq!(nonlinear.reason(), expected);
         let result = compute_time_history(
             model,
-            AnalysisSettings {
-                th_nonlinear: true,
-                ..Default::default()
-            },
+            settings,
             GroundMotion {
                 dt: 0.01,
                 accel_x: vec![0.0, 0.0],

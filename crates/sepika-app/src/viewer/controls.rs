@@ -26,7 +26,8 @@ pub(super) fn view_controls_with_view(
     let sources = view.clone();
     let mode = view.view_mode;
     if mode == ViewMode::Hinge
-        || mode == ViewMode::Modeling && view.modeling_analysis == ModelingAnalysis::Incremental
+        || mode == ViewMode::Modeling
+            && app.ui.scoped.modeling_analysis == ModelingAnalysis::Incremental
     {
         ui.horizontal_wrapped(|ui| {
             ui.label("加力方向:");
@@ -100,7 +101,7 @@ pub(super) fn view_controls_with_view(
     let mut cmq_component = view.cmq_component;
     let mut cmq_axes = view.cmq_axes;
     let mut check_ratio_filter = view.check_ratio_filter;
-    let mut modeling_analysis = view.modeling_analysis;
+    let mut modeling_analysis = app.ui.scoped.modeling_analysis;
     if mode == ViewMode::Cmq {
         ui.horizontal_wrapped(|ui| {
             ui.label("成分:");
@@ -121,22 +122,7 @@ pub(super) fn view_controls_with_view(
     }
     if mode == ViewMode::Modeling {
         ui.horizontal_wrapped(|ui| {
-            ui.label("解析種別:");
-            ui.selectable_value(
-                &mut modeling_analysis,
-                ModelingAnalysis::Static,
-                "静解析(弾性)",
-            );
-            ui.selectable_value(
-                &mut modeling_analysis,
-                ModelingAnalysis::Incremental,
-                "増分解析(弾塑性)",
-            );
-            ui.selectable_value(
-                &mut modeling_analysis,
-                ModelingAnalysis::TimeHistory,
-                "非線形時刻歴",
-            );
+            ModelingAnalysis::selector(ui, &mut modeling_analysis);
             ui.separator();
             ui.add_enabled(
                 false,
@@ -146,6 +132,9 @@ pub(super) fn view_controls_with_view(
                 ),
             );
         });
+        if let Err(reason) = app.prepared_frame_analysis() {
+            ui.label(reason);
+        }
     }
     if mode == ViewMode::Force {
         ui.horizontal_wrapped(|ui| {
@@ -297,7 +286,7 @@ pub(super) fn view_controls_with_view(
         });
     }
     if mode == ViewMode::TimeHistory
-        || mode == ViewMode::Modeling && view.modeling_analysis == ModelingAnalysis::TimeHistory
+        || mode == ViewMode::Modeling && modeling_analysis == ModelingAnalysis::TimeHistory
     {
         let label = match &view.spatial_source {
             Some(super::viewport::SpatialResultSource::Case(id, _)) => app
@@ -466,7 +455,7 @@ pub(super) fn view_controls_with_view(
     view.cmq_component = cmq_component;
     view.cmq_axes = cmq_axes;
     view.check_ratio_filter = check_ratio_filter;
-    view.modeling_analysis = modeling_analysis;
+    app.ui.scoped.modeling_analysis = modeling_analysis;
 }
 
 #[cfg(test)]

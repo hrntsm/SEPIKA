@@ -248,6 +248,7 @@ pub struct Staleness {
     /// `diagnostics_stale` と同じ理由で `Default` は true（未実行）とする。
     /// 解析の実行前に `ensure_preparation` が参照する。
     pub preparation_stale: bool,
+    pub(crate) frame_preparation_stale: bool,
 }
 
 impl Default for Staleness {
@@ -259,6 +260,7 @@ impl Default for Staleness {
             unsaved_changes: false,
             diagnostics_stale: true,
             preparation_stale: true,
+            frame_preparation_stale: true,
         }
     }
 }
@@ -271,6 +273,7 @@ impl Staleness {
         self.unsaved_changes = true;
         self.diagnostics_stale = true;
         self.preparation_stale = true;
+        self.frame_preparation_stale = true;
     }
     /// 計算に用いないモデルデータ（通り芯）が編集された → 未保存フラグだけ立てる。
     ///
@@ -938,6 +941,13 @@ impl Default for AppCore {
 
 /// 現在のモデルに紐づく、解析・設計側の状態（モデル従属状態）。
 ///
+type CachedFrameAnalysis = (
+    std::sync::Arc<sepika_job::prepare::PreparedFrameAnalysis>,
+    u64,
+);
+
+type FramePreparationState = Result<CachedFrameAnalysis, (u64, String)>;
+
 /// モデルを差し替えると意味を失うものだけをここへ置く。解析結果・準備計算・診断・
 /// 再計算要否・実行中ジョブのほか、「そのモデルに対して選んだもの」（プロジェクト
 /// ファイルのパス・波形ライブラリの選択）と、直近の操作に対する報告
@@ -998,6 +1008,7 @@ pub struct ModelScoped {
     /// 荷重集計を確認するために保持する。`run_preparation`／
     /// 各解析実行時の `ensure_preparation` で再構築する。
     pub preparation: Option<PreparationResult>,
+    prepared_frame_analysis: Option<FramePreparationState>,
     /// 直近の保有水平耐力算定で用いた層別 βu（耐力壁・筋かいの水平耐力比）。
     /// `compute_holding_capacity` が設定する（表示用）。
     pub ds_beta_u_by_story: Vec<f64>,
@@ -1042,6 +1053,7 @@ pub struct ModelScoped {
     /// DL/LL/EX/EY の再計算（床格子サブFEM解析等）を丸ごとスキップする。
     /// モデルの新規作成・読込では `None` にリセットする（永続化しない）。
     pub auto_load_sync_hash: Option<u64>,
+    auto_load_frame_preparation: Option<sepika_job::prepare::FramePreparation>,
     /// 最後の準備計算で生成した仕口パネルの諸元（節点 index の昇順）。
     /// 準備計算の結果タブに一覧表示する。永続化しない（モデルから毎回再生成する）。
     pub generated_panels: Vec<sepika_element::springs::panel_gen::GeneratedPanel>,
@@ -1086,6 +1098,7 @@ impl Default for ModelScoped {
             diagnostics: Vec::new(),
             recorded_diagnostics: None,
             preparation: None,
+            prepared_frame_analysis: None,
             ds_beta_u_by_story: Vec::new(),
             ds_wall_details: Vec::new(),
             src_holding_sign: sepika_solver::nonlinear::pushover::PushoverSign::Positive,
@@ -1100,6 +1113,7 @@ impl Default for ModelScoped {
             wave_library_selection: None,
             wave_library_selected_sha256: None,
             auto_load_sync_hash: None,
+            auto_load_frame_preparation: None,
             generated_panels: Vec::new(),
             combo_error: None,
             unset_regions_ack: None,
@@ -1127,6 +1141,8 @@ pub struct UiState {
 /// ドラフト・詳細ウィンドウの選択部材とそのキャッシュ・作成モードの選択節点）を
 /// ここへ置く。[`App::load_model`] が `Default::default()` の代入で丸ごと破棄する。
 pub struct UiModelScoped {
+    #[cfg(feature = "gui")]
+    pub(crate) modeling_analysis: crate::viewer::ModelingAnalysis,
     #[cfg(feature = "gui")]
     pub(crate) src_column_route21: crate::design_view::src_column_route21::Route21Draft,
     #[cfg(feature = "gui")]
@@ -1288,6 +1304,8 @@ pub struct UiModelScoped {
 impl Default for UiModelScoped {
     fn default() -> Self {
         Self {
+            #[cfg(feature = "gui")]
+            modeling_analysis: Default::default(),
             #[cfg(feature = "gui")]
             search: Default::default(),
             #[cfg(feature = "gui")]

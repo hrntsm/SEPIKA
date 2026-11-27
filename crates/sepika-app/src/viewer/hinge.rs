@@ -13,19 +13,17 @@ use crate::viewer::mn_draw;
 use sepika_core::error::RebarGeometryError;
 use sepika_core::ids::{ElemId, MaterialId};
 use sepika_core::model::{
-    AnalysisKind, ElementData, ElementKind, HysteresisModel, Material, MaterialCategory, Model,
-    RigidZone, Section,
+    AnalysisKind, ElementData, ElementKind, Material, MaterialCategory, Model, Section,
 };
 use sepika_core::section_shape::SectionShape;
 use sepika_core::units::to_display::{force_kn, moment_kn_m};
 use sepika_core::units::ConcreteClass;
 use sepika_element::behavior::{FiberSectionState, FiberStateSample};
 use sepika_element::factory::{
-    build_hinge_view, resolve_fiber_concrete_hysteresis, resolve_member_hysteresis,
-    resolves_to_concentrated_spring, AnalysisHingeModel, HingeView, StrengthBasis,
+    build_hinge_view, hinge_history_label, hinge_view_dependencies, AnalysisHingeModel, HingeView,
+    HingeViewDependencies, StrengthBasis,
 };
 use sepika_element::frame::concentrated::MnInteraction;
-use sepika_element::wall::side_column::wall_side_column_release;
 use sepika_element::wall::wall_element::wall_element_geometry;
 use sepika_section::mn_surface::MnSurface;
 use sepika_solver::nonlinear::pushover::{HingeEvent, HingeLevel, MemberStepState};
@@ -301,27 +299,17 @@ struct HingeViewKey {
     elem: ElemId,
     /// 選択ステップ添字（`records` 上の位置）。材端集中ばね以外は常に 0。
     step: usize,
+    axial_force_n: Option<f64>,
     /// 解析結果の世代（最終実行時刻と要再計算フラグ）。
     generation: (Option<SystemTime>, bool),
     kind: ElementKind,
     /// 要素幾何（両端節点座標と局所軸基準ベクトル）。
     geometry: Option<ElementGeometry>,
-    /// [`resolves_to_concentrated_spring`] の解決値。
-    concentrated: bool,
-    /// 自要素が耐震壁の側柱（面内解放）か。
-    wall_side_column: bool,
-    elastic_wall_girder: bool,
-    /// 材端集中ばねの剛域。それ以外は `None`。
-    rigid_zone: Option<RigidZone>,
+    dependencies: HingeViewDependencies,
     section: Option<SectionFingerprint>,
     material: Option<MaterialFingerprint>,
     rebar_material: Option<MaterialFingerprint>,
     steel_material: Option<MaterialFingerprint>,
-    /// 材端集中ばねの履歴則。それ以外は `None`。
-    hysteresis: Option<HysteresisModel>,
-    rc_beam_reference: Option<sepika_core::model::RcBeamReference>,
-    rc_reference_diagnostic: Option<String>,
-    wall_side_column_diagnostic: Option<String>,
 }
 
 /// 要素の両端節点座標と局所軸の基準ベクトル。
@@ -425,23 +413,20 @@ fn hinge_view_key(
     step: usize,
     staleness: &Staleness,
 ) -> HingeViewKey {
-    let concentrated = resolves_to_concentrated_spring(elem, model);
+    let dependencies = hinge_view_dependencies(elem, model, StrengthBasis::MaterialStrength);
     let section = elem.section.and_then(|sid| model.sections.get(sid.index()));
     HingeViewKey {
         elem: elem.id,
-        step: if concentrated { step } else { 0 },
+        step: if dependencies.uses_step_response() {
+            step
+        } else {
+            0
+        },
+        axial_force_n: None,
         generation: (staleness.last_run, staleness.results_stale),
         kind: elem.kind,
         geometry: element_geometry(model, elem),
-        concentrated,
-        wall_side_column: wall_side_column_release(elem, model).is_some(),
-        elastic_wall_girder: sepika_element::frame::beam::is_elastic_wall_girder(model, elem),
-        wall_side_column_diagnostic: sepika_element::factory::wall_side_column_input_issue(
-            elem,
-            model,
-            Some(AnalysisKind::Incremental),
-        ),
-        rigid_zone: concentrated.then_some(elem.rigid_zone),
+        dependencies,
         section: section.map(SectionFingerprint::from),
         material: model.element_material(elem).map(MaterialFingerprint::from),
         rebar_material: model
@@ -450,15 +435,6 @@ fn hinge_view_key(
         steel_material: model
             .element_steel_material(elem)
             .map(MaterialFingerprint::from),
-        rc_beam_reference: model.member_rc_beam_reference(elem.id),
-        rc_reference_diagnostic: sepika_element::factory::rc_beam_reference_input_issue(
-            elem,
-            model,
-            AnalysisKind::Incremental,
-            StrengthBasis::MaterialStrength,
-        ),
-        hysteresis: concentrated
-            .then(|| resolve_member_hysteresis(elem, model, AnalysisKind::Incremental)),
     }
 }
 
@@ -468,10 +444,14 @@ fn hinge_view_key(
 fn ensure_hinge_view(
     model: &Model,
     cache: &mut Option<HingeViewCache>,
-    key: HingeViewKey,
+    mut key: HingeViewKey,
     elem: &ElementData,
     axial_force_n: f64,
 ) {
+    key.axial_force_n = key
+        .dependencies
+        .uses_step_response()
+        .then_some(axial_force_n);
     if cache.as_ref().is_some_and(|c| c.key == key) {
         return;
     }
@@ -669,15 +649,33 @@ pub(crate) fn show_hinge_detail_window(
     }
 }
 
-/// ヒンジ詳細ウィンドウの中身。共通ヘッダ（i端/j端の集約ヒンジ情報）と解析モデルの
-/// 表示に続けて、表示ステップの選択、M-θ カーブ、N-M 相関図、ファイバー断面の
-/// 塑性化マップを該当するものだけ縦に並べる。
+fn hinge_detail_result<'a>(
+    app: &'a App,
+    viewport: &super::ViewportState,
+) -> Result<&'a sepika_solver::nonlinear::pushover::PushoverResult, String> {
+    let po = viewport
+        .pushover_result(app)
+        .ok_or("増分解析が未実行です。対象方向の増分解析を実行してください。")?;
+    app.require_result_input(crate::app::references::ResultInputKey::Pushover(
+        viewport.displayed_pushover_dir(app),
+    ))
+    .map_err(|reason| format!("{reason}\n対象方向の増分解析を再実行してください。"))?;
+    Ok(po)
+}
+
 fn draw_hinge_detail_content(
     ui: &mut egui::Ui,
     app: &mut App,
     elem_id: ElemId,
     viewport: &mut super::ViewportState,
 ) {
+    let po = match hinge_detail_result(app, viewport) {
+        Ok(result) => result,
+        Err(reason) => {
+            ui.colored_label(theme::GRAY_600, reason);
+            return;
+        }
+    };
     let display = super::wall_expanded_view_model(&app.core.model);
     let (elem_snapshot, elem_section) = {
         let Some(elem) = display.element(elem_id) else {
@@ -689,11 +687,6 @@ fn draw_hinge_detail_content(
             ui.separator();
         }
         (elem.clone(), elem.section)
-    };
-
-    let Some(po) = viewport.pushover_result(app) else {
-        ui.colored_label(theme::GRAY_600, "増分解析が未実行です。");
-        return;
     };
 
     let mine: Vec<HingeMarker> = aggregate_hinges_at(&po.hinges, viewport.hinge_step)
@@ -765,25 +758,13 @@ fn draw_hinge_detail_content(
     let bend_dir_z = effective_bend_dir_z(view.model, dominant_z);
 
     ui.label(format!("解析モデル: {}", analysis_model_label(view.model)));
-    let rule_note = match view.model {
-        AnalysisHingeModel::ConcentratedSpring => Some(format!(
-            "履歴則: {}",
-            resolve_member_hysteresis(&elem_snapshot, &app.core.model, AnalysisKind::Incremental)
-                .label()
-        )),
-        AnalysisHingeModel::Fiber => Some(format!(
-            "コンクリート除荷則: {}",
-            resolve_fiber_concrete_hysteresis(
-                &elem_snapshot,
-                &app.core.model,
-                AnalysisKind::Incremental
-            )
-            .label()
-        )),
-        AnalysisHingeModel::Other => None,
-    };
-    if let Some(note) = rule_note {
-        ui.label(note);
+    if let Some((name, rule)) = hinge_history_label(
+        &elem_snapshot,
+        display.as_ref(),
+        AnalysisKind::Incremental,
+        view.model,
+    ) {
+        ui.label(format!("{name}: {rule}"));
     }
     let bend_face_label = match view.model {
         AnalysisHingeModel::ConcentratedSpring => {
@@ -836,9 +817,10 @@ fn draw_hinge_detail_content(
                 draw_mn_plot(ui, surface, elem_id, &records, bend_dir_z, step, &mut cam);
                 app.ui.view.hinge_mn_camera = cam;
             }
-            MnDisplay::None => {
+            MnDisplay::None if view.unavailability_reason.is_none() => {
                 ui.colored_label(theme::GRAY_600, mn_unavailable_message(view));
             }
+            MnDisplay::None => {}
         }
         ui.separator();
     }
@@ -873,15 +855,10 @@ fn mn_display(view: &HingeView) -> MnDisplay {
 /// N-M 図を表示できないときの案内文。
 fn mn_unavailable_message(view: &HingeView) -> &'static str {
     match view.model {
-        AnalysisHingeModel::ConcentratedSpring if view.backbone.is_none() => {
-            "断面または材料の情報が不足しているため N-M 相関図を表示できません。"
-        }
         AnalysisHingeModel::ConcentratedSpring => {
             "この解析モデルでは N-M 相関を使用していません（履歴材料は N-M 相関非対応）。"
         }
-        AnalysisHingeModel::Fiber => {
-            "断面または材料の情報が不足しているため N-M 相関図を表示できません。"
-        }
+        AnalysisHingeModel::Fiber => "このファイバー断面では N-M 曲面を表示できません。",
         AnalysisHingeModel::Other => "この要素種別では N-M 相関図を表示しません。",
     }
 }
@@ -1405,6 +1382,54 @@ fn draw_fiber_scatter(plot_ui: &mut egui_plot::PlotUi<'_>, fibers: &[FiberStateS
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sepika_core::model::{HysteresisModel, RigidZone};
+    use sepika_element::factory::resolves_to_concentrated_spring;
+    use sepika_element::wall::side_column::wall_side_column_release;
+
+    #[test]
+    fn hinge_detail_requires_current_pushover_for_the_displayed_direction() {
+        use sepika_solver::statics::analysis::SeismicDir;
+
+        let mut model = crate::sample::portal_frame();
+        model.panel_zone = sepika_core::model::PanelZoneMode::None;
+        let mut app = App::default();
+        assert!(app.load_model(model));
+        app.core.analysis_cfg.push_dir = SeismicDir::X;
+        app.core.analysis_cfg.push_steps = 2;
+        app.core.analysis_cfg.push_use_max_disp = true;
+        app.core.analysis_cfg.push_use_drift_angle = false;
+        app.core.analysis_cfg.push_max_disp = 0.2;
+        app.core.analysis_cfg.push_apply_long_term = false;
+        app.run_preparation();
+        app.run_pushover();
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        let mut viewport = super::super::ViewportState {
+            pushover_dir: Some(SeismicDir::X),
+            ..Default::default()
+        };
+        assert!(hinge_detail_result(&app, &viewport).is_ok());
+        viewport.pushover_dir = Some(SeismicDir::Y);
+        assert!(hinge_detail_result(&app, &viewport).is_err());
+        viewport.pushover_dir = Some(SeismicDir::X);
+
+        app.core.model.materials[0].young *= 0.95;
+        app.core.scoped.staleness.mark_edited();
+        assert!(hinge_detail_result(&app, &viewport).is_err());
+        app.run_static_target(crate::app::StaticTarget::Case(
+            sepika_core::ids::LoadCaseId(0),
+        ));
+        assert!(
+            app.core.scoped.last_error.is_none(),
+            "{:?}",
+            app.core.scoped.last_error
+        );
+        assert!(app.pushover_for(SeismicDir::X).is_some());
+        assert!(hinge_detail_result(&app, &viewport).is_err());
+    }
     use crate::viewer::wall_expanded_view_model;
     use sepika_core::model::ForceRegime;
     use sepika_core::units::to_display::moment_kn_m;
@@ -2545,8 +2570,28 @@ mod tests {
         );
 
         let mut hist = model.clone();
-        hist.set_member_hysteresis(ElemId(0), HysteresisModel::Retrograde);
+        let label = |model: &Model| {
+            hinge_history_label(
+                &elem,
+                model,
+                AnalysisKind::Incremental,
+                AnalysisHingeModel::Fiber,
+            )
+            .unwrap()
+        };
+        hist.set_member_hysteresis(ElemId(0), HysteresisModel::OriginOriented);
         assert_eq!(k0, key_of(&hist, &elem, 0), "履歴則は曲面に効かない");
+        assert_eq!(
+            label(&model),
+            ("コンクリート除荷則", HysteresisModel::Retrograde.label())
+        );
+        assert_eq!(
+            label(&hist),
+            (
+                "コンクリート除荷則",
+                HysteresisModel::OriginOriented.label()
+            )
+        );
     }
 
     /// 材端集中ばねでは剛域・履歴則が表示骨格に効くためキーに含め、
@@ -3056,12 +3101,10 @@ mod tests {
         assert_eq!(mn_display(&other_view), MnDisplay::None);
     }
 
-    /// 集中ばねで骨格が無い（断面・材料不足）場合は「履歴材料が非対応」ではなく
-    /// 情報不足を案内する。
     #[test]
-    fn mn_unavailable_message_distinguishes_input_shortage_from_history_rule() {
-        let input_shortage = HingeView {
-            model: AnalysisHingeModel::ConcentratedSpring,
+    fn mn_unavailable_message_distinguishes_fiber_surface_from_history_rule() {
+        let fiber = HingeView {
+            model: AnalysisHingeModel::Fiber,
             backbone: None,
             total_backbone: None,
             unavailability_reason: None,
@@ -3069,8 +3112,8 @@ mod tests {
             mn_surface: None,
         };
         assert_eq!(
-            mn_unavailable_message(&input_shortage),
-            "断面または材料の情報が不足しているため N-M 相関図を表示できません。"
+            mn_unavailable_message(&fiber),
+            "このファイバー断面では N-M 曲面を表示できません。"
         );
 
         let history = HingeView {

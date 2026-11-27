@@ -29,7 +29,9 @@ use crate::dynamic::damping::{Damping, DampingAccumulation};
 use sepika_core::dof::DofMap;
 use sepika_core::model::Model;
 use sepika_element::behavior::{ElementBehavior, MassOption};
-use sepika_element::factory::{build_nonlinear_behavior, StrengthBasis};
+use sepika_element::factory::{
+    prepare_nonlinear_elements, PreparedNonlinearElements, StrengthBasis,
+};
 use sepika_math::solver::{make_solver, LinearSolver, SolveError, SolverBackend};
 use sepika_math::sparse::{sparse_matvec, Triplet};
 
@@ -125,18 +127,81 @@ pub fn nonlinear_time_history_with_force_observer(
     crate::common::assemble::validate_global_mass_inputs(model)?;
     sepika_math::parallelism::apply_to_faer();
 
-    sepika_element::factory::ensure_nonlinear_input_with_basis(
+    let elements = prepare_nonlinear_elements(
         model,
         sepika_core::model::AnalysisKind::TimeHistory,
         sepika_element::factory::StrengthBasis::Nominal,
     )
     .map_err(SolveError::InvalidInput)?;
-    let active_cases: Vec<_> = model
-        .load_cases
-        .iter()
-        .filter(|case| cfg.apply_long_term && case.kind.is_long_term())
-        .map(|case| case.id)
-        .collect();
+    run_nonlinear_time_history(
+        elements,
+        dofmap,
+        reducer,
+        wave,
+        newmark,
+        damping,
+        accumulation,
+        initial_disp,
+        initial_vel,
+        cfg,
+        observer,
+    )
+}
+
+/// 非線形時刻歴・公称値で診断済みの同じモデルを解析する。
+#[allow(clippy::too_many_arguments)]
+pub fn nonlinear_time_history_with_prepared_elements(
+    elements: PreparedNonlinearElements<'_>,
+    dofmap: &DofMap,
+    reducer: &Reducer,
+    wave: &GroundMotion,
+    newmark: &NewmarkCfg,
+    damping: &Damping,
+    accumulation: DampingAccumulation,
+    initial_disp: &[f64],
+    initial_vel: &[f64],
+    cfg: NonlinearThCfg,
+    observer: Option<&mut CommittedMemberForcesObserver<'_>>,
+) -> Result<ResponseResult, SolveError> {
+    assert_eq!(
+        elements.kind(),
+        sepika_element::factory::AnalysisKind::TimeHistory
+    );
+    assert_eq!(elements.basis(), StrengthBasis::Nominal);
+    crate::common::assemble::validate_global_mass_inputs(elements.model())?;
+    sepika_math::parallelism::apply_to_faer();
+    run_nonlinear_time_history(
+        elements,
+        dofmap,
+        reducer,
+        wave,
+        newmark,
+        damping,
+        accumulation,
+        initial_disp,
+        initial_vel,
+        cfg,
+        observer,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_nonlinear_time_history(
+    elements: PreparedNonlinearElements<'_>,
+    dofmap: &DofMap,
+    reducer: &Reducer,
+    wave: &GroundMotion,
+    newmark: &NewmarkCfg,
+    damping: &Damping,
+    accumulation: DampingAccumulation,
+    initial_disp: &[f64],
+    initial_vel: &[f64],
+    cfg: NonlinearThCfg,
+    observer: Option<&mut CommittedMemberForcesObserver<'_>>,
+) -> Result<ResponseResult, SolveError> {
+    let model = elements.model();
+    let active_cases =
+        sepika_element::factory::time_history_long_term_cases(model, cfg.apply_long_term);
     sepika_element::factory::ensure_rc_beam_reference_loads(model, &active_cases)
         .map_err(SolveError::InvalidInput)?;
 
@@ -153,7 +218,7 @@ pub fn nonlinear_time_history_with_force_observer(
         StrengthBasis::Nominal,
     )
     .map_err(SolveError::InvalidInput)?;
-    let mut behaviors = build_behaviors(model, &wall_capacities);
+    let mut behaviors = elements.build(&wall_capacities);
     let solver_backend = crate::common::tangent::tangent_solver_backend(&behaviors);
     if matches!(solver_backend, SolverBackend::DirectSparseLu) && damping.is_tangent_based() {
         return Err(SolveError::InvalidInput(
@@ -760,25 +825,4 @@ fn newton_static_converge(
         apply_du_trial(model, dofmap, behaviors, &du_free).map_err(SolveError::InvalidInput)?;
     }
     Ok(None)
-}
-
-fn build_behaviors(
-    model: &Model,
-    wall_capacities: &[(sepika_core::ids::ElemId, [f64; 2])],
-) -> Vec<Box<dyn sepika_element::behavior::ElementBehavior>> {
-    let mut behaviors = Vec::new();
-    for elem in &model.elements {
-        let b = build_nonlinear_behavior(
-            elem,
-            model,
-            StrengthBasis::Nominal,
-            sepika_element::factory::AnalysisKind::TimeHistory,
-            wall_capacities
-                .iter()
-                .find(|(id, _)| *id == elem.id)
-                .map(|(_, q)| *q),
-        );
-        behaviors.push(b);
-    }
-    behaviors
 }

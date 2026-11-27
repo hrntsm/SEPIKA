@@ -2562,6 +2562,46 @@ pub(super) fn wait_for_job(app: &mut App) {
 }
 
 #[test]
+fn async_eigen_job_invalidates_frame_preparation_only_when_ai_period_changes() {
+    for mode in [AiMode::Approx, AiMode::SemiPrecise] {
+        let mut app = App::default();
+        assert!(app.load_model(crate::sample::portal_frame()));
+        app.commit_analysis_settings(AnalysisSettings {
+            ai_mode: mode,
+            threads: 1,
+            ..app.core.analysis_cfg
+        });
+        for first_run in [true, false] {
+            app.start_eigen_job(1);
+            assert!(app.core.scoped.job.is_some());
+            assert!(app.prepared_frame_analysis().is_ok());
+            let period_before = app.design_seismic_period().ok();
+            let prepared_at = app.core.scoped.preparation.as_ref().unwrap().computed_at;
+            wait_for_job(&mut app);
+            assert_eq!(app.core.scoped.last_error, None);
+            let period_after = app.design_seismic_period().unwrap();
+            assert!(app.core.scoped.results.as_ref().unwrap().modal.is_some());
+            assert_eq!(
+                app.core.scoped.preparation.as_ref().unwrap().computed_at,
+                prepared_at
+            );
+            if mode == AiMode::SemiPrecise && first_run {
+                assert_eq!(period_before, None);
+                assert_eq!(
+                    app.prepared_frame_analysis().err(),
+                    Some("現在の入力で準備計算を実行してください。")
+                );
+                app.run_preparation();
+                assert!(app.prepared_frame_analysis().is_ok());
+            } else {
+                assert_eq!(period_before, Some(period_after));
+                assert!(app.prepared_frame_analysis().is_ok());
+            }
+        }
+    }
+}
+
+#[test]
 fn test_async_pushover_job_flow() {
     let mut app = App::default();
     app.load_model(with_explicit_pushover_gravity(crate::sample::portal_frame()));

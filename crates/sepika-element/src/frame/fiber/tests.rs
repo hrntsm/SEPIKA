@@ -3351,6 +3351,8 @@ fn src_analysis_ratio_model() -> Model {
     model.sections[0] = Section {
         material: Some(MaterialId(0)),
         steel_material: Some(MaterialId(1)),
+        rebar_material: Some(MaterialId(2)),
+        shear_rebar_material: Some(MaterialId(2)),
         ..shape.to_section(SectionId(0), "SRC434".into())
     };
     let concrete = &mut model.materials[0];
@@ -3369,7 +3371,15 @@ fn src_analysis_ratio_model() -> Model {
     steel.poisson = 0.3;
     steel.fc = None;
     steel.fy = Some(235.0);
+    let rebar = Material {
+        id: MaterialId(2),
+        category: MaterialCategory::Rebar,
+        name: "SD295A".into(),
+        fy: Some(295.0),
+        ..steel.clone()
+    };
     model.materials.push(steel);
+    model.materials.push(rebar);
     model
 }
 

@@ -231,6 +231,7 @@ impl App {
         match result {
             Ok(report) => {
                 self.core.scoped.generated_panels = report.panels;
+                self.core.scoped.auto_load_frame_preparation = Some(report.frame_preparation);
                 for notice in report.notices {
                     if initialize_stories && notice.contains("地震用重量を再生成できません")
                     {

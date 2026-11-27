@@ -281,6 +281,14 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
         }
     }
     ui.separator();
+    ui.horizontal_wrapped(|ui| {
+        crate::viewer::ModelingAnalysis::selector(ui, &mut app.ui.scoped.modeling_analysis);
+    });
+    let analysis_kind = app.ui.scoped.modeling_analysis.kind();
+    let prepared = app.prepared_frame_analysis();
+    if let Err(reason) = prepared {
+        ui.label(reason);
+    }
 
     let (
         wall_index,
@@ -340,6 +348,8 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
             &[
                 Col::id(),
                 Col::label("種別"),
+                Col::text("非線形方式の指定"),
+                Col::text("準備計算の方式判定"),
                 Col::wide_num("節点"),
                 Col::name("断面"),
                 Col::name("材料"),
@@ -382,6 +392,46 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                     } else {
                         ""
                     });
+                });
+                row.col(|ui| {
+                    let label = match elem.kind {
+                        ElementKind::Fiber => "ファイバー（要素種別）",
+                        ElementKind::Beam => match elem.force_regime {
+                            ForceRegime::Auto => "自動",
+                            ForceRegime::UniaxialBendingShear => "一軸曲げせん断",
+                            ForceRegime::AxialBendingInteract => "軸曲げ連成",
+                        },
+                        _ => "―",
+                    };
+                    table_util::text_cell(ui, label);
+                });
+                row.col(|ui| {
+                    use sepika_element::factory::FrameAnalysisMethod;
+                    if !matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber) {
+                        ui.label("―");
+                        return;
+                    }
+                    match prepared
+                        .ok()
+                        .and_then(|report| report.decision(elem.id, analysis_kind))
+                    {
+                        Some(Ok(prepared)) => ui.label(match prepared.method {
+                            FrameAnalysisMethod::Elastic => "弾性",
+                            FrameAnalysisMethod::ConcentratedSpring => "材端集中ばね",
+                            FrameAnalysisMethod::Fiber => "ファイバー",
+                        }),
+                        Some(Err(issue)) => ui
+                            .label(match issue {
+                                sepika_job::prepare::PreparedFrameIssue::Inapplicable(_) => {
+                                    "適用外"
+                                }
+                                sepika_job::prepare::PreparedFrameIssue::Unconfirmed(_) => {
+                                    "確認不可"
+                                }
+                            })
+                            .on_hover_text(issue.reason()),
+                        None => ui.label("未確認"),
+                    };
                 });
                 row.col(|ui| {
                     let ids: Vec<String> = elem.nodes.iter().map(|n| n.0.to_string()).collect();

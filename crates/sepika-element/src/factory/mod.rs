@@ -21,18 +21,21 @@ mod springs;
 mod wall_opening;
 
 pub use hinge_view::{
-    build_hinge_view, resolves_to_concentrated_spring, AnalysisHingeModel, HingeView,
+    build_hinge_view, hinge_history_label, hinge_view_dependencies,
+    resolves_to_concentrated_spring, AnalysisHingeModel, HingeView, HingeViewDependencies,
 };
 pub(crate) use input_check::member_rebar_material_strength_issue;
 pub use input_check::{
     elastic_stiffness_input_issue, ensure_nonlinear_input, ensure_nonlinear_input_for_kind,
     ensure_nonlinear_input_with_basis, ensure_rc_beam_reference_loads,
-    ensure_wall_side_column_analysis, nonlinear_input_issues, nonlinear_input_issues_for_kind,
-    rc_beam_reference_input_issue, steel_section_primary_material_issue,
-    wall_side_column_input_issue, wall_side_column_input_issue_with_index,
-    wall_side_column_issue_message,
+    ensure_wall_side_column_analysis, nonlinear_frame_analysis_decision, nonlinear_input_issues,
+    nonlinear_input_issues_for_kind, prepare_nonlinear_elements, rc_beam_reference_input_issue,
+    rc_beam_reference_load_issues, steel_section_primary_material_issue,
+    time_history_long_term_cases, wall_side_column_input_issue,
+    wall_side_column_input_issue_with_index, wall_side_column_issue_message,
+    MissingMemberAssignment,
 };
-pub use regime::{resolve_force_regime, ResolvedRegime};
+pub use regime::{resolve_force_regime, FrameAnalysisMethod, ResolvedRegime};
 pub use sepika_core::model::AnalysisKind;
 pub use springs::{
     plastic_zone_length, resolve_fiber_concrete_hysteresis, resolve_member_hysteresis,
@@ -157,20 +160,15 @@ fn with_panel_offset(
     }
 }
 
-fn wall_release_normal(data: &ElementData, model: &Model, kind: AnalysisKind) -> Option<[f64; 3]> {
-    let index = sepika_core::model::WallSideColumnIndex::build(model);
-    input_check::wall_side_column_normal_with_index(data, model, Some(kind), &index)
-        .unwrap_or_else(|issue| panic!("{issue}"))
-}
-
 fn build_connected_fiber(
     data: &ElementData,
     model: &Model,
     basis: StrengthBasis,
     kind: AnalysisKind,
+    wall_normal: Option<[f64; 3]>,
 ) -> Box<dyn ElementBehavior> {
     let mut member = build_fiber(data, model, basis, kind);
-    if let Some(normal) = wall_release_normal(data, model, kind) {
+    if let Some(normal) = wall_normal {
         member
             .configure_wall_release(normal)
             .unwrap_or_else(|reason| panic!("部材 ID {} の壁側柱接続: {reason}", data.id.0));
@@ -230,8 +228,7 @@ impl StrengthBasis {
 /// 部材耐力算定に用いる材料強度の基準は `basis` で指定する。
 /// 時刻歴応答解析は [`StrengthBasis::Nominal`]、
 /// 保有水平耐力計算は [`StrengthBasis::MaterialStrength`] を渡す。
-/// RC矩形梁の集中ばね入力が不正・不足なら診断文付きでpanicする。
-/// 矩形SRC梁・柱の材端集中ばねは適用条件を確認できないため診断文付きでpanicする。
+/// 線材の方式が共通診断で適用外なら、診断文付きでpanicする。
 /// RC耐震壁の `wall_capacity` には事前解決した局所正負の順のQu `[N]` の有限正値を渡す。
 /// RC耐震壁で値が欠落・不正の場合や要素の入力が適用外の場合は、診断文付きでpanicする。
 /// `model` は `Model::validate_local_frames` 済みを前提とする。
@@ -242,45 +239,86 @@ pub fn build_nonlinear_behavior(
     kind: AnalysisKind,
     wall_capacity: Option<[f64; 2]>,
 ) -> Box<dyn ElementBehavior> {
-    if let Some(issue) = wall_side_column_input_issue(data, model, Some(kind)) {
-        panic!("{issue}");
-    }
-    if crate::frame::beam::is_elastic_wall_girder(model, data) {
-        if let Some(issue) = input_check::member_strength_issue(data, model) {
+    let index = sepika_core::model::WallSideColumnIndex::build(model);
+    let decision = input_check::frame_decision(data, model, kind, basis, &index)
+        .map(|decision| decision.unwrap_or_else(|issue| panic!("{issue}")));
+    if decision.is_none() {
+        if let Some(issue) =
+            wall_side_column_input_issue_with_index(data, model, Some(kind), &index)
+                .or_else(|| input_check::rc_reference_target_diagnostic(data, model))
+                .or_else(|| {
+                    if data.kind == ElementKind::PanelZone {
+                        crate::springs::panel::PanelZone::nonlinear_issue(data, model)
+                    } else {
+                        None
+                    }
+                })
+        {
             panic!("{issue}");
         }
+    }
+    build_nonlinear_element(data, model, basis, kind, wall_capacity, decision)
+}
+
+/// 同一モデルで非線形の事前診断を通過した要素生成入力。
+pub struct PreparedNonlinearElements<'a> {
+    model: &'a Model,
+    kind: AnalysisKind,
+    basis: StrengthBasis,
+    decisions: Vec<Option<input_check::FrameDecision>>,
+}
+
+impl<'a> PreparedNonlinearElements<'a> {
+    pub fn model(&self) -> &'a Model {
+        self.model
+    }
+
+    pub fn kind(&self) -> AnalysisKind {
+        self.kind
+    }
+
+    pub fn basis(&self) -> StrengthBasis {
+        self.basis
+    }
+
+    /// モデルと同じ部材順で生成する。RC耐震壁の Qu は ID ごとに局所正負順 [N] で渡す。
+    pub fn build(
+        &self,
+        wall_capacities: &[(sepika_core::ids::ElemId, [f64; 2])],
+    ) -> Vec<Box<dyn ElementBehavior>> {
+        self.model
+            .elements
+            .iter()
+            .zip(&self.decisions)
+            .map(|(data, decision)| {
+                let qu = wall_capacities
+                    .iter()
+                    .find(|(id, _)| *id == data.id)
+                    .map(|(_, q)| *q);
+                build_nonlinear_element(data, self.model, self.basis, self.kind, qu, *decision)
+            })
+            .collect()
+    }
+}
+
+fn build_nonlinear_element(
+    data: &ElementData,
+    model: &Model,
+    basis: StrengthBasis,
+    kind: AnalysisKind,
+    wall_capacity: Option<[f64; 2]>,
+    decision: Option<input_check::FrameDecision>,
+) -> Box<dyn ElementBehavior> {
+    if decision.is_some_and(|d| d.method == FrameAnalysisMethod::Elastic) {
         return build_behavior(data, model);
     }
-    if let Some(issue) = input_check::src_concentrated_spring_issue(data, model) {
-        panic!("{issue}");
-    }
-    if let Some(issue) = springs::rc_reference_target_issue(data, model) {
-        panic!("部材 ID {} のRC梁基準接続: {issue}", data.id.0);
-    }
     match data.kind {
-        ElementKind::Beam => {
-            let inner: Box<dyn ElementBehavior> = match resolve_force_regime(data, model) {
-                ResolvedRegime::ConcentratedSpring => {
-                    if let Some(issue) =
-                        input_check::member_rebar_material_strength_issue(data, model, basis)
-                    {
-                        panic!("{issue}");
-                    }
-                    if matches!(
-                        model
-                            .element_section(data)
-                            .and_then(|section| section.shape.as_ref()),
-                        Some(sepika_core::section_shape::SectionShape::RcBeamRect { .. })
-                    ) {
-                        if let Some(issue) = input_check::member_strength_issue(data, model) {
-                            panic!("{issue}");
-                        }
-                    }
+        ElementKind::Beam | ElementKind::Fiber => {
+            let decision = decision.expect("線材の方式判定");
+            let inner: Box<dyn ElementBehavior> = match decision.method {
+                FrameAnalysisMethod::ConcentratedSpring => {
                     let elem = crate::frame::beam::BeamElement::new(data, model);
                     let rule = resolve_member_hysteresis(data, model, kind);
-                    if let Some(issue) = springs::rc_reference_issue(data, model, rule, basis) {
-                        panic!("部材 ID {} のRC梁基準接続: {issue}", data.id.0);
-                    }
                     let (spring_i, spring_j, backbone) =
                         build_flexural_springs(data, model, rule, basis);
                     let beam = crate::frame::concentrated::ConcentratedSpringBeam::new(
@@ -305,12 +343,12 @@ pub fn build_nonlinear_behavior(
                     };
                     with_member_shear(Box::new(beam), data, model, kind)
                 }
-                ResolvedRegime::Fiber => build_connected_fiber(data, model, basis, kind),
+                FrameAnalysisMethod::Fiber => {
+                    build_connected_fiber(data, model, basis, kind, decision.wall_normal)
+                }
+                _ => unreachable!(),
             };
             with_panel_offset(inner, data, model)
-        }
-        ElementKind::Fiber => {
-            with_panel_offset(build_connected_fiber(data, model, basis, kind), data, model)
         }
         ElementKind::Brace { .. } => crate::frame::eccentric::connect(
             Box::new(crate::frame::truss::TrussElement::new(data, model)),
@@ -354,9 +392,6 @@ pub fn build_nonlinear_behavior(
         ElementKind::PanelZone => {
             use crate::springs::panel::PanelZone;
 
-            if let Some(reason) = PanelZone::nonlinear_issue(data, model) {
-                panic!("{reason}");
-            }
             Box::new(PanelZone::new_nonlinear(data, model))
         }
         _ => build_behavior(data, model),

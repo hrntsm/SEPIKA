@@ -3,6 +3,7 @@ use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::{ElemId, MaterialId, NodeId, SectionId};
 use sepika_core::model::{ElementKind, ForceRegime, LocalAxis, MemberLoadKind};
 use sepika_element::behavior::Ctx;
+use sepika_element::factory::build_nonlinear_behavior;
 
 fn mixed_model(kind: ElementKind) -> Model {
     let mut model = super::super::tests::prepared_wall_story_model_with(4000., 1000.);

@@ -24,6 +24,37 @@ fn steel_material() -> Material {
     }
 }
 
+#[test]
+fn public_spring_factory_rejects_unresolved_yield_with_the_precheck_reason() {
+    let mut material = steel_material();
+    material.name = "未知鋼材".into();
+    material.fy = None;
+    let section = SectionShape::SteelH {
+        height: 400.0,
+        width: 200.0,
+        web_thick: 8.0,
+        flange_thick: 13.0,
+        root_r: Some(13.0),
+    }
+    .to_section(SectionId(0), "G1".into());
+    let mut model = beam_model(section, material);
+    model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
+    let reason = ensure_nonlinear_input(&model).unwrap_err();
+    assert!(reason.contains("降伏強度"), "{reason}");
+    let panic = std::panic::catch_unwind(|| {
+        crate::factory::build_nonlinear_behavior(
+            &model.elements[0],
+            &model,
+            StrengthBasis::Nominal,
+            AnalysisKind::Incremental,
+            None,
+        )
+    })
+    .err()
+    .expect("未設定の降伏強度を既定値で代用しない");
+    assert_eq!(panic.downcast_ref::<String>(), Some(&reason));
+}
+
 /// コンクリート区分の材料（RC・SRC 断面の部材に割り当てる）。
 fn concrete_material() -> Material {
     Material {
@@ -473,6 +504,7 @@ fn src_concentrated_spring_builder_and_hinge_view_share_unavailability_reason() 
     model.elements[0].force_regime = ForceRegime::UniaxialBendingShear;
     model.validate_local_frames().unwrap();
     let data = &model.elements[0];
+    let index = WallSideColumnIndex::build(&model);
     for (kind, basis) in [
         (AnalysisKind::Incremental, StrengthBasis::MaterialStrength),
         (AnalysisKind::TimeHistory, StrengthBasis::Nominal),
@@ -480,6 +512,10 @@ fn src_concentrated_spring_builder_and_hinge_view_share_unavailability_reason() 
         let issues = nonlinear_input_issues_with_basis(&model, kind, basis);
         assert_eq!(issues.len(), 1, "{issues:?}");
         assert!(issues[0].contains("部材 ID 0 のSRC材端集中ばね"));
+        assert_eq!(
+            nonlinear_frame_analysis_decision(data, &model, kind, basis, &index),
+            Some(Err(issues[0].clone()))
+        );
 
         let panic = std::panic::catch_unwind(|| {
             build_nonlinear_behavior(data, &model, basis, kind, None);
@@ -1017,6 +1053,38 @@ fn symmetric_multilayer_rc_backbone_uses_both_rebar_centroids() {
     assert!(ensure_nonlinear_input(&model)
         .unwrap_err()
         .contains("D41以下"));
+}
+
+#[test]
+fn hinge_view_refuses_the_same_invalid_shear_material_as_incremental_analysis() {
+    use crate::factory::build_hinge_view;
+
+    let mut model = explicit_rc_reference_fixture();
+    let mut shear = model.materials[1].clone();
+    shear.id = MaterialId(model.materials.len() as u32);
+    shear.category = MaterialCategory::Steel;
+    model.sections[0].shear_rebar_material = Some(shear.id);
+    model.materials.push(shear);
+    let issues = nonlinear_input_issues_for_kind(&model, AnalysisKind::Incremental);
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert!(issues[0].contains("せん断補強筋"));
+    let view = |kind| {
+        build_hinge_view(
+            &model.elements[0],
+            &model,
+            StrengthBasis::Nominal,
+            kind,
+            0.0,
+            8,
+            24,
+        )
+        .unwrap()
+    };
+    let push = view(AnalysisKind::Incremental);
+    assert_eq!(push.unavailability_reason.as_ref(), Some(&issues[0]));
+    assert!(push.backbone.is_none());
+    assert!(push.mn_linear.is_none() && push.mn_surface.is_none());
+    assert!(view(AnalysisKind::TimeHistory).backbone.is_some());
 }
 
 #[test]
