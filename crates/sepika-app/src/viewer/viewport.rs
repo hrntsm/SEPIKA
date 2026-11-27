@@ -36,7 +36,6 @@ pub struct ViewportState {
     pub show_diaphragm_master: bool,
     pub show_supports: bool,
     pub show_space_grid: bool,
-    pub modeling_analysis: crate::viewer::ModelingAnalysis,
     pub show_beam_interpolation: bool,
     pub th_speed: f32,
     pub lumped_show_frame: bool,
@@ -81,7 +80,6 @@ impl Default for ViewportState {
             show_diaphragm_master: false,
             show_supports: true,
             show_space_grid: true,
-            modeling_analysis: crate::viewer::ModelingAnalysis::default(),
             show_beam_interpolation: true,
             th_speed: 1.0,
             lumped_show_frame: true,
@@ -321,14 +319,19 @@ impl ViewportState {
 }
 
 impl ViewportState {
+    pub(crate) fn displayed_pushover_dir(
+        &self,
+        app: &crate::app::App,
+    ) -> sepika_solver::statics::analysis::SeismicDir {
+        self.pushover_dir
+            .unwrap_or(app.core.scoped.pushover_view_dir)
+    }
+
     pub(crate) fn pushover_result<'a>(
         &self,
         app: &'a crate::app::App,
     ) -> Option<&'a sepika_solver::nonlinear::pushover::PushoverResult> {
-        app.pushover_for(
-            self.pushover_dir
-                .unwrap_or(app.core.scoped.pushover_view_dir),
-        )
+        app.pushover_for(self.displayed_pushover_dir(app))
     }
 }
 

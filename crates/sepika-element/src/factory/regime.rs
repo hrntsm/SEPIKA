@@ -5,7 +5,37 @@
 //! - [`is_column_member`] — 柱用断面を持つ部材かどうか
 //! - [`is_on_rigid_diaphragm`] — 剛床に所属するか
 
-use sepika_core::model::{ElementData, ForceRegime, FrameSectionUse, Model};
+use sepika_core::model::{
+    AnalysisKind, ElementData, ElementKind, ForceRegime, FrameSectionUse, Model,
+};
+
+/// 柱・大梁の解析方式。適用可否は入力診断と合わせて確認する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameAnalysisMethod {
+    Elastic,
+    ConcentratedSpring,
+    Fiber,
+}
+
+pub(super) fn frame_analysis_method(
+    data: &ElementData,
+    model: &Model,
+    kind: Option<AnalysisKind>,
+) -> Option<FrameAnalysisMethod> {
+    match data.kind {
+        ElementKind::Beam | ElementKind::Fiber
+            if kind.is_none() || crate::frame::beam::is_elastic_wall_girder(model, data) =>
+        {
+            Some(FrameAnalysisMethod::Elastic)
+        }
+        ElementKind::Beam => Some(match resolve_force_regime(data, model) {
+            ResolvedRegime::ConcentratedSpring => FrameAnalysisMethod::ConcentratedSpring,
+            ResolvedRegime::Fiber => FrameAnalysisMethod::Fiber,
+        }),
+        ElementKind::Fiber => Some(FrameAnalysisMethod::Fiber),
+        _ => None,
+    }
+}
 
 /// ForceRegime の自動選択結果
 pub enum ResolvedRegime {

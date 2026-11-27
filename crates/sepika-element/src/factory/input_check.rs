@@ -4,9 +4,13 @@
 //! - [`ensure_nonlinear_input`] — 不備があれば是正内容を示すエラーを返す
 
 use sepika_core::model::{
-    wall_steel_input_issue, ElementData, ElementKind, MaterialCategory, Model,
+    wall_steel_input_issue, AnalysisKind, ElementData, ElementKind, MaterialCategory, Model,
+    WallSideColumnIndex,
 };
 use sepika_core::section_shape::SectionShape;
+
+use super::regime::{frame_analysis_method, FrameAnalysisMethod};
+use super::StrengthBasis;
 
 /// エラーメッセージへ列挙する不備の最大件数（超過分は件数のみを示す）。
 const MAX_LISTED: usize = 5;
@@ -273,6 +277,15 @@ fn nonlinear_input_issues_with_basis(
     kind: sepika_core::model::AnalysisKind,
     basis: super::StrengthBasis,
 ) -> Vec<String> {
+    inspect_nonlinear_inputs(model, kind, basis, |_| {})
+}
+
+fn inspect_nonlinear_inputs(
+    model: &Model,
+    kind: AnalysisKind,
+    basis: StrengthBasis,
+    mut accept: impl FnMut(Option<FrameDecision>),
+) -> Vec<String> {
     let mut issues = Vec::new();
     if let Err(issue) = model.validate_wall_primary_materials() {
         issues.push(issue);
@@ -288,6 +301,18 @@ fn nonlinear_input_issues_with_basis(
     }
     let index = sepika_core::model::WallSideColumnIndex::build(model);
     for elem in &model.elements {
+        if let Some(decision) = frame_decision(elem, model, kind, basis, &index) {
+            match decision {
+                Ok(decision) => accept(Some(decision)),
+                Err(issue) => {
+                    if !issues.contains(&issue) {
+                        issues.push(issue);
+                    }
+                }
+            }
+            continue;
+        }
+        accept(None);
         if let Some(issue) = steel_section_primary_material_issue(elem, model) {
             issues.push(issue);
             continue;
@@ -300,79 +325,178 @@ fn nonlinear_input_issues_with_basis(
             }
             continue;
         }
-        if crate::frame::beam::is_elastic_wall_girder(model, elem) {
-            if let Some(issue) = member_strength_issue(elem, model) {
-                issues.push(issue);
-            }
-            continue;
-        }
-        if let Some(issue) = src_concentrated_spring_issue(elem, model) {
-            issues.push(issue);
-            continue;
-        }
-        if let Some(issue) = super::springs::rc_reference_target_issue(elem, model) {
-            issues.push(format!("部材 ID {} のRC梁基準接続: {issue}", elem.id.0));
-            continue;
-        }
-        let issue = match elem.kind {
-            ElementKind::Brace { .. } => elastic_stiffness_input_issue(elem, model),
-            ElementKind::PanelZone => {
-                crate::springs::panel::PanelZone::nonlinear_issue(elem, model)
-            }
-            ElementKind::Wall => {
-                crate::wall::wall_element::WallElement::nonlinear_wall_capacity_issue(
-                    elem, model, basis, kind,
-                )
-            }
-            ElementKind::Beam | ElementKind::Fiber => {
-                member_rebar_material_strength_issue(elem, model, basis)
-                    .or_else(|| {
-                        if kind == sepika_core::model::AnalysisKind::Incremental {
-                            shear_yield_rebar_issue(elem, model)
-                        } else {
-                            None
-                        }
-                    })
-                    .or_else(|| member_strength_issue(elem, model))
-                    .or_else(|| {
-                        super::springs::rc_reference_issue(
-                            elem,
-                            model,
-                            super::springs::resolve_member_hysteresis(elem, model, kind),
-                            basis,
-                        )
-                        .map(|issue| format!("部材 ID {} のRC梁基準接続: {issue}", elem.id.0))
-                    })
-                    .or_else(|| {
-                        let fiber = elem.kind != ElementKind::Beam
-                            || matches!(
-                                super::resolve_force_regime(elem, model),
-                                super::ResolvedRegime::Fiber
-                            );
-                        if !fiber {
-                            return None;
-                        }
-                        crate::frame::fiber::FiberBeam::try_with_plastic_zone(
-                            elem,
-                            model,
-                            super::springs::plastic_zone_length(elem, model),
-                            basis,
-                            kind,
-                        )
-                        .and_then(|beam| beam.validate_initial_section_stiffness())
-                        .err()
-                        .map(|reason| {
-                            format!("部材 ID {} のファイバー初期断面: {reason}", elem.id.0)
-                        })
-                    })
-            }
-            _ => None,
-        };
-        if let Some(msg) = issue {
+        if let Some(msg) = nonlinear_element_input_issue(elem, model, kind, basis, None) {
             issues.push(msg);
         }
     }
     issues
+}
+
+fn nonlinear_element_input_issue(
+    elem: &ElementData,
+    model: &Model,
+    kind: AnalysisKind,
+    basis: StrengthBasis,
+    method: Option<FrameAnalysisMethod>,
+) -> Option<String> {
+    if method == Some(FrameAnalysisMethod::Elastic) {
+        return member_strength_issue(elem, model);
+    }
+    if let Some(issue) = src_concentrated_spring_issue(elem, model) {
+        return Some(issue);
+    }
+    if let Some(issue) = rc_reference_target_diagnostic(elem, model) {
+        return Some(issue);
+    }
+    match elem.kind {
+        ElementKind::Brace { .. } => elastic_stiffness_input_issue(elem, model),
+        ElementKind::PanelZone => crate::springs::panel::PanelZone::nonlinear_issue(elem, model),
+        ElementKind::Wall => crate::wall::wall_element::WallElement::nonlinear_wall_capacity_issue(
+            elem, model, basis, kind,
+        ),
+        ElementKind::Beam | ElementKind::Fiber => {
+            nonlinear_rebar_input_issue(elem, model, kind, basis)
+                .or_else(|| member_strength_issue(elem, model))
+                .or_else(|| {
+                    rc_reference_diagnostic(
+                        elem,
+                        model,
+                        super::springs::resolve_member_hysteresis(elem, model, kind),
+                        basis,
+                    )
+                })
+                .or_else(|| {
+                    if method != Some(FrameAnalysisMethod::Fiber) {
+                        return None;
+                    }
+                    crate::frame::fiber::FiberBeam::try_with_plastic_zone(
+                        elem,
+                        model,
+                        super::springs::plastic_zone_length(elem, model),
+                        basis,
+                        kind,
+                    )
+                    .and_then(|beam| beam.validate_initial_section_stiffness())
+                    .err()
+                    .map(|reason| format!("部材 ID {} のファイバー初期断面: {reason}", elem.id.0))
+                })
+        }
+        _ => None,
+    }
+}
+
+pub(super) fn rc_reference_target_diagnostic(data: &ElementData, model: &Model) -> Option<String> {
+    super::springs::rc_reference_target_issue(data, model)
+        .map(|issue| format!("部材 ID {} のRC梁基準接続: {issue}", data.id.0))
+}
+
+pub(super) fn rc_reference_diagnostic(
+    data: &ElementData,
+    model: &Model,
+    rule: sepika_core::model::HysteresisModel,
+    basis: StrengthBasis,
+) -> Option<String> {
+    super::springs::rc_reference_issue(data, model, rule, basis)
+        .map(|issue| format!("部材 ID {} のRC梁基準接続: {issue}", data.id.0))
+}
+
+/// 柱・大梁の非線形方式と、方式固有の適用可否を照合する。
+/// 弾性準備の診断とは別に用いる。インデックスは同じモデルから構築する。
+pub fn nonlinear_frame_analysis_decision(
+    data: &ElementData,
+    model: &Model,
+    kind: AnalysisKind,
+    basis: StrengthBasis,
+    index: &WallSideColumnIndex,
+) -> Option<Result<FrameAnalysisMethod, String>> {
+    frame_decision(data, model, kind, basis, index)
+        .map(|decision| decision.map(|decision| decision.method))
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct FrameDecision {
+    pub method: FrameAnalysisMethod,
+    pub wall_normal: Option<[f64; 3]>,
+}
+
+pub(super) fn frame_decision(
+    data: &ElementData,
+    model: &Model,
+    kind: AnalysisKind,
+    basis: StrengthBasis,
+    index: &WallSideColumnIndex,
+) -> Option<Result<FrameDecision, String>> {
+    let method = frame_analysis_method(data, model, Some(kind))?;
+    Some((|| {
+        if let Some(issue) = steel_section_primary_material_issue(data, model) {
+            return Err(issue);
+        }
+        let wall_normal = wall_side_column_normal_with_index(data, model, Some(kind), index)?;
+        if let Some(issue) = nonlinear_element_input_issue(data, model, kind, basis, Some(method)) {
+            return Err(issue);
+        }
+        Ok(FrameDecision {
+            method,
+            wall_normal,
+        })
+    })())
+}
+
+/// 断面・主材料の必須割当で不足している入力。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum MissingMemberAssignment {
+    Section,
+    Material,
+    MainRebar,
+    ShearRebar,
+    EmbeddedSteel,
+}
+
+impl MissingMemberAssignment {
+    /// 必須の断面・材料割当がない場合に限り該当する。
+    pub fn applies_to(self, data: &ElementData, model: &Model) -> bool {
+        if !data.kind.requires_section_and_material() {
+            return false;
+        }
+        match self {
+            Self::Section => data.section.is_none(),
+            Self::Material => data.section.is_some() && model.element_material(data).is_none(),
+            Self::MainRebar | Self::ShearRebar | Self::EmbeddedSteel => {
+                let Some(section) = model.element_section(data) else {
+                    return false;
+                };
+                let src = matches!(
+                    section.shape,
+                    Some(SectionShape::SrcBeamRect { .. } | SectionShape::SrcColumnRect { .. })
+                );
+                let has_rebar = src
+                    || matches!(
+                        section.shape,
+                        Some(
+                            SectionShape::RcBeamRect { .. }
+                                | SectionShape::RcColumnRect { .. }
+                                | SectionShape::RcColumnCircle { .. }
+                        )
+                    );
+                match self {
+                    Self::MainRebar => has_rebar && section.rebar_material.is_none(),
+                    Self::ShearRebar => has_rebar && section.shear_rebar_material.is_none(),
+                    Self::EmbeddedSteel => src && section.steel_material.is_none(),
+                    _ => unreachable!(),
+                }
+            }
+        }
+    }
+
+    pub fn reason(self) -> &'static str {
+        match self {
+            Self::Section => "断面が未割当です",
+            Self::Material => "断面に材料が未割当です",
+            Self::MainRebar => "断面に主筋の材料が未割当です",
+            Self::ShearRebar => "断面にせん断補強筋の材料が未割当です",
+            Self::EmbeddedSteel => "断面に内蔵鉄骨の材料が未割当です",
+        }
+    }
 }
 
 /// 壁側柱と壁上下剛梁の判定後に、矩形SRC梁・柱の材端集中ばねの適用外理由を返す。
@@ -397,7 +521,24 @@ pub(super) fn src_concentrated_spring_issue(data: &ElementData, model: &Model) -
     ))
 }
 
-fn shear_yield_rebar_issue(data: &ElementData, model: &Model) -> Option<String> {
+fn nonlinear_rebar_input_issue(
+    data: &ElementData,
+    model: &Model,
+    kind: AnalysisKind,
+    basis: StrengthBasis,
+) -> Option<String> {
+    member_rebar_material_strength_issue(data, model, basis)
+        .or_else(|| shear_yield_rebar_issue(data, model, kind))
+}
+
+fn shear_yield_rebar_issue(
+    data: &ElementData,
+    model: &Model,
+    kind: AnalysisKind,
+) -> Option<String> {
+    if kind != AnalysisKind::Incremental {
+        return None;
+    }
     let shape = model.element_section(data)?.shape.as_ref()?;
     if !matches!(
         shape,
@@ -472,7 +613,28 @@ pub fn ensure_nonlinear_input_with_basis(
     kind: sepika_core::model::AnalysisKind,
     basis: super::StrengthBasis,
 ) -> Result<(), String> {
-    let issues = nonlinear_input_issues_with_basis(model, kind, basis);
+    ensure_no_nonlinear_issues(nonlinear_input_issues_with_basis(model, kind, basis))
+}
+
+/// 同じ不変モデルから診断の順序で方式を確定し、要素生成へ渡す。
+pub fn prepare_nonlinear_elements(
+    model: &Model,
+    kind: AnalysisKind,
+    basis: StrengthBasis,
+) -> Result<super::PreparedNonlinearElements<'_>, String> {
+    let mut decisions = Vec::with_capacity(model.elements.len());
+    ensure_no_nonlinear_issues(inspect_nonlinear_inputs(model, kind, basis, |decision| {
+        decisions.push(decision);
+    }))?;
+    Ok(super::PreparedNonlinearElements {
+        model,
+        kind,
+        basis,
+        decisions,
+    })
+}
+
+fn ensure_no_nonlinear_issues(issues: Vec<String>) -> Result<(), String> {
     if issues.is_empty() {
         return Ok(());
     }
@@ -929,23 +1091,29 @@ pub fn ensure_rc_beam_reference_loads(
     model: &Model,
     active_cases: &[sepika_core::ids::LoadCaseId],
 ) -> Result<(), String> {
-    for case in model
+    rc_beam_reference_load_issues(model, active_cases)
+        .next()
+        .map_or(Ok(()), |(_, reason)| Err(reason))
+}
+
+/// 有効荷重ケース順・荷重入力順の、対象部材とRC逆対称基準の適用外理由。
+pub fn rc_beam_reference_load_issues<'a>(
+    model: &'a Model,
+    active_cases: &'a [sepika_core::ids::LoadCaseId],
+) -> impl Iterator<Item = (sepika_core::ids::ElemId, String)> + 'a {
+    model
         .load_cases
         .iter()
-        .filter(|case| active_cases.contains(&case.id))
-    {
-        for load in &case.member {
-            let Some(data) = model
+        .filter(move |case| active_cases.contains(&case.id))
+        .flat_map(move |case| case.member.iter().filter_map(move |load| {
+            let data = model
                 .elements
                 .iter()
-                .find(|element| element.id == load.elem)
-            else {
-                continue;
-            };
+                .find(|element| element.id == load.elem)?;
             if model.member_rc_beam_reference(data.id).is_none()
                 || !super::hinge_view::resolves_to_concentrated_spring(data, model)
             {
-                continue;
+                return None;
             }
             let nonzero = match load.kind {
                 sepika_core::model::MemberLoadKind::Point { p, .. } => p != 0.0,
@@ -953,12 +1121,26 @@ pub fn ensure_rc_beam_reference_loads(
                     w1 != 0.0 || w2 != 0.0
                 }
             };
-            if nonzero {
-                return Err(format!("部材 ID {} の有効荷重ケース「{}」に中間部材荷重があります。一定せん断・三角形曲げのRC逆対称基準へ自動接続できません", data.id.0, case.name));
-            }
-        }
-    }
-    Ok(())
+            nonzero.then(|| {
+                (data.id, format!(
+                    "部材 ID {} の有効荷重ケース「{}」に中間部材荷重があります。一定せん断・三角形曲げのRC逆対称基準へ自動接続できません",
+                    data.id.0, case.name
+                ))
+            })
+        }))
+}
+
+/// 非線形時刻歴の初期状態で有効な長期荷重ケース。
+pub fn time_history_long_term_cases(
+    model: &Model,
+    apply_long_term: bool,
+) -> Vec<sepika_core::ids::LoadCaseId> {
+    model
+        .load_cases
+        .iter()
+        .filter(|case| apply_long_term && case.kind.is_long_term())
+        .map(|case| case.id)
+        .collect()
 }
 
 /// 線材の鋼断面と主材料の区分の不一致、E・採用 G、弾性梁の剛性・端部縮約の不備を部材 ID 付きで返す。

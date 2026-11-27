@@ -177,7 +177,13 @@ impl App {
             if ui.selectable_label(sel_ult, "終局検定").clicked() {
                 self.ui.view.design_view = DesignView::Ultimate;
             }
-            if ui.selectable_label(sel_mn, "MN相関曲面").clicked() {
+            if ui
+                .selectable_label(sel_mn, "MN相関曲面（断面参考）")
+                .on_hover_text(
+                    "断面単体の参考図です。解析の採用方式・適用可否・解析結果を示しません。",
+                )
+                .clicked()
+            {
                 self.ui.view.design_view = DesignView::MnSurface;
             }
             if ui.selectable_label(sel_qty, "数量積算").clicked() {

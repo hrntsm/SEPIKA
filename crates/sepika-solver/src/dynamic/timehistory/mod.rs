@@ -27,7 +27,8 @@ pub use linear::{
     linear_time_history_until_with_force_observer, linear_time_history_with_state,
 };
 pub use nonlinear::{
-    nonlinear_time_history_analysis, nonlinear_time_history_with_force_observer, NonlinearThCfg,
+    nonlinear_time_history_analysis, nonlinear_time_history_with_force_observer,
+    nonlinear_time_history_with_prepared_elements, NonlinearThCfg,
 };
 pub use recording::uses_signed_bending_peaks;
 pub use result::{

@@ -17,14 +17,237 @@ use crate::auto_loads::{
 use crate::error::JobError;
 use crate::settings::AnalysisSettings;
 
+type FrameDecision = Result<PreparedFrameMethod, PreparedFrameIssue>;
+
+/// 部材固有の適用外と、解析条件未確定による確認不能を区別する。
+#[derive(Debug)]
+pub enum PreparedFrameIssue {
+    Inapplicable(String),
+    Unconfirmed(String),
+}
+
+impl PreparedFrameIssue {
+    pub fn reason(&self) -> &str {
+        match self {
+            Self::Inapplicable(reason) | Self::Unconfirmed(reason) => reason,
+        }
+    }
+}
+
+/// 柱・大梁の方式と表示に必要な解析モデルの属性。
+#[derive(Clone, Copy)]
+pub struct PreparedFrameMethod {
+    pub method: sepika_element::factory::FrameAnalysisMethod,
+    pub wall_side_release: bool,
+    pub elastic_wall_girder: bool,
+    pub rigid_lengths_mm: [f64; 2],
+    pub plastic_zone_mm: Option<f64>,
+    pub torsion_released: bool,
+}
+
+/// 柱・大梁の方式判定。種別間で同じ準備済みモデルを参照する。
+pub struct PreparedFrameAnalysis {
+    decisions: std::collections::BTreeMap<sepika_core::ids::ElemId, [FrameDecision; 3]>,
+    apply_long_term: [bool; 2],
+}
+
+impl PreparedFrameAnalysis {
+    /// `kind=None` は線形静的。柱・大梁以外は `None`。
+    pub fn decision(
+        &self,
+        id: sepika_core::ids::ElemId,
+        kind: Option<sepika_core::model::AnalysisKind>,
+    ) -> Option<&FrameDecision> {
+        use sepika_core::model::AnalysisKind;
+        let i = match kind {
+            None => 0,
+            Some(AnalysisKind::Incremental) => 1,
+            Some(AnalysisKind::TimeHistory) => 2,
+        };
+        self.decisions.get(&id).map(|row| &row[i])
+    }
+
+    pub fn matches_load_settings(&self, settings: &AnalysisSettings) -> bool {
+        self.apply_long_term == [settings.push_apply_long_term, settings.th_apply_long_term]
+    }
+}
+
+fn prepared_frame_analysis(
+    model: &Model,
+    settings: &AnalysisSettings,
+) -> Result<PreparedFrameAnalysis, JobError> {
+    use sepika_core::model::{AnalysisKind, ElementKind};
+    use sepika_element::factory::{
+        nonlinear_frame_analysis_decision, rc_beam_reference_load_issues,
+        time_history_long_term_cases, FrameAnalysisMethod, StrengthBasis,
+    };
+    use sepika_element::frame::{beam, fiber, rigid_arm};
+    use sepika_element::wall::side_column::SideColumnEdges;
+    crate::weight_preparation::require_current_generated_mass(model)?;
+    let (model, _) = crate::compute::expand_walls(model.clone())?;
+    let walls = SideColumnEdges::build(&model);
+    let mut elastic_issues = std::collections::BTreeMap::new();
+    use sepika_solver::statics::analysis::precheck::{elastic_member_issues, IssueTargets};
+    for issue in elastic_member_issues(&model) {
+        if let IssueTargets::Members(ids) = issue.targets {
+            for id in ids {
+                elastic_issues.entry(id).or_insert_with(|| {
+                    if issue.short == issue.message {
+                        issue.short.clone()
+                    } else {
+                        format!("部材 ID {}: {}", id.0, issue.short)
+                    }
+                });
+            }
+        }
+    }
+    let issues_for = |cases: &[sepika_core::ids::LoadCaseId]| {
+        let mut issues = std::collections::BTreeMap::new();
+        for (id, reason) in rc_beam_reference_load_issues(&model, cases) {
+            issues.entry(id).or_insert(reason);
+        }
+        issues
+    };
+    let increment_issues = if settings.push_apply_long_term {
+        sepika_core::load_combo::ultimate_gravity_terms(&model)
+            .map(|terms| issues_for(&terms.into_iter().map(|(id, _)| id).collect::<Vec<_>>()))
+    } else {
+        Ok(Default::default())
+    };
+    let history_issues = issues_for(&time_history_long_term_cases(
+        &model,
+        settings.th_apply_long_term,
+    ));
+    let decisions = model
+        .elements
+        .iter()
+        .filter(|data| matches!(data.kind, ElementKind::Beam | ElementKind::Fiber))
+        .map(|data| {
+            let wall_side_release = walls.release_axis(data, &model).is_some();
+            let elastic_wall_girder = beam::is_elastic_wall_girder(&model, data);
+            let torsion_released = beam::i_end_torsion_release(data, &model);
+            let l = model.member_length(data);
+            let rz = model.analysis_rigid_zone(data);
+            let (li, lj) = rigid_arm::resolve_lengths(rz.rigid_length_i(), rz.rigid_length_j(), l);
+            let kinds = [
+                (None, StrengthBasis::Nominal),
+                (
+                    Some(AnalysisKind::Incremental),
+                    StrengthBasis::MaterialStrength,
+                ),
+                (Some(AnalysisKind::TimeHistory), StrengthBasis::Nominal),
+            ];
+            (
+                data.id,
+                kinds.map(|(kind, basis)| {
+                    // 時刻歴では壁側柱接続を弾性準備に先立って検査する。
+                    if kind == Some(AnalysisKind::TimeHistory) {
+                        if let Some(reason) =
+                            sepika_element::factory::wall_side_column_input_issue_with_index(
+                                data,
+                                &model,
+                                kind,
+                                walls.classification(),
+                            )
+                        {
+                            return Err(PreparedFrameIssue::Inapplicable(reason));
+                        }
+                    }
+                    if let Some(reason) = elastic_issues.get(&data.id) {
+                        return Err(PreparedFrameIssue::Inapplicable(reason.clone()));
+                    }
+                    let method = if let Some(kind) = kind {
+                        nonlinear_frame_analysis_decision(
+                            data,
+                            &model,
+                            kind,
+                            basis,
+                            walls.classification(),
+                        )
+                        .expect("柱・大梁は方式判定の対象")
+                        .map_err(PreparedFrameIssue::Inapplicable)?
+                    } else {
+                        FrameAnalysisMethod::Elastic
+                    };
+                    let issue = match kind {
+                        None => None,
+                        Some(AnalysisKind::Incremental) => match &increment_issues {
+                            Ok(issues) => issues.get(&data.id),
+                            Err(reason)
+                                if method == FrameAnalysisMethod::ConcentratedSpring
+                                    && model.member_rc_beam_reference(data.id).is_some() =>
+                            {
+                                return Err(PreparedFrameIssue::Unconfirmed(format!(
+                                    "RC逆対称基準の適用可否を確認できません: {reason}"
+                                )));
+                            }
+                            Err(_) => None,
+                        },
+                        Some(AnalysisKind::TimeHistory) => history_issues.get(&data.id),
+                    };
+                    if let Some(reason) = issue {
+                        return Err(PreparedFrameIssue::Inapplicable(reason.clone()));
+                    }
+                    Ok(PreparedFrameMethod {
+                        method,
+                        wall_side_release,
+                        elastic_wall_girder,
+                        rigid_lengths_mm: [li, lj],
+                        torsion_released,
+                        plastic_zone_mm: (method == FrameAnalysisMethod::Fiber).then(|| {
+                            if l <= 1e-9 {
+                                return 0.0;
+                            }
+                            fiber::clamp_plastic_zone(
+                                sepika_element::factory::plastic_zone_length(data, &model),
+                                l - li - lj,
+                            )
+                        }),
+                    })
+                }),
+            )
+        })
+        .collect();
+    Ok(PreparedFrameAnalysis {
+        decisions,
+        apply_long_term: [settings.push_apply_long_term, settings.th_apply_long_term],
+    })
+}
+
 /// 解析前処理（剛域・仕口パネル・荷重自動同期）の報告。
 pub struct PrepareReport {
     /// 生成した仕口パネル（GUI の準備計算表が表示する）。
     pub panels: Vec<sepika_element::springs::panel_gen::GeneratedPanel>,
     /// 荷重同期で発生した注意事項（SemiPrecise で固有周期未算定など）。
     pub notices: Vec<String>,
+    /// この準備で得られた柱・大梁の方式確認に必要な共通準備の結果。
+    pub frame_preparation: FramePreparation,
     /// 領域再生成で節点が削除され、節点 ID の付け直しが発生した。
     pub nodes_renumbered: bool,
+}
+
+/// 柱・大梁の方式確認に用いる共通準備の結果。
+pub struct FramePreparation {
+    weight_failure: Option<String>,
+}
+
+impl FramePreparation {
+    /// 必要な地震用重量を再生成できなかった理由。
+    pub fn weight_failure(&self) -> Option<&str> {
+        self.weight_failure.as_deref()
+    }
+
+    /// この準備が出力した未変更のモデルの方式判定を返す。解析は実行しない。
+    pub fn analysis(
+        &self,
+        model: &Model,
+        settings: &AnalysisSettings,
+    ) -> Result<PreparedFrameAnalysis, JobError> {
+        if let Some(reason) = &self.weight_failure {
+            return Err(JobError::InvalidInput(reason.clone()));
+        }
+        prepared_frame_analysis(model, settings)
+    }
 }
 
 /// 剛域と仕口パネルを自動算定してモデルへ反映する。
@@ -186,7 +409,7 @@ fn prepare_work_model(
     apply_tip_loads(model, tip_loads);
     let mut notices = gravity.notices;
     notices.extend(panel_notices);
-    let mut weights_valid = true;
+    let mut weight_preparation_failure = None;
     if (!model.stories.is_empty() || initialize_stories)
         && !crate::weight_preparation::weights_are_current(model, settings.mass_method)
     {
@@ -215,18 +438,19 @@ fn prepare_work_model(
                 settings.mass_method,
             ),
             Err(error) => {
-                weights_valid = false;
+                let reason = format!("地震用重量を再生成できません: {error}");
                 invalidate_generated_weights(model);
                 for name in [
                     sepika_core::model::EX_CASE_NAME,
                     sepika_core::model::EY_CASE_NAME,
                 ] {
-                    notices.push(format!("{name} の Ai 地震力を再生成できません: 地震用重量を再生成できません: {error}"));
+                    notices.push(format!("{name} の Ai 地震力を再生成できません: {reason}"));
                 }
+                weight_preparation_failure = Some(reason);
             }
         }
     }
-    let mut seismic = if weights_valid {
+    let mut seismic = if weight_preparation_failure.is_none() {
         compute_seismic_auto_load_cases(model, settings, design_period)
     } else {
         crate::auto_loads::AutoLoadComputeResult {
@@ -280,6 +504,9 @@ fn prepare_work_model(
     Ok(PrepareReport {
         panels,
         notices,
+        frame_preparation: FramePreparation {
+            weight_failure: weight_preparation_failure,
+        },
         nodes_renumbered: false,
     })
 }

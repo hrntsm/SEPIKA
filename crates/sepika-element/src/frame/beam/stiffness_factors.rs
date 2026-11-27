@@ -465,6 +465,41 @@ pub fn composite_props_of(
     model: &Model,
     data: &sepika_core::model::ElementData,
 ) -> Result<Option<sepika_core::section_shape::CompositeProps>, String> {
+    composite_props_for_member(model, data)
+        .map_err(|(issue, section)| issue.member_message(data.id, &section.name))
+}
+
+enum CompositePropsIssue {
+    MissingPrimaryMaterial,
+    Invalid(String),
+}
+
+impl CompositePropsIssue {
+    fn reason(&self) -> &str {
+        match self {
+            Self::MissingPrimaryMaterial => "SRC/CFT 主材料が未割当です",
+            Self::Invalid(reason) => reason,
+        }
+    }
+
+    fn member_message(&self, id: sepika_core::ids::ElemId, section_name: &str) -> String {
+        let reason = self.reason();
+        match self {
+            Self::MissingPrimaryMaterial => {
+                format!("部材 ID {} の断面「{section_name}」の {reason}", id.0)
+            }
+            Self::Invalid(_) => format!("部材 ID {} の断面「{section_name}」: {reason}", id.0),
+        }
+    }
+}
+
+fn composite_props_for_member<'a>(
+    model: &'a Model,
+    data: &sepika_core::model::ElementData,
+) -> Result<
+    Option<sepika_core::section_shape::CompositeProps>,
+    (CompositePropsIssue, &'a sepika_core::model::Section),
+> {
     let Some(sec) = data.section.and_then(|sid| model.sections.get(sid.index())) else {
         return Ok(None);
     };
@@ -479,15 +514,33 @@ pub fn composite_props_of(
                 | sepika_core::section_shape::SectionShape::CftBox { .. }
                 | sepika_core::section_shape::SectionShape::CftPipe { .. }
         ) {
-            return Err(format!(
-                "部材 ID {} の断面「{}」の SRC/CFT 主材料が未割当です",
-                data.id.0, sec.name
-            ));
+            return Err((CompositePropsIssue::MissingPrimaryMaterial, sec));
         }
         return Ok(None);
     };
     composite_props_with(sec, mat, model.element_steel_material(data))
-        .map_err(|error| format!("部材 ID {} の断面「{}」: {error}", data.id.0, sec.name))
+        .map_err(|reason| (CompositePropsIssue::Invalid(reason), sec))
+}
+
+/// CFT の等価断面が使えない場合、部材を含まない理由と部材付き診断をこの順で返す。
+pub fn cft_equivalent_input_issue(
+    data: &sepika_core::model::ElementData,
+    model: &Model,
+) -> Option<(String, String)> {
+    model
+        .element_section(data)
+        .filter(|section| section.is_cft())?;
+    match composite_props_for_member(model, data) {
+        Ok(Some(_)) => None,
+        Ok(None) => {
+            let reason = String::from("CFT の等価断面性能が未算定です");
+            Some((reason.clone(), reason))
+        }
+        Err((issue, section)) => Some((
+            issue.reason().into(),
+            issue.member_message(data.id, &section.name),
+        )),
+    }
 }
 
 pub(super) fn validate_composite_material(

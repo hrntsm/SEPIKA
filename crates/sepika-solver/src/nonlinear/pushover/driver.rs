@@ -36,7 +36,7 @@ use crate::statics::analysis::{
 use sepika_core::dof::DofMap;
 use sepika_core::model::{MemberLoad, Model};
 use sepika_element::behavior::ElementBehavior;
-use sepika_element::factory::{build_nonlinear_behavior, StrengthBasis};
+use sepika_element::factory::{prepare_nonlinear_elements, StrengthBasis};
 use sepika_math::solver::{make_solver, LinearSolver, SolverBackend};
 
 /// 全フェーズで持ち回るソルバインスタンス・CSC 組立てキャッシュ・作業バッファ。
@@ -164,7 +164,7 @@ pub fn pushover_analysis_recording_signed(
 
     let mut st = SolverState::new(n_active, reducer.n_indep);
 
-    sepika_element::factory::ensure_nonlinear_input_with_basis(
+    let elements = prepare_nonlinear_elements(
         model,
         sepika_core::model::AnalysisKind::Incremental,
         sepika_element::factory::StrengthBasis::MaterialStrength,
@@ -182,20 +182,7 @@ pub fn pushover_analysis_recording_signed(
         &gravity_terms,
         StrengthBasis::MaterialStrength,
     )?;
-    let mut behaviors: Vec<Box<dyn ElementBehavior>> = Vec::new();
-    for elem in &model.elements {
-        let b = build_nonlinear_behavior(
-            elem,
-            model,
-            StrengthBasis::MaterialStrength,
-            sepika_element::factory::AnalysisKind::Incremental,
-            wall_capacities
-                .iter()
-                .find(|(id, _)| *id == elem.id)
-                .map(|(_, q)| *q),
-        );
-        behaviors.push(b);
-    }
+    let mut behaviors = elements.build(&wall_capacities);
     let backend = crate::common::tangent::tangent_solver_backend(&behaviors);
     if matches!(backend, SolverBackend::DirectSparseLu) {
         st.solver = make_solver(backend);

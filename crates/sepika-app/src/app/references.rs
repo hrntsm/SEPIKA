@@ -278,6 +278,7 @@ impl App {
         }
         let lumped_identity = self.lumped_model_input_identity();
         self.core.analysis_cfg = next;
+        self.invalidate_frame_preparation_if_auto_load_inputs_changed();
         if lumped_identity != self.lumped_model_input_identity() {
             self.invalidate_lumped_mass_view();
         }
@@ -434,18 +435,24 @@ impl App {
         }
     }
 
+    pub(super) fn input_generation(&self) -> u64 {
+        self.core
+            .scoped
+            .references
+            .generation
+            .checked_add(self.core.scoped.undo.revision())
+            .and_then(|generation| {
+                generation.checked_sub(self.core.scoped.reference_preparation_revisions)
+            })
+            .expect("編集世代の上限")
+    }
+
     pub fn input_reference(&self) -> InputReference {
         let state = &self.core.scoped.references;
         InputReference {
             project: state.project.clone(),
             proposal: state.proposal.clone(),
-            generation: state
-                .generation
-                .checked_add(self.core.scoped.undo.revision())
-                .and_then(|generation| {
-                    generation.checked_sub(self.core.scoped.reference_preparation_revisions)
-                })
-                .expect("編集世代の上限"),
+            generation: self.input_generation(),
             input: self.reference_input_identity(),
         }
     }

@@ -42,6 +42,9 @@ impl App {
                 bundle.modal = Some(modal);
                 self.core.scoped.results = Some(bundle);
                 self.core.scoped.staleness.last_run = Some(SystemTime::now());
+                if self.core.analysis_cfg.ai_mode == AiMode::SemiPrecise {
+                    self.invalidate_frame_preparation_if_auto_load_inputs_changed();
+                }
             }
             Err(e) => self.report_error(e),
         }

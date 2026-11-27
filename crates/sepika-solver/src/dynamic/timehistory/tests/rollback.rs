@@ -2,6 +2,7 @@ use super::*;
 use sepika_core::dof::Dof6Mask;
 use sepika_core::ids::*;
 use sepika_core::model::*;
+use sepika_element::factory::build_nonlinear_behavior;
 
 fn model(kind: ElementKind) -> Model {
     Model {

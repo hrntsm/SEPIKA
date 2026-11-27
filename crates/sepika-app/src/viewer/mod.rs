@@ -241,6 +241,24 @@ pub enum ModelingAnalysis {
     TimeHistory,
 }
 
+impl ModelingAnalysis {
+    pub(crate) fn kind(self) -> Option<sepika_core::model::AnalysisKind> {
+        use sepika_core::model::AnalysisKind;
+        match self {
+            Self::Static => None,
+            Self::Incremental => Some(AnalysisKind::Incremental),
+            Self::TimeHistory => Some(AnalysisKind::TimeHistory),
+        }
+    }
+
+    pub(crate) fn selector(ui: &mut egui::Ui, value: &mut Self) {
+        ui.label("確認する解析種別:");
+        ui.selectable_value(value, Self::Static, "線形静的");
+        ui.selectable_value(value, Self::Incremental, "増分");
+        ui.selectable_value(value, Self::TimeHistory, "非線形時刻歴");
+    }
+}
+
 /// 応力図（[`ViewMode::Force`]）で表示できる成分。
 ///
 /// 部材内力ベクトル `[N, Qy, Qz, Mx, My, Mz]` の 6 成分に 1 対 1 で対応し、

@@ -440,6 +440,19 @@ fn prepare_imported(mut app: App) -> App {
     app
 }
 
+fn prepare_public(input: &App) -> sepika_core::model::Model {
+    let mut model = input.core.model.clone();
+    let report =
+        sepika_job::prepare::prepare_model(&mut model, &input.core.analysis_cfg, None, true)
+            .unwrap();
+    assert_eq!(report.frame_preparation.weight_failure(), None);
+    select_frame_gravity(&mut model);
+    let report =
+        sepika_job::prepare_model_for_analysis(&mut model, &input.core.analysis_cfg, None).unwrap();
+    assert_eq!(report.frame_preparation.weight_failure(), None);
+    model
+}
+
 #[test]
 fn imported_slab_group_overlap_matches_independent_prismatic_volumes() {
     let app = imported();
@@ -569,7 +582,7 @@ fn four_story_steel_portal() -> sepika_core::model::Model {
 }
 
 /// 床を持たない鋼構造の非線形解析用モデル。
-fn prepared_steel_portal(four_story: bool) -> App {
+fn steel_portal_input(four_story: bool) -> App {
     let mut app = App::default();
     app.core.analysis_cfg.threads = 1;
     let mut model = if four_story {
@@ -578,7 +591,15 @@ fn prepared_steel_portal(four_story: bool) -> App {
         sepika_app::sample::portal_frame()
     };
     model.panel_zone = sepika_core::model::PanelZoneMode::None;
-    app.load_model(model);
+    assert!(app.load_model(model));
+    app
+}
+
+fn prepared_steel_portal(four_story: bool) -> App {
+    prepare_steel_portal(steel_portal_input(four_story))
+}
+
+fn prepare_steel_portal(mut app: App) -> App {
     app.generate_stories_action();
     app.run_preparation();
     assert_no_error(&app, "鋼構造サンプルの準備計算");
@@ -595,6 +616,17 @@ fn prepared_rectangular_rc_portal() -> App {
 }
 
 fn prepared_rectangular_rc_portal_with_beam_cover(beam_cover: f64) -> App {
+    let mut app = App::default();
+    app.core.analysis_cfg.threads = 1;
+    app.load_model(rectangular_rc_portal_input(beam_cover));
+    app.generate_stories_action();
+    app.run_preparation();
+    assert_no_error(&app, "RC矩形準備");
+    sepika_element::factory::ensure_nonlinear_input(&app.core.model).expect("RC矩形入力");
+    app
+}
+
+fn rectangular_rc_portal_input(beam_cover: f64) -> sepika_core::model::Model {
     use sepika_core::ids::{MaterialId, SectionId};
     use sepika_core::model::{FrameSectionUse, Material, MaterialCategory};
     use sepika_core::section_shape::{
@@ -692,14 +724,7 @@ fn prepared_rectangular_rc_portal_with_beam_cover(beam_cover: f64) -> App {
             Some(sepika_core::model::RcBeamReference::AntisymmetricHalfMemberWithoutAxialForce),
         );
     }
-    let mut app = App::default();
-    app.core.analysis_cfg.threads = 1;
-    app.load_model(model);
-    app.generate_stories_action();
-    app.run_preparation();
-    assert_no_error(&app, "RC矩形準備");
-    sepika_element::factory::ensure_nonlinear_input(&app.core.model).expect("RC矩形入力");
-    app
+    model
 }
 
 fn assert_t_beam_diagnostic(app: &App) {
@@ -720,9 +745,18 @@ fn assert_t_beam_diagnostic(app: &App) {
 
 #[test]
 fn imported_t_beams_stop_pushover_and_nonlinear_time_history() {
-    let mut app = prepared_without_panels();
+    let mut input = imported();
+    input.core.model.panel_zone = sepika_core::model::PanelZoneMode::None;
+    input.core.analysis_cfg.th_nonlinear = true;
+    let direct = prepare_public(&input);
+    let mut app = prepare_imported(input);
     app.run_pushover();
     assert_t_beam_diagnostic(&app);
+    let reason = sepika_job::compute::compute_pushover(direct.clone(), app.core.analysis_cfg)
+        .err()
+        .unwrap()
+        .to_string();
+    assert_eq!(app.core.scoped.last_error.as_deref(), Some(reason.as_str()));
     assert!(app
         .core
         .scoped
@@ -730,9 +764,17 @@ fn imported_t_beams_stop_pushover_and_nonlinear_time_history() {
         .as_ref()
         .is_none_or(|r| r.pushover_x.is_none()));
     clear_error(&mut app);
-    app.core.analysis_cfg.th_nonlinear = true;
     app.run_time_history_sample();
     assert_t_beam_diagnostic(&app);
+    let reason = sepika_job::compute::compute_time_history(
+        direct,
+        app.core.analysis_cfg,
+        sepika_job::sample_ground_motion(&app.core.analysis_cfg).unwrap(),
+    )
+    .err()
+    .unwrap()
+    .to_string();
+    assert_eq!(app.core.scoped.last_error.as_deref(), Some(reason.as_str()));
     assert!(app
         .core
         .scoped
@@ -1145,9 +1187,25 @@ fn diagnostics_are_clean() {
 /// （剛床上の梁・二次部材が絡む経路で過去に発生）を検出する。
 #[test]
 fn static_all_solves_every_case_and_combination() {
-    let app = analyzed();
+    let input = imported();
+    let direct_model = prepare_public(&input);
+    let mut app = prepare_imported(input);
+    app.run_static_all();
+    assert_no_error(&app, "静的解析（一括）");
     let results = app.core.scoped.results.as_ref().expect("解析結果");
     let n_elems = frame_elem_count(&app);
+    let dl = dl_case_id(&app);
+    let direct = sepika_job::compute::compute_linear_static(direct_model, dl).unwrap();
+    let via_app = static_of(&app, static_case_key(&app, dl));
+    assert_eq!(via_app.disp, direct.disp);
+    let forces = |result: &sepika_solver::statics::linear::StaticOnce| {
+        result
+            .member_forces
+            .iter()
+            .map(|(id, forces)| (*id, forces.at.clone()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(forces(via_app), forces(&direct));
 
     assert_eq!(results.statics.len(), 5, "荷重ケース単体の結果数");
     assert_eq!(
@@ -2095,7 +2153,9 @@ fn steel_portal_ds_hold_preserves_response_and_imported_rc_ultimate_checks() {
 /// 鋼構造サンプルの増分解析で性能曲線・層せん断が力学的に整合する。
 #[test]
 fn pushover_reaches_ultimate_state() {
-    let mut app = prepared_steel_portal(true);
+    let input = steel_portal_input(true);
+    let direct_model = prepare_public(&input);
+    let mut app = prepare_steel_portal(input);
     app.run_pushover();
     assert_no_error(&app, "増分解析");
 
@@ -2108,6 +2168,16 @@ fn pushover_reaches_ultimate_state() {
         .pushover_x
         .as_ref()
         .expect("増分解析の結果");
+    let direct =
+        sepika_job::compute::compute_pushover(direct_model, app.core.analysis_cfg).unwrap();
+    assert_eq!(push.qu, direct.qu);
+    assert_eq!(push.termination, direct.termination);
+    assert_eq!(push.steps.len(), direct.steps.len());
+    for (gui, public) in push.steps.iter().zip(&direct.steps) {
+        assert_eq!(gui.load_factor, public.load_factor);
+        assert_eq!(gui.top_disp, public.top_disp);
+        assert_eq!(gui.base_shear, public.base_shear);
+    }
 
     assert!(
         push.steps.len() > 1,
@@ -2398,9 +2468,11 @@ fn rectangular_rc_decay_tail_has_no_false_non_convergence() {
 /// 既存1層鋼サンプルの非線形時刻歴が長期荷重初期化を含め完走する。
 #[test]
 fn time_history_nonlinear_runs() {
-    let mut app = prepared_steel_portal(false);
-    app.core.analysis_cfg.th_dir = ThDir::X;
-    app.core.analysis_cfg.th_nonlinear = true;
+    let mut input = steel_portal_input(false);
+    input.core.analysis_cfg.th_dir = ThDir::X;
+    input.core.analysis_cfg.th_nonlinear = true;
+    let direct_model = prepare_public(&input);
+    let mut app = prepare_steel_portal(input);
     app.run_time_history_sample();
     assert_no_error(&app, "非線形時刻歴応答解析");
 
@@ -2413,6 +2485,15 @@ fn time_history_nonlinear_runs() {
         .time_history
         .as_ref()
         .expect("時刻歴の結果");
+    let direct = sepika_job::compute::compute_time_history(
+        direct_model,
+        app.core.analysis_cfg,
+        sepika_job::sample_ground_motion(&app.core.analysis_cfg).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(th.peak_disp, direct.peak_disp);
+    assert_eq!(th.time, direct.time);
+    assert_eq!(th.non_converged_steps, direct.non_converged_steps);
     assert_eq!(
         th.non_converged_steps, 0,
         "既存鋼門型の全時刻ステップが収束する"
@@ -2448,6 +2529,7 @@ fn time_history_nonlinear_runs() {
 #[test]
 fn ovika_roundtrip_preserves_model_and_results() {
     let mut app = analyzed();
+    assert!(app.prepared_frame_analysis().is_ok());
     app.run_design_check();
     clear_error(&mut app);
     // 既定値から変えておき、往復で「既定値に戻ってしまう」誤りを検出できるようにする。
@@ -2524,6 +2606,10 @@ fn ovika_roundtrip_preserves_model_and_results() {
     reopened.core.analysis_cfg.threads = 1;
     reopened.open_project_from(path.clone());
     assert_no_error(&reopened, "プロジェクト読込");
+    assert_eq!(
+        reopened.prepared_frame_analysis().err(),
+        Some("現在の入力で準備計算を実行してください。")
+    );
 
     reopened.core.model.validate().unwrap();
     assert!(app.core.model.eq_ignoring_dofmap(&reopened.core.model));
@@ -3655,7 +3741,92 @@ fn slab_floor_load_reaches_primary_frame() {
 }
 
 #[test]
+fn prepared_member_rejects_zero_shear_area_with_public_static_diagnostic() {
+    let mut app = App::default();
+    assert!(app.load_model(sepika_app::sample::portal_frame()));
+    app.core.model.sections[1].as_y = 0.0;
+    let direct = prepare_public(&app);
+    app.run_preparation();
+    let reason = "断面の有効せん断断面積 As が 0 です";
+    let member = app.core.model.elements[2].id;
+    let report = app
+        .prepared_frame_analysis()
+        .expect("部材不備で共通準備は失効しない");
+    let prepared_reason = report
+        .decision(member, None)
+        .unwrap()
+        .as_ref()
+        .err()
+        .unwrap()
+        .reason();
+    assert_eq!(prepared_reason, format!("部材 ID {}: {reason}", member.0));
+    assert!(report
+        .decision(app.core.model.elements[0].id, None)
+        .unwrap()
+        .is_ok());
+    let expected = sepika_solver::statics::analysis::precheck::model_issues(&direct)
+        .into_iter()
+        .find(|issue| issue.short == reason)
+        .unwrap();
+    let dl = dl_case_id(&app);
+    let error = sepika_job::compute::compute_linear_static(direct, dl)
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(error.contains(&expected.message), "{error}");
+    app.run_linear_static(dl);
+    assert_eq!(app.core.scoped.last_error.as_deref(), Some(error.as_str()));
+}
+
+#[test]
+fn linear_preparation_and_public_static_report_missing_rc_rebar_material() {
+    use sepika_core::ids::SectionId;
+    for (section_id, reason) in [
+        (SectionId(0), "断面に主筋の材料が未割当です"),
+        (SectionId(1), "断面にせん断補強筋の材料が未割当です"),
+    ] {
+        let mut app = prepared_rectangular_rc_portal();
+        let section = &mut app.core.model.sections[section_id.index()];
+        if section_id == SectionId(0) {
+            section.rebar_material = None;
+        } else {
+            section.shear_rebar_material = None;
+        }
+        app.run_preparation();
+        let report = app.prepared_frame_analysis().unwrap();
+        let member = app
+            .core
+            .model
+            .elements
+            .iter()
+            .find(|e| e.section == Some(section_id))
+            .unwrap()
+            .id;
+        let issue = report
+            .decision(member, None)
+            .unwrap()
+            .as_ref()
+            .err()
+            .unwrap();
+        assert_eq!(issue.reason(), format!("部材 ID {}: {reason}", member.0));
+        let expected = sepika_solver::statics::analysis::precheck::model_issues(&app.core.model)
+            .into_iter()
+            .find(|issue| issue.short == reason)
+            .expect("公開解析の部材診断");
+        let error =
+            sepika_job::compute::compute_linear_static(app.core.model.clone(), dl_case_id(&app))
+                .err()
+                .unwrap()
+                .to_string();
+        assert!(error.contains(&expected.message), "{error}");
+    }
+}
+
+#[test]
 fn rc_reference_rejects_only_member_loads_applied_in_the_current_analysis() {
+    use sepika_core::model::AnalysisKind;
+    use sepika_element::factory::FrameAnalysisMethod;
+
     let mut app = prepared_rectangular_rc_portal();
     assert!(app
         .core
@@ -3669,6 +3840,60 @@ fn rc_reference_rejects_only_member_loads_applied_in_the_current_analysis() {
     app.core.analysis_cfg.th_apply_long_term = true;
     app.core.analysis_cfg.th_duration = 0.2;
     app.core.analysis_cfg.th_dt = 0.05;
+    app.core.analysis_cfg.push_apply_long_term = true;
+    app.core.model.ultimate_gravity_combination = None;
+    app.run_preparation();
+    let report = app.prepared_frame_analysis().unwrap();
+    let (member, prepared_reason) = app
+        .core
+        .model
+        .elements
+        .iter()
+        .find_map(|data| {
+            let issue = report
+                .decision(data.id, Some(AnalysisKind::TimeHistory))?
+                .as_ref()
+                .err()?;
+            issue
+                .reason()
+                .contains("一定せん断・三角形")
+                .then(|| (data.id, issue.reason().to_owned()))
+        })
+        .expect("時刻歴で有効な材間荷重を準備計算でも拒否");
+    assert_eq!(
+        report
+            .decision(member, None)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .method,
+        FrameAnalysisMethod::Elastic
+    );
+    assert!(matches!(
+        report.decision(member, Some(AnalysisKind::Incremental)),
+        Some(Err(sepika_job::prepare::PreparedFrameIssue::Unconfirmed(reason)))
+            if reason.contains("長期架構用組合せが未指定")
+    ));
+    select_frame_gravity(&mut app.core.model);
+    app.run_preparation();
+    let report = app.prepared_frame_analysis().unwrap();
+    let push_error =
+        sepika_job::compute::compute_pushover(app.core.model.clone(), app.core.analysis_cfg)
+            .err()
+            .unwrap()
+            .to_string();
+    assert!(
+        app.core.model.elements.iter().any(|data| {
+            report
+                .decision(data.id, Some(AnalysisKind::Incremental))
+                .and_then(|decision| decision.as_ref().err())
+                .is_some_and(|issue| {
+                    issue.reason().contains("一定せん断・三角形")
+                        && push_error.contains(issue.reason())
+                })
+        }),
+        "{push_error}"
+    );
     app.run_time_history_sample();
     let error = app
         .core
@@ -3676,9 +3901,37 @@ fn rc_reference_rejects_only_member_loads_applied_in_the_current_analysis() {
         .last_error
         .as_ref()
         .expect("有効な非三角部材荷重を拒否");
-    assert!(error.contains("一定せん断・三角形"), "{error}");
+    assert!(
+        error.contains(&prepared_reason)
+            || app.core.model.elements.iter().any(|data| {
+                app.prepared_frame_analysis()
+                    .unwrap()
+                    .decision(data.id, Some(AnalysisKind::TimeHistory))
+                    .and_then(|decision| decision.as_ref().err())
+                    .is_some_and(|issue| {
+                        issue.reason().contains("一定せん断・三角形")
+                            && error.contains(issue.reason())
+                    })
+            }),
+        "{error}"
+    );
     app.core.scoped.last_error = None;
     app.core.analysis_cfg.th_apply_long_term = false;
+    app.core.analysis_cfg.push_apply_long_term = false;
+    assert!(app.prepared_frame_analysis().is_err());
+    app.run_preparation();
+    for kind in [AnalysisKind::Incremental, AnalysisKind::TimeHistory] {
+        assert_eq!(
+            app.prepared_frame_analysis()
+                .unwrap()
+                .decision(member, Some(kind))
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .method,
+            FrameAnalysisMethod::ConcentratedSpring
+        );
+    }
     app.run_time_history_sample();
     assert_no_error(&app, "未適用部材荷重を拒否しない");
     let response = app
@@ -3696,6 +3949,241 @@ fn rc_reference_rejects_only_member_loads_applied_in_the_current_analysis() {
         .iter()
         .flatten()
         .all(|value| value.is_finite()));
+}
+
+#[test]
+fn prepared_member_reports_actual_rebar_error_for_its_own_section() {
+    use sepika_core::section_shape::SectionShape;
+    let mut model = rectangular_rc_portal_input(40.0);
+    let section = &mut model.sections[1];
+    let Some(SectionShape::RcBeamRect { rebar, .. }) = &mut section.shape else {
+        panic!("RC梁")
+    };
+    rebar.top = vec![100];
+    let detail = section
+        .shape
+        .as_ref()
+        .unwrap()
+        .validate_rebar()
+        .unwrap_err()
+        .to_string();
+    let section_id = section.id;
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    let public = prepare_public(&app);
+    app.run_preparation();
+    let report = app.prepared_frame_analysis().unwrap();
+    for member in public
+        .elements
+        .iter()
+        .filter(|e| e.section == Some(section_id))
+    {
+        let reason = report
+            .decision(member.id, None)
+            .unwrap()
+            .as_ref()
+            .err()
+            .unwrap()
+            .reason();
+        assert!(
+            reason.starts_with(&format!("部材 ID {}:", member.id.0)),
+            "{reason}"
+        );
+        assert!(
+            reason.contains(&format!("断面 ID {}", section_id.0)),
+            "{reason}"
+        );
+        assert!(reason.contains(&detail), "{reason}");
+    }
+    let error = sepika_job::compute::compute_linear_static(public, dl_case_id(&app))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains(&detail), "{error}");
+}
+
+#[test]
+fn prepared_src_spring_reason_matches_public_analysis_and_linear_stays_elastic() {
+    use sepika_core::ids::{MaterialId, SectionId};
+    use sepika_core::model::{AnalysisKind, ForceRegime};
+    use sepika_core::section_shape::{SectionShape, SrcHManufacture};
+    use sepika_element::factory::FrameAnalysisMethod;
+
+    let mut model = rectangular_rc_portal_input(40.0);
+    let sec = &model.sections[1];
+    let Some(SectionShape::RcBeamRect { b, d, rebar }) = sec.shape.clone() else {
+        panic!("RC梁")
+    };
+    let mut steel = sepika_app::sample::portal_frame().materials.remove(0);
+    steel.id = MaterialId(model.materials.len() as u32);
+    let mut src = SectionShape::SrcBeamRect {
+        b,
+        d,
+        rebar,
+        steel_height: 300.0,
+        steel_width: 150.0,
+        steel_web_thick: 6.5,
+        steel_flange_thick: 9.0,
+        steel_manufacture: SrcHManufacture::BuiltUp,
+    }
+    .to_section(SectionId(model.sections.len() as u32), "SRC梁".into());
+    src.frame_use = sec.frame_use;
+    src.material = sec.material;
+    src.rebar_material = sec.rebar_material;
+    src.shear_rebar_material = sec.shear_rebar_material;
+    src.steel_material = Some(steel.id);
+    let beam = model
+        .elements
+        .iter_mut()
+        .find(|e| e.section == Some(sec.id))
+        .unwrap();
+    beam.section = Some(src.id);
+    beam.force_regime = ForceRegime::Auto;
+    let member = beam.id;
+    model.set_member_rc_beam_reference(member, None);
+    model.sections.push(src);
+    let sec = &model.sections[0];
+    let Some(SectionShape::RcColumnRect { b, d, rebar }) = sec.shape.clone() else {
+        panic!("RC柱")
+    };
+    let mut src_column = SectionShape::SrcColumnRect {
+        b,
+        d,
+        rebar,
+        steel_height: 300.0,
+        steel_width: 150.0,
+        steel_web_thick: 6.5,
+        steel_flange_thick: 9.0,
+        steel_manufacture: SrcHManufacture::BuiltUp,
+    }
+    .to_section(SectionId(model.sections.len() as u32), "SRC柱".into());
+    src_column.frame_use = sec.frame_use;
+    src_column.material = sec.material;
+    src_column.rebar_material = sec.rebar_material;
+    src_column.shear_rebar_material = sec.shear_rebar_material;
+    src_column.steel_material = Some(steel.id);
+    let column = &mut model.elements[1];
+    assert_eq!(column.section, Some(sec.id));
+    column.section = Some(src_column.id);
+    column.force_regime = ForceRegime::UniaxialBendingShear;
+    let column_id = column.id;
+    model.sections.push(src_column);
+    model.materials.push(steel);
+    let mut app = App::default();
+    assert!(app.load_model(model));
+    app.core.analysis_cfg.threads = 1;
+    app.core.analysis_cfg.push_apply_long_term = false;
+    app.core.analysis_cfg.th_apply_long_term = false;
+    app.core.analysis_cfg.th_nonlinear = true;
+    let cfg = app.core.analysis_cfg;
+    let mut public = app.core.model.clone();
+    let prepared = sepika_job::prepare_model_for_analysis(&mut public, &cfg, None).unwrap();
+    let public_report = prepared.frame_preparation.analysis(&public, &cfg).unwrap();
+    app.run_preparation();
+    let push = sepika_job::compute::compute_pushover(public.clone(), cfg)
+        .err()
+        .unwrap()
+        .to_string();
+    let history = sepika_job::compute::compute_time_history(
+        public,
+        cfg,
+        sepika_job::sample_ground_motion(&cfg).unwrap(),
+    )
+    .err()
+    .unwrap()
+    .to_string();
+    for (kind, error) in [
+        (AnalysisKind::Incremental, push),
+        (AnalysisKind::TimeHistory, history),
+    ] {
+        match kind {
+            AnalysisKind::Incremental => app.run_pushover(),
+            AnalysisKind::TimeHistory => app.run_time_history_sample(),
+        }
+        assert_eq!(app.core.scoped.last_error.as_deref(), Some(error.as_str()));
+        let report = app.prepared_frame_analysis().unwrap();
+        for id in [member, column_id] {
+            let reason = report
+                .decision(id, Some(kind))
+                .unwrap()
+                .as_ref()
+                .err()
+                .unwrap()
+                .reason();
+            assert!(
+                reason.starts_with(&format!("部材 ID {} のSRC材端集中ばね", id.0)),
+                "{reason}"
+            );
+            assert!(error.contains(reason), "{error}");
+            assert_eq!(
+                public_report
+                    .decision(id, Some(kind))
+                    .unwrap()
+                    .as_ref()
+                    .err()
+                    .unwrap()
+                    .reason(),
+                reason
+            );
+            for prepared in [report, &public_report] {
+                assert_eq!(
+                    prepared
+                        .decision(id, None)
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .method,
+                    FrameAnalysisMethod::Elastic
+                );
+            }
+        }
+    }
+    assert!(app.core.scoped.results.is_none());
+
+    let src = app.core.model.element(member).unwrap();
+    let section = src.section.unwrap();
+    let mut invalid_concrete = app.core.model.element_material(src).unwrap().clone();
+    invalid_concrete.id = MaterialId(app.core.model.materials.len() as u32);
+    invalid_concrete.poisson = 0.5;
+    app.core.model.sections[section.index()].material = Some(invalid_concrete.id);
+    app.core.model.materials.push(invalid_concrete);
+    app.core.scoped.staleness.mark_edited();
+    let mut public = app.core.model.clone();
+    let public_report = sepika_job::prepare_model_for_analysis(&mut public, &cfg, None)
+        .unwrap()
+        .frame_preparation
+        .analysis(&public, &cfg)
+        .unwrap();
+    app.run_preparation();
+    assert!(app.core.scoped.preparation.is_none());
+    assert!(app.core.scoped.staleness.preparation_stale);
+    let error = app.core.scoped.last_error.as_deref().unwrap();
+    assert!(error.contains("SRC の νc"), "{error}");
+    let report = app.prepared_frame_analysis().expect("共通準備は成立済み");
+    let issue = |report: &sepika_job::prepare::PreparedFrameAnalysis| {
+        report
+            .decision(member, None)
+            .unwrap()
+            .as_ref()
+            .err()
+            .unwrap()
+            .reason()
+            .to_string()
+    };
+    assert!(issue(report).contains("SRC の νc"));
+    assert_eq!(issue(report), issue(&public_report));
+    for prepared in [report, &public_report] {
+        assert_eq!(
+            prepared
+                .decision(app.core.model.elements[0].id, None)
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .method,
+            FrameAnalysisMethod::Elastic
+        );
+    }
+    app.core.scoped.staleness.mark_edited();
+    assert!(app.prepared_frame_analysis().is_err());
 }
 
 #[test]
