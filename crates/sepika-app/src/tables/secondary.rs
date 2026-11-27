@@ -1052,7 +1052,6 @@ mod tests {
             }
         }
         for kind in [
-            ElementKind::Shell,
             ElementKind::Wall,
             ElementKind::PanelZone,
             ElementKind::Brace {

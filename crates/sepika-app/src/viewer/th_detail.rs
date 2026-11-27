@@ -46,7 +46,7 @@ enum LoopKind {
     Axial,
     /// 梁・柱（曲げ材）: M - θ
     Flexural,
-    /// 上記以外（壁・シェル・パネルゾーン等）: ループ表示非対応
+    /// 上記以外（壁・パネルゾーン等）: ループ表示非対応
     Unsupported,
 }
 
@@ -56,7 +56,7 @@ fn loop_kind_of(kind: &ElementKind) -> LoopKind {
             LoopKind::Axial
         }
         ElementKind::Beam | ElementKind::Fiber => LoopKind::Flexural,
-        ElementKind::Wall | ElementKind::Shell | ElementKind::PanelZone => LoopKind::Unsupported,
+        ElementKind::Wall | ElementKind::PanelZone => LoopKind::Unsupported,
     }
 }
 
@@ -70,7 +70,6 @@ fn kind_label(kind: &ElementKind) -> &'static str {
         ElementKind::Brace { .. } => "ブレース",
         ElementKind::NodalSpring => "節点ばね",
         ElementKind::Damper => "ダンパー",
-        ElementKind::Shell => "シェル",
     }
 }
 
@@ -184,7 +183,7 @@ fn elem_has_force_recording(rec: &ThRecording, elem_idx: usize) -> bool {
 }
 
 /// 断面検定の対象になる部材種別か（ダンパー・節点ばね要素、
-/// 耐震壁・シェル・パネルゾーンは対象外）。
+/// 耐震壁・パネルゾーンは対象外）。
 fn design_member_kind(elem: &ElementData, model: &Model) -> Option<MemberKind> {
     match elem.kind {
         ElementKind::Brace { .. } => Some(MemberKind::Brace),

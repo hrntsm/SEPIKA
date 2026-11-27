@@ -221,7 +221,7 @@ fn ovika_rejects_joint_and_haunch_refs_to_missing_members() {
 }
 
 #[test]
-fn ovika_rejects_wall_attributes_without_a_wall_or_shell() {
+fn ovika_rejects_wall_attributes_without_a_wall() {
     let mut model = baseline();
     model.elements.push(ElementData {
         id: ElemId(0),
@@ -240,10 +240,7 @@ fn ovika_rejects_wall_attributes_without_a_wall_or_shell() {
     });
     let path =
         std::env::temp_dir().join(format!("sepika1764-invalid-{}.ovika", std::process::id()));
-    for (id, reason) in [
-        (0, "壁要素・シェルのいずれでもありません"),
-        (7, "dangling reference"),
-    ] {
+    for (id, reason) in [(0, "壁要素ではありません"), (7, "dangling reference")] {
         model.wall_attrs = vec![WallAttr {
             elem: ElemId(id),
             opening_area: 100_000.0,

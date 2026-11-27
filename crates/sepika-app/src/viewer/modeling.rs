@@ -187,7 +187,7 @@ pub(super) fn classify_with(
         }
         ElementKind::PanelZone => ModelClass::Panel,
         ElementKind::Brace { .. } => ModelClass::Truss,
-        ElementKind::Shell | ElementKind::NodalSpring | ElementKind::Damper => ModelClass::Other,
+        ElementKind::NodalSpring | ElementKind::Damper => ModelClass::Other,
     }
 }
 

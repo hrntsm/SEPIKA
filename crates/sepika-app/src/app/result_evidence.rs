@@ -1558,7 +1558,7 @@ mod tests {
         model.sections[0].depth = 666.0;
         model.sections[0].thickness = Some(77.0);
         model.sections[0].property_basis.area = PropertyBasis::Supplied;
-        model.elements[2].kind = ElementKind::Shell;
+        model.elements[2].kind = ElementKind::Wall;
         model.elements[2].nodes = [0, 1, 3, 2].into_iter().map(NodeId).collect();
         model.wall_attrs.push(WallAttr {
             elem: ElemId(2),
@@ -1607,7 +1607,7 @@ mod tests {
             "断面用途 Some(Column) / 幅 444 mm / せい 666 mm / 実板厚 Some(77.0)",
             "断面積の採用元 Supplied",
             "種別 Concrete",
-            "壁・シェルの開口面積 1200 mm²",
+            "壁の開口面積 1200 mm²",
             "width: 30.0",
             "二次部材 #557 固定SRC小梁 / 種別 Beam",
             "二次部材 #557 / 主筋: #2 割当主筋",

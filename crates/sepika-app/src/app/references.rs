@@ -1714,7 +1714,7 @@ impl App {
                 ui.label(format!("種別 {:?} / フェース距離 i={:?} mm・j={:?} mm（Noneは未算定） / 端別XYZ偏心 {:?} mm / 局所軸参照方向 {:?}", member.kind, member.rigid_zone.face_i, member.rigid_zone.face_j, member.end_offsets_mm, member.local_axis.ref_vector));
                 if let Some(detail) = model.member_detail(member.id) { ui.label(format!("ハンチ i={:?} / j={:?}（長さ・せい増分・幅増分 mm）", detail.haunch_i, detail.haunch_j)); }
                 else { ui.label("ハンチ: 指定なし"); }
-                if let Some(wall) = model.wall_attrs.iter().find(|attr| attr.elem == member.id) { ui.label(format!("壁・シェルの開口面積 {} mm² / 個別開口 {:?}（寸法・位置 mm）", wall.opening_area, wall.openings)); }
+                if let Some(wall) = model.wall_attrs.iter().find(|attr| attr.elem == member.id) { ui.label(format!("壁の開口面積 {} mm² / 個別開口 {:?}（寸法・位置 mm）", wall.opening_area, wall.openings)); }
             }
             for section in &model.sections {
                 ui.label(format!(

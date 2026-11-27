@@ -371,7 +371,6 @@ pub fn members_table(ui: &mut egui::Ui, app: &mut App) {
                             ElementKind::Beam => "Beam",
                             ElementKind::Fiber => "Fiber",
                             ElementKind::Wall => "Wall",
-                            ElementKind::Shell => "Shell",
                             ElementKind::Brace { .. } => "Brace",
                             ElementKind::Damper => "Damper",
                             ElementKind::NodalSpring => "NodalSpring",

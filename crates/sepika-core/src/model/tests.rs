@@ -708,7 +708,6 @@ fn test_requires_section_and_material_covers_line_and_area_elements() {
             tension_only: false,
         },
         ElementKind::Brace { tension_only: true },
-        ElementKind::Shell,
         ElementKind::Wall,
     ] {
         assert!(
@@ -1867,7 +1866,6 @@ fn frame_node_count_matrix_and_support_axes() {
         model.validate_frame_node_counts().unwrap();
     }
     for kind in [
-        ElementKind::Shell,
         ElementKind::Wall,
         ElementKind::PanelZone,
         ElementKind::NodalSpring,
@@ -1913,7 +1911,7 @@ fn frame_node_guard_keeps_four_node_area_elements_and_distinct_zero_length_sprin
     };
     let mut element = ElementData {
         id: ElemId(0),
-        kind: ElementKind::Shell,
+        kind: ElementKind::Wall,
         nodes: (0..4).map(NodeId).collect(),
         section: None,
         local_axis: LocalAxis {
@@ -1926,11 +1924,8 @@ fn frame_node_guard_keeps_four_node_area_elements_and_distinct_zero_length_sprin
         plastic_zone: None,
         spring: None,
     };
-    for kind in [ElementKind::Shell, ElementKind::Wall] {
-        element.kind = kind;
-        model.elements = vec![element.clone()];
-        model.validate().unwrap();
-    }
+    model.elements = vec![element.clone()];
+    model.validate().unwrap();
     model.nodes[1].coord = model.nodes[0].coord;
     element.nodes = vec![NodeId(0), NodeId(1)].into();
     element.kind = ElementKind::NodalSpring;

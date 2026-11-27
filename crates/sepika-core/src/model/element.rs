@@ -1,6 +1,6 @@
 //! 要素（部材）の型。
 //!
-//! - [`ElementKind`] — 要素種別（梁・シェル・ブレース・ダンパー等）。
+//! - [`ElementKind`] — 要素種別（梁・壁・ブレース・ダンパー等）。
 //! - [`ForceRegime`] — 応力評価の方式。
 //! - [`LocalAxis`] — 部材ローカル軸の基準ベクトル。
 //! - [`EndCondition`] — 部材端の接合条件。
@@ -13,7 +13,6 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ElementKind {
     Beam,
-    Shell,
     /// ファイバー梁要素（積分点断面のファイバー分割による端部塑性化域モデル）。
     Fiber,
     Wall,
@@ -61,7 +60,7 @@ impl ElementKind {
     /// （`Model::element_material`）。
     ///
     /// 必須なのは線材（梁・ファイバー梁・ブレース）と
-    /// 面材（シェル・壁）で、断面諸元と材料定数から剛性を作るため、いずれかが
+    /// 壁要素で、断面諸元と材料定数から剛性を作るため、いずれかが
     /// 未割当だとゼロ剛性となり解析が成立しない。
     ///
     /// 一方、次の要素は断面を持たないのが正常な状態であり、未割当として
@@ -79,7 +78,6 @@ impl ElementKind {
             ElementKind::Beam
             | ElementKind::Fiber
             | ElementKind::Brace { .. }
-            | ElementKind::Shell
             | ElementKind::Wall => true,
             ElementKind::PanelZone | ElementKind::NodalSpring | ElementKind::Damper => false,
         }
@@ -117,10 +115,8 @@ impl Model {
                 element.id.0
             ));
         }
-        if matches!(
-            element.kind,
-            ElementKind::PanelZone | ElementKind::Shell | ElementKind::Wall
-        ) || element.nodes.len() != 2
+        if matches!(element.kind, ElementKind::PanelZone | ElementKind::Wall)
+            || element.nodes.len() != 2
         {
             return Ok(());
         }

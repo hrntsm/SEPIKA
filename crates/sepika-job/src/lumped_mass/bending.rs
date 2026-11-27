@@ -231,7 +231,6 @@ fn validate_scope(inp: &LumpedMassBuildInput<'_>) -> JobResult<()> {
             ElementKind::NodalSpring => "節点ばね",
             ElementKind::Damper => "制振ダンパー",
             ElementKind::Wall => "壁要素",
-            ElementKind::Shell => "シェル要素",
             ElementKind::Fiber => "ファイバー要素",
             _ => "接続節点数が不正な骨組要素",
         };
@@ -1224,7 +1223,6 @@ mod tests {
             ElementKind::NodalSpring,
             ElementKind::Damper,
             ElementKind::Wall,
-            ElementKind::Shell,
         ] {
             for geometry in 0..3 {
                 let (mut model, res) = fixture(SeismicDir::X, false, false);
@@ -1241,7 +1239,7 @@ mod tests {
                 let other = node.id;
                 model.nodes.push(node);
                 added.nodes = [NodeId(4), other].into_iter().collect();
-                if matches!(kind, ElementKind::Wall | ElementKind::Shell) {
+                if kind == ElementKind::Wall {
                     added.nodes.extend([NodeId(5), NodeId(6)]);
                 }
                 let id = added.id;

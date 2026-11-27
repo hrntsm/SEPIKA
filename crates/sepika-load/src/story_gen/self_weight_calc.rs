@@ -1,4 +1,4 @@
-//! 自重（線材・壁・シェル・ダンパー）の列挙と算定。
+//! 自重（線材・壁・ダンパー）の列挙と算定。
 //!
 //! - [`SelfWeightItem`] — 自重 1 件分の設計重量・物理質量相当と帰属の中間表現
 //! - [`enumerate_self_weight`] — モデル全要素の自重を列挙する
@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use sepika_core::section_shape::SectionShape;
 
-use super::geom::{dist3, is_vertical_pair, polygon_area_3d};
+use super::geom::{dist3, is_vertical_pair};
 use super::*;
 
 /// 節点 → その節点に取り付く線材（Beam/Fiber/Brace、2 節点以上）の `model.elements`
@@ -94,19 +94,6 @@ pub(crate) enum SelfWeightItem {
         load: f64,
         mass_equiv: f64,
     },
-    /// 壁・シェルの自重の頂点配分（`model.nodes` 添字 → [N]）。
-    ///
-    /// 質量方式ごとに基準が異なるため 3 値を持つ。
-    /// `load_shares` は設計重量（設計躯体 ＋ 仕上げ・増打ち ＋ 開口重量）、
-    /// `mass_equiv_shares` は物理密度の躯体 ＋ 仕上げ・増打ち ＋ 開口重量、
-    /// `matrix_shares` は物理密度の躯体 ＋ 開口重量（解析の質量行列が受け持つ分）。
-    /// 仕上げ・増打ちは質量行列に対応物がないため、`mass_equiv_shares` と
-    /// `matrix_shares` の差として補正質点に残す。
-    Panel {
-        load_shares: Vec<(usize, f64)>,
-        mass_equiv_shares: Vec<(usize, f64)>,
-        matrix_shares: Vec<(usize, f64)>,
-    },
 }
 
 /// モデル全要素の自重を列挙する（§柱梁自重・§壁自重・§ダンパー自重）。
@@ -132,7 +119,6 @@ pub(crate) enum SelfWeightItem {
 ///   `factor` を乗じない。階共通耐火被覆・`load_cfg.extra_line_weight`（例外的な付加線重量 [N/mm]）・
 ///   `load_cfg.finish_area_weight`（仕上げ面重量 w_f、周長 φ から自動換算）が
 ///   あれば自重算定長を掛けて加算する。
-/// - シェル: 設計重量・物理質量相当重量・行列負担を別々に全頂点へ配る。
 /// - 壁版: 本列挙から除外する。物理壁版IDの共通実領域からDL支持と階帯を別々に生成する。
 /// - ダンパー: 入力総重量を使い、断面・付加重量は加算しない。
 ///
@@ -389,45 +375,6 @@ pub(crate) fn enumerate_self_weight(
                     items.push(SelfWeightItem::Upstand { elem_idx, segments });
                 }
             }
-            ElementKind::Shell if elem.nodes.len() >= 3 => {
-                let Some(t) = sec.thickness else {
-                    continue;
-                };
-                let pts: Vec<[f64; 3]> = elem
-                    .nodes
-                    .iter()
-                    .map(|n| model.nodes[n.index()].coord)
-                    .collect();
-                let area = polygon_area_3d(&pts);
-
-                let attr = model.wall_attrs.iter().find(|a| a.elem == elem.id);
-                let opening_area = attr.map(|a| a.total_opening_area()).unwrap_or(0.0);
-                let opening_weight = attr.map(|a| a.opening_weight).unwrap_or(0.0);
-                let net_area = (area - opening_area).max(0.0);
-                let finish = attr.map(|a| a.finish_intensity).unwrap_or(0.0);
-                mat.validate_design_self_weight(
-                    &format!("要素 {}", elem.id.0),
-                    "シェルのDL・地震用重量",
-                )?;
-                let w_load = ((mat.design_unit_weight_n_per_mm3() * t + finish) * net_area
-                    + opening_weight)
-                    .max(0.0);
-
-                let slit = attr.map(|a| a.slit).unwrap_or_default();
-                let load_shares = wall_corner_shares(elem, &pts, w_load, slit);
-                let w_matrix =
-                    (mat.density * t * GRAVITY_MM_S2 * net_area + opening_weight).max(0.0);
-                let matrix_shares = wall_corner_shares(elem, &pts, w_matrix, slit);
-                let w_mass_equiv = ((mat.density * t * GRAVITY_MM_S2 + finish) * net_area
-                    + opening_weight)
-                    .max(0.0);
-                let mass_equiv_shares = wall_corner_shares(elem, &pts, w_mass_equiv, slit);
-                items.push(SelfWeightItem::Panel {
-                    load_shares,
-                    mass_equiv_shares,
-                    matrix_shares,
-                });
-            }
             _ => {}
         }
     }
@@ -475,52 +422,4 @@ pub fn validate_cft_steel_materials(model: &Model) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-/// 壁エレメントの自重を頂点へ配る（§壁自重）。
-///
-/// 縁が切れていない梁際の辺へ伝える。上下とも一体なら四隅へ等分し、片側だけ切れて
-/// いれば反対側の 2 節点へ全量を寄せる。上下とも切れた壁は四隅へ等分して重量を落とさず、
-/// 解析前チェックのエラーに委ねる。
-///
-/// 上下の別は標高で決める。同じ標高の節点はまとめて 1 つの辺として扱う
-/// （台形壁で上辺の 2 節点の標高がわずかに異なる場合も、[`LEVEL_TOL_MM`] 以内なら
-/// 同じ辺とみなす）。
-fn wall_corner_shares(
-    elem: &sepika_core::model::ElementData,
-    pts: &[[f64; 3]],
-    w: f64,
-    slit: sepika_core::model::WallSlit,
-) -> Vec<(usize, f64)> {
-    let equal = |idx: Vec<usize>| -> Vec<(usize, f64)> {
-        let share = w / idx.len() as f64;
-        idx.into_iter()
-            .map(|i| (elem.nodes[i].index(), share))
-            .collect()
-    };
-    let all: Vec<usize> = (0..pts.len()).collect();
-    let (bottom_slit, top_slit) = (slit.beam_face[0], slit.beam_face[1]);
-    if bottom_slit == top_slit {
-        return equal(all);
-    }
-    let level = |take_max: bool| -> Vec<usize> {
-        let z =
-            pts.iter()
-                .map(|p| p[2])
-                .fold(if take_max { f64::MIN } else { f64::MAX }, |acc, v| {
-                    if take_max {
-                        acc.max(v)
-                    } else {
-                        acc.min(v)
-                    }
-                });
-        (0..pts.len())
-            .filter(|&i| (pts[i][2] - z).abs() < LEVEL_TOL_MM)
-            .collect()
-    };
-    let idx = level(bottom_slit);
-    if idx.is_empty() {
-        return equal(all);
-    }
-    equal(idx)
 }

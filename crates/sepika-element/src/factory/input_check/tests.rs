@@ -1453,7 +1453,6 @@ fn explicit_rc_basis_rejects_every_other_resolved_element_path() {
     }
     for element_kind in [
         ElementKind::Fiber,
-        ElementKind::Shell,
         ElementKind::Wall,
         ElementKind::PanelZone,
         ElementKind::Brace {

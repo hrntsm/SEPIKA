@@ -873,10 +873,7 @@ pub fn try_compute_quantity_takeoff(
         .filter(|e| {
             matches!(
                 e.kind,
-                ElementKind::Beam
-                    | ElementKind::Brace { .. }
-                    | ElementKind::Shell
-                    | ElementKind::Wall
+                ElementKind::Beam | ElementKind::Brace { .. } | ElementKind::Wall
             )
         })
         .map(|e| e.section)
@@ -1059,7 +1056,7 @@ fn compute_quantity_takeoff_validated(
                     out.items.push(item);
                 }
             }
-            ElementKind::Wall | ElementKind::Shell if elem.nodes.len() >= 3 => {
+            ElementKind::Wall if elem.nodes.len() >= 3 => {
                 if let Some(item) = wall_quantity(&ctx, elem) {
                     out.items.push(item);
                 }

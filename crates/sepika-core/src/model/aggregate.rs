@@ -289,7 +289,7 @@ impl Model {
 
     /// 節点・要素・断面・材料・階・床/壁領域・床板/壁版の添字 ID と、
     /// 主架構・二次部材・版・領域・通り芯・一本部材・階・拘束・荷重・部材別重量・生成記録の参照を検査する。
-    /// 壁属性の参照先は壁要素またはシェルに限る。二次部材 ID は一意性だけを要求する。
+    /// 壁属性の参照先は壁要素に限る。二次部材 ID は一意性だけを要求する。
     /// 未割当 `None`・断面用途・幾何・入力完成度は検査しない。
     pub fn validate_reference_ids(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
@@ -1618,14 +1618,14 @@ impl Model {
         }
     }
 
-    /// 参照先が存在しないか、壁要素・シェルでない最初の壁属性を、部材番号付きエラーで返す。
+    /// 参照先が存在しないか、壁要素でない最初の壁属性を、部材番号付きエラーで返す。
     pub fn validate_wall_attr_refs(&self) -> Result<(), crate::error::CoreError> {
         use crate::error::CoreError;
 
         for attr in &self.wall_attrs {
             let id = attr.elem.0;
             match self.element(attr.elem).map(|elem| elem.kind) {
-                Some(ElementKind::Wall | ElementKind::Shell) => {}
+                Some(ElementKind::Wall) => {}
                 None => {
                     return Err(CoreError::DanglingRef(format!(
                         "{WALL_ATTR_LABEL} -> 部材 {id}"
@@ -1633,7 +1633,7 @@ impl Model {
                 }
                 Some(_) => {
                     return Err(CoreError::InvalidInput(format!(
-                        "{WALL_ATTR_LABEL} -> 部材 {id} は壁要素・シェルのいずれでもありません"
+                        "{WALL_ATTR_LABEL} -> 部材 {id} は壁要素ではありません"
                     )))
                 }
             }

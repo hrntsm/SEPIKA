@@ -507,7 +507,7 @@ fn coupling_indicator_from_expanded(
             .nodes
             .iter()
             .filter_map(|id| model.node(*id).map(|node| node.coord));
-        if matches!(kind, ElementKind::Wall | ElementKind::Shell) {
+        if kind == ElementKind::Wall {
             let mut points = points;
             if let Some(origin) = points.next() {
                 let (mut spans_x, mut spans_y, mut spans_z) = (false, false, false);
@@ -767,7 +767,7 @@ fn transmits_shared_displacement(
         return true;
     }
     let member = member.element;
-    if matches!(member.kind, ElementKind::Wall | ElementKind::Shell) {
+    if member.kind == ElementKind::Wall {
         return dof == Dof::Uz;
     }
     if dof == Dof::Rz && matches!(member.kind, ElementKind::Brace { .. }) {

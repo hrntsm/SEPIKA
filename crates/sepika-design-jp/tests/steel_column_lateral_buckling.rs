@@ -280,50 +280,44 @@ fn a_directly_connected_input_plate_requires_reconfirmation_after_an_edit() {
     use sepika_core::model::{ElementKind, Section};
     use sepika_design_jp::steel::column_lateral_buckling_length;
 
-    for kind in [ElementKind::Shell, ElementKind::Wall] {
-        let mut model = input::column(500.0, false);
-        for (id, coord) in [
-            (2, [3000.0, 0.0, 3000.0]),
-            (3, [3000.0, 0.0, 1500.0]),
-            (4, [0.0, 0.0, 1500.0]),
-        ] {
-            let mut node = model.nodes[1].clone();
-            node.id = NodeId(id);
-            node.coord = coord;
-            model.nodes.push(node);
-        }
-        let mut plate = model.elements[0].clone();
-        plate.id = ElemId(1);
-        plate.kind = kind;
-        plate.nodes = [1, 2, 3, 4].into_iter().map(NodeId).collect();
-        plate.section = Some(SectionId(1));
-        plate.end_offsets_mm = [[0.0; 3]; 2];
-        model.elements.push(plate);
-        let mut plate_section = Section::zero(SectionId(1), "板".into());
-        plate_section.thickness = Some(150.0);
-        model.sections.push(plate_section);
-        model.steel_design_attrs[0].column_lateral_buckling_end_supports =
-            Some(model.column_end_supports(&model.elements[0]).unwrap());
-
-        let length = |model: &Model| {
-            column_lateral_buckling_length(
-                model,
-                &model.elements[0],
-                model.steel_design_attrs.first(),
-            )
-        };
-        assert_eq!(length(&model), Ok(3500.0));
-        model.sections[1].thickness = Some(100.0);
-        assert!(length(&model)
-            .unwrap_err()
-            .contains("確認時から変わりました"));
-        model.sections[1].thickness = Some(150.0);
-        assert_eq!(length(&model), Ok(3500.0));
-        model.elements.pop();
-        assert!(length(&model)
-            .unwrap_err()
-            .contains("確認時から変わりました"));
+    let mut model = input::column(500.0, false);
+    for (id, coord) in [
+        (2, [3000.0, 0.0, 3000.0]),
+        (3, [3000.0, 0.0, 1500.0]),
+        (4, [0.0, 0.0, 1500.0]),
+    ] {
+        let mut node = model.nodes[1].clone();
+        node.id = NodeId(id);
+        node.coord = coord;
+        model.nodes.push(node);
     }
+    let mut plate = model.elements[0].clone();
+    plate.id = ElemId(1);
+    plate.kind = ElementKind::Wall;
+    plate.nodes = [1, 2, 3, 4].into_iter().map(NodeId).collect();
+    plate.section = Some(SectionId(1));
+    plate.end_offsets_mm = [[0.0; 3]; 2];
+    model.elements.push(plate);
+    let mut plate_section = Section::zero(SectionId(1), "板".into());
+    plate_section.thickness = Some(150.0);
+    model.sections.push(plate_section);
+    model.steel_design_attrs[0].column_lateral_buckling_end_supports =
+        Some(model.column_end_supports(&model.elements[0]).unwrap());
+
+    let length = |model: &Model| {
+        column_lateral_buckling_length(model, &model.elements[0], model.steel_design_attrs.first())
+    };
+    assert_eq!(length(&model), Ok(3500.0));
+    model.sections[1].thickness = Some(100.0);
+    assert!(length(&model)
+        .unwrap_err()
+        .contains("確認時から変わりました"));
+    model.sections[1].thickness = Some(150.0);
+    assert_eq!(length(&model), Ok(3500.0));
+    model.elements.pop();
+    assert!(length(&model)
+        .unwrap_err()
+        .contains("確認時から変わりました"));
 }
 
 #[test]

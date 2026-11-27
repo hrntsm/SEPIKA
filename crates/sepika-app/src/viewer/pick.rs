@@ -195,7 +195,7 @@ fn dist_point_to_polygon(p: egui::Pos2, poly: &[egui::Pos2]) -> f32 {
     best
 }
 
-/// ピック距離の比較用スコア。面要素（壁・シェル）は大梁の下辺と重なる辺で
+/// ピック距離の比較用スコア。面要素（壁）は大梁の下辺と重なる辺で
 /// 線材と同距離になったとき壁を優先するため、微小なバイアスを掛ける。
 fn pick_score(shape: DrawShape, dist_px: f32) -> f32 {
     match shape {
@@ -248,7 +248,7 @@ pub(super) fn pick_nearest_node(
 
 /// スクリーン座標 `pos` に最も近い部材の `(ElemId, 距離px)` を返す。
 ///
-/// 線材は先頭 2 節点の線分距離、壁・シェルは多角形の内側（距離 0）または辺距離。
+/// 線材は先頭 2 節点の線分距離、壁は多角形の内側（距離 0）または辺距離。
 /// 2 節点未満の要素・節点参照が範囲外の要素は対象外。荷重対象の専用ピックに用いる。
 pub(super) fn pick_nearest_member(
     model: &sepika_core::model::Model,

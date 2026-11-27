@@ -18,8 +18,8 @@ mod multi_floor_model;
 #[path = "fixtures/multi_floor_torsional_cancellation_reference.rs"]
 mod multi_floor_reference;
 use multi_floor_model::{
-    add_head_load_case, model_with_floor, scale, Floor, HeadForces, HEADS, SMALL_SCALE, UNIFORM_MM,
-    XY_MM,
+    add_head_load_case, model_with_two_diaphragms, scale, HeadForces, HEADS, SMALL_SCALE,
+    UNIFORM_MM, XY_MM,
 };
 use multi_floor_reference::uniform_displacement_reactions;
 
@@ -74,10 +74,11 @@ fn check_uniform(model: &Model, response: &StaticOnce, reactions: HeadForces, ax
     }
 }
 
-fn reproduce(floor: Floor, required_diagnostic: &str) {
-    let mut model = model_with_floor(floor);
+#[test]
+fn two_diaphragms_allow_local_cancellation_without_a_shared_story_rotation() {
+    let mut model = model_with_two_diaphragms();
     let [uniform_x, uniform_y] = uniform_displacement_reactions();
-    eprintln!("{floor:?} 一様独立反力 X={uniform_x:.9?}, Y={uniform_y:.9?}");
+    eprintln!("一様独立反力 X={uniform_x:.9?}, Y={uniform_y:.9?}");
     let x = solve(&mut model, "X対照", uniform_x);
     let y = solve(&mut model, "Y対照", uniform_y);
     check_uniform(&model, &x, uniform_x, 0);
@@ -107,23 +108,15 @@ fn reproduce(floor: Floor, required_diagnostic: &str) {
         })
     };
     let d_twisted = sample_disp(&twisted);
-    match floor {
-        Floor::TwoDiaphragms => {
-            for (master, slave) in [(0, 2), (1, 3)] {
-                assert_relative_eq!(d_twisted[master][2], d_twisted[slave][2], epsilon = 1e-13);
-                assert_relative_eq!(
-                    d_twisted[slave][0] - d_twisted[master][0],
-                    -4000.0 * d_twisted[master][2],
-                    epsilon = 1e-11,
-                );
-            }
-            assert!((d_twisted[0][2] - d_twisted[1][2]).abs() > 1e-5);
-        }
-        Floor::Shell => {
-            // 同じY座標の辺の伸縮は共通の並進・回転で表せない。
-            assert!((d_twisted[1][0] - d_twisted[0][0]).abs() > 1e-4);
-        }
+    for (master, slave) in [(0, 2), (1, 3)] {
+        assert_relative_eq!(d_twisted[master][2], d_twisted[slave][2], epsilon = 1e-13);
+        assert_relative_eq!(
+            d_twisted[slave][0] - d_twisted[master][0],
+            -4000.0 * d_twisted[master][2],
+            epsilon = 1e-11,
+        );
     }
+    assert!((d_twisted[0][2] - d_twisted[1][2]).abs() > 1e-5);
     let c = 2;
     assert_relative_eq!(d_twisted[c][0], sample_disp(&small)[c][0], epsilon = 1e-11);
     let stiffness_x =
@@ -140,7 +133,7 @@ fn reproduce(floor: Floor, required_diagnostic: &str) {
         ("Xねじれ縮小", &small_twisted, small_twisted_x, &small_y),
     ];
     for (name, response, loads, response_y) in cases {
-        eprintln!("{floor:?} {name} Fx/Fy [N]={loads:.9?}");
+        eprintln!("{name} Fx/Fy [N]={loads:.9?}");
         let forces = check_equilibrium(&model, response, loads);
         let displacements = sample_disp(response);
         let [dx, dy, _] = displacements[c];
@@ -160,7 +153,7 @@ fn reproduce(floor: Floor, required_diagnostic: &str) {
             stiffness_x(response)
         );
         let reason = re_x.unwrap_err();
-        assert!(reason.contains(required_diagnostic), "{reason}");
+        assert!(reason.contains("層上端に剛床が複数あります"), "{reason}");
         assert!(reason.contains("部材2の方向別断面剛性の軸"), "{reason}");
         assert_eq!(fes_x, Err(reason));
         assert_eq!(rs_x, 1.0);
@@ -190,14 +183,4 @@ fn reproduce(floor: Floor, required_diagnostic: &str) {
             assert_relative_eq!(big, tiny, epsilon = 1e-7);
         }
     }
-}
-
-#[test]
-fn two_diaphragms_allow_local_cancellation_without_a_shared_story_rotation() {
-    reproduce(Floor::TwoDiaphragms, "層上端に剛床が複数あります");
-}
-
-#[test]
-fn a_deforming_floor_allows_local_cancellation_without_a_rigid_story_motion() {
-    reproduce(Floor::Shell, "層上端に単一剛床がありません");
 }

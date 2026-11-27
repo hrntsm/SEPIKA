@@ -253,7 +253,7 @@ fn shape_has_steel_fiber_region(shape: &SectionShape) -> bool {
 /// 壁上下の剛梁は主筋材料の区分と、弾性剛性・形状・質量に必要な入力を検査する。
 ///
 /// 仕口パネルは非線形解析の対象外として診断する。
-/// 弾性としてモデル化することが仕様である要素（`Shell` / `NodalSpring`、
+/// 弾性としてモデル化することが仕様である要素（`NodalSpring`、
 /// および特性を専用の属性で持つ `Damper`）は対象外。
 /// ブレースは弾性トラスに必要な幾何・断面・材料だけを診断する。
 pub fn nonlinear_input_issues(model: &Model) -> Vec<String> {

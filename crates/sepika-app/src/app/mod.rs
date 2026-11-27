@@ -1752,9 +1752,7 @@ pub(crate) fn steel_member_use_of(
     use sepika_design_jp::secondary::width_thickness::SteelMemberUse;
     if matches!(
         elem.kind,
-        sepika_core::model::ElementKind::Wall
-            | sepika_core::model::ElementKind::Shell
-            | sepika_core::model::ElementKind::PanelZone
+        sepika_core::model::ElementKind::Wall | sepika_core::model::ElementKind::PanelZone
     ) {
         return SteelMemberUse::Beam;
     }

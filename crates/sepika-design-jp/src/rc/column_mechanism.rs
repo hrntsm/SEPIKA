@@ -298,10 +298,6 @@ impl MemberAxis {
     }
 }
 
-fn node_pair(i: NodeId, j: NodeId) -> [NodeId; 2] {
-    [i.min(j), i.max(j)]
-}
-
 #[derive(Default)]
 struct GirderMoments<'a> {
     sum_my: f64,
@@ -454,7 +450,6 @@ pub struct ColumnMechanismTopology {
     frame: NodeAdjacency,
     linked_nodes: HashSet<NodeId>,
     unconfirmed_reverse_joints: HashSet<NodeId>,
-    shell_node_pairs: HashSet<[NodeId; 2]>,
     line_slab_supports: HashSet<ElemId>,
 }
 
@@ -462,7 +457,6 @@ impl ColumnMechanismTopology {
     /// 検定対象モデルの主架構線材と、別節点との連結拘束を索引化する。
     pub fn new(model: &Model) -> Self {
         let mut unconfirmed_reverse_joints = HashSet::new();
-        let mut shell_node_pairs = HashSet::new();
         for elem in &model.elements {
             match elem.kind {
                 ElementKind::PanelZone => {
@@ -470,16 +464,6 @@ impl ColumnMechanismTopology {
                 }
                 ElementKind::NodalSpring | ElementKind::Wall => {
                     unconfirmed_reverse_joints.extend(elem.nodes.iter().copied())
-                }
-                ElementKind::Shell => {
-                    unconfirmed_reverse_joints.extend(elem.nodes.iter().copied());
-                    for (index, &first) in elem.nodes.iter().enumerate() {
-                        shell_node_pairs.extend(
-                            elem.nodes[index + 1..]
-                                .iter()
-                                .map(|&second| node_pair(first, second)),
-                        );
-                    }
                 }
                 // 軸力要素も、偏心端では軸力により付加曲げを節点へ伝える。
                 ElementKind::Brace { .. } => unconfirmed_reverse_joints.extend(
@@ -534,7 +518,6 @@ impl ColumnMechanismTopology {
             frame: NodeAdjacency::primary_frame(model),
             linked_nodes: Reducer::explicit_constraint_linked_nodes(model),
             unconfirmed_reverse_joints,
-            shell_node_pairs,
             line_slab_supports,
         }
     }
@@ -560,11 +543,7 @@ impl ColumnMechanismTopology {
     }
 
     fn has_attached_floor(&self, model: &Model, girder: &ElementData) -> bool {
-        self.line_slab_supports.contains(&girder.id)
-            || beam_supports_slab(model, girder)
-            || self
-                .shell_node_pairs
-                .contains(&node_pair(girder.nodes[0], girder.nodes[1]))
+        self.line_slab_supports.contains(&girder.id) || beam_supports_slab(model, girder)
     }
 
     fn allows_new_head_yield(

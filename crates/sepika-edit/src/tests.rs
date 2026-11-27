@@ -1000,67 +1000,53 @@ fn test_edit_section_shape_rejects_use_change_for_references() {
 }
 
 #[test]
-fn test_edit_rc_plate_section_shape_with_element_reference() {
+fn editing_a_wall_section_preserves_its_wall_reference() {
     use sepika_core::section_shape::SectionShape;
-    for (name, kind, old_shape, new_shape) in [
-        (
-            "S",
-            ElementKind::Shell,
-            SectionShape::RcSlab { thickness: 150.0 },
-            SectionShape::RcSlab { thickness: 200.0 },
-        ),
-        (
-            "W",
-            ElementKind::Wall,
-            SectionShape::RcWall {
-                thickness: 180.0,
-                pwh_ratio: None,
-                pwv_ratio: None,
-                ps: 0.0,
-            },
-            SectionShape::RcWall {
-                thickness: 220.0,
-                pwh_ratio: None,
-                pwv_ratio: None,
-                ps: 0.0,
-            },
-        ),
-    ] {
-        let mut model = Model::default();
-        model
-            .sections
-            .push(old_shape.to_section(SectionId(0), name.into()));
-        model.elements.push(ElementData {
-            id: ElemId(0),
-            kind,
-            nodes: smallvec![],
-            section: Some(SectionId(0)),
-            local_axis: LocalAxis {
-                ref_vector: [0.0, 0.0, 1.0],
-            },
-            end_cond: [EndCondition::Fixed, EndCondition::Fixed],
-            force_regime: ForceRegime::Auto,
-            rigid_zone: Default::default(),
-            end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
-            plastic_zone: None,
-            spring: None,
-        });
+    let old_shape = SectionShape::RcWall {
+        thickness: 180.0,
+        pwh_ratio: None,
+        pwv_ratio: None,
+        ps: 0.0,
+    };
+    let new_shape = SectionShape::RcWall {
+        thickness: 220.0,
+        pwh_ratio: None,
+        pwv_ratio: None,
+        ps: 0.0,
+    };
+    let mut model = Model::default();
+    model
+        .sections
+        .push(old_shape.to_section(SectionId(0), "W".into()));
+    model.elements.push(ElementData {
+        id: ElemId(0),
+        kind: ElementKind::Wall,
+        nodes: smallvec![],
+        section: Some(SectionId(0)),
+        local_axis: LocalAxis {
+            ref_vector: [0.0, 0.0, 1.0],
+        },
+        end_cond: [EndCondition::Fixed, EndCondition::Fixed],
+        force_regime: ForceRegime::Auto,
+        rigid_zone: Default::default(),
+        end_offsets_mm: [[0.0, 0.0, 0.0]; 2],
+        plastic_zone: None,
+        spring: None,
+    });
 
-        assert!(!EditSectionShape {
-            section: SectionId(0),
-            new_shape: new_shape.clone(),
-            frame_use: None,
-        }
-        .apply(&mut model)
-        .is_noop());
-        assert_eq!(model.sections[0].shape, Some(new_shape));
+    assert!(!EditSectionShape {
+        section: SectionId(0),
+        new_shape: new_shape.clone(),
+        frame_use: None,
     }
+    .apply(&mut model)
+    .is_noop());
+    assert_eq!(model.sections[0].shape, Some(new_shape));
 }
 
 #[test]
 fn test_edit_section_shape_rejects_cft_for_non_target_element_reference() {
     for kind in [
-        ElementKind::Shell,
         ElementKind::Wall,
         ElementKind::PanelZone,
         ElementKind::NodalSpring,
@@ -6143,7 +6129,6 @@ fn set_element_section_rejects_cft_for_non_column_use_or_kind() {
         ElementKind::Brace {
             tension_only: false,
         },
-        ElementKind::Shell,
         ElementKind::Wall,
     ] {
         let mut model = seeded_model(2, 1);
