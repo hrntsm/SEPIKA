@@ -2,7 +2,7 @@
 
 本書は記録時点の検証履歴である。全長ファイバー積分モデルと専用試験 `distributed_curvature_tests.rs` は Issue #1169 で削除しており、現行の解析経路・試験対象ではない。
 
-対象は共通DOF、シェル、節点ばね、履歴ダンパー、Maxwellダンパー、免震支承、要素生成の入力診断である。算定式・公差・状態のcommit/revert順序は変更しない。既存V&Vの状態を変更せず、以下はVerificationの対応表とする。実験ValidationやGUI操作の証拠へ拡張しない。
+整理時の対象は共通DOF、シェル、節点ばね、履歴ダンパー、Maxwellダンパー、免震支承、要素生成の入力診断である。算定式・公差・状態のcommit/revert順序は変更しない。既存V&Vの状態を変更せず、以下はVerificationの対応表とする。実験ValidationやGUI操作の証拠へ拡張しない。
 
 マルチスプリングと専用試験は [#2032](https://github.com/hrntsm/SEPIKA/issues/2032) で廃止した。下表の該当行は試験整理時点の証跡であり、現行の試験入口ではない。
 
@@ -14,9 +14,8 @@
 | `test_hysteretic_active_in_static_no_dt` | `springs::damper::hysteretic::tests::test_hysteretic_bilinear_elastic_then_yield` | 時間刻み未指定で伸び0.05 mmの50 Nと正の接線剛性、降伏後応答を保持 |
 | `test_axial_spring_local_stiffness_and_displacement` / `test_rotational_spring_stiffness_components` | `springs::spring::tests::test_axial_and_rotational_spring_stiffness_components` | 軸の対角・交差4成分、曲げ回転2方向の各4成分とねじり0。試験内だけのP/k代入再計算を除く |
 | `test_maxwell_state_member_forces_matches_axial_force` | `springs::damper::maxwell::tests::test_maxwell_element_drives_axial_force` | 実update後の引張正負、2評価点の軸力一致とMz=0。commit後の力・緩和・cache・復元の別試験を保持 |
-| シェルのドリリング感度 | `shell::tests::test_drilling_stabilization_insensitivity` | 1要素片持ち、節点0/1固定・節点2Uzの単位荷重、係数0.1/1/10で先端変位差1%未満。local_stiffnessの安定化を二重加算せず、既存dense_solveで解く |
 | 免震の状態確定共用 | `springs::isolator::tests` | 積層・摩擦・歪依存のtrial後に既存commit_stateを使い、材料確定→変位確定→せん断状態複製の順を維持。既存commit/revert・checkpoint回帰を保持 |
-| 行列引数・lookup・生成診断 | `shell::{bmatrix,stiffness,recovery}` / `frame::section_lookup` / `factory::{regime,input_check}` | 未使用引数と不可能なOption枝だけを除去。行列演算、未割当/範囲外/ID不一致の既定物性、Autoと明示レジーム、診断順と文言を維持 |
+| lookup・生成診断 | `frame::section_lookup` / `factory::{regime,input_check}` | 不可能なOption枝を除去し、未割当/範囲外/ID不一致の既定物性、Autoと明示レジーム、診断順と文言を維持 |
 | `test_laminated_yields_past_qd` | `springs::isolator::tests::test_checkpoint_roundtrip_restores_hysteresis` | 同じ積層支承・150 mm変位で、弾性力を下回ることと120000 Nとの差500 N未満をcheckpoint復元試験へ移設。履歴・復元後の全観測を保持 |
 | `fiber_section_states_are_delegated_to_inner_fiber_beam` | `frame::multi_spring::tests::test_ms_phi_positive_objectivity_and_tangent_consistency` | 同じ295 N/mm²・塑性域指定なしの初期モデルで、状態の存在・2点以上・各点のfiber非空を客観性試験の更新前へ移設 |
 | `test_nonlinear_panel_tracks_column_without_stiffness` | `springs::panel::tests::test_nonlinear_panel_yields_at_pmy` | 同じ未更新の非線形パネルで14 DOFと柱12 DOFの剛性0を照合。降伏履歴と期待値・公差を保持 |
@@ -25,6 +24,15 @@
 | 試験中の断面力取得・初期設定 | `frame::fiber::distributed_curvature_tests` / `factory::input_check::tests` ほか | 同一状態の断面力を一度取得して全成分を照合。同値の再代入と観測前に破棄される設定だけを除去し、入力・試行履歴・期待値・公差を保持 |
 
 固定SHAを含む過去のhandoff・raw出力・過去試験件数は履歴として保持する。本表はその記録を過去に遡って変更するものではない。
+
+## シェル廃止前の証跡
+
+シェル要素と専用試験は [#2033](https://github.com/hrntsm/SEPIKA/issues/2033) で廃止した。下表は[廃止前の実装・試験](https://github.com/hrntsm/SEPIKA/tree/eabc94da274cedea44dc844fd57026cb14b20810/crates/sepika-element/src/shell)の整理記録であり、現行の保証には含まない。
+
+| 整理対象 | 廃止前の試験・実装 | 当時の観測 |
+| --- | --- | --- |
+| シェルのドリリング感度 | `shell::tests::test_drilling_stabilization_insensitivity` | 1要素片持ち、節点0/1固定・節点2Uzの単位荷重、係数0.1/1/10で先端変位差1%未満。local_stiffnessの安定化を二重加算せず、既存dense_solveで解く |
+| シェルの行列引数 | `shell::{bmatrix,stiffness,recovery}` | 未使用引数を除去し、行列演算を維持 |
 
 ## 検証状態
 

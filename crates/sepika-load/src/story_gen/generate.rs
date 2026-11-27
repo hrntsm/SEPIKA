@@ -355,20 +355,6 @@ fn generate_stories_impl(
                 target[nj] += total / 2.0;
             }
         }
-        SelfWeightItem::Panel {
-            load_shares,
-            mass_equiv_shares,
-            matrix_shares,
-        } => {
-            let src = match basis {
-                Basis::Load => load_shares,
-                Basis::MassEquiv => mass_equiv_shares,
-                Basis::Matrix => matrix_shares,
-            };
-            for &(i, w) in src {
-                target[i] += w;
-            }
-        }
         SelfWeightItem::Damper {
             ni,
             nj,

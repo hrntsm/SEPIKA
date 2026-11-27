@@ -92,7 +92,6 @@ pub fn build_behavior_with_axial_factor(
             with_panel_offset(inner, data, model)
         }
         ElementKind::PanelZone => Box::new(crate::springs::panel::PanelZone::new(data, model)),
-        ElementKind::Shell => Box::new(crate::shell::ShellElement::new(data, model)),
         ElementKind::Wall => {
             crate::wall::shear_section::wall_shear_rigidity(data, model)
                 .unwrap_or_else(|reason| panic!("壁 ID {}: {reason}", data.id.0));

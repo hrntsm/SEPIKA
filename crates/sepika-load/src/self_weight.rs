@@ -34,7 +34,6 @@ const DIR_DOWN: [f64; 3] = [0.0, 0.0, -1.0];
 /// - **ダンパー**: 入力総重量を両端節点へ 1/2 ずつの節点荷重とする。
 /// - **囲まれた壁版**: 共通総量を明示DL方式・任意辺率で実支持梁へ伝える。
 ///   Attached壁・二次支持は床分配／逐次反力伝達が扱う。
-/// - **シェル**: 頂点への節点荷重。壁の階重量は別の水平帯積分で算定する。
 ///
 /// 同一節点への荷重は 1 件の `NodalLoad` に合算して返す。
 /// 壁属性の参照先が不正なら、入力種別と部材番号を含むエラーを返す。
@@ -134,11 +133,6 @@ pub fn self_weight_case_content(
             SelfWeightItem::Damper { ni, nj, load, .. } => {
                 node_force[ni] += load / 2.0;
                 node_force[nj] += load / 2.0;
-            }
-            SelfWeightItem::Panel { load_shares, .. } => {
-                for (i, w) in load_shares {
-                    node_force[i] += w;
-                }
             }
         }
     }
@@ -571,9 +565,6 @@ mod tests {
                     ..
                 } => *load + *extra_bottom_load,
                 crate::story_gen::SelfWeightItem::Damper { load, .. } => *load,
-                crate::story_gen::SelfWeightItem::Panel { load_shares, .. } => {
-                    load_shares.iter().map(|(_, w)| w).sum()
-                }
             })
             .sum();
 

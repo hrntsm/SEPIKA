@@ -1,9 +1,7 @@
 use super::eccentricity_model::{column_model, TOP};
 use sepika_core::dof::Dof;
-use sepika_core::ids::{ElemId, LoadCaseId, MaterialId, NodeId, SectionId};
-use sepika_core::model::{
-    Constraint, ElementKind, GirderTorsionMode, LoadCase, LoadCaseKind, Model, NodalLoad, Section,
-};
+use sepika_core::ids::{LoadCaseId, NodeId};
+use sepika_core::model::{Constraint, GirderTorsionMode, LoadCase, LoadCaseKind, Model, NodalLoad};
 
 pub const HEADS: [NodeId; 4] = [NodeId(1), NodeId(3), NodeId(5), NodeId(7)];
 pub const XY_MM: [[f64; 2]; 4] = [[0.0, 0.0], [2000.0, 0.0], [0.0, 4000.0], [2000.0, 4000.0]];
@@ -11,13 +9,7 @@ pub const UNIFORM_MM: f64 = 0.25;
 pub const SMALL_SCALE: f64 = 0.001;
 pub type HeadForces = [[f64; 2]; 4];
 
-#[derive(Clone, Copy, Debug)]
-pub enum Floor {
-    TwoDiaphragms,
-    Shell,
-}
-
-pub fn model_with_floor(floor: Floor) -> Model {
+pub fn model_with_two_diaphragms() -> Model {
     let mut model = column_model(&XY_MM, 0.0, 0.0);
     model.girder_torsion = GirderTorsionMode::Keep;
     model.sections[0].iy = 12_000_000.0;
@@ -33,33 +25,10 @@ pub fn model_with_floor(floor: Floor) -> Model {
         let [x, y] = direction;
         model.elements[id.index() / 2].local_axis.ref_vector = [x, y, 0.0];
     }
-    match floor {
-        Floor::TwoDiaphragms => {
-            for [master, slave] in [[HEADS[0], HEADS[2]], [HEADS[1], HEADS[3]]] {
-                model
-                    .constraints
-                    .push(Constraint::rigid_diaphragm(TOP, master, vec![slave]));
-            }
-        }
-        Floor::Shell => {
-            let mut material = model.materials[0].clone();
-            material.id = MaterialId(1);
-            material.name = "床材".into();
-            material.young = 2_000.0;
-            model.materials.push(material);
-            let mut section = Section::zero(SectionId(1), "床断面".into());
-            section.material = Some(MaterialId(1));
-            section.thickness = Some(2.0);
-            model.sections.push(section);
-            let mut shell = model.elements[0].clone();
-            shell.id = ElemId(4);
-            shell.kind = ElementKind::Shell;
-            shell.nodes = [HEADS[0], HEADS[1], HEADS[3], HEADS[2]]
-                .into_iter()
-                .collect();
-            shell.section = Some(SectionId(1));
-            model.elements.push(shell);
-        }
+    for [master, slave] in [[HEADS[0], HEADS[2]], [HEADS[1], HEADS[3]]] {
+        model
+            .constraints
+            .push(Constraint::rigid_diaphragm(TOP, master, vec![slave]));
     }
     model
 }

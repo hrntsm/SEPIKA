@@ -3436,7 +3436,7 @@ fn ダンパー総重量の不正入力と参照は診断する() {
         match case {
             0 => cfg.dampers[0].elem = ElemId(999),
             1 => cfg.dampers.push(valid.clone()),
-            2 => model.elements[0].kind = ElementKind::Shell,
+            2 => model.elements[0].kind = ElementKind::NodalSpring,
             3 => model.elements[0].nodes.pop().map(|_| ()).unwrap(),
             _ => model.elements[0].nodes[1] = NodeId(999),
         }
@@ -5035,21 +5035,6 @@ fn src_embedded_steel_high_density_does_not_apply_steel_threshold_to_total_secti
     model.materials.push(steel);
     assert!(generate_stories(&model, None).is_ok());
     assert!(model.element_mass_properties(&model.elements[0]).is_ok());
-}
-
-#[test]
-fn steel_shell_design_self_weight_rejects_high_density_with_element_id() {
-    let mut model = two_story_model();
-    model.elements.truncate(1);
-    model.elements[0].kind = ElementKind::Shell;
-    model.elements[0].nodes = vec![NodeId(0), NodeId(1), NodeId(3), NodeId(2)].into();
-    model.sections[0].thickness = Some(10.0);
-    model.materials[0].density = 85e-6 / 9806.65;
-    let error = generate_stories(&model, None).unwrap_err();
-    assert!(
-        error.contains("要素 0") && error.contains("シェル") && error.contains("過小評価"),
-        "{error}"
-    );
 }
 
 #[test]

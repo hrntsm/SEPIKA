@@ -2291,11 +2291,10 @@ fn test_model_issues_allows_cft_horizontal_primary_column() {
 }
 
 #[test]
-fn test_model_issues_errors_cft_shell_and_wall_references() {
+fn test_model_issues_errors_cft_on_non_frame_elements() {
     use super::precheck::precheck_model;
 
     for kind in [
-        ElementKind::Shell,
         ElementKind::Wall,
         ElementKind::PanelZone,
         ElementKind::NodalSpring,
@@ -2358,7 +2357,7 @@ fn test_model_issues_errors_cft_shell_and_wall_references() {
             });
         }
 
-        let err = precheck_model(&model).expect_err("CFT の Shell/Wall 参照はエラーにする");
+        let err = precheck_model(&model).expect_err("CFT の非線材への割当はエラーにする");
         assert!(err.to_string().contains("CFT"), "{err}");
     }
 }

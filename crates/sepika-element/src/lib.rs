@@ -7,13 +7,11 @@
 //! - [`frame`] —     線材要素（梁・トラス・材端集中ばね梁・ファイバー・部材荷重）
 //! - [`springs`] —   ばね・パネル要素
 //! - [`wall`] —      壁要素
-//! - [`shell`] —     シェル要素
 //! - [`factory`] —   要素データから振る舞いを生成するディスパッチャ
 
 pub mod behavior;
 pub mod factory;
 pub mod frame;
-pub mod shell;
 pub mod springs;
 pub mod transform;
 pub mod wall;

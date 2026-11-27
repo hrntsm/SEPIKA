@@ -57,7 +57,7 @@ pub(super) fn in_plane_offset_dir(
 
 /// 材軸を持つ線材か（先頭 2 節点を結ぶ線分＝部材線として描いてよい要素か）。
 ///
-/// 壁・シェルは面要素で材軸を持たない（壁は多角形として別に描く）。仕口パネルは
+/// 壁は面要素で材軸を持たない（壁は多角形として別に描く）。仕口パネルは
 /// 「接合部の節点 ＋ 取り付く部材の他端」を節点列に持つ接合部要素であり、先頭
 /// 2 節点は取り付く柱・梁そのものと同じ節点対になる（`pick_nearest_member` が
 /// ピック対象から外しているのと同じ理由）。
@@ -79,7 +79,7 @@ pub(super) enum DrawShape {
 /// 要素種別ごとの描き方。部材線（[`draws_as_line`]）・面要素のポリゴン・選択
 /// ハイライトが同じ規約を共有するための単一情報源。
 ///
-/// 壁・シェルは面要素で材軸を持たないため多角形で描く。仕口パネルは「接合部の
+/// 壁は面要素で材軸を持たないため多角形で描く。仕口パネルは「接合部の
 /// 節点 ＋ 取り付く部材の他端」を節点列に持つ接合部要素で、材軸も輪郭も持たない
 /// ため描かない（`pick_nearest_member` がピック対象から外しているのと同じ理由）。
 /// 先頭 2 節点を結ぶと取り付く柱・梁とまったく同じ線分になるため、線で描くと
@@ -90,7 +90,7 @@ pub(super) enum DrawShape {
 pub(super) fn element_draw_shape(kind: sepika_core::model::ElementKind) -> DrawShape {
     use sepika_core::model::ElementKind as K;
     match kind {
-        K::Wall | K::Shell => DrawShape::Polygon,
+        K::Wall => DrawShape::Polygon,
         K::PanelZone => DrawShape::None,
         K::Beam | K::Fiber | K::Brace { .. } | K::NodalSpring | K::Damper => DrawShape::Line,
     }
@@ -1986,9 +1986,7 @@ mod tests {
         assert_eq!(element_draw_shape(ElementKind::PanelZone), DrawShape::None);
         assert!(!draws_as_line(ElementKind::PanelZone));
         assert_eq!(element_draw_shape(ElementKind::Wall), DrawShape::Polygon);
-        assert_eq!(element_draw_shape(ElementKind::Shell), DrawShape::Polygon);
         assert!(!draws_as_line(ElementKind::Wall));
-        assert!(!draws_as_line(ElementKind::Shell));
         for kind in [
             ElementKind::Beam,
             ElementKind::Fiber,

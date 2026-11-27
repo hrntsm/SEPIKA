@@ -333,7 +333,7 @@ fn frame_two_nodes_ovika_roundtrip_keeps_independent_quantity_and_support_axis()
 }
 
 #[test]
-fn removed_multi_spring_rejects_model_load_without_replacing_the_open_project() {
+fn removed_element_kinds_fail_model_load_without_replacing_the_open_project() {
     let incoming = crate::sample::portal_frame();
     let mut app = App::default();
     assert!(app.load_model(incoming.clone()));
@@ -346,34 +346,36 @@ fn removed_multi_spring_rejects_model_load_without_replacing_the_open_project() 
     let before = rmp_serde::to_vec_named(&app.core.model).unwrap();
     let results = rmp_serde::to_vec_named(&app.core.scoped.results).unwrap();
     let revision = app.core.scoped.undo.revision();
-    let path = test_tmp().join("removed-line-member.ovika");
+    let path = test_tmp().join("removed-element-kind.ovika");
 
-    for usage in [FrameSectionUse::Column, FrameSectionUse::Girder] {
+    for (usage, kind) in [
+        (FrameSectionUse::Column, "MultiSpring"),
+        (FrameSectionUse::Girder, "MultiSpring"),
+        (FrameSectionUse::Girder, "Shell"),
+    ] {
         let index = incoming
             .elements
             .iter()
             .position(|element| incoming.element_section(element).unwrap().frame_use == Some(usage))
             .unwrap();
         let mut document = serde_json::to_value(&incoming).unwrap();
-        document["elements"][index]["kind"] = serde_json::json!("MultiSpring");
+        document["elements"][index]["kind"] = serde_json::json!(kind);
+        let expected = format!("unknown variant `{kind}`");
         let error = serde_json::from_value::<Model>(document.clone()).unwrap_err();
-        assert!(
-            error.to_string().contains("unknown variant `MultiSpring`"),
-            "{error}"
-        );
+        assert!(error.to_string().contains(&expected), "{error}");
         super::secondary_cft_tests::write_invalid_container(&path, &document);
         let error = sepika_io::ovika::load_ovika(&path).err().unwrap();
         assert!(
             matches!(
                 &error,
                 sepika_io::ovika::IoError::Decode(reason)
-                    if reason.contains("unknown variant `MultiSpring`")
+                    if reason.contains(&expected)
             ),
             "{error}"
         );
         app.open_project_from(path.clone());
         let reason = app.core.scoped.last_error.as_deref().unwrap();
-        assert!(reason.contains("unknown variant `MultiSpring`"), "{reason}");
+        assert!(reason.contains(&expected), "{reason}");
         assert_eq!(rmp_serde::to_vec_named(&app.core.model).unwrap(), before);
         assert_eq!(
             rmp_serde::to_vec_named(&app.core.scoped.results).unwrap(),

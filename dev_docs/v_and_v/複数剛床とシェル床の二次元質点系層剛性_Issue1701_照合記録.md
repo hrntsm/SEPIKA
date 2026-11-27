@@ -1,5 +1,7 @@
 # 複数剛床とシェル床の二次元質点系層剛性（Issue #1701）
 
+> シェル床の照合は廃止前の記録です。[#2033](https://github.com/hrntsm/SEPIKA/issues/2033) により現行版ではシェル床は対応外です。現在の恒久回帰は複数剛床を対象とします。
+
 [Issue #1701](https://github.com/hrntsm/SEPIKA/issues/1701) の照合。状態🔶。複数剛床とシェル床の四柱例で、ねじれにより加力方向の層間変位が相殺された柱の比を足し合わせると、二次元線形せん断型の層剛性は独立な一様並進の剛性を大きく上回った。公開入口は両床条件で診断を出さずに質点系を生成した。
 
 ## 入力と独立対照
@@ -44,12 +46,20 @@
 
 ## 再現
 
+現行版の次のコマンドは、どちらも複数剛床のみを照合する。
 [質点系の統合試験](../../crates/sepika-job/tests/planar_column_ki_torsional_cancellation.rs)は、[四柱模型](../../crates/sepika-design-jp/tests/fixtures/multi_floor_torsional_cancellation_model.rs)と[独立反力](../../crates/sepika-design-jp/tests/fixtures/multi_floor_torsional_cancellation_reference.rs)を [#1683 の統合試験](../../crates/sepika-design-jp/tests/multi_floor_torsional_cancellation.rs)と共用する。試験で使う数値誤差と観測差の下限は、この入力に対する再現条件である。
 
 ```bash
 cargo test --locked -p sepika-job --test planar_column_ki_torsional_cancellation -- --nocapture
 cargo test --locked -p sepika-design-jp --test multi_floor_torsional_cancellation -- --nocapture --test-threads=1
 ```
+
+シェル床を含めて再現する場合は、照合内容に応じて次の統合試験を収めたコミットで同じコマンドを実行する。
+
+- 上表の層ばね・周期：[#1701 当初の統合試験](https://github.com/hrntsm/SEPIKA/blob/6fdeea9f34996c5e5ed5dcb552967cdc31a3569e/crates/sepika-job/tests/planar_column_ki_torsional_cancellation.rs)
+- 診断付き保留：[#1705 修正後・シェル廃止前の統合試験](https://github.com/hrntsm/SEPIKA/blob/eabc94da274cedea44dc844fd57026cb14b20810/crates/sepika-job/tests/planar_column_ki_torsional_cancellation.rs)
+
+以下は各時点の検証記録である。
 
 基点 `4ebf5992` に本差分を適用し、WindowsのRust 1.100.0で `cargo test --locked -p sepika-job` の246件、`cargo test --locked -p sepika-design-jp` の950件が成功した。stable更新確認後の両クレートの全ターゲットClippy（`--locked -- -D warnings`）、`cargo fmt --all -- --check`、`cargo run --locked -p xtask -- check-docs`、`mdbook build docs`、変更文書のローカルリンク・見出し、`git diff --check` も成功した。Cargoは既存のワークスペース依存宣言 `schemars` の未使用警告を出した。
 

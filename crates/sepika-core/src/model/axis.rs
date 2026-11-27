@@ -202,7 +202,7 @@ impl Model {
     ///
     /// 通り芯自身は所属節点しか持たないため、「その通りで構成される構面の要素」は
     /// 常にこのヘルパーで求める。柱・梁・ブレースのような線材のほか、4 節点すべてが
-    /// その通りに属する壁・シェルも該当する。
+    /// その通りに属する壁も該当する。
     pub fn axis_elements(&self, axis: &Axis) -> Vec<ElemId> {
         let on_axis: std::collections::HashSet<NodeId> = axis.nodes.iter().copied().collect();
         let mut ids: Vec<ElemId> = self

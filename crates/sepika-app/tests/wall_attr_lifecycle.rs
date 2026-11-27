@@ -27,7 +27,7 @@ fn element(id: u32, kind: ElementKind, nodes: &[u32]) -> ElementData {
     }
 }
 
-fn adjacent_panels(kind: ElementKind) -> Model {
+fn adjacent_walls() -> Model {
     let material = Material {
         id: MaterialId(0),
         name: "Fc24".into(),
@@ -50,8 +50,8 @@ fn adjacent_panels(kind: ElementKind) -> Model {
     .to_section(SectionId(0), "W150".into());
     section.material = Some(material.id);
     let mut panels = [
-        element(0, kind, &[0, 1, 4, 3]),
-        element(1, kind, &[1, 2, 5, 4]),
+        element(0, ElementKind::Wall, &[0, 1, 4, 3]),
+        element(1, ElementKind::Wall, &[1, 2, 5, 4]),
     ];
     for panel in &mut panels {
         panel.section = Some(section.id);
@@ -143,7 +143,7 @@ fn ovika_roundtrip(model: &Model, label: &str) -> Model {
 
 #[test]
 fn deleting_a_wall_preserves_the_adjacent_wall_and_undo_restores_all_ordered_input() {
-    let mut model = adjacent_panels(ElementKind::Wall);
+    let mut model = adjacent_walls();
     model.elements.extend([
         element(2, ElementKind::Beam, &[1, 2]),
         element(3, ElementKind::Beam, &[4, 5]),
@@ -192,28 +192,8 @@ fn deleting_a_wall_preserves_the_adjacent_wall_and_undo_restores_all_ordered_inp
 }
 
 #[test]
-fn deleting_a_shell_preserves_the_adjacent_shell_self_weight_and_slit() {
-    let mut model = adjacent_panels(ElementKind::Shell);
-    model.wall_attrs[1].slit.beam_face = [true, false];
-    let mut model = ovika_roundtrip(&model, "shells");
-    let mut undo = UndoStack::new();
-    assert!(undo.run(&mut model, Box::new(DeleteMember { id: ElemId(0) })));
-    let (nodal, member) =
-        sepika_load::self_weight::self_weight_case_content(&model, &LoadCfg::default()).unwrap();
-    assert!(member.is_empty());
-    assert_eq!(
-        nodal.iter().map(|load| load.node).collect::<Vec<_>>(),
-        [NodeId(4), NodeId(5)]
-    );
-    // 2.7 m² 残る断面の躯体と仕上げは 12,420 N、開口部は 80 N。上の2節点へ等分する。
-    for load in nodal {
-        assert!((load.values[2] + 6250.0).abs() < 1e-9);
-    }
-}
-
-#[test]
 fn invalid_wall_attributes_stop_member_editing_preparation_and_analysis() {
-    let mut baseline = adjacent_panels(ElementKind::Wall);
+    let mut baseline = adjacent_walls();
     baseline
         .elements
         .push(element(2, ElementKind::Beam, &[1, 2]));

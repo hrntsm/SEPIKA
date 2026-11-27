@@ -437,27 +437,6 @@ pub fn model_issues(model: &Model) -> Vec<ModelIssue> {
         }
     }
 
-    let no_thickness: Vec<ElemId> = model
-        .elements
-        .iter()
-        .filter(|e| matches!(e.kind, ElementKind::Shell))
-        .filter(|e| {
-            e.section
-                .and_then(|sid| model.sections.get(sid.index()))
-                .is_some_and(|s| s.thickness.is_none())
-        })
-        .map(|e| e.id)
-        .collect();
-    if !no_thickness.is_empty() {
-        issues.push(ModelIssue::members(
-            "シェル要素の断面に板厚が設定されていません",
-            "部材 ID ",
-            no_thickness,
-            "シェル要素の断面に板厚がありません",
-            "断面タブで板厚を持つ断面を割り当ててください。",
-        ));
-    }
-
     let zero_shear: Vec<ElemId> = model
         .elements
         .iter()

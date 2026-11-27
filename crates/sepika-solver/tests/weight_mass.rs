@@ -357,7 +357,7 @@ fn gravity_cases_onlyでも不正ダンパー入力を拒否し直接質量組�
                     let duplicate = model.load_cfg.as_ref().unwrap().dampers[0].clone();
                     model.load_cfg.as_mut().unwrap().dampers.push(duplicate);
                 }
-                4 => model.elements[0].kind = ElementKind::Shell,
+                4 => model.elements[0].kind = ElementKind::NodalSpring,
                 5 => model.load_cfg.as_mut().unwrap().dampers[0].elem = ElemId(999),
                 6 => model.elements[0].nodes[1] = NodeId(999),
                 7 => {

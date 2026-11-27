@@ -82,7 +82,7 @@ impl WallOpening {
     }
 }
 
-/// 壁要素（`ElementKind::Wall`/`Shell`）の壁属性
+/// 壁要素（`ElementKind::Wall`）の壁属性
 /// （壁自重（固定荷重）の開口、柱際スリット、および
 /// 剛性計算の開口低減・耐震壁判定に用いる個別開口寸法。RC 規準）。
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

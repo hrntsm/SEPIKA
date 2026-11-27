@@ -1,8 +1,10 @@
 # 平面凸四角形シェルの面積（Issue1154）
 
+> シェル要素を廃止する前の照合履歴です。[#2033](https://github.com/hrntsm/SEPIKA/issues/2033) 以降はシェル解析を実行しません。
+
 ## 対象と独立期待値
 
-基点 `78c7265a6e5ef4971478e0467dba26345877c1a0` における、面積の重複・欠落する三角分割を是正する。新しい近似・係数・定式化は採用せず、平面凸四角形だけを検証対象とする。計算方式の正本は [MITC4 シェル要素](../../docs/calc_basis/04_要素剛性/04_MITC4_シェル要素.md)。
+基点 `78c7265a6e5ef4971478e0467dba26345877c1a0` における、面積の重複・欠落する三角分割を是正する。新しい近似・係数・定式化は採用せず、平面凸四角形だけを検証対象とする。当時の計算方式は [廃止前のMITC4 シェル要素](https://github.com/hrntsm/SEPIKA/blob/1e32dcbea2ed9fa48742cd107209a99bfb201711/docs/calc_basis/04_要素剛性/04_MITC4_シェル要素.md) を参照。
 
 公開試験 `crates/sepika-element/tests/shell_quadrilateral.rs` の材料は E=23000 N/mm²、ν=0.2、密度2.4×10⁻⁹ t/mm³、板厚100 mm。
 
