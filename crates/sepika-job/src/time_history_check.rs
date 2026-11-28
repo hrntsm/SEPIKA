@@ -1,21 +1,103 @@
 //! 確定時刻ごとの簡易検定と支配値の集計。
 
 pub(crate) mod column_bending;
+pub use column_bending::targets as targets_symmetric_column_bending;
 
 use std::collections::BTreeMap;
 
-use sepika_core::model::{Material, Model, Section};
+use sepika_core::ids::ElemId;
+use sepika_core::model::{ElementKind, Material, Model, Section};
 use sepika_design_jp::steel::SteelDesign;
 use sepika_design_jp::{DesignCtx, LoadTerm, MemberForcesAt, MemberKind};
-use sepika_element::frame::beam::{eval_sections_of, MemberForces};
+use sepika_element::frame::beam::eval_sections_of;
 use sepika_solver::dynamic::timehistory::{
-    uses_signed_bending_peaks, AsymmetricColumnSectionHistory, CommittedBendingResponse,
-    CommittedMemberForcesObserver, SectionForceCheckPeak, SectionForceCheckPosition,
+    uses_signed_bending_peaks, AsymmetricColumnSectionHistory, CommittedMemberForcesObserver,
+    ResponseResult, SectionForceCheckPeak, SectionForceCheckPosition,
     SymmetricColumnBendingHistory, ThRecording,
 };
 
+/// 全確定時刻を使うH形鋼柱照査の記録。対象外と、対象だが記録がない場合を区別する。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TimeHistoryColumnCheck<'a> {
+    OutsideScope(&'static str),
+    AsymmetricSection(Result<&'a AsymmetricColumnSectionHistory, &'static str>),
+    SymmetricBending(Result<&'a SymmetricColumnBendingHistory, &'static str>),
+}
+
+/// 時刻歴解析の結果と、その記録の部材順を確定した解析モデル。
+#[derive(Debug)]
+pub struct ConfirmedTimeHistoryResult {
+    pub(crate) model: Model,
+    pub(crate) response: ResponseResult,
+}
+
+impl ConfirmedTimeHistoryResult {
+    /// この実行の応答。記録添字はこの実行の解析モデルの要素順。
+    pub fn response(&self) -> &ResponseResult {
+        &self.response
+    }
+
+    /// 応答を取り出す。生成元の部材との結び付きは引き継がない。
+    pub(crate) fn into_response(self) -> ResponseResult {
+        self.response
+    }
+
+    /// この実行の部材 ID で照査を参照する。対象外・記録欠落・部分的な未算定理由を区別する。
+    ///
+    /// ```compile_fail
+    /// use sepika_core::{ids::ElemId, model::Model};
+    /// use sepika_job::time_history_check::ConfirmedTimeHistoryResult;
+    /// fn lookup(result: &ConfirmedTimeHistoryResult, reordered: &Model) {
+    ///     result.column_check(reordered, ElemId(0));
+    /// }
+    /// ```
+    pub fn column_check(&self, id: ElemId) -> TimeHistoryColumnCheck<'_> {
+        column_check_history(&self.model, id, self.response.recording.as_ref())
+    }
+}
+
+fn column_check_history<'a>(
+    model: &Model,
+    id: ElemId,
+    recording: Option<&'a ThRecording>,
+) -> TimeHistoryColumnCheck<'a> {
+    use TimeHistoryColumnCheck::*;
+    let mut elements = model
+        .elements
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.id == id);
+    let Some((index, elem)) = elements.next() else {
+        return OutsideScope("指定した部材が解析モデルにありません。");
+    };
+    if elements.next().is_some() {
+        return OutsideScope("部材 ID が重複し、照査対象を特定できません。");
+    }
+    if uses_signed_bending_peaks(model, elem) {
+        AsymmetricSection(
+            recording
+                .and_then(|rec| rec.asymmetric_column_sections.get(&index))
+                .ok_or("全確定時刻の断面照査の記録を取得できません。確認するには解析を再実行してください。"),
+        )
+    } else if targets_symmetric_column_bending(model, elem) {
+        SymmetricBending(
+            recording
+                .and_then(|rec| rec.symmetric_column_bending.get(&index))
+                .ok_or("確定時刻ごとの補剛区間の照査記録がありません。先頭から解析を再実行してください。"),
+        )
+    } else {
+        OutsideScope(match elem.kind {
+            ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. } => {
+                "対象のH形鋼柱ではないため、全確定時刻の柱照査の対象外です。"
+            }
+            _ => "この要素種別は断面検定の対象外です（ダンパー・節点ばね要素等）。",
+        })
+    }
+}
+
 struct Column<'a> {
     index: usize,
+    id: ElemId,
     section: &'a Section,
     material: Option<&'a Material>,
     ctx: DesignCtx,
@@ -50,7 +132,57 @@ pub(crate) fn collect_time_history_checks<T, E>(
     let history = &mut checks.asymmetric_columns;
     let bending_histories = &mut checks.symmetric_columns;
     let bending_columns = column_bending::columns(model, bending_histories);
-    let columns: Vec<_> = model
+    let columns = asymmetric_columns(model, history);
+    let result = if history.is_empty() && bending_histories.is_empty() {
+        run(None)?
+    } else {
+        run(Some(&mut |snapshot| {
+            // 再開点の内力は前半結果で照査済みなので二重計上しない。
+            if snapshot.step() < first_step {
+                return;
+            }
+            for column in &bending_columns {
+                let item = bending_histories.get_mut(&column.index).unwrap();
+                column_bending::record(
+                    item,
+                    column,
+                    snapshot.step(),
+                    snapshot.time_s(),
+                    |length_mm| {
+                        let bounds_mm = [0.0, length_mm];
+                        snapshot
+                            .member(column.id)?
+                            .strong_bending_span(bounds_mm, bounds_mm)
+                    },
+                );
+            }
+            for item in history.values_mut() {
+                item.committed_count += 1;
+            }
+            for column in &columns {
+                let member = snapshot.member(column.id);
+                record_section_forces(
+                    &mut history.get_mut(&column.index).unwrap().positions,
+                    column,
+                    snapshot.time_s(),
+                    |xi| {
+                        member
+                            .as_ref()
+                            .map_err(|&reason| reason)?
+                            .recorded_section_forces(xi)
+                    },
+                );
+            }
+        }))?
+    };
+    Ok((result, checks))
+}
+
+fn asymmetric_columns<'a>(
+    model: &'a Model,
+    history: &mut BTreeMap<usize, AsymmetricColumnSectionHistory>,
+) -> Vec<Column<'a>> {
+    model
         .elements
         .iter()
         .enumerate()
@@ -87,6 +219,7 @@ pub(crate) fn collect_time_history_checks<T, E>(
             }
             Some(Column {
                 index,
+                id: elem.id,
                 section,
                 material,
                 ctx: DesignCtx {
@@ -100,58 +233,25 @@ pub(crate) fn collect_time_history_checks<T, E>(
                 },
             })
         })
-        .collect();
-    let result = if history.is_empty() && bending_histories.is_empty() {
-        run(None)?
-    } else {
-        run(Some(
-            &mut |step,
-                  time_s,
-                  forces: &[Option<MemberForces>],
-                  bending: &CommittedBendingResponse<'_>| {
-                // 再開点の内力は前半結果で照査済みなので二重計上しない。
-                if step >= first_step {
-                    for column in &bending_columns {
-                        let item = bending_histories.get_mut(&column.index).unwrap();
-                        column_bending::record(item, column, step, time_s, bending);
-                    }
-                    for item in history.values_mut() {
-                        item.committed_count += 1;
-                    }
-                    for column in &columns {
-                        if let Some(member) = forces.get(column.index).and_then(Option::as_ref) {
-                            record_section_forces(
-                                &mut history.get_mut(&column.index).unwrap().positions,
-                                column,
-                                time_s,
-                                member,
-                            );
-                        }
-                    }
-                }
-            },
-        ))?
-    };
-    Ok((result, checks))
+        .collect()
 }
 
 fn record_section_forces(
     positions: &mut [SectionForceCheckPosition],
     column: &Column<'_>,
     time_s: f64,
-    member: &MemberForces,
+    section_forces: impl Fn(f64) -> Result<[f64; 6], &'static str>,
 ) {
     for position in positions {
-        let mut matching = member.at.iter().filter(|(xi, _)| *xi == position.xi);
-        let Some(&(_, local)) = matching.next() else {
-            continue;
+        let local = match section_forces(position.xi) {
+            Ok(local) => local,
+            Err(reason) => {
+                if !position.unavailable.contains(reason) {
+                    position.unavailable.insert(reason.into());
+                }
+                continue;
+            }
         };
-        if matching.next().is_some() {
-            position
-                .unavailable
-                .insert("同一評価位置の断面力が重複しています".into());
-            continue;
-        }
         position.observed_count += 1;
         let Some(material) = column.material else {
             continue;
@@ -193,36 +293,55 @@ mod asymmetric_column_model;
 mod tests {
     use super::asymmetric_column_model::column_model;
     use super::*;
+    use sepika_core::model::ElementData;
+    use sepika_element::frame::beam::MemberForces;
+
+    #[test]
+    fn missing_column_record_and_nodal_spring_have_different_reasons() {
+        let mut model = column_model();
+        let id = model.elements[0].id;
+        let spring_id = ElemId(17);
+        model.elements.push(ElementData {
+            id: spring_id,
+            kind: ElementKind::NodalSpring,
+            ..model.elements[0].clone()
+        });
+        let recording = ThRecording::default();
+        assert!(matches!(column_check_history(&model, id, Some(&recording)),
+            TimeHistoryColumnCheck::AsymmetricSection(Err(reason)) if reason.contains("断面照査の記録を取得できません")));
+        assert!(
+            matches!(column_check_history(&model, spring_id, Some(&recording)),
+            TimeHistoryColumnCheck::OutsideScope(reason) if reason.contains("節点ばね"))
+        );
+    }
 
     fn run(
         model: &Model,
-        prior: BTreeMap<usize, AsymmetricColumnSectionHistory>,
+        mut prior: BTreeMap<usize, AsymmetricColumnSectionHistory>,
         first_step: u64,
         samples: &[(u64, Option<MemberForces>)],
     ) -> BTreeMap<usize, AsymmetricColumnSectionHistory> {
-        collect_time_history_checks(
-            model,
-            TimeHistoryChecks {
-                asymmetric_columns: prior,
-                ..Default::default()
-            },
-            first_step,
-            |observer| {
-                let observer = observer.unwrap();
-                for (step, member) in samples {
-                    observer(
-                        *step,
-                        *step as f64,
-                        std::slice::from_ref(member),
-                        &|_, _| unreachable!("上下非対称H形鋼柱では確認しない"),
-                    );
+        let columns = asymmetric_columns(model, &mut prior);
+        let [column] = columns.as_slice() else {
+            panic!("対象柱が1本ではない")
+        };
+        let item = prior.get_mut(&column.index).unwrap();
+        for (step, member) in samples.iter().filter(|(step, _)| *step >= first_step) {
+            item.committed_count += 1;
+            record_section_forces(&mut item.positions, column, *step as f64, |xi| {
+                let member = member.as_ref().ok_or("部材の解析断面力がありません")?;
+                let (_, force) = member
+                    .at
+                    .iter()
+                    .find(|(pos, _)| *pos == xi)
+                    .ok_or("指定した評価位置の解析断面力がありません")?;
+                if force.iter().any(|f| !f.is_finite()) {
+                    return Err("断面力が非有限です");
                 }
-                Ok::<_, ()>(())
-            },
-        )
-        .unwrap()
-        .1
-        .asymmetric_columns
+                Ok(*force)
+            });
+        }
+        prior
     }
 
     #[test]
@@ -261,7 +380,7 @@ mod tests {
         let [end, middle, missing] = column.positions.as_slice() else {
             panic!("{column:?}")
         };
-        assert_eq!(end.observed_count, 7);
+        assert_eq!(end.observed_count, 6);
         let peak = end.peak.as_ref().unwrap();
         assert_eq!((peak.time_s, peak.n_n, peak.mz_nmm), (1.0, -400e3, 125e6));
         assert!((peak.ratio - 1.065_016_34).abs() < 1e-8);
@@ -270,6 +389,7 @@ mod tests {
             "ねじりモーメントMx",
             "断面力が非有限",
             "曲げねじり座屈",
+            "部材の解析断面力がありません",
         ] {
             assert!(
                 end.unavailable.iter().any(|r| r.contains(reason)),
@@ -284,6 +404,9 @@ mod tests {
             (missing.xi, missing.observed_count, &missing.peak),
             (1.0, 0, &None)
         );
+        assert!(missing
+            .unavailable
+            .contains("指定した評価位置の解析断面力がありません"));
     }
 
     #[test]

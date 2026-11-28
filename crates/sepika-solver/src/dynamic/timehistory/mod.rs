@@ -43,19 +43,11 @@ pub(crate) use crate::common::assemble::{assemble_global_k, assemble_global_m};
 #[cfg(test)]
 pub(crate) use sepika_element::behavior::MassOption;
 
+use crate::common::member_response::ConfirmedTimeHistoryStep;
 use crate::dynamic::damping::Damping;
 
-/// 要素添字と実材軸長 [mm] から、同一応答の実材軸全長の曲げ分布を取得する。
-pub type CommittedBendingResponse<'a> = dyn Fn(usize, f64) -> Result<sepika_element::frame::member_load::FrameStrongBendingSpan, String>
-    + 'a;
-
-/// 確定ステップ番号、時刻 [s]、要素順の局所断面力と同じ応答の曲げ分布の取得手段を受け取る。
-pub type CommittedMemberForcesObserver<'a> = dyn FnMut(
-        u64,
-        f64,
-        &[Option<sepika_element::frame::beam::MemberForces>],
-        &CommittedBendingResponse<'_>,
-    ) + 'a;
+/// 表示記録の間引き前に各確定時刻の部材応答を受け取る。
+pub type CommittedMemberForcesObserver<'a> = dyn FnMut(&ConfirmedTimeHistoryStep<'_>) + 'a;
 
 /// Rayleigh 減衰の係数 (α_m, β_k) を、2つの振動数と目標減衰比から計算する。
 pub fn rayleigh_coeffs(omega1: f64, omega2: f64, h1: f64, h2: f64) -> (f64, f64) {

@@ -53,6 +53,7 @@ fn peak_labels_with_confirmed_long_term(
                 draw_peak_check(
                     ui,
                     app,
+                    column_check_history(&app.core.model, elem.id, Some(rec)),
                     elem,
                     index,
                     rec,

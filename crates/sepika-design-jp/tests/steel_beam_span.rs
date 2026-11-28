@@ -4,13 +4,18 @@ mod combined_column;
 #[path = "fixtures/steel_beam_span_model.rs"]
 mod input;
 
+use input::{split_cantilever, SECOND_BEAM, SPLIT_MM};
 use sepika_core::ids::{ElemId, LoadCaseId, NodeId};
-use sepika_core::model::{MemberLoad, MemberLoadKind, Model, SteelDesignAttr};
+use sepika_core::model::{MemberLoad, MemberLoadKind, Model};
 use sepika_design_jp::{
     girder_group_overrides, run_member_design_checks, CheckKind, CheckOutcome, CheckResult,
     LoadTerm, MemberDesignCheckOptions,
 };
-use sepika_solver::statics::{analysis::Analysis, linear::StaticOnce};
+use sepika_solver::common::member_response::ConfirmedLoadState;
+use sepika_solver::statics::{
+    analysis::{Analysis, ConfirmedStaticSource},
+    linear::StaticOnce,
+};
 
 fn check(
     model: &Model,
@@ -82,17 +87,111 @@ fn check_bending(result: &CheckResult, ratio: f64, detail: &str) {
 }
 
 #[test]
+fn confirmed_static_check_keeps_its_own_nodal_case_and_effective_combination() {
+    let model = input::nodal_only_cases();
+    let analysis = Analysis::prepare(&model).unwrap();
+    let a = analysis.confirmed_linear_static(input::DEAD).unwrap();
+    let b = analysis.confirmed_linear_static(input::UNLOADED).unwrap();
+    let combo = sepika_core::model::LoadCombination {
+        name: "節点荷重の線形和".into(),
+        terms: vec![
+            (input::DEAD, 1e16),
+            (input::DEAD, 1.5),
+            (input::DEAD, -1e16),
+            (input::UNLOADED, 1.0),
+        ],
+    };
+    let combined = analysis.confirmed_linear_combination(&combo).unwrap();
+    assert_eq!(a.source(), &ConfirmedStaticSource::Case(input::DEAD));
+    assert_eq!(b.source(), &ConfirmedStaticSource::Case(input::UNLOADED));
+    assert_eq!(
+        combined.source(),
+        &ConfirmedStaticSource::Combination(combo.name)
+    );
+    assert_eq!(
+        combined.effective_terms(),
+        [(input::DEAD, 1.5), (input::UNLOADED, 1.0)]
+    );
+
+    for (solved, mz_knm) in [(&a, 100.0), (&b, 0.0), (&combined, 150.0)] {
+        let bound = solved.member_responses().unwrap();
+        let beam = bound.member(input::BEAM).unwrap();
+        let extent = [0.0, input::LENGTH_MM];
+        let section = beam.recorded_section_forces(0.0).unwrap();
+        near(section[5].abs() / 1e6, mz_knm);
+        let span = beam.strong_bending_span(extent, extent).unwrap();
+        near(span.end_moments_nmm[0].abs() / 1e6, mz_knm);
+        if mz_knm == 0.0 {
+            assert_eq!(section, [0.0; 6]);
+            assert_eq!(span.end_moments_nmm, [0.0; 2]);
+        }
+
+        let rows = sepika_design_jp::run_confirmed_static_member_design_checks(
+            solved,
+            &MemberDesignCheckOptions {
+                term: LoadTerm::Long,
+                steel_beam_span_load_terms: Some(&[(input::UNLOADED, 1.0)]),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .member_checks
+        .into_iter()
+        .filter_map(|(id, xi, row)| (id == input::BEAM).then_some((xi, row)))
+        .collect::<Vec<_>>();
+        let reference = check(
+            &model,
+            solved.result(),
+            LoadTerm::Long,
+            Some(solved.effective_terms()),
+        );
+        let bending = |rows: &[(f64, CheckOutcome)]| {
+            at(rows, 0.0)
+                .components
+                .iter()
+                .find(|row| row.kind == CheckKind::Bending)
+                .map(|row| (row.ratio, row.detail.clone()))
+        };
+        let actual = bending(&rows);
+        assert_eq!(actual, bending(&reference));
+        if mz_knm != 0.0 {
+            assert!(actual.unwrap().0 > 0.0);
+        }
+    }
+}
+
+#[test]
 fn middle_brace_checks_both_intervals_against_their_own_long_and_short_allowables() {
     let model = input::simply_supported_with_middle_brace(2_000.0, 150_000.0);
-    let solved = Analysis::prepare(&model)
+    let confirmed = Analysis::prepare(&model)
         .unwrap()
-        .linear_static(input::DEAD)
+        .confirmed_linear_static(input::DEAD)
         .unwrap();
+    let solved = confirmed.result();
     let terms = [(input::DEAD, 1.0)];
     let raw = &solved.member_forces[0].1.at;
     assert_eq!(raw.len(), 3);
     assert!(raw.iter().all(|(xi, _)| *xi != 0.25));
     near(raw[1].1[5].abs() / 1e6, 150.0);
+
+    let responses = confirmed.member_responses().unwrap();
+    let beam = responses.member(input::BEAM).unwrap();
+    assert_eq!(beam.member_id(), input::BEAM);
+    assert_eq!(beam.load_state(), ConfirmedLoadState::LinearStatic(&terms));
+    assert_eq!(beam.recorded_section_forces(0.0).unwrap(), raw[0].1);
+    assert_eq!(
+        beam.recorded_section_forces(0.25),
+        Err("指定した評価位置の解析断面力がありません")
+    );
+    let spans = beam
+        .strong_bending_intervals(&[0.0, 4000.0, 8000.0], [0.0, 8000.0])
+        .unwrap();
+    let [left, right] = spans.as_slice() else {
+        panic!("補剛区間は2つ");
+    };
+    assert!(left.interior_maximum && right.monotonic);
+    near(right.end_moments_nmm[0].abs() / 1e6, 150.0);
+    near(right.end_moments_nmm[1] / 1e6, 0.0);
 
     // M(L/4)=3PL/16=225 kN·m、M(L/2)=PL/8=150 kN·m。
     // 左は区間内最大、右は単調で端部比0。Z=1,148,243.4133 mm³。
@@ -114,7 +213,18 @@ fn middle_brace_checks_both_intervals_against_their_own_long_and_short_allowable
             0.602_349_787,
         ),
     ] {
-        let rows = check(&model, &solved, term, Some(&terms));
+        let rows = sepika_design_jp::run_confirmed_static_member_design_checks(
+            &confirmed,
+            &MemberDesignCheckOptions {
+                term,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .member_checks
+        .into_iter()
+        .filter_map(|(id, xi, row)| (id == input::BEAM).then_some((xi, row)))
+        .collect::<Vec<_>>();
         assert!(
             rows.iter()
                 .all(|(_, row)| matches!(row, CheckOutcome::Checked(_))),
@@ -755,6 +865,216 @@ fn the_recovered_demand_range_uses_unclamped_faces_and_rejects_unconfirmed_faces
 }
 
 #[test]
+fn confirmed_midspan_keeps_its_check_before_a_nearby_point_load() {
+    let mut model = input::cantilever(20_000.0, 0.0, None);
+    model.load_cases[0].member.push(MemberLoad::manual(
+        input::BEAM,
+        [1.0, 0.0, 0.0],
+        MemberLoadKind::Point {
+            a: 4_000.000_000_000_01,
+            p: -150e3,
+        },
+    ));
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .confirmed_linear_static(input::DEAD)
+        .unwrap();
+    let responses = solved.member_responses().unwrap();
+    let midspan = responses
+        .member(input::BEAM)
+        .unwrap()
+        .recorded_section_forces(0.5)
+        .unwrap();
+    near(midspan[0], -150e3);
+
+    let reference = check(
+        &model,
+        solved.result(),
+        LoadTerm::Short,
+        Some(solved.effective_terms()),
+    );
+    let confirmed = sepika_design_jp::run_confirmed_static_member_design_checks(
+        &solved,
+        &MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            ..Default::default()
+        },
+    )
+    .unwrap()
+    .member_checks
+    .into_iter()
+    .filter_map(|(id, xi, outcome)| (id == input::BEAM).then_some((xi, outcome)))
+    .collect::<Vec<_>>();
+    assert_eq!(at(&confirmed, 0.5), at(&reference, 0.5));
+}
+
+#[test]
+fn confirmed_beam_does_not_check_the_rounded_right_cut_at_a_nonmaximum_j_face() {
+    let model = input::cantilever_with_axial_point_at_j_face();
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .confirmed_linear_static(input::DEAD)
+        .unwrap();
+    let length_mm = 8_395.6;
+    let face_xi = 1.0 - 498.3 / length_mm;
+    assert_eq!(face_xi, 7_897.3 / length_mm);
+    assert!(face_xi * length_mm > 7_897.3);
+    let forces = &solved.result().member_forces[0].1;
+    near(
+        forces.at.iter().find(|(xi, _)| *xi == face_xi).unwrap().1[0],
+        0.0,
+    );
+    let peak = solved
+        .member_responses()
+        .unwrap()
+        .member(input::BEAM)
+        .unwrap()
+        .strong_bending_span([0.0, length_mm], [0.0, 7_897.3])
+        .unwrap();
+    assert_eq!(peak.demand_peaks[0].xi, 0.0);
+    assert!(!peak.demand_peaks.iter().any(|cut| cut.is_j_face));
+    near(peak.demand_peaks[0].left[0].abs(), 150_000.0);
+
+    let report = sepika_design_jp::run_confirmed_static_member_design_checks(
+        &solved,
+        &MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let rows: Vec<_> = report
+        .member_checks
+        .into_iter()
+        .map(|(_, xi, outcome)| (xi, outcome))
+        .collect();
+    assert!(
+        matches!(&rows.iter().find(|(xi, _)| *xi == face_xi).unwrap().1,
+        CheckOutcome::Skipped { reason } if reason.contains("切断側を確定できません"))
+    );
+    assert!(at(&rows, 0.0)
+        .components
+        .iter()
+        .any(|component| component.kind == CheckKind::Bending
+            && component.detail.contains("σax=18.3105")));
+    assert!(at(&rows, 0.5)
+        .components
+        .iter()
+        .any(|component| component.kind == CheckKind::Bending && component.ratio > 0.0));
+}
+
+#[test]
+fn confirmed_beam_does_not_check_the_left_limit_before_the_joint() {
+    use sepika_core::model::{MemberDetailAttr, MemberJoint};
+
+    let length_mm = 8_395.6;
+    let joint_mm = 4_002.1_f64;
+    let xi = joint_mm / length_mm;
+    let point_mm = joint_mm.next_down();
+    assert_eq!(xi * length_mm, point_mm);
+    let mut model = input::cantilever(20_000.0, 0.0, None);
+    model.nodes[1].coord[0] = length_mm;
+    model.member_detail_attrs.push(MemberDetailAttr {
+        joints: vec![MemberJoint {
+            distance: joint_mm,
+            kind: Default::default(),
+        }],
+        ..MemberDetailAttr::new(input::BEAM)
+    });
+    model.load_cases[0].member.push(MemberLoad::manual(
+        input::BEAM,
+        [1.0, 0.0, 0.0],
+        MemberLoadKind::Point {
+            a: point_mm,
+            p: -150e3,
+        },
+    ));
+    let solved = Analysis::prepare(&model)
+        .unwrap()
+        .confirmed_linear_static(input::DEAD)
+        .unwrap();
+    let recorded = &solved.result().member_forces[0].1.at;
+    near(
+        recorded.iter().find(|(pos, _)| *pos == xi).unwrap().1[0],
+        -150e3,
+    );
+    assert!(matches!(
+        solved.member_responses().unwrap().member(input::BEAM).unwrap().recorded_section_forces(xi),
+        Err(reason) if reason.contains("切断側を確定できません")
+    ));
+    let report = sepika_design_jp::run_confirmed_static_member_design_checks(
+        &solved,
+        &MemberDesignCheckOptions {
+            term: LoadTerm::Short,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(report.member_checks.iter().any(|(_, pos, outcome)| *pos == xi
+        && matches!(outcome, CheckOutcome::Skipped { reason } if reason.contains("切断側を確定できません"))));
+    assert!(!report
+        .member_checks
+        .iter()
+        .any(|(_, pos, outcome)| *pos == xi && matches!(outcome, CheckOutcome::Checked(_))));
+    assert!(report
+        .member_checks
+        .iter()
+        .any(|(_, pos, outcome)| *pos == 0.0 && matches!(outcome, CheckOutcome::Checked(_))));
+}
+
+#[test]
+fn nonmaximum_j_face_accepts_only_an_exactly_cancelled_point_jump() {
+    let model = input::cantilever_with_axial_point_at_j_face();
+    let point_mm = 7_897.3_f64;
+    let face_xi = 1.0 - 498.3 / 8_395.6;
+    let check_face = |model: &Model| {
+        let solved = Analysis::prepare(model)
+            .unwrap()
+            .confirmed_linear_static(input::DEAD)
+            .unwrap();
+        sepika_design_jp::run_confirmed_static_member_design_checks(
+            &solved,
+            &MemberDesignCheckOptions {
+                term: LoadTerm::Short,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .member_checks
+        .into_iter()
+        .find(|(id, xi, _)| *id == input::BEAM && *xi == face_xi)
+        .unwrap()
+        .2
+    };
+    let axial_point =
+        |a, p| MemberLoad::manual(input::BEAM, [1.0, 0.0, 0.0], MemberLoadKind::Point { a, p });
+
+    let mut unloaded = model.clone();
+    unloaded.load_cases[0].member.clear();
+    let expected = check_face(&unloaded);
+    assert!(matches!(expected, CheckOutcome::Checked(_)));
+
+    let mut cancelled = model.clone();
+    cancelled.load_cases[0]
+        .member
+        .push(axial_point(point_mm, 150e3));
+    assert_eq!(check_face(&cancelled), expected);
+
+    let mut small_residual = cancelled;
+    small_residual.load_cases[0]
+        .member
+        .insert(1, axial_point(point_mm, 1e-12));
+    let mut nearby = model;
+    nearby.load_cases[0]
+        .member
+        .push(axial_point(point_mm.next_down(), 150e3));
+    for nonzero_jump in [small_residual, nearby] {
+        assert!(matches!(check_face(&nonzero_jump),
+            CheckOutcome::Skipped { reason } if reason.contains("切断側を確定できません")));
+    }
+}
+
+#[test]
 fn the_j_face_uses_the_physical_left_cut_even_when_xi_rounds_to_the_right() {
     for face_j_mm in [498.3, 499.1] {
         assert_j_face_inside_cut(face_j_mm);
@@ -783,12 +1103,16 @@ fn assert_j_face_inside_cut(face_j_mm: f64) {
             p: -150_000.0,
         },
     ));
-    let solved = Analysis::prepare(&model)
+    let confirmed = Analysis::prepare(&model)
         .unwrap()
-        .linear_static(input::DEAD)
+        .confirmed_linear_static(input::DEAD)
         .unwrap();
+    let solved = confirmed.result();
     let xi = point_mm / LENGTH;
     let sampled_xi = 1.0 - face_j_mm / LENGTH;
+    if face_j_mm == 498.3 {
+        assert_eq!(xi, sampled_xi);
+    }
     assert!(sampled_xi * LENGTH > point_mm);
     let sample = solved.member_forces[0]
         .1
@@ -798,7 +1122,24 @@ fn assert_j_face_inside_cut(face_j_mm: f64) {
         .unwrap();
     near(sample.1[0], 0.0);
     let terms = [(input::DEAD, 1.0)];
-    let rows = check(&model, &solved, LoadTerm::Short, Some(&terms));
+    let responses = confirmed.member_responses().unwrap();
+    let beam = responses.member(input::BEAM).unwrap();
+    assert!(matches!(
+        beam.recorded_section_forces(sampled_xi),
+        Err(reason) if reason.contains("切断側を確定できません")
+    ));
+    let span = beam
+        .strong_bending_span([0.0, LENGTH], [0.0, point_mm])
+        .unwrap();
+    let face = span
+        .demand_peaks
+        .iter()
+        .find(|peak| peak.is_j_face)
+        .unwrap();
+    assert_eq!(face.x_mm, point_mm);
+    near(face.left[0].abs(), 150_000.0);
+
+    let rows = check(&model, solved, LoadTerm::Short, Some(&terms));
     let at_face = at(&rows, xi);
     assert_eq!(
         rows.iter()
@@ -808,39 +1149,6 @@ fn assert_j_face_inside_cut(face_j_mm: f64) {
     );
     check_bending(at_face, 1.117_006_539, "σax=18.3105");
     assert!(!at_face.ok());
-}
-
-const SECOND_BEAM: ElemId = ElemId(1);
-const SPLIT_MM: f64 = 4_800.0;
-
-fn split_cantilever(mut model: Model, split_mm: f64) -> Model {
-    let mut joint = model.nodes[1].clone();
-    joint.id = NodeId(2);
-    joint.coord[0] = split_mm;
-    model.nodes.push(joint);
-    let mut second = model.elements[0].clone();
-    second.id = SECOND_BEAM;
-    second.nodes[0] = NodeId(2);
-    model.elements[0].nodes[1] = NodeId(2);
-    model.elements.push(second);
-    model.girder_groups = vec![vec![input::BEAM, SECOND_BEAM]];
-    let length = input::LENGTH_MM;
-    model.steel_design_attrs = [input::BEAM, SECOND_BEAM]
-        .into_iter()
-        .map(|elem| SteelDesignAttr {
-            elem,
-            joint_flange_loss: 0.0,
-            joint_web_loss: 0.0,
-            scallop_web_loss: 0.0,
-            lb_direct: Some((length, length, length)),
-            lateral_brace_count: None,
-            lk_y_direct: None,
-            lk_z_direct: None,
-            c_direct: None,
-            column_lateral_buckling_end_supports: None,
-        })
-        .collect();
-    model
 }
 
 #[test]

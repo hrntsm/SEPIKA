@@ -3,12 +3,16 @@ use sepika_core::model::{
     EndCondition, MassMethod, MemberLoad, MemberLoadKind, Model, SteelDesignAttr,
 };
 use sepika_element::frame::beam::BeamElement;
-use sepika_job::compute::compute_time_history;
+use sepika_job::compute::{compute_confirmed_time_history, compute_time_history};
+use sepika_job::time_history_check::TimeHistoryColumnCheck;
 use sepika_job::time_history_restart::{
     compute_checkpoint, resume_checkpoint, LinearTimeHistoryCheckpoint,
 };
 use sepika_job::AnalysisSettings;
-use sepika_solver::dynamic::timehistory::GroundMotion;
+use sepika_solver::common::member_response::ConfirmedLoadState;
+use sepika_solver::dynamic::damping::Damping;
+use sepika_solver::dynamic::timehistory::{GroundMotion, NewmarkCfg};
+use sepika_solver::statics::analysis::Analysis;
 
 #[path = "../../sepika-design-jp/tests/fixtures/steel_h_column_combined_model.rs"]
 mod combined_column;
@@ -66,16 +70,17 @@ fn unrecorded_linear_bending_failure_survives_checkpoint_round_trip_and_restart(
         .unwrap()
         .recording
         .unwrap();
-    let recording = compute_time_history(model.clone(), sparse, wave.clone())
-        .unwrap()
-        .recording
-        .unwrap();
+    let solved = compute_confirmed_time_history(model.clone(), sparse, wave.clone()).unwrap();
+    let recording = solved.response().recording.as_ref().unwrap();
     assert!(!recording.frame_time.contains(&dt));
     assert_eq!(
         recording.symmetric_column_bending,
         full.symmetric_column_bending
     );
-    let item = &recording.symmetric_column_bending[&0];
+    let column_id = model.elements[0].id;
+    let TimeHistoryColumnCheck::SymmetricBending(Ok(item)) = solved.column_check(column_id) else {
+        panic!("対象柱には解析で算定した横座屈照査がある");
+    };
     assert_eq!(
         (item.committed_count, item.evaluated_count),
         (3, 3),
@@ -87,6 +92,47 @@ fn unrecorded_linear_bending_failure_survives_checkpoint_round_trip_and_restart(
     assert!((peak.max_mz_nmm.abs() - 259e6).abs() < 1e-5, "{peak:?}");
     assert!((peak.c - 1.75).abs() < 1e-12, "{peak:?}");
     assert!((peak.ratio - 1.007_72).abs() < 1e-5, "{peak:?}");
+
+    let elem = &model.elements[0];
+    let bounds = [0.0, item.lb_mm.unwrap()];
+    let mut confirmed_times = Vec::new();
+    Analysis::prepare(&model)
+        .unwrap()
+        .time_history_with_force_observer(
+            &wave,
+            NewmarkCfg::average_accel(),
+            Damping::MassProportional { h: 0.0, omega: 1.0 },
+            Some(2),
+            Some(&mut |snapshot| {
+                confirmed_times.push(snapshot.time_s());
+                if snapshot.step() != peak.step {
+                    return;
+                }
+                let member = snapshot.member(elem.id).unwrap();
+                assert_eq!(member.member_id(), elem.id);
+                assert_eq!(
+                    member.load_state(),
+                    ConfirmedLoadState::TimeHistory {
+                        step: peak.step,
+                        time_s: peak.time_s,
+                        applied_long_term: false,
+                    }
+                );
+                assert_eq!(bounds, [0.0, 3000.0]);
+                let shorter = [0.0, 3_000.0_f64.next_down()];
+                assert!(matches!(member.strong_bending_span(shorter, shorter),
+                    Err(reason) if reason.contains("解析応答の全長と一致しません")));
+                let span = member.strong_bending_span(bounds, bounds).unwrap();
+                assert!(span.monotonic && span.unverified_distribution.is_none());
+                assert_eq!(span.end_moments_nmm, peak.end_moments_nmm);
+                assert!((span.end_moments_nmm[0].abs() - 259e6).abs() < 1e-5);
+                let recorded_mz = member.recorded_section_forces(0.0).unwrap()[5];
+                assert!((span.end_moments_nmm[0] - recorded_mz).abs() < 1e-5);
+                assert!(member.strong_bending_span([1.0, 3000.0], bounds).is_err());
+            }),
+        )
+        .unwrap();
+    assert_eq!(confirmed_times, [0.0, dt, 2.0 * dt]);
 
     let checkpoint = compute_checkpoint(model.clone(), sparse, wave.clone(), 1).unwrap();
     let checkpoint =

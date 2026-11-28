@@ -249,6 +249,16 @@ pub fn compute_time_history(
     cfg: AnalysisSettings,
     wave: sepika_solver::dynamic::timehistory::GroundMotion,
 ) -> JobResult<sepika_solver::dynamic::timehistory::ResponseResult> {
+    compute_confirmed_time_history(model, cfg, wave)
+        .map(crate::time_history_check::ConfirmedTimeHistoryResult::into_response)
+}
+
+/// 時刻歴応答と同じ実行の部材照査を返す。前処理を通したモデルを渡すこと。
+pub fn compute_confirmed_time_history(
+    model: sepika_core::model::Model,
+    cfg: AnalysisSettings,
+    wave: sepika_solver::dynamic::timehistory::GroundMotion,
+) -> JobResult<crate::time_history_check::ConfirmedTimeHistoryResult> {
     if cfg.th_nonlinear {
         model
             .validate_member_hysteresis_attr_refs()
@@ -280,30 +290,32 @@ pub fn compute_time_history(
     .map_err(JobError::InvalidInput)?;
     let analysis = Analysis::prepare(&model).map_err(|e| JobError::Prepare(e.to_string()))?;
     let damping = time_history_damping(&analysis, cfg)?;
-    if cfg.th_nonlinear {
-        return compute_nonlinear_time_history(model, cfg, wave, damping);
-    }
-    let record_every = (cfg.th_record_every > 0).then_some(cfg.th_record_every);
-    let newmark = sepika_solver::dynamic::timehistory::NewmarkCfg::average_accel();
-    let (mut result, checks) = crate::time_history_check::collect_time_history_checks(
-        &model,
-        Default::default(),
-        0,
-        |observer| {
-            analysis.time_history_with_force_observer(
-                &wave,
-                newmark,
-                damping,
-                record_every,
-                observer,
-            )
-        },
-    )
-    .map_err(dynamic_solve_error)?;
-    if let Some(recording) = &mut result.recording {
-        checks.store(recording);
-    }
-    Ok(result)
+    let response = if cfg.th_nonlinear {
+        compute_nonlinear_time_history(&model, cfg, wave, damping)?
+    } else {
+        let record_every = (cfg.th_record_every > 0).then_some(cfg.th_record_every);
+        let newmark = sepika_solver::dynamic::timehistory::NewmarkCfg::average_accel();
+        let (mut result, checks) = crate::time_history_check::collect_time_history_checks(
+            &model,
+            Default::default(),
+            0,
+            |observer| {
+                analysis.time_history_with_force_observer(
+                    &wave,
+                    newmark,
+                    damping,
+                    record_every,
+                    observer,
+                )
+            },
+        )
+        .map_err(dynamic_solve_error)?;
+        if let Some(recording) = &mut result.recording {
+            checks.store(recording);
+        }
+        result
+    };
+    Ok(crate::time_history_check::ConfirmedTimeHistoryResult { model, response })
 }
 
 pub(crate) fn time_history_damping(
@@ -382,21 +394,21 @@ pub(crate) fn time_history_damping(
 /// 非線形時刻歴応答解析（[`compute_time_history`] の非線形分岐）。
 /// `DampingAccumulation` は既定を用いる。
 fn compute_nonlinear_time_history(
-    model: sepika_core::model::Model,
+    model: &sepika_core::model::Model,
     cfg: AnalysisSettings,
     wave: sepika_solver::dynamic::timehistory::GroundMotion,
     damping: sepika_solver::dynamic::damping::Damping,
 ) -> JobResult<sepika_solver::dynamic::timehistory::ResponseResult> {
     let elements = sepika_element::factory::prepare_nonlinear_elements(
-        &model,
+        model,
         sepika_core::model::AnalysisKind::TimeHistory,
         sepika_element::factory::StrengthBasis::Nominal,
     )
     .map_err(|e| {
         JobError::InvalidInput(format!("非線形時刻歴（部材耐力を算定できません）:\n{e}"))
     })?;
-    let dofmap = sepika_core::dof::DofMap::build(&model);
-    let reducer = sepika_solver::common::constraint::Reducer::build(&model, &dofmap);
+    let dofmap = sepika_core::dof::DofMap::build(model);
+    let reducer = sepika_solver::common::constraint::Reducer::build(model, &dofmap);
     let n_indep = reducer.n_indep;
     let init = vec![0.0; n_indep];
     let newmark = sepika_solver::dynamic::timehistory::NewmarkCfg::average_accel();
@@ -408,7 +420,7 @@ fn compute_nonlinear_time_history(
         record_every,
     };
     let (mut result, checks) = crate::time_history_check::collect_time_history_checks(
-        &model,
+        model,
         Default::default(),
         0,
         |observer| {

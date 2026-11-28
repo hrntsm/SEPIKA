@@ -175,6 +175,8 @@ fn loaded_recording_keeps_signed_udl_sections_and_unstored_step_peaks() {
 
 #[test]
 fn loaded_recording_point_force_keeps_left_limit_and_both_ends() {
+    use crate::common::member_response::{ConfirmedTimeHistoryStep, MemberIndices};
+
     for rotated in [false, true] {
         let model = model(rotated, ElementKind::Beam);
         let mut beam = FiberBeam::with_plastic_zone(
@@ -192,10 +194,24 @@ fn loaded_recording_point_force_keeps_left_limit_and_both_ends() {
         );
         beam.update_state_with_member_loads(&zero(), &[point], false, &Ctx { model: &model })
             .unwrap();
-        let forces = member_forces_nonlinear(&model, &[Box::new(beam)])
-            .unwrap()
-            .forces;
-        let at = &forces[0].as_ref().unwrap().at;
+        let response = member_forces_nonlinear(&model, &[Box::new(beam)]).unwrap();
+        let snapshot = ConfirmedTimeHistoryStep {
+            members: &MemberIndices::new(&model),
+            step: 0,
+            time_s: 0.0,
+            applied_long_term: true,
+            forces: &response.forces,
+            loaded: &response.loaded,
+            bending: &|index, length_mm| response.strong_bending(index, length_mm),
+        };
+        let member = snapshot.member(model.elements[0].id).unwrap();
+        close(member.recorded_section_forces(0.5).unwrap()[1], -500.0);
+        close(member.recorded_section_forces(0.5001).unwrap()[1], 500.0);
+        assert_eq!(
+            member.recorded_section_forces(0.50001),
+            Err("指定した評価位置の解析断面力がありません")
+        );
+        let at = &response.forces[0].as_ref().unwrap().at;
         assert_eq!(
             at.iter().map(|p| p.0).collect::<Vec<_>>(),
             [0., 0.5, 0.5001, 1.]

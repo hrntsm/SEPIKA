@@ -2,9 +2,10 @@ use super::{
     resolve, Comp, FrameStaticBendingSection, FrameStaticStrongBending, FrameStrongBendingPeak,
     FrameStrongBendingSpan, LoadedFrameSection, StrongBendingResponse,
 };
+use crate::transform::LocalFrame;
 use num_rational::BigRational;
 use num_traits::{Signed, ToPrimitive, Zero};
-use sepika_core::model::MemberLoadKind;
+use sepika_core::model::{MemberLoad, MemberLoadKind};
 use std::cell::OnceCell;
 use std::cmp::Ordering;
 
@@ -29,6 +30,35 @@ fn finite(value: &BigRational) -> Result<f64, ExactSpanError> {
 }
 
 type ExactVector = [BigRational; 3];
+
+fn exact_point_jump<'a>(
+    frame: &LocalFrame,
+    x_mm: f64,
+    loads: impl Iterator<Item = (f64, &'a MemberLoad)>,
+) -> Result<ExactVector, ExactSpanError> {
+    let mut jump = std::array::from_fn(|_| BigRational::zero());
+    for (factor, load) in loads {
+        if matches!(load.kind, MemberLoadKind::Point { a, .. } if a == x_mm) {
+            let factor = rational(factor)?;
+            for (axis, comp) in resolve(load, frame).into_iter().enumerate() {
+                if let Some(Comp::Point { p, .. }) = comp {
+                    jump[axis] += &factor * rational(if axis == 0 { -p } else { p })?;
+                }
+            }
+        }
+    }
+    Ok(jump)
+}
+
+pub(in crate::frame::member_load) fn has_nonzero_point_jump<'a>(
+    frame: &LocalFrame,
+    x_mm: f64,
+    loads: impl Iterator<Item = (f64, &'a MemberLoad)>,
+) -> Result<bool, &'static str> {
+    exact_point_jump(frame, x_mm, loads)
+        .map(|jump| jump.iter().any(|component| !component.is_zero()))
+        .map_err(|_| "集中部材荷重による断面力の跳びを確認できません")
+}
 
 fn exact_vector([x, y, z]: [f64; 3]) -> Result<ExactVector, ExactSpanError> {
     Ok([rational(x)?, rational(y)?, rational(z)?])
@@ -629,17 +659,11 @@ impl LoadedFrameSection {
     }
 
     fn exact_point_jump(&self, x_mm: f64) -> Result<ExactVector, ExactSpanError> {
-        let mut jump = std::array::from_fn(|_| BigRational::zero());
-        for load in &self.map.loads {
-            if matches!(load.kind, MemberLoadKind::Point { a, .. } if a == x_mm) {
-                for (axis, comp) in resolve(load, self.frame()).into_iter().enumerate() {
-                    if let Some(Comp::Point { p, .. }) = comp {
-                        jump[axis] += rational(if axis == 0 { -p } else { p })?;
-                    }
-                }
-            }
-        }
-        Ok(jump)
+        exact_point_jump(
+            self.frame(),
+            x_mm,
+            self.map.loads.iter().map(|load| (1.0, load)),
+        )
     }
 
     fn saved_right_cut(

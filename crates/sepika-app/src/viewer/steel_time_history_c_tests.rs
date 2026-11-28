@@ -352,7 +352,12 @@ fn material_only_failure_is_shown_alongside_the_unavailable_lateral_check() {
         original.symmetric_column_bending
     );
     let output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
-        super::draw_symmetric_column_bending(ui, &restored, 0, 3, false);
+        super::draw_symmetric_column_bending(
+            ui,
+            Ok(&restored.symmetric_column_bending[&0]),
+            3,
+            false,
+        );
     });
     let labels: Vec<_> = output
         .shapes

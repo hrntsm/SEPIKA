@@ -20,6 +20,8 @@ use sepika_core::model::{ElementData, ElementKind, Model};
 use sepika_core::section_shape::SectionShape;
 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::frame::beam::MemberForces;
+use sepika_solver::common::member_response::StaticMemberLoads;
+use sepika_solver::statics::analysis::ConfirmedStaticResult;
 use sepika_solver::statics::linear::{
     GirderColumnFaceEnds, RcColumnFaceEnds, SteelPanelColumnFaceForce,
 };
@@ -118,6 +120,10 @@ pub struct MemberDesignCheckOptions<'a> {
     /// 鋼梁・鋼柱の補剛区間の曲げを照合する、解析に用いた荷重ケースID・係数。モデルは解析時の部材荷重を持つこと。
     /// 不明ならNoneとし、強軸曲げ分布は未確認とする。
     pub steel_beam_span_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
+    /// 保存断面力と生成入力を照合済みの大梁専用荷重項。大梁の断面・区間照査に使用し、鋼柱には使わない。
+    pub saved_steel_beam_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
+    /// 鋼梁の断面力の照合に失敗した部材と理由。ケース全体の失敗は `Err`。
+    pub steel_beam_span_source_error: Option<Result<&'a HashMap<ElemId, &'static str>, &'a str>>,
     /// ハンチ付きRC梁の許容せん断力を確認する、同じ線形静的応答の荷重ケースID・係数。
     /// モデルは解析時の部材荷重を持つこと。未指定時は正確な曲げ分布を確認できない。
     pub rc_beam_qd1_haunch_load_terms: Option<&'a [(sepika_core::ids::LoadCaseId, f64)]>,
@@ -381,7 +387,7 @@ pub fn validate_model_steel_inputs(model: &Model) -> Result<(), String> {
     crate::joint_wiring::validate_steel_panel_inputs(model)
 }
 
-/// 部材内力に対する許容応力度検定を一括実行する。
+/// 呼出側が指定した断面力を使う低水準の許容応力度検定。解析結果の由来は認定しない。
 ///
 /// 部材ループ（DesignCtx 組み立て → 危険断面位置での検定）のほか、
 /// 大梁の長期たわみと節点単位検定も含む。床の小梁・スラブ設計は
@@ -391,6 +397,37 @@ pub fn run_member_design_checks(
     member_forces: &[(ElemId, MemberForces)],
     panel_moments: &[(NodeId, [f64; 2])],
     options: &MemberDesignCheckOptions<'_>,
+) -> Result<MemberDesignCheckReport, String> {
+    run_member_design_checks_impl(model, member_forces, panel_moments, options, None)
+}
+
+/// 計算モデルと一体の線形静的結果から許容応力度検定を実行する。
+/// 鋼梁の区間応答には結果に結び付いた実効荷重を使い、呼出側から渡された荷重係数では上書きしない。
+pub fn run_confirmed_static_member_design_checks(
+    solved: &ConfirmedStaticResult<'_>,
+    options: &MemberDesignCheckOptions<'_>,
+) -> Result<MemberDesignCheckReport, String> {
+    let options = MemberDesignCheckOptions {
+        steel_beam_span_load_terms: Some(solved.effective_terms()),
+        saved_steel_beam_load_terms: None,
+        steel_beam_span_source_error: None,
+        ..options.clone()
+    };
+    run_member_design_checks_impl(
+        solved.model(),
+        &solved.result().member_forces,
+        &solved.result().panel_moments,
+        &options,
+        Some(solved),
+    )
+}
+
+fn run_member_design_checks_impl(
+    model: &Model,
+    member_forces: &[(ElemId, MemberForces)],
+    panel_moments: &[(NodeId, [f64; 2])],
+    options: &MemberDesignCheckOptions<'_>,
+    solved: Option<&ConfirmedStaticResult<'_>>,
 ) -> Result<MemberDesignCheckReport, String> {
     let mut elem_by_id = HashMap::with_capacity(model.elements.len());
     for e in &model.elements {
@@ -413,8 +450,13 @@ pub fn run_member_design_checks(
             m
         });
 
-    let beam_span_loads =
-        steel_beam_span::BeamSpanLoads::from_terms(model, options.steel_beam_span_load_terms);
+    let steel_column_loads =
+        StaticMemberLoads::from_terms(model, options.steel_beam_span_load_terms);
+    let saved_beam_loads = options
+        .saved_steel_beam_load_terms
+        .map(|terms| StaticMemberLoads::from_terms(model, Some(terms)));
+    let beam_span_loads = saved_beam_loads.as_ref().unwrap_or(&steel_column_loads);
+    let confirmed_beam_responses = solved.map(ConfirmedStaticResult::member_responses);
     let mut haunch_span_loads = None;
     let mut column_mechanism_topology = None;
     let mut rc_beam_adjacency = None;
@@ -497,11 +539,12 @@ pub fn run_member_design_checks(
         })
         .map(|elem| (elem.id, MemberForces { at: Vec::new() }))
         .collect();
-    use steel_beam_span::{GroupBending, RecoveredBending};
+    use steel_beam_span::{BendingInput, GroupBending, RecoveredBending};
     let mut grouped_beam_spans = steel_beam_span::grouped_bending_spans(
         model,
         member_forces,
         &force_rows,
+        options.steel_beam_span_source_error.and_then(Result::ok),
         beam_span_loads.as_ref(),
     );
     let route21_inputs = options
@@ -516,7 +559,13 @@ pub fn run_member_design_checks(
         .filter(|elem| frame_check_target(elem))
     {
         let row_count = force_rows.get(&elem.id).copied().unwrap_or_default();
-        if row_count == 1 {
+        let beam_source_error = options
+            .steel_beam_span_source_error
+            .and_then(|verification| match verification {
+                Ok(errors) => errors.get(&elem.id).copied(),
+                Err(reason) => Some(reason),
+            });
+        if row_count == 1 && beam_source_error.is_none() {
             continue;
         }
         let (Some(sec), Some(mat)) = (model.element_section(elem), model.element_material(elem))
@@ -524,7 +573,8 @@ pub fn run_member_design_checks(
             continue;
         };
         let structure = structure_kind_of(Some(sec), Some(mat.category));
-        if route21_inputs.is_some()
+        if row_count != 1
+            && route21_inputs.is_some()
             && structure == StructureKind::Src
             && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
             && unavailable_src_ids.insert(elem.id)
@@ -546,7 +596,8 @@ pub fn run_member_design_checks(
         if structure != StructureKind::S || !crate::steel::is_symmetric_h_section(sec) {
             continue;
         }
-        if MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
+        if row_count != 1
+            && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
             && unavailable_steel_column_ids.insert(elem.id)
         {
             let reason = if row_count == 0 {
@@ -588,12 +639,15 @@ pub fn run_member_design_checks(
         } else {
             steel_beam_span::requires_bending_span(sec, structure, &ctx)
         };
-        if needs_span && unavailable_beam_ids.insert(elem.id) {
-            let reason = if row_count == 0 {
+        let confirmed_beam = confirmed_beam_responses.is_some() || saved_beam_loads.is_some();
+        if (beam_source_error.is_some() || (confirmed_beam || needs_span) && row_count != 1)
+            && unavailable_beam_ids.insert(elem.id)
+        {
+            let reason = beam_source_error.unwrap_or(if row_count == 0 {
                 "鋼梁の解析断面力がありません"
             } else {
                 "鋼梁の解析断面力が重複し、一意の解析応答を確認できません"
-            };
+            });
             member_checks.push((
                 elem.id,
                 0.5,
@@ -701,7 +755,7 @@ pub fn run_member_design_checks(
                     elem,
                     mf,
                     &ctx,
-                    beam_span_loads.as_ref(),
+                    steel_column_loads.as_ref(),
                     Some(&reason),
                     &mut member_checks,
                 ) {
@@ -1058,10 +1112,7 @@ pub fn run_member_design_checks(
             .and_then(|_| crate::rc::beam_qd1_haunches(model, elem, single_qd1_geometry));
         if let Some(haunches) = &mut rc_beam_qd1_haunches {
             let loads = haunch_span_loads.get_or_insert_with(|| {
-                steel_beam_span::BeamSpanLoads::from_terms(
-                    model,
-                    options.rc_beam_qd1_haunch_load_terms,
-                )
+                StaticMemberLoads::from_terms(model, options.rc_beam_qd1_haunch_load_terms)
             });
             haunches.set_static_shear_span_reference(
                 model,
@@ -1137,7 +1188,7 @@ pub fn run_member_design_checks(
                 elem,
                 mf,
                 &ctx,
-                beam_span_loads.as_ref(),
+                steel_column_loads.as_ref(),
                 None,
                 &mut member_checks,
             )
@@ -1145,10 +1196,11 @@ pub fn run_member_design_checks(
             continue;
         }
 
-        let grouped_steel_beam = structure == StructureKind::S
+        let steel_beam = structure == StructureKind::S
             && kind == MemberKind::Girder
-            && crate::steel::is_symmetric_h_section(sec)
-            && (group.is_some() || grouped_girders.contains(elem_id));
+            && crate::steel::is_symmetric_h_section(sec);
+        let grouped_steel_beam =
+            steel_beam && (group.is_some() || grouped_girders.contains(elem_id));
         let grouped_beam_span = grouped_steel_beam.then(|| {
             grouped_beam_spans
                 .remove(elem_id)
@@ -1201,10 +1253,14 @@ pub fn run_member_design_checks(
                     }
                 };
             }
-            beam_span_loads
-                .as_ref()
-                .map_err(|reason| (*reason).to_owned())
-                .and_then(|loads| loads.bending_span(model, elem, mf, &ctx))
+            let input = match &confirmed_beam_responses {
+                Some(Ok(responses)) => BendingInput::Confirmed(responses.member(*elem_id)?),
+                Some(Err(reason)) => return Err((*reason).into()),
+                None => {
+                    BendingInput::Saved(beam_span_loads.as_ref().map_err(|&reason| reason)?, mf)
+                }
+            };
+            steel_beam_span::bending_span(input, elem, &ctx)
         });
         let middle_bracing = steel_beam_span::has_middle_bracing(&ctx);
         let mut beam_peaks = Vec::new();
@@ -1387,11 +1443,61 @@ pub fn run_member_design_checks(
             .rigid_zone
             .face_j
             .map(|face| (1.0 - face / position_length).clamp(0.5 + 1e-9, 1.0));
+        let covered_by_peak = |pos| {
+            beam_peaks.iter().any(|(peak, _)| {
+                peak.xi == pos
+                    || (peak.is_j_face
+                        && sampled_j_face == Some(pos)
+                        && (peak.xi - pos).abs() <= f64::EPSILON)
+            })
+        };
+        let interval_at = |pos| {
+            let index = intervals.partition_point(|interval| interval.bounds_xi[1] < pos);
+            intervals.get(index.min(intervals.len().saturating_sub(1)))
+        };
+        let confirm_beam_sections =
+            steel_beam && (confirmed_beam_responses.is_some() || saved_beam_loads.is_some());
+        let mut verified_beam_sections = Vec::new();
+        if confirm_beam_sections {
+            let confirmed = confirmed_beam_responses.as_ref().map(|responses| {
+                responses
+                    .as_ref()
+                    .map_err(|&reason| reason)
+                    .and_then(|responses| responses.member(*elem_id))
+            });
+            for &pos in positions.iter().filter(|&&pos| !covered_by_peak(pos)) {
+                let local = match &confirmed {
+                    Some(response) => response
+                        .as_ref()
+                        .map_err(|&reason| reason)
+                        .and_then(|response| response.recorded_section_forces(pos)),
+                    None => beam_span_loads
+                        .as_ref()
+                        .map_err(|&reason| reason)
+                        .and_then(|loads| loads.recorded_section_forces(elem, mf, pos)),
+                };
+                match local {
+                    Ok(forces) => {
+                        verified_beam_sections.push((pos, forces, None, interval_at(pos)))
+                    }
+                    Err(reason) => member_checks.push((
+                        *elem_id,
+                        pos,
+                        CheckOutcome::Skipped {
+                            reason: reason.into(),
+                        },
+                    )),
+                }
+            }
+        }
         let section_forces = mf
             .at
             .iter()
             .enumerate()
             .filter(|(row, (pos, _))| {
+                if confirm_beam_sections {
+                    return false;
+                }
                 let selected_position = match &route21_matches {
                     Some((stations, counts)) => stations[*row].is_some_and(|i| counts[i] == 1),
                     None if qd1_positions.is_some() => positions.iter().any(|expected| {
@@ -1408,22 +1514,10 @@ pub fn run_member_design_checks(
                 };
                 selected_position
                     && !repeated_stations.contains(&station_key(*pos))
-                    && !beam_peaks.iter().any(|(peak, _)| {
-                        peak.xi == *pos
-                            || (peak.is_j_face
-                                && sampled_j_face == Some(*pos)
-                                && (peak.xi - pos).abs() <= f64::EPSILON)
-                    })
+                    && !covered_by_peak(*pos)
             })
-            .map(|(_, &(pos, forces))| {
-                let interval = if intervals.is_empty() {
-                    None
-                } else {
-                    let index = intervals.partition_point(|interval| interval.bounds_xi[1] < pos);
-                    intervals.get(index.min(intervals.len() - 1))
-                };
-                (pos, forces, None, interval)
-            })
+            .map(|(_, &(pos, forces))| (pos, forces, None, interval_at(pos)))
+            .chain(verified_beam_sections)
             .chain(peak_sections);
         for (pos, forces, cut_side, interval) in section_forces {
             let at_rc_column_face = column_geometry.is_some_and(|geometry| {

@@ -161,29 +161,58 @@ impl MemberDetailAttr {
     /// 共通実装。両者の位置一致判定（1e-6）はこの単一実装により保証される。
     /// `geom_len` が 0 以下（不正な幾何）のときは空を返す。
     pub fn extra_check_positions(&self, rigid_zone: &RigidZone, geom_len: f64) -> Vec<f64> {
-        if geom_len <= 1e-12 {
-            return Vec::new();
-        }
         let mut xs = Vec::new();
+        self.for_each_extra_check_position(rigid_zone, geom_len, |xi, _| xs.push(xi));
+        xs
+    }
+
+    /// 付帯検定位置ごとに、全長比 ξ と i 端からの距離 [mm] を渡す。
+    #[doc(hidden)]
+    pub fn for_each_extra_check_position(
+        &self,
+        rigid_zone: &RigidZone,
+        geom_len: f64,
+        mut visit: impl FnMut(f64, f64),
+    ) {
+        if geom_len <= 1e-12 {
+            return;
+        }
         if let Some(h) = &self.haunch_i {
             if h.length > 0.0 {
-                let base = rigid_zone.face_i_or_zero();
-                xs.push(((base + h.length) / geom_len).clamp(0.0, 0.5 - 1e-9));
+                let distance_mm = rigid_zone.face_i_or_zero() + h.length;
+                let raw = distance_mm / geom_len;
+                let xi = raw.clamp(0.0, 0.5 - 1e-9);
+                visit(
+                    xi,
+                    if raw == xi {
+                        distance_mm
+                    } else {
+                        xi * geom_len
+                    },
+                );
             }
         }
         if let Some(h) = &self.haunch_j {
             if h.length > 0.0 {
-                let base = rigid_zone.face_j_or_zero();
-                xs.push((1.0 - (base + h.length) / geom_len).clamp(0.5 + 1e-9, 1.0));
+                let j_distance_mm = rigid_zone.face_j_or_zero() + h.length;
+                let raw = 1.0 - j_distance_mm / geom_len;
+                let xi = raw.clamp(0.5 + 1e-9, 1.0);
+                visit(
+                    xi,
+                    if raw == xi {
+                        geom_len - j_distance_mm
+                    } else {
+                        xi * geom_len
+                    },
+                );
             }
         }
         for j in &self.joints {
             let xi = j.distance / geom_len;
             if xi > 0.0 && xi < 1.0 {
-                xs.push(xi);
+                visit(xi, j.distance);
             }
         }
-        xs
     }
 }
 

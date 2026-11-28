@@ -376,14 +376,19 @@ fn run_nonlinear_time_history(
     let mut time = Vec::with_capacity(n_steps + 1);
     time.push(0.0);
 
-    let mut recorder =
-        ThRecorder::new(model, dofmap, n_steps, cfg.record_every).with_force_observer(observer);
+    let mut recorder = ThRecorder::new(model, dofmap, n_steps, cfg.record_every)
+        .with_force_observer(model, observer);
     {
         let (xg_x_init, xg_y_init) = accel_xy_at(wave, 0);
         let mf_init = member_forces_nonlinear(model, &behaviors)?;
-        recorder.observe(0, 0.0, &mf_init.forces, &|index, length_mm| {
-            mf_init.strong_bending(index, length_mm)
-        });
+        recorder.observe(
+            0,
+            0.0,
+            cfg.apply_long_term,
+            &mf_init.forces,
+            &mf_init.loaded,
+            &|index, length_mm| mf_init.strong_bending(index, length_mm),
+        );
         recorder.record_step(
             0,
             0.0,
@@ -649,7 +654,9 @@ fn run_nonlinear_time_history(
             recorder.observe(
                 (n + 1) as u64,
                 t_next,
+                cfg.apply_long_term,
                 &mf_now.forces,
+                &mf_now.loaded,
                 &|index, length_mm| mf_now.strong_bending(index, length_mm),
             );
             recorder.record_step(

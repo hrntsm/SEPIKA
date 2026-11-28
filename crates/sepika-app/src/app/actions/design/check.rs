@@ -1,8 +1,171 @@
 use super::super::*;
 
-use crate::app::result_validity::same_saved_member_forces;
+use std::collections::{HashMap, HashSet};
+
+use crate::app::result_validity::{decode_recorded_input, same_saved_member_forces};
+use sepika_core::model::ElementKind;
+use sepika_element::frame::beam::MemberForces;
+use sepika_solver::statics::linear::StaticOnce;
+
+type SavedSteelBeamInput = (Vec<(LoadCaseId, f64)>, HashMap<ElemId, &'static str>);
+
+fn unique_static_result<'a>(
+    mut responses: impl Iterator<Item = &'a StaticOnce>,
+) -> Result<&'a StaticOnce, &'static str> {
+    let response = responses
+        .next()
+        .ok_or("選択した荷重状態の保存解析結果がありません")?;
+    if responses.next().is_some() {
+        return Err("選択した荷重状態の保存解析結果が重複しています");
+    }
+    Ok(response)
+}
+
+fn index_member_rows(
+    forces: &[(ElemId, MemberForces)],
+) -> HashMap<ElemId, Option<&(ElemId, MemberForces)>> {
+    let mut rows = HashMap::with_capacity(forces.len());
+    for row in forces {
+        rows.entry(row.0)
+            .and_modify(|r| *r = None)
+            .or_insert(Some(row));
+    }
+    rows
+}
 
 impl App {
+    pub(in crate::app) fn is_saved_steel_beam_target(
+        model: &sepika_core::model::Model,
+        id: ElemId,
+    ) -> bool {
+        model.element(id).is_some_and(|elem| {
+            matches!(
+                elem.kind,
+                ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
+            ) && sepika_design_jp::MemberKind::try_of_element(elem, model)
+                == Ok(sepika_design_jp::MemberKind::Girder)
+                && model.element_section(elem).is_some_and(|sec| {
+                    sepika_design_jp::steel::is_symmetric_h_section(sec)
+                        && sepika_core::structure_kind::structure_kind_of(
+                            Some(sec),
+                            model.element_material(elem).map(|mat| mat.category),
+                        ) == sepika_core::structure_kind::StructureKind::S
+                })
+        })
+    }
+
+    pub(in crate::app) fn saved_steel_beam_input(&self) -> Result<SavedSteelBeamInput, String> {
+        let bundle = self
+            .core
+            .scoped
+            .results
+            .as_ref()
+            .ok_or("鋼梁の保存解析結果がありません")?;
+        let key = self
+            .selected_design_source()
+            .ok_or("鋼梁の解析結果の選択がありません")?;
+        let response = match &key {
+            ResultInputKey::Static(key) => unique_static_result(
+                bundle
+                    .statics
+                    .iter()
+                    .filter(move |(stored, _)| stored == key)
+                    .map(|(_, r)| r),
+            ),
+            ResultInputKey::Combo(name) => unique_static_result(
+                bundle
+                    .combos
+                    .iter()
+                    .filter(move |(stored, _)| stored == name)
+                    .map(|(_, r)| r),
+            ),
+            _ => unreachable!("静的荷重ケースまたは組合せのみ"),
+        }?;
+        let mut records = bundle
+            .input_records
+            .iter()
+            .filter(|(stored, _)| *stored == key);
+        let (_, bytes) = records
+            .next()
+            .ok_or("選択した解析結果の生成入力がありません")?;
+        if records.next().is_some() {
+            return Err("選択した解析結果の生成入力が重複しています".into());
+        }
+        self.require_result_input(key.clone())?;
+        let recorded = decode_recorded_input(&key, bytes, None)?.model;
+        let terms = match key {
+            ResultInputKey::Static(StaticCaseKey::User(id)) => vec![(id, 1.0)],
+            ResultInputKey::Static(StaticCaseKey::Seismic(dir)) => {
+                use sepika_core::model::{LoadCaseKind, EX_CASE_NAME, EY_CASE_NAME};
+                let name = match dir {
+                    SeismicDir::X => EX_CASE_NAME,
+                    SeismicDir::Y => EY_CASE_NAME,
+                };
+                let mut cases = recorded
+                    .load_cases
+                    .iter()
+                    .filter(|case| case.name == name && case.kind == LoadCaseKind::Seismic);
+                let case = cases.next().ok_or("生成入力に地震荷重ケースがありません")?;
+                if cases.next().is_some() {
+                    return Err("生成入力の地震荷重ケースが重複しています".into());
+                }
+                vec![(case.id, 1.0)]
+            }
+            ResultInputKey::Combo(name) => {
+                let mut combos = recorded
+                    .combinations
+                    .iter()
+                    .filter(|combo| combo.name == name);
+                let combo = combos.next().ok_or("生成入力に荷重組合せがありません")?;
+                if combos.next().is_some() {
+                    return Err("生成入力の荷重組合せが重複しています".into());
+                }
+                sepika_core::load_combo::effective_combination_terms(combo, &recorded.load_cases)?
+            }
+            _ => unreachable!("静的荷重ケースまたは組合せのみ"),
+        };
+        let saved = index_member_rows(&response.member_forces);
+        let displayed = index_member_rows(&bundle.member_forces);
+        let row_error = |id| match (saved.get(&id), displayed.get(&id)) {
+            (None, _) => Some("保存結果に鋼梁の解析断面力がありません"),
+            (_, None) => Some("表示側に鋼梁の解析断面力がありません"),
+            (Some(None), _) | (_, Some(None)) => {
+                Some("鋼梁の解析断面力が重複し、一意の解析応答を確認できません")
+            }
+            (Some(Some(saved)), Some(Some(displayed))) => (!same_saved_member_forces(
+                std::slice::from_ref(*saved),
+                std::slice::from_ref(*displayed),
+            ))
+            .then_some(
+                "表示断面力が選択した荷重状態の保存解析結果と一致しません。選び直してください",
+            ),
+        };
+        let model = &self.core.model;
+        let errors = model
+            .elements
+            .iter()
+            .map(|elem| elem.id)
+            .filter(|&id| Self::is_saved_steel_beam_target(model, id))
+            .filter_map(|id| row_error(id).map(|reason| (id, reason)))
+            .collect();
+        Ok((terms, errors))
+    }
+
+    pub(in crate::app) fn affected_split_steel_beams(
+        &self,
+        row_errors: &HashMap<ElemId, &'static str>,
+    ) -> HashSet<ElemId> {
+        let model = &self.core.model;
+        model
+            .girder_groups
+            .iter()
+            .filter(|group| group.iter().any(|id| row_errors.contains_key(id)))
+            .flatten()
+            .copied()
+            .filter(|&id| Self::is_saved_steel_beam_target(model, id))
+            .collect()
+    }
+
     /// 選択対象の保存係数・種別による状態。単独ケースと組合せを区別する。
     pub fn selected_design_load_state(
         &self,
@@ -298,7 +461,7 @@ impl App {
             Vec::new()
         };
         let long_member_forces = gravity_long_owned.as_deref().filter(|_| is_seismic_combo);
-        let group_overrides =
+        let mut group_overrides =
             sepika_design_jp::girder_group_overrides(&self.core.model, &results.member_forces);
         let (q0_by_elem, grouped_rc_q0) = if !damage_control
             && long_member_forces.is_some()
@@ -378,6 +541,20 @@ impl App {
         } else {
             None
         };
+        let steel_beam_source =
+            (frame_design_requested && load_error.is_none()).then(|| self.saved_steel_beam_input());
+        let saved_beam_input = steel_beam_source
+            .as_ref()
+            .and_then(|source| source.as_ref().ok());
+        if let Some((_, row_errors)) = saved_beam_input {
+            for id in self.affected_split_steel_beams(row_errors) {
+                group_overrides.remove(&id);
+            }
+        }
+        let beam_source_error = steel_beam_source.as_ref().map(|source| match source {
+            Ok((_, errors)) => Ok(errors),
+            Err(reason) => Err(reason.as_str()),
+        });
         let route21 = if load_error.is_none() && gravity_error.is_none() {
             match self.selected_route21_inputs() {
                 Ok(inputs) => inputs,
@@ -419,6 +596,9 @@ impl App {
                     src_wall_gravity_forces: gravity_long_owned.as_deref(),
                     load_terms: load_terms.as_deref(),
                     steel_beam_span_load_terms: verified_member_load_terms,
+                    saved_steel_beam_load_terms: saved_beam_input
+                        .map(|(terms, _)| terms.as_slice()),
+                    steel_beam_span_source_error: beam_source_error,
                     rc_beam_qd1_haunch_load_terms: verified_member_load_terms,
                     rc_column_long_term_shear,
                     rc_column_face_forces: selected_response
