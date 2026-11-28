@@ -8,11 +8,13 @@
 use std::collections::BTreeMap;
 
 use super::result::{AxialForcePeaks, StoryResponse, StrongAxisMomentPeaks, ThRecording};
+use crate::common::member_response::{ConfirmedTimeHistoryStep, MemberIndices, TimeHistoryBending};
 use sepika_core::dof::{DofMap, DOF_PER_NODE};
 use sepika_core::model::{ElementData, ElementKind, FrameSectionUse, Model};
 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_element::behavior::{Ctx, ElementBehavior, LoadedFrameResponse};
 use sepika_element::frame::beam::MemberForces;
+use sepika_element::frame::member_load::{FrameStrongBendingSpan, LoadedFrameSection};
 
 /// 時刻歴簡易検定で正負の局所 Mz 極値を記録する対象かを返す。
 pub fn uses_signed_bending_peaks(model: &Model, elem: &ElementData) -> bool {
@@ -75,12 +77,23 @@ pub(crate) struct NonlinearMemberResponse {
     pub loaded: Vec<Option<LoadedFrameResponse>>,
 }
 
+pub(super) fn confirmed_full_span(
+    section: &LoadedFrameSection,
+    length_mm: f64,
+    forces: &MemberForces,
+) -> Result<FrameStrongBendingSpan, String> {
+    if length_mm != section.length_mm() {
+        return Err("指定区間が同じ確定時刻の解析応答の全長と一致しません".into());
+    }
+    section.full_span_strong_bending(length_mm, forces)
+}
+
 impl NonlinearMemberResponse {
     pub fn strong_bending(
         &self,
         index: usize,
         length_mm: f64,
-    ) -> Result<sepika_element::frame::member_load::FrameStrongBendingSpan, String> {
+    ) -> Result<FrameStrongBendingSpan, String> {
         let section = self
             .loaded
             .get(index)
@@ -91,7 +104,7 @@ impl NonlinearMemberResponse {
             .get(index)
             .and_then(Option::as_ref)
             .ok_or("同じ確定時刻の断面力がありません")?;
-        section.section.full_span_strong_bending(length_mm, forces)
+        confirmed_full_span(&section.section, length_mm, forces)
     }
 }
 
@@ -222,7 +235,10 @@ struct StoryDofGroup {
 /// [`Self::record_step`] を呼ぶ。フレーム間引き・部材内力包絡・層別集計をここに集約し、
 /// 3 つの積分スキームで同一のロジックを共有する。
 pub(crate) struct ThRecorder<'a, 'env> {
-    observer: Option<&'a mut super::CommittedMemberForcesObserver<'env>>,
+    observer: Option<(
+        &'a mut super::CommittedMemberForcesObserver<'env>,
+        MemberIndices<'a>,
+    )>,
     record_every: usize,
     n_steps: u64,
     /// `weight_above[i]` = 当該層以上（i 番目〜最上層）の地震用重量の累積和。
@@ -377,9 +393,10 @@ impl<'a, 'env> ThRecorder<'a, 'env> {
 
     pub(crate) fn with_force_observer(
         mut self,
+        model: &'a Model,
         observer: Option<&'a mut super::CommittedMemberForcesObserver<'env>>,
     ) -> Self {
-        self.observer = observer;
+        self.observer = observer.map(|observer| (observer, MemberIndices::new(model)));
         self
     }
 
@@ -455,11 +472,21 @@ impl<'a, 'env> ThRecorder<'a, 'env> {
         &mut self,
         step: u64,
         time_s: f64,
+        applied_long_term: bool,
         forces: &[Option<MemberForces>],
-        bending_response: &super::CommittedBendingResponse<'_>,
+        loaded: &[Option<LoadedFrameResponse>],
+        bending: &TimeHistoryBending<'_>,
     ) {
-        if let Some(observer) = &mut self.observer {
-            observer(step, time_s, forces, bending_response);
+        if let Some((observer, members)) = &mut self.observer {
+            observer(&ConfirmedTimeHistoryStep {
+                members,
+                step,
+                time_s,
+                applied_long_term,
+                forces,
+                loaded,
+                bending,
+            });
         }
     }
 

@@ -6,7 +6,6 @@ use sepika_element::frame::member_load::{
     frame_static_strong_bending, FrameStaticBendingError, FrameStaticStrongBending,
 };
 
-use super::steel_beam_span::BeamSpanLoads;
 use super::{combine_incomplete_reasons, strength_outcomes};
 use crate::steel::{
     check_symmetric_h_plate_slenderness, column_span_parameters, StaticColumnSectionCheck,
@@ -15,6 +14,7 @@ use crate::steel::{
 use crate::{
     CheckComponent, CheckKind, CheckOutcome, CheckResult, DesignCtx, MemberForcesAt, SteelDesign,
 };
+use sepika_solver::common::member_response::StaticMemberLoads;
 use FrameStaticBendingError::{Distribution, Stations};
 
 pub(super) fn check(
@@ -22,7 +22,7 @@ pub(super) fn check(
     elem: &ElementData,
     forces: &MemberForces,
     ctx: &DesignCtx,
-    loads: Result<&BeamSpanLoads<'_>, &&str>,
+    loads: Result<&StaticMemberLoads<'_>, &&str>,
     section_issue: Option<&str>,
     outcomes: &mut Vec<(ElemId, f64, CheckOutcome)>,
 ) -> bool {
@@ -580,7 +580,7 @@ fn node_ends(model: &Model, elem: &ElementData) -> Option<[[f64; 3]; 2]> {
 fn recover(
     model: &Model,
     elem: &ElementData,
-    loads: Result<&BeamSpanLoads<'_>, &&str>,
+    loads: Result<&StaticMemberLoads<'_>, &&str>,
     forces: &MemberForces,
 ) -> Result<(FrameStaticStrongBending, [[f64; 3]; 2]), FrameStaticBendingError> {
     let loads = loads

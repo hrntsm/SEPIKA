@@ -1,6 +1,8 @@
 use super::*;
+use std::collections::{HashMap, HashSet};
+
 use sepika_core::result_contract::{ANALYSIS_CONTRACT_VERSION, DESIGN_CONTRACT_VERSION};
-use sepika_design_jp::CheckOutcome;
+use sepika_design_jp::{CheckOutcome, MemberDesignCheckOptions};
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ResultInputKey {
@@ -379,7 +381,117 @@ impl App {
             .is_some_and(|b| b.has_design_results())
         {
             self.core.scoped.staleness.design_stale = self.require_design_input().is_err();
+            let bundle = self.core.scoped.results.as_ref().unwrap();
+            let model = &self.core.model;
+            if !self.core.scoped.staleness.design_stale
+                && self.core.scoped.last_static.is_some()
+                && bundle.design_source == self.selected_design_source()
+                && bundle.member_checks.iter().any(|check| {
+                    Self::is_saved_steel_beam_target(model, check.elem)
+                        && check
+                            .positions
+                            .iter()
+                            .any(|position| matches!(position.outcome, CheckOutcome::Checked(_)))
+                })
+            {
+                let verification = self.saved_steel_beam_input();
+                let mut affected = HashSet::new();
+                let mut rechecked = Ok(HashMap::new());
+                if let Ok((terms, row_errors)) = &verification {
+                    affected = self.affected_split_steel_beams(row_errors);
+                    if affected.iter().any(|id| !row_errors.contains_key(id)) {
+                        rechecked = self.recheck_restored_split_steel_beams(
+                            bundle, &affected, terms, row_errors,
+                        );
+                    }
+                }
+                let (mut rechecked, recheck_error) = match rechecked {
+                    Ok(rows) => (rows, None),
+                    Err(reason) => (HashMap::new(), Some(reason)),
+                };
+                let bundle = self.core.scoped.results.as_mut().unwrap();
+                let mut unavailable = None;
+                for check in bundle.member_checks.iter_mut().filter(|check| {
+                    Self::is_saved_steel_beam_target(model, check.elem)
+                        && check
+                            .positions
+                            .iter()
+                            .any(|p| matches!(p.outcome, CheckOutcome::Checked(_)))
+                }) {
+                    if let Some(positions) = rechecked.remove(&check.elem) {
+                        if positions
+                            .iter()
+                            .any(|p| matches!(p.outcome, CheckOutcome::Skipped { .. }))
+                        {
+                            unavailable.get_or_insert("一本部材の補剛区間を確認できません");
+                        }
+                        check.positions = positions;
+                        continue;
+                    }
+                    let reason = match &verification {
+                        Ok((_, errors)) => errors.get(&check.elem).copied().or_else(|| {
+                            affected.contains(&check.elem).then(|| {
+                                recheck_error
+                                    .as_deref()
+                                    .unwrap_or("一本部材の補剛区間を確認できません")
+                            })
+                        }),
+                        Err(reason) => Some(reason.as_str()),
+                    };
+                    let Some(reason) = reason else { continue };
+                    for position in &mut check.positions {
+                        if matches!(position.outcome, CheckOutcome::Checked(_)) {
+                            unavailable.get_or_insert(reason);
+                            position.outcome = CheckOutcome::Skipped {
+                                reason: reason.into(),
+                            };
+                        }
+                    }
+                }
+                if let Some(reason) = unavailable {
+                    self.report_notice(format!("保存された鋼梁の検定は未算定です。{reason}"));
+                }
+            }
         }
+    }
+
+    fn recheck_restored_split_steel_beams(
+        &self,
+        bundle: &ResultsBundle,
+        affected: &HashSet<ElemId>,
+        terms: &[(LoadCaseId, f64)],
+        row_errors: &HashMap<ElemId, &'static str>,
+    ) -> Result<HashMap<ElemId, Vec<PositionCheck>>, String> {
+        let term = match self.selected_design_load_state()?.duration {
+            sepika_core::load_combo::LoadDuration::Long => LoadTerm::Long,
+            sepika_core::load_combo::LoadDuration::Short => LoadTerm::Short,
+        };
+        let forces: Vec<_> = bundle
+            .member_forces
+            .iter()
+            .filter(|(id, _)| affected.contains(id))
+            .cloned()
+            .collect();
+        let report = sepika_design_jp::run_member_design_checks(
+            &self.core.model,
+            &forces,
+            &[],
+            &MemberDesignCheckOptions {
+                term,
+                saved_steel_beam_load_terms: Some(terms),
+                steel_beam_span_source_error: Some(Ok(row_errors)),
+                ..Default::default()
+            },
+        )?;
+        let rows = report
+            .member_checks
+            .into_iter()
+            .filter(|(id, _, _)| affected.contains(id) && !row_errors.contains_key(id))
+            .collect();
+        Ok(group_member_checks(rows)
+            .into_iter()
+            .map(|check| (check.elem, check.positions))
+            .collect())
     }
 
     pub(super) fn reject_result_contracts(&mut self) -> bool {

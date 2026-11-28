@@ -34,9 +34,10 @@ use sepika_design_jp::{
 };
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::transform::LocalFrame;
-use sepika_solver::dynamic::timehistory::ThRecording;
+use sepika_job::time_history_check::{targets_symmetric_column_bending, TimeHistoryColumnCheck};
 use sepika_solver::dynamic::timehistory::{
-    uses_signed_bending_peaks, AxialForcePeaks, ForcePeakSnapshot,
+    uses_signed_bending_peaks, AsymmetricColumnSectionHistory, AxialForcePeaks, ForcePeakSnapshot,
+    SymmetricColumnBendingHistory, ThRecording,
 };
 
 /// ループ表示の分類（要素種別による）。
@@ -193,18 +194,6 @@ fn design_member_kind(elem: &ElementData, model: &Model) -> Option<MemberKind> {
     }
 }
 
-fn is_symmetric_h_column(model: &Model, elem: &ElementData) -> bool {
-    matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber)
-        && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
-        && model.element_section(elem).is_some_and(|sec| {
-            sepika_design_jp::steel::is_symmetric_h_section(sec)
-                && sepika_core::structure_kind::structure_kind_of(
-                    Some(sec),
-                    model.element_material(elem).map(|mat| mat.category),
-                ) == StructureKind::S
-        })
-}
-
 /// 時刻歴詳細ウィンドウ（`app.ui.scoped.th_detail_elem` があれば表示）。
 pub(crate) fn show_th_detail_window_at(ui: &egui::Ui, app: &mut App, view: &super::ViewportState) {
     let Some(elem_id) = app.ui.scoped.th_detail_elem else {
@@ -255,22 +244,18 @@ fn draw_th_detail_content_at(
     };
     let case_id = view.spatial_case_id(app);
     let is_target = |model: &Model| {
-        model
-            .element(elem_id)
-            .is_some_and(|elem| is_symmetric_h_column(model, elem))
-    };
-    let selected_input_matches = || {
-        case_id.is_some_and(|id| {
-            app.require_result_input(crate::app::ResultInputKey::TimeHistory(id))
-                .is_ok()
+        model.element(elem_id).is_some_and(|elem| {
+            targets_symmetric_column_bending(model, elem)
+                || (case_id.is_some() && uses_signed_bending_peaks(model, elem))
         })
     };
-    if (is_target(&app.core.model)
-        || case_id
-            .and_then(|id| app.recorded_time_history_model(id))
-            .as_ref()
-            .is_some_and(is_target))
-        && !selected_input_matches()
+    let selected_input_matches = case_id.is_some_and(|id| {
+        app.require_result_input(crate::app::ResultInputKey::TimeHistory(id))
+            .is_ok()
+    });
+    let recorded_model = case_id.and_then(|id| app.recorded_time_history_model(id));
+    if (is_target(&app.core.model) || recorded_model.as_ref().is_some_and(is_target))
+        && !selected_input_matches
     {
         ui.colored_label(
             theme::WARN_TEXT,
@@ -278,21 +263,44 @@ fn draw_th_detail_content_at(
         );
         return;
     }
-    let Some(recording) = th_result.recording.as_ref() else {
-        ui.colored_label(
-            theme::GRAY_600,
-            "時刻歴の詳細記録がないため、内力履歴と簡易検定を表示できません。確認するには解析を再実行してください。",
-        );
-        return;
-    };
-    let th_nonlinear = th_result.nonlinear;
-    let th_applied_long_term = th_result.applied_long_term;
     let display = super::wall_expanded_view_model(&app.core.model);
     let Some(elem_idx) = display.elements.iter().position(|e| e.id == elem_id) else {
         ui.colored_label(theme::GRAY_600, "この部材はモデルから削除されています。");
         return;
     };
     let elem = &display.elements[elem_idx];
+    let selected_result = case_id
+        .filter(|_| selected_input_matches)
+        .and_then(|id| app.core.scoped.results.as_ref()?.time_history_for(id));
+    let column_check = match (&recorded_model, selected_result) {
+        (Some(model), Some(result)) => column_check_history(
+            &super::wall_expanded_view_model(model),
+            elem_id,
+            result.recording.as_ref(),
+        ),
+        _ => column_check_history(&display, elem_id, None),
+    };
+    let Some(recording) = th_result.recording.as_ref() else {
+        ui.colored_label(
+            theme::GRAY_600,
+            "時刻歴の詳細記録がないため、内力履歴と簡易検定を表示できません。確認するには解析を再実行してください。",
+        );
+        match column_check {
+            TimeHistoryColumnCheck::AsymmetricSection(Err(reason))
+            | TimeHistoryColumnCheck::SymmetricBending(Err(reason)) => {
+                ui.colored_label(theme::WARN_TEXT, format!("未算定：{reason}"));
+            }
+            TimeHistoryColumnCheck::OutsideScope(reason)
+                if design_member_kind(elem, &display).is_none() =>
+            {
+                ui.colored_label(theme::GRAY_600, reason);
+            }
+            _ => (),
+        }
+        return;
+    };
+    let th_nonlinear = th_result.nonlinear;
+    let th_applied_long_term = th_result.applied_long_term;
     let Some(axis) = super::member_axis_endpoints(elem, display.as_ref()) else {
         ui.colored_label(theme::GRAY_600, "材軸端点を取得できません。");
         return;
@@ -376,15 +384,16 @@ fn draw_th_detail_content_at(
     draw_peak_check(
         ui,
         app,
+        column_check,
         elem,
         elem_idx,
         recording,
-        th_result.time.len(),
+        selected_result.unwrap_or(th_result).time.len(),
         th_nonlinear,
         th_applied_long_term,
         || damage_control_gravity_issue(app, view, &display, th_result),
         || {
-            if !selected_input_matches() {
+            if !selected_input_matches {
                 return Err("時刻歴結果の生成入力を確認できないため、初期載荷を照合できません");
             }
             matching_gravity_member_forces(&display, app, |name| {
@@ -739,10 +748,50 @@ fn matching_gravity_member_forces<'a>(
     Err(reason)
 }
 
+fn column_check_history<'a>(
+    model: &Model,
+    id: ElemId,
+    recording: Option<&'a ThRecording>,
+) -> TimeHistoryColumnCheck<'a> {
+    use TimeHistoryColumnCheck::*;
+    let mut elements = model
+        .elements
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.id == id);
+    let Some((index, elem)) = elements.next() else {
+        return OutsideScope("指定した部材が解析モデルにありません。");
+    };
+    if elements.next().is_some() {
+        return OutsideScope("部材 ID が重複し、照査対象を特定できません。");
+    }
+    if uses_signed_bending_peaks(model, elem) {
+        AsymmetricSection(
+            recording
+                .and_then(|rec| rec.asymmetric_column_sections.get(&index))
+                .ok_or("全確定時刻の断面照査の記録を取得できません。確認するには解析を再実行してください。"),
+        )
+    } else if targets_symmetric_column_bending(model, elem) {
+        SymmetricBending(
+            recording
+                .and_then(|rec| rec.symmetric_column_bending.get(&index))
+                .ok_or("確定時刻ごとの補剛区間の照査記録がありません。先頭から解析を再実行してください。"),
+        )
+    } else if matches!(
+        elem.kind,
+        ElementKind::Beam | ElementKind::Fiber | ElementKind::Brace { .. }
+    ) {
+        OutsideScope("対象のH形鋼柱ではないため、全確定時刻の柱照査の対象外です。")
+    } else {
+        OutsideScope("この要素種別は断面検定の対象外です（ダンパー・節点ばね要素等）。")
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_peak_check<'a>(
     ui: &mut egui::Ui,
     app: &App,
+    column_check: TimeHistoryColumnCheck<'_>,
     elem: &ElementData,
     elem_idx: usize,
     rec: &ThRecording,
@@ -754,13 +803,13 @@ fn draw_peak_check<'a>(
     axis: &super::MemberAxisEndpoints,
 ) {
     let model = &app.core.model;
-    let signed_bending = uses_signed_bending_peaks(model, elem);
+    let signed_bending = matches!(column_check, TimeHistoryColumnCheck::AsymmetricSection(_));
     let sec = model.element_section(elem);
     let structure = sepika_core::structure_kind::structure_kind_of(
         sec,
         model.element_material(elem).map(|mat| mat.category),
     );
-    let symmetric_h_column = is_symmetric_h_column(model, elem);
+    let symmetric_h_column = matches!(column_check, TimeHistoryColumnCheck::SymmetricBending(_));
     ui.strong(if signed_bending || symmetric_h_column {
         "時刻歴の簡易検定（短期）"
     } else {
@@ -777,32 +826,23 @@ fn draw_peak_check<'a>(
         .color(theme::GRAY_600),
     );
 
-    if signed_bending {
-        draw_asymmetric_column_section_history(ui, rec, elem_idx);
-    }
     let attr = model.steel_design_attrs.iter().find(|a| a.elem == elem.id);
-    if symmetric_h_column {
-        draw_symmetric_column_bending(
+    match column_check {
+        TimeHistoryColumnCheck::AsymmetricSection(history) => {
+            draw_asymmetric_column_section_history(ui, history);
+        }
+        TimeHistoryColumnCheck::SymmetricBending(history) => draw_symmetric_column_bending(
             ui,
-            rec,
-            elem_idx,
+            history,
             expected_count,
             attr.and_then(|a| a.c_direct).is_some(),
-        );
+        ),
+        TimeHistoryColumnCheck::OutsideScope(_) => (),
     }
-    let Some(peak) = rec
-        .peak_member_forces
-        .get(elem_idx)
-        .and_then(|o| o.as_ref())
-    else {
-        ui.colored_label(theme::GRAY_600, "内力の記録がないため検定対象外です。");
-        return;
-    };
     let Some(kind) = design_member_kind(elem, &app.core.model) else {
-        ui.colored_label(
-            theme::GRAY_600,
-            "この要素種別は断面検定の対象外です（ダンパー・節点ばね要素等）。",
-        );
+        if let TimeHistoryColumnCheck::OutsideScope(reason) = column_check {
+            ui.colored_label(theme::GRAY_600, reason);
+        }
         return;
     };
     let Some(sec) = elem
@@ -817,6 +857,14 @@ fn draw_peak_check<'a>(
             theme::GRAY_600,
             "断面に材料が割り当てられていないため検定対象外です。",
         );
+        return;
+    };
+    let Some(peak) = rec
+        .peak_member_forces
+        .get(elem_idx)
+        .and_then(|o| o.as_ref())
+    else {
+        ui.colored_label(theme::WARN_TEXT, "未算定：断面力の記録がありません。");
         return;
     };
     let axial_peaks = rec.axial_force_peaks.get(elem_idx);
@@ -1312,8 +1360,7 @@ fn draw_peak_check<'a>(
 
 fn draw_symmetric_column_bending(
     ui: &mut egui::Ui,
-    rec: &ThRecording,
-    elem_idx: usize,
+    history: Result<&SymmetricColumnBendingHistory, &str>,
     expected_count: usize,
     has_direct_c: bool,
 ) {
@@ -1322,12 +1369,12 @@ fn draw_symmetric_column_bending(
     if has_direct_c {
         ui.label("通常検定用のC直接入力は、対象の時刻と補剛区間での有効性を確認できないため使用しません。");
     }
-    let Some(history) = rec.symmetric_column_bending.get(&elem_idx) else {
-        ui.colored_label(
-            theme::WARN_TEXT,
-            "未算定：確定時刻ごとの補剛区間の照査記録がありません。先頭から解析を再実行してください。",
-        );
-        return;
+    let history = match history {
+        Ok(history) => history,
+        Err(reason) => {
+            ui.colored_label(theme::WARN_TEXT, format!("未算定：{reason}"));
+            return;
+        }
     };
     let complete = expected_count > 0
         && history.committed_count == expected_count
@@ -1373,7 +1420,7 @@ fn draw_symmetric_column_bending(
             peak.c, peak.p_lambda_b, peak.fb_mpa,
         ));
         ui.label(format!(
-            "i端 {mi:.3}、j端 {mj:.3}、最大需要 Mz={:.3} kN·m（i端から {:.3} mm）",
+            "i端 {mi:.3}、j端 {mj:.3}、最大強軸曲げ Mz={:.3} kN·m（i端から {:.3} mm）",
             moment_kn_m(peak.max_mz_nmm),
             peak.max_x_mm,
         ));
@@ -1403,15 +1450,18 @@ fn draw_symmetric_column_bending(
     }
 }
 
-fn draw_asymmetric_column_section_history(ui: &mut egui::Ui, rec: &ThRecording, elem_idx: usize) {
+fn draw_asymmetric_column_section_history(
+    ui: &mut egui::Ui,
+    history: Result<&AsymmetricColumnSectionHistory, &str>,
+) {
     ui.strong("全確定時刻の断面単独照査");
     ui.label("圧縮時または軸力ゼロ時に、同じ評価位置・時刻の軸力と強軸曲げから上下縁を照査します。部材全体の適否は未判定です。");
-    let Some(history) = rec.asymmetric_column_sections.get(&elem_idx) else {
-        ui.colored_label(
-            theme::WARN_TEXT,
-            "全確定時刻の断面照査の記録を取得できません。確認するには解析を再実行してください。",
-        );
-        return;
+    let history = match history {
+        Ok(history) => history,
+        Err(reason) => {
+            ui.colored_label(theme::WARN_TEXT, format!("未算定：{reason}"));
+            return;
+        }
     };
     if history.committed_count == 0 {
         ui.colored_label(
@@ -1615,6 +1665,71 @@ mod tests {
     use super::*;
 
     #[test]
+    fn column_section_check_displays_response_gap_separately_from_a_zero_ratio() {
+        use sepika_solver::dynamic::timehistory::{
+            AsymmetricColumnSectionHistory, SectionForceCheckPeak, SectionForceCheckPosition,
+        };
+        let mut app = App::default();
+        assert!(app.load_model(crate::app::steel_column_k_tests::asymmetric_built_h_cantilever()));
+        let reason = "指定した評価位置の解析断面力がありません";
+        let rec = ThRecording {
+            asymmetric_column_sections: [(
+                0,
+                AsymmetricColumnSectionHistory {
+                    committed_count: 1,
+                    positions: vec![
+                        SectionForceCheckPosition {
+                            xi: 0.0,
+                            observed_count: 1,
+                            peak: Some(SectionForceCheckPeak {
+                                time_s: 0.0,
+                                ratio: 0.0,
+                                n_n: 0.0,
+                                mz_nmm: 0.0,
+                            }),
+                            ..Default::default()
+                        },
+                        SectionForceCheckPosition {
+                            xi: 0.5,
+                            unavailable: [reason.to_owned()].into(),
+                            ..Default::default()
+                        },
+                    ],
+                    ..Default::default()
+                },
+            )]
+            .into(),
+            ..Default::default()
+        };
+        let text = peak_recording_text(&app, &app.core.model.elements[0], 0, &rec, false);
+        assert!(text.contains("断面の検定比の下限 0.00000"), "{text}");
+        assert!(text.contains(&format!("未算定：{reason}")), "{text}");
+        assert!(!text.contains("対象外"), "{text}");
+
+        let empty = ThRecording::default();
+        let elem = &app.core.model.elements[0];
+        let TimeHistoryColumnCheck::AsymmetricSection(Err(reason)) =
+            column_check_history(&app.core.model, elem.id, Some(&empty))
+        else {
+            panic!("対象柱の照査記録が欠けている");
+        };
+        let text = peak_recording_text(&app, elem, 0, &empty, false);
+        assert!(text.contains(&format!("未算定：{reason}")), "{text}");
+        assert!(!text.contains("対象外"), "{text}");
+
+        app.core.model.elements[0].kind = ElementKind::NodalSpring;
+        let spring = &app.core.model.elements[0];
+        let TimeHistoryColumnCheck::OutsideScope(reason) =
+            column_check_history(&app.core.model, spring.id, Some(&empty))
+        else {
+            panic!("節点ばねは対象外");
+        };
+        let text = peak_recording_text(&app, spring, 0, &empty, false);
+        assert!(text.contains(reason), "{text}");
+        assert!(!text.contains("断面力の記録がありません"), "{text}");
+    }
+
+    #[test]
     fn old_h_column_results_do_not_reconstruct_a_diagram_and_keep_independent_ng() {
         let mut app = App::default();
         assert!(app.load_model(steel_column_lateral_buckling_input::column(500.0, true)));
@@ -1686,6 +1801,7 @@ mod tests {
                 draw_peak_check(
                     ui,
                     app,
+                    column_check_history(&app.core.model, elem.id, Some(rec)),
                     elem,
                     index,
                     rec,
@@ -3070,6 +3186,7 @@ mod tests {
                 draw_peak_check(
                     ui,
                     &app,
+                    column_check_history(&app.core.model, elem.id, Some(&rec)),
                     elem,
                     0,
                     &rec,

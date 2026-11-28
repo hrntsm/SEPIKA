@@ -1,25 +1,28 @@
 use std::collections::BTreeMap;
 
+use sepika_core::ids::ElemId;
 use sepika_core::model::{ElementData, ElementKind, Material, Model, Section, SteelDesignAttr};
 use sepika_core::structure_kind::{structure_kind_of, StructureKind};
 use sepika_design_jp::steel::{
     column_lateral_buckling_length, is_symmetric_h_section, SteelDesign,
 };
 use sepika_design_jp::{DesignCtx, LoadTerm, MemberForcesAt, MemberKind};
+use sepika_element::frame::member_load::FrameStrongBendingSpan;
 use sepika_solver::dynamic::timehistory::{
-    ColumnBendingMaterialFailure, ColumnBendingPeak, CommittedBendingResponse,
-    SymmetricColumnBendingHistory,
+    ColumnBendingMaterialFailure, ColumnBendingPeak, SymmetricColumnBendingHistory,
 };
 
 pub(crate) struct Column<'a> {
     pub index: usize,
+    pub id: ElemId,
     length_mm: f64,
     section: &'a Section,
     material: Option<&'a Material>,
     ctx: DesignCtx,
 }
 
-pub(crate) fn targets(model: &Model, elem: &ElementData) -> bool {
+/// 全確定時刻の強軸曲げ・横座屈照査の対象部材かを返す。
+pub fn targets(model: &Model, elem: &ElementData) -> bool {
     matches!(elem.kind, ElementKind::Beam | ElementKind::Fiber)
         && MemberKind::try_of_element(elem, model) == Ok(MemberKind::Column)
         && model.element_section(elem).is_some_and(|sec| {
@@ -69,6 +72,7 @@ pub(crate) fn columns<'a>(
             }
             Some(Column {
                 index,
+                id: elem.id,
                 length_mm: model.member_length(elem),
                 section,
                 material,
@@ -88,13 +92,13 @@ pub(crate) fn record(
     column: &Column<'_>,
     step: u64,
     time_s: f64,
-    bending: &CommittedBendingResponse<'_>,
+    bending: impl FnOnce(f64) -> Result<FrameStrongBendingSpan, String>,
 ) {
     item.committed_count += 1;
     let Some(material) = column.material else {
         return;
     };
-    let span = match bending(column.index, item.lb_mm.unwrap_or(column.length_mm)) {
+    let span = match bending(item.lb_mm.unwrap_or(column.length_mm)) {
         Ok(span) => span,
         Err(reason) => {
             item.unavailable.insert(reason);
@@ -244,7 +248,6 @@ pub(crate) fn valid_prefix(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time_history_check::collect_time_history_checks;
     use sepika_core::model::{MemberLoad, MemberLoadKind};
     use sepika_element::frame::beam::MemberForces;
     use sepika_element::frame::member_load::frame_strong_bending_span;
@@ -279,18 +282,18 @@ mod tests {
         )
             -> Result<sepika_element::frame::member_load::FrameStrongBendingSpan, String>,
     ) -> SymmetricColumnBendingHistory {
-        let (_, mut checks) =
-            collect_time_history_checks(model, Default::default(), 0, |observer| {
-                let observer = observer.unwrap();
-                for step in 0..steps {
-                    observer(step as u64, step as f64 * 0.1, &[], &|i, lb| {
-                        bending(step, i, lb)
-                    });
-                }
-                Ok::<_, ()>(())
-            })
-            .unwrap();
-        checks.symmetric_columns.remove(&0).unwrap()
+        let mut histories = BTreeMap::new();
+        let columns = columns(model, &mut histories);
+        let [column] = columns.as_slice() else {
+            panic!("対象柱が1本ではない")
+        };
+        let mut item = histories.remove(&column.index).unwrap();
+        for step in 0..steps {
+            record(&mut item, column, step as u64, step as f64 * 0.1, |lb| {
+                bending(step, column.index, lb)
+            });
+        }
+        item
     }
 
     fn frame() -> LocalFrame {

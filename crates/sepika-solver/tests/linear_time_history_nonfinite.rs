@@ -199,7 +199,7 @@ fn linear_time_history_rejects_nonfinite_initial_section_forces_before_observati
         &[0.0],
         Some(3),
         None,
-        Some(&mut |_, _, _, _| panic!("不正な初期状態を観測した")),
+        Some(&mut |_| panic!("不正な初期状態を観測した")),
     )
     .unwrap_err()
     .to_string();

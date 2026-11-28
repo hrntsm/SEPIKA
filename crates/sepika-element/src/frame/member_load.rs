@@ -4,7 +4,7 @@
 
 use crate::transform::LocalFrame;
 use sepika_core::geom::vec3;
-use sepika_core::model::{MemberLoad, MemberLoadKind};
+use sepika_core::model::{MemberDetailAttr, MemberLoad, MemberLoadKind, RigidZone};
 
 mod section_extrema;
 mod shear_envelope;
@@ -20,6 +20,84 @@ pub use strong_bending::{
     FrameStaticBendingSection, FrameStaticStrongBending, FrameStrongBendingPeak,
     FrameStrongBendingSpan,
 };
+
+/// 材軸長 [mm] と実効部材荷重から、記録と検定位置の全候補が同じ切断側（荷重点では左極限）かを確認する。
+/// 正味の跳びを挟む場合、または位置不明で近接する跳びを除けない場合はエラー。
+pub fn confirm_frame_recorded_section_cut<'a>(
+    frame: &LocalFrame,
+    length_mm: f64,
+    rigid_zone: &RigidZone,
+    detail: Option<&MemberDetailAttr>,
+    xi: f64,
+    loads: impl Iterator<Item = (f64, &'a MemberLoad)> + Clone,
+) -> Result<(), &'static str> {
+    if !(0.0..=1.0).contains(&xi) {
+        return Err("部材断面位置は有限の全長比0以上1以下が必要です");
+    }
+    let x_mm = xi * length_mm;
+    let face_i_mm = rigid_zone.face_i_or_zero();
+    let face_j_mm = rigid_zone.face_j_or_zero();
+    let raw_i = face_i_mm / length_mm;
+    let raw_j = 1.0 - face_j_mm / length_mm;
+    let xi_i = raw_i.clamp(0.0, 0.5 - 1e-9);
+    let xi_j = raw_j.clamp(0.5 + 1e-9, 1.0);
+    let fixed_positions = [
+        (0.0, 0.0),
+        (0.5, 0.5 * length_mm),
+        (1.0, length_mm),
+        (
+            xi_i,
+            if raw_i == xi_i {
+                face_i_mm
+            } else {
+                xi_i * length_mm
+            },
+        ),
+        (
+            xi_j,
+            if raw_j == xi_j {
+                length_mm - face_j_mm
+            } else {
+                xi_j * length_mm
+            },
+        ),
+    ];
+    let mut bounds_mm = None;
+    let mut visit = |position, distance_mm| {
+        if position == xi {
+            let [min_mm, max_mm] = bounds_mm.unwrap_or([x_mm; 2]);
+            bounds_mm = Some([min_mm.min(distance_mm), max_mm.max(distance_mm)]);
+        }
+    };
+    for (position, distance_mm) in fixed_positions {
+        visit(position, distance_mm);
+    }
+    if let Some(detail) = detail {
+        detail.for_each_extra_check_position(rigid_zone, length_mm, visit);
+    }
+    if bounds_mm == Some([x_mm; 2]) {
+        return Ok(());
+    }
+    let tol_mm = 32.0 * f64::EPSILON * length_mm.max(1.0);
+    let could_change_side = |a| match bounds_mm {
+        // 左極限を使うため、最大位置そのものの荷重もまだ通過していない。
+        Some([min_mm, max_mm]) => min_mm <= a && a < max_mm,
+        None => (a - x_mm).abs() <= tol_mm,
+    };
+    let mut points = Vec::new();
+    for (factor, load) in loads.clone() {
+        let MemberLoadKind::Point { a, p } = load.kind else {
+            continue;
+        };
+        if factor != 0.0 && p != 0.0 && could_change_side(a) && !points.contains(&a) {
+            if strong_bending::has_nonzero_point_jump(frame, a, loads.clone())? {
+                return Err("集中部材荷重と評価位置の位置関係から断面力の切断側を確定できません");
+            }
+            points.push(a);
+        }
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug)]
 enum Comp {
@@ -389,6 +467,38 @@ impl LoadedFrameSection {
         self.at_mm(xi * self.map.length_mm)
     }
 
+    /// この応答を算定した材軸の全長 [mm]。
+    #[doc(hidden)]
+    pub fn length_mm(&self) -> f64 {
+        self.map.length_mm()
+    }
+
+    /// 記録位置 ξ の切断側を、検定位置の幾何と同時点の荷重で確認する。
+    /// 荷重点と評価断面の実距離が一致する記録は左極限。
+    pub fn confirm_recorded_section_cut(
+        &self,
+        xi: f64,
+        rigid_zone: &RigidZone,
+        detail: Option<&MemberDetailAttr>,
+    ) -> Result<(), &'static str> {
+        confirm_frame_recorded_section_cut(
+            self.frame(),
+            self.map.length_mm,
+            rigid_zone,
+            detail,
+            xi,
+            self.map.loads.iter().map(|load| (1.0, load)),
+        )
+    }
+
+    fn has_point_load_near(&self, position_mm: f64) -> bool {
+        let tol_mm = 32.0 * f64::EPSILON * self.map.length_mm.max(1.0);
+        self.map.loads.iter().any(|load| {
+            matches!(load.kind, MemberLoadKind::Point { a, p }
+                if p != 0.0 && (a - position_mm).abs() <= tol_mm)
+        })
+    }
+
     /// 実材軸i端からの距離 `[mm]` を指定して `[N,Qy,Qz,Mx,My,Mz]` を返す。
     /// 範囲外・回収座標の長さの不一致・非零集中荷重位置（丸め誤差の範囲を含む）はエラー。
     pub fn at_continuous_section_mm(
@@ -403,10 +513,7 @@ impl LoadedFrameSection {
         if !position_mm.is_finite() || !(0.0..=self.map.length_mm).contains(&position_mm) {
             return Err("実柱面が部材荷重応答の全長区間外です".into());
         }
-        if self.map.loads.iter().any(|load| {
-            matches!(load.kind, MemberLoadKind::Point { a, p }
-                if p != 0.0 && (a - position_mm).abs() <= tol_mm)
-        }) {
+        if self.has_point_load_near(position_mm) {
             return Err(
                 "実柱面に非零の集中部材荷重が作用し、断面力の切断側を一意に決められません".into(),
             );
@@ -786,12 +893,55 @@ pub fn cmq_with_rigid_zone(
 mod tests {
     use super::*;
     use sepika_core::ids::ElemId;
-    use sepika_core::model::{MemberLoad, MemberLoadKind};
+    use sepika_core::model::{MemberJoint, MemberLoad, MemberLoadKind};
 
     fn canonical_frame() -> LocalFrame {
         LocalFrame {
             rot: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         }
+    }
+
+    #[test]
+    fn recorded_cut_must_agree_with_all_positions_sharing_its_xi() {
+        let length_mm = 8_000.0;
+        let face_i_mm = 2_001.0_f64;
+        let joint_mm = face_i_mm.next_down();
+        let xi = face_i_mm / length_mm;
+        assert_eq!(joint_mm / length_mm, xi);
+        assert_eq!(xi * length_mm, face_i_mm);
+        let rigid_zone = RigidZone {
+            face_i: Some(face_i_mm),
+            ..Default::default()
+        };
+        let detail = MemberDetailAttr {
+            joints: vec![MemberJoint {
+                distance: joint_mm,
+                kind: Default::default(),
+            }],
+            ..MemberDetailAttr::new(ElemId(0))
+        };
+        let check = |a, rigid_zone, detail| {
+            let load = MemberLoad::manual(
+                ElemId(0),
+                [1.0, 0.0, 0.0],
+                MemberLoadKind::Point { a, p: 50_000.0 },
+            );
+            confirm_frame_recorded_section_cut(
+                &canonical_frame(),
+                length_mm,
+                rigid_zone,
+                detail,
+                xi,
+                std::iter::once((1.0, &load)),
+            )
+        };
+        for a in [joint_mm.next_down(), face_i_mm] {
+            assert!(check(a, &rigid_zone, Some(&detail)).is_ok());
+        }
+        assert!(matches!(check(joint_mm, &rigid_zone, Some(&detail)),
+            Err(reason) if reason.contains("切断側を確定できません")));
+        assert!(matches!(check(face_i_mm, &RigidZone::default(), None),
+            Err(reason) if reason.contains("切断側を確定できません")));
     }
 
     fn map_load(kind: MemberLoadKind, direction: [f64; 3]) -> FrameDeadLoadMap {

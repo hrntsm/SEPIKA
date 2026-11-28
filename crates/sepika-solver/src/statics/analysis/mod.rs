@@ -5,6 +5,7 @@
 
 use crate::common::assemble::assemble_global_k;
 use crate::common::constraint::Reducer;
+use crate::common::member_response::StaticMemberResponses;
 use crate::dynamic::damping::Damping;
 use crate::dynamic::eigen::{self, ModalResult};
 use crate::dynamic::timehistory::{GroundMotion, NewmarkCfg, ResponseResult};
@@ -31,6 +32,51 @@ pub use seismic::{
     base_elevation, build_seismic_load_case_from_model, building_height_mm, ground_elevation,
     seismic_distribution_for_model, steel_height_ratio, validate_basement_ground,
 };
+
+/// 解析が実際に解いた荷重ケースまたは組合せ。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ConfirmedStaticSource {
+    Case(LoadCaseId),
+    Combination(String),
+}
+
+/// 計算モデル・実効係数と一体の線形静的解析結果。
+pub struct ConfirmedStaticResult<'m> {
+    model: &'m Model,
+    source: ConfirmedStaticSource,
+    terms: Vec<(LoadCaseId, f64)>,
+    result: StaticOnce,
+}
+
+impl ConfirmedStaticResult<'_> {
+    pub fn model(&self) -> &Model {
+        self.model
+    }
+
+    pub fn source(&self) -> &ConfirmedStaticSource {
+        &self.source
+    }
+
+    pub fn effective_terms(&self) -> &[(LoadCaseId, f64)] {
+        &self.terms
+    }
+
+    pub fn result(&self) -> &StaticOnce {
+        &self.result
+    }
+
+    /// この結果の部材断面力と区間応答を参照する。別結果の断面力は指定できない。
+    ///
+    /// ```compile_fail
+    /// # use sepika_solver::statics::analysis::ConfirmedStaticResult;
+    /// fn mix(a: &ConfirmedStaticResult<'_>, b: &ConfirmedStaticResult<'_>) {
+    ///     let _ = a.member_responses(&b.result().member_forces);
+    /// }
+    /// ```
+    pub fn member_responses(&self) -> Result<StaticMemberResponses<'_>, &'static str> {
+        StaticMemberResponses::from_solved(self.model, &self.terms, &self.result.member_forces)
+    }
+}
 
 /// `model.elements` と同順の構築時 ID・弾性応答要素・自由度対応を返す。
 fn build_behavior_cache(model: &Model, dofmap: &DofMap) -> Vec<crate::statics::BehaviorEntry> {
@@ -150,6 +196,19 @@ impl<'m> Analysis<'m> {
                 SolveError::InvalidInput(format!("荷重ケース {} が存在しません", lc.0))
             })?;
         self.solve_and_recover(load_case)
+    }
+
+    /// 指定ケースを解き、計算モデルと結果を一体に返す。
+    pub fn confirmed_linear_static(
+        &self,
+        lc: LoadCaseId,
+    ) -> Result<ConfirmedStaticResult<'m>, SolveError> {
+        Ok(ConfirmedStaticResult {
+            model: self.model,
+            source: ConfirmedStaticSource::Case(lc),
+            terms: vec![(lc, 1.0)],
+            result: self.linear_static(lc)?,
+        })
     }
 
     /// 節点の Fx・Fy・Mz 各単位荷重に対する軸順 Ux・Uy・Rz の変位を返す（行が変位、列が荷重）。

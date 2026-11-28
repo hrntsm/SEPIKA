@@ -5,6 +5,7 @@ use sepika_core::geom::vec3::{dist, local_frame_axes_and_fallback_reference};
 use sepika_core::model::{MemberLoad, MemberLoadKind};
 
 mod exact;
+pub(super) use exact::has_nonzero_point_jump;
 use exact::ExactSpanError;
 
 /// 補剛区間の符号付き強軸曲げ分布と、指定した需要範囲の断面力。

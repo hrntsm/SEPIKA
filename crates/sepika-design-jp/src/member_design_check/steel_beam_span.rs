@@ -1,18 +1,17 @@
 use std::collections::HashMap;
 
 use sepika_core::geom::vec3::dist;
-use sepika_core::ids::{ElemId, LoadCaseId};
+use sepika_core::ids::ElemId;
 use sepika_core::model::{
-    ElementData, EndCondition, MemberLoad, MemberLoadExtent, MemberLoadKind, Model, Section,
-    SteelDesignAttr,
+    ElementData, EndCondition, MemberLoadExtent, MemberLoadKind, Model, Section, SteelDesignAttr,
 };
 use sepika_core::structure_kind::StructureKind;
 use sepika_element::frame::beam::MemberForces;
 use sepika_element::frame::member_load::{
-    frame_strong_bending_intervals, frame_strong_bending_span, frame_strong_bending_span_mm,
-    verify_frame_bending_stations_mm, FrameStrongBendingPeak,
+    frame_strong_bending_span_mm, verify_frame_bending_stations_mm, FrameStrongBendingPeak,
 };
 use sepika_element::transform::LocalFrame;
+use sepika_solver::common::member_response::{ConfirmedMemberResponse, StaticMemberLoads};
 
 use crate::steel::{beam_lateral_buckling_length, SteelBeamMomentDiagram};
 use crate::{DesignCtx, MemberKind};
@@ -50,116 +49,88 @@ pub(super) fn has_middle_bracing(ctx: &DesignCtx) -> bool {
         })
 }
 
-pub(super) struct BeamSpanLoads<'a>(HashMap<ElemId, Vec<(f64, &'a MemberLoad)>>);
+pub(super) enum BendingInput<'a> {
+    Confirmed(ConfirmedMemberResponse<'a>),
+    Saved(&'a StaticMemberLoads<'a>, &'a MemberForces),
+}
 
-impl<'a> BeamSpanLoads<'a> {
-    pub(super) fn for_member(&self, id: ElemId) -> &[(f64, &'a MemberLoad)] {
-        self.0.get(&id).map_or(&[][..], Vec::as_slice)
+pub(super) fn bending_span(
+    input: BendingInput<'_>,
+    elem: &ElementData,
+    ctx: &DesignCtx,
+) -> Result<RecoveredBending, String> {
+    let count = ctx
+        .steel_attr
+        .as_ref()
+        .and_then(|a| a.lateral_brace_count)
+        .unwrap_or(0);
+    if count == 0
+        && [0.0, 0.5, 1.0].into_iter().any(|pos| {
+            let (lb, partial) = beam_lateral_buckling_length(ctx, pos);
+            partial || !lb.is_finite() || (lb - ctx.length).abs() > 1e-9
+        })
+        || count > 0
+            && ctx
+                .steel_attr
+                .as_ref()
+                .is_some_and(|a| a.lb_direct.is_some())
+    {
+        return Err("指定した横座屈長さから補剛端の位置を確認できません".into());
     }
-
-    pub(super) fn from_terms(
-        model: &'a Model,
-        terms: Option<&[(LoadCaseId, f64)]>,
-    ) -> Result<Self, &'static str> {
-        let terms = terms
-            .filter(|terms| !terms.is_empty())
-            .ok_or("解析応答と同じ荷重ケース・荷重組合せの由来が未確認です")?;
-        let mut by_member = HashMap::<_, Vec<_>>::new();
-        for &(id, factor) in terms {
-            let mut cases = model.load_cases.iter().filter(|case| case.id == id);
-            let case = cases.next().ok_or("解析に用いた荷重ケースがありません")?;
-            if cases.next().is_some() || !factor.is_finite() {
-                return Err("荷重ケースIDまたは荷重係数が不正です");
+    let [Some(face_i_mm), Some(face_j_mm)] = [elem.rigid_zone.face_i, elem.rigid_zone.face_j]
+    else {
+        return Err("鋼梁の両端の材端フェース位置が未確認です".into());
+    };
+    let end_mm = ctx.length - face_j_mm;
+    if !face_i_mm.is_finite()
+        || !face_j_mm.is_finite()
+        || face_i_mm < 0.0
+        || face_j_mm < 0.0
+        || face_i_mm >= end_mm
+    {
+        return Err("鋼梁の材端フェース間に正の区間を確認できません".into());
+    }
+    let demand = [face_i_mm, end_mm];
+    if count == 0 {
+        let span = match input {
+            BendingInput::Confirmed(response) => {
+                response.strong_bending_span([0.0, ctx.length], demand)
             }
-            if factor != 0.0 {
-                for load in &case.member {
-                    by_member.entry(load.elem).or_default().push((factor, load));
-                }
+            BendingInput::Saved(loads, forces) => {
+                loads.recover_strong_bending_span(elem, ctx.length, demand, forces)
             }
-        }
-        Ok(Self(by_member))
+        }?;
+        return Ok(RecoveredBending::Single(span.into()));
     }
-
-    pub(super) fn bending_span(
-        &self,
-        model: &Model,
-        elem: &ElementData,
-        forces: &MemberForces,
-        ctx: &DesignCtx,
-    ) -> Result<RecoveredBending, String> {
-        let count = ctx
-            .steel_attr
-            .as_ref()
-            .and_then(|a| a.lateral_brace_count)
-            .unwrap_or(0);
-        if count == 0
-            && [0.0, 0.5, 1.0].into_iter().any(|pos| {
-                let (lb, partial) = beam_lateral_buckling_length(ctx, pos);
-                partial || !lb.is_finite() || (lb - ctx.length).abs() > 1e-9
-            })
-            || count > 0
-                && ctx
-                    .steel_attr
-                    .as_ref()
-                    .is_some_and(|a| a.lb_direct.is_some())
-        {
-            return Err("指定した横座屈長さから補剛端の位置を確認できません".into());
-        }
-        let [i, j] = model
-            .primary_frame_axis_ends(elem)?
-            .or_else(|| {
-                let &[i, j] = elem.nodes.as_slice() else {
-                    return None;
-                };
-                Some([model.node(i)?.coord, model.node(j)?.coord])
-            })
-            .ok_or("梁の実材軸が未確認です")?;
-        let frame = LocalFrame::from_nodes(i, j, elem.local_axis.ref_vector)?;
-        let loads = self.for_member(elem.id);
-        let [Some(face_i_mm), Some(face_j_mm)] = [elem.rigid_zone.face_i, elem.rigid_zone.face_j]
-        else {
-            return Err("鋼梁の両端の材端フェース位置が未確認です".into());
-        };
-        let end_mm = ctx.length - face_j_mm;
-        if !face_i_mm.is_finite()
-            || !face_j_mm.is_finite()
-            || face_i_mm < 0.0
-            || face_j_mm < 0.0
-            || face_i_mm >= end_mm
-        {
-            return Err("鋼梁の材端フェース間に正の区間を確認できません".into());
-        }
-        let demand = [face_i_mm, end_mm];
-        if count == 0 {
-            let span = frame_strong_bending_span(&frame, ctx.length, demand, loads, forces)?;
-            return Ok(RecoveredBending::Single(span.into()));
-        }
-        if count > 10_000 {
-            return Err("等間隔横補剛本数が通常検定の上限（10,000）を超えています".into());
-        }
-        let sections = f64::from(count) + 1.0;
-        let length_mm = ctx.length / sections;
-        if length_mm <= 1e-9 || !(face_i_mm < length_mm && end_mm > ctx.length - length_mm) {
-            return Err("材端フェース間で各等間隔補剛区間の正の検定範囲を確認できません".into());
-        }
-        let boundaries = (0..=u64::from(count) + 1)
-            .map(|index| ctx.length * (index as f64 / sections))
-            .collect::<Vec<_>>();
-        let spans =
-            frame_strong_bending_intervals(&frame, ctx.length, demand, &boundaries, loads, forces)?;
-        Ok(RecoveredBending::Multiple(
-            spans
-                .into_iter()
-                .zip(boundaries.windows(2))
-                .map(|(span, bounds)| SteelBeamInterval {
-                    bounds_mm: [bounds[0], bounds[1]],
-                    bounds_xi: [bounds[0] / ctx.length, bounds[1] / ctx.length],
-                    length_mm,
-                    span: span.into(),
-                })
-                .collect(),
-        ))
+    if count > 10_000 {
+        return Err("等間隔横補剛本数が通常検定の上限（10,000）を超えています".into());
     }
+    let sections = f64::from(count) + 1.0;
+    let length_mm = ctx.length / sections;
+    if length_mm <= 1e-9 || !(face_i_mm < length_mm && end_mm > ctx.length - length_mm) {
+        return Err("材端フェース間で各等間隔補剛区間の正の検定範囲を確認できません".into());
+    }
+    let boundaries = (0..=u64::from(count) + 1)
+        .map(|index| ctx.length * (index as f64 / sections))
+        .collect::<Vec<_>>();
+    let spans = match input {
+        BendingInput::Confirmed(response) => response.strong_bending_intervals(&boundaries, demand),
+        BendingInput::Saved(loads, forces) => {
+            loads.recover_strong_bending_intervals(elem, &boundaries, demand, forces)
+        }
+    }?;
+    Ok(RecoveredBending::Multiple(
+        spans
+            .into_iter()
+            .zip(boundaries.windows(2))
+            .map(|(span, bounds)| SteelBeamInterval {
+                bounds_mm: [bounds[0], bounds[1]],
+                bounds_xi: [bounds[0] / ctx.length, bounds[1] / ctx.length],
+                length_mm,
+                span: span.into(),
+            })
+            .collect(),
+    ))
 }
 
 impl From<sepika_element::frame::member_load::FrameStrongBendingSpan> for SteelBeamSpan {
@@ -213,7 +184,8 @@ pub(super) fn grouped_bending_spans(
     model: &Model,
     member_forces: &[(ElemId, MemberForces)],
     force_rows: &HashMap<ElemId, usize>,
-    loads: Result<&BeamSpanLoads<'_>, &&'static str>,
+    row_errors: Option<&HashMap<ElemId, &'static str>>,
+    loads: Result<&StaticMemberLoads<'_>, &&'static str>,
 ) -> HashMap<ElemId, Result<GroupBending, String>> {
     if model.girder_groups.is_empty() {
         return HashMap::new();
@@ -229,7 +201,9 @@ pub(super) fn grouped_bending_spans(
         let result = if group.iter().any(|id| memberships[id] != 1) {
             Err("一本部材の構成要素が重複しています".into())
         } else {
-            grouped_bending_span(model, group, &forces, force_rows, loads, &mut spans)
+            grouped_bending_span(
+                model, group, &forces, force_rows, row_errors, loads, &mut spans,
+            )
         };
         if let Err(reason) = result {
             for &id in group {
@@ -269,7 +243,8 @@ fn grouped_bending_span(
     group: &[ElemId],
     saved: &HashMap<ElemId, &MemberForces>,
     force_rows: &HashMap<ElemId, usize>,
-    loads: Result<&BeamSpanLoads<'_>, &&'static str>,
+    row_errors: Option<&HashMap<ElemId, &'static str>>,
+    loads: Result<&StaticMemberLoads<'_>, &&'static str>,
     spans: &mut HashMap<ElemId, Result<GroupBending, String>>,
 ) -> Result<(), String> {
     if group.is_empty() {
@@ -457,6 +432,11 @@ fn grouped_bending_span(
         if force_rows.get(id) != Some(&1) {
             return Err("一本部材の一意な解析断面力がありません".into());
         }
+        if let Some(reason) = row_errors.and_then(|errors| errors.get(id)) {
+            return Err(format!(
+                "一本部材の参照先の解析断面力を照合できません。{reason}"
+            ));
+        }
         let mf = saved[id];
         let Some(&(0.0, start)) = mf.at.first() else {
             return Err("一本部材の要素i端の解析断面力がありません".into());
@@ -473,7 +453,7 @@ fn grouped_bending_span(
                 return Err("一本部材の要素境界で解析断面力が連続していません".into());
             }
         }
-        let local_loads = beam_loads.0.get(id).map_or(&[][..], Vec::as_slice);
+        let local_loads = beam_loads.for_member(*id);
         let local_stations: Vec<_> = mf.at.iter().map(|&(xi, f)| (xi * length_mm, f)).collect();
         verify_frame_bending_stations_mm(&member.frame, length_mm, local_loads, &local_stations)?;
         for &(factor, original) in local_loads {
